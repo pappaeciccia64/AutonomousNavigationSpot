@@ -1,16 +1,35 @@
+#spotSDK/spotGrid.py
+
 import numpy as np
 from bosdyn.client.frame_helpers import *
 from bosdyn.client.frame_helpers import get_a_tform_b
 from bosdyn.api import local_grid_pb2
+from scipy.ndimage import uniform_filter
 
 def create_vtk_no_step_grid(proto, robot_state_client):
-    """Generate VTK polydata for the no step grid from the local grid response."""
+    """Generate VTK polydata for the no step grid from the local grid response.
+    Questa funzione:
+
+    Cerca la local grid “no_step” nel messaggio ricevuto.
+
+    Decodifica i valori (raw o RLE).
+
+    Costruisce una griglia di punti (x,y,z) nel frame VISION.
+
+    Colora le celle (rosso = non steppable, blu = steppable).
+
+    Restituisce:
+
+        pts → punti 3D nel frame VISION
+
+        cells_no_step → valori della grid
+
+        color → colori RGB"""
     local_grid_proto = None
     cell_size = 0.0
     for local_grid_found in proto:
         if local_grid_found.local_grid_type_name == 'no_step':
             local_grid_proto = local_grid_found
-            local_grid_found.local_grid.extent.cell_size = 0.5
             cell_size = local_grid_found.local_grid.extent.cell_size
 
     # If no relevant local grid found, return empty arrays (caller can handle)
@@ -47,70 +66,6 @@ def create_vtk_no_step_grid(proto, robot_state_client):
     pts = offset_grid_pixels(pts, vision_tform_local_grid, cell_size)
 
     return pts, cells_no_step, color
-
-
-def create_vtk_obstacle_grid(proto, robot_state_client):
-    """Generate points, cell values and colors for the obstacle distance grid.
-
-    The obstacle_distance grid encodes the signed distance (in metres) from each
-    cell to the nearest detected obstacle:
-        dist < 0   -> strictly inside an obstacle  → blocked  (red)
-        dist >= 0  -> border or free space          → passable (blue)
-
-    Zero-padding policy: no safety margin is added around obstacles.
-    A cell is passable as soon as its distance is >= 0.
-    Unlike the no_step grid, grass is NOT classified as an obstacle here,
-    making this grid more suitable for outdoor environments.
-
-    Returns:
-        pts (np.ndarray, shape (N,3)): cell positions in the VISION frame
-        cells_obstacle_dist (np.ndarray, shape (N,)): raw signed-distance values
-        color (np.ndarray, shape (N,3) uint8): RGB colours per cell
-    """
-    local_grid_proto = None
-    cell_size = 0.0
-    for local_grid_found in proto:
-        if local_grid_found.local_grid_type_name == 'obstacle_distance':
-            local_grid_proto = local_grid_found
-            cell_size = local_grid_found.local_grid.extent.cell_size
-
-    # If no relevant local grid found, return empty arrays (caller can handle)
-    if local_grid_proto is None:
-        return np.empty((0, 3), dtype=np.float32), np.array([], dtype=np.float32), np.zeros((0, 3), dtype=np.uint8)
-
-    # Unpack the raw distance values.
-    cells_obstacle_dist = unpack_grid(local_grid_proto).astype(np.float32)
-
-    # Build (x, y) grid coordinates.
-    ys, xs = np.mgrid[0:local_grid_proto.local_grid.extent.num_cells_x,
-                      0:local_grid_proto.local_grid.extent.num_cells_y]
-
-    # Use ground-plane height for the z coordinate.
-    transforms_snapshot = local_grid_proto.local_grid.transforms_snapshot
-    z_ground_in_vision_frame = compute_ground_height_in_vision_frame(robot_state_client)
-    cell_count = local_grid_proto.local_grid.extent.num_cells_x * local_grid_proto.local_grid.extent.num_cells_y
-    z = np.ones(cell_count, dtype=np.float32) * z_ground_in_vision_frame
-
-    pts = np.vstack([np.ravel(xs).astype(np.float32),
-                     np.ravel(ys).astype(np.float32), z]).T
-    pts[:, [0, 1]] *= (local_grid_proto.local_grid.extent.cell_size,
-                       local_grid_proto.local_grid.extent.cell_size)
-
-    # Colour coding (zero-padding – no border zone):
-    #   red  -> strictly inside obstacle  (dist < 0)
-    #   blue -> passable: border or free  (dist >= 0)
-    color = np.zeros([cell_count, 3], dtype=np.uint8)
-    color[:, 0] = (cells_obstacle_dist < 0.0)   # red  = blocked
-    color[:, 2] = (cells_obstacle_dist >= 0.0)  # blue = passable
-    color *= 255
-
-    # Offset to VISION frame.
-    vision_tform_local_grid = get_a_tform_b(transforms_snapshot, VISION_FRAME_NAME,
-                                            local_grid_proto.local_grid.frame_name_local_grid_data)
-    pts = offset_grid_pixels(pts, vision_tform_local_grid, cell_size)
-
-    return pts, cells_obstacle_dist, color
-
 
 def compute_ground_height_in_vision_frame(robot_state_client):
     """Get the z-height of the ground plane in vision frame from the current robot state."""
@@ -177,3 +132,247 @@ def expand_data_by_rle_count(local_grid_proto, data_type=np.int16):
         for j in range(0, local_grid_proto.local_grid.rle_counts[i]):
             cells_pz_full.append(cells_pz[i])
     return np.array(cells_pz_full)
+
+def analyze_navigation_zones(pts, cells_no_step, robot_x, robot_y, robot_yaw,
+                            front_distance=0.5, lateral_distance=1.5, lateral_width=1.0,
+                            rear_distance=1.0):
+    """    Analyze zones in front, to the right, to the left and behind the robot to determine whether the path is clear.
+
+    Args:
+        pts: array (N, 3) with coordinates [x, y, z] of the cells in the VISION frame
+        cells_no_step: array (N,) with no-step values (<=0 = non-steppable, >0 = steppable)
+        robot_x, robot_y: robot position in meters (VISION frame)
+        robot_yaw: robot orientation in radians
+        front_distance: how far to look ahead (meters)
+        lateral_distance: how far to look sideways (meters)
+        lateral_width: width of the lateral area to consider (meters)
+        rear_distance: how far to look behind (meters)
+
+    Returns:
+        dict with keys:
+            - 'front_blocked': bool, True if front is blocked
+            - 'left_free': bool, True if left side is free
+            - 'right_free': bool, True if right side is free
+            - 'rear_free': bool, True if rear side is free
+            - 'front_free_ratio': float 0-1, fraction of free cells in front
+            - 'left_free_ratio': float 0-1, fraction of free cells on the left
+            - 'right_free_ratio': float 0-1, fraction of free cells on the right
+            - 'rear_free_ratio': float 0-1, fraction of free cells on the rear
+            - 'recommendation': str, suggestion ('GO_STRAIGHT', 'TURN_LEFT', 'TURN_RIGHT', 'BLOCKED')
+    """
+
+    # Direction vectors for the robot (body X-axis in the VISION frame)
+    front_dir_x = np.cos(robot_yaw)
+    front_dir_y = np.sin(robot_yaw)
+
+    # Perpendicular direction vectors (right and left)
+    right_dir_x = np.cos(robot_yaw - np.pi/2)  # -90° = right
+    right_dir_y = np.sin(robot_yaw - np.pi/2)
+    left_dir_x = np.cos(robot_yaw + np.pi/2)   # +90° = left
+    left_dir_y = np.sin(robot_yaw + np.pi/2)
+
+    # Coordinates of grid cells relative to the robot
+    dx = pts[:, 0] - robot_x
+    dy = pts[:, 1] - robot_y
+
+    # Projection onto the forward direction (longitudinal distance)
+    proj_front = dx * front_dir_x + dy * front_dir_y
+    # Projection onto the lateral direction (transverse distance, + = right, - = left)
+    proj_lateral = dx * right_dir_x + dy * right_dir_y
+
+    # --- FRONT ZONE ---
+    # Cells in front of the robot: proj_front > 0 and < front_distance, |proj_lateral| < 0.5m (robot width ~0.8m)
+    mask_front = (proj_front > 0) & (proj_front <= front_distance) & (np.abs(proj_lateral) <= 0.5)
+    cells_front = cells_no_step[mask_front]
+
+    if len(cells_front) > 0:
+        front_free_count = np.sum(cells_front > 0.0)
+        front_free_ratio = front_free_count / len(cells_front)
+    else:
+        front_free_ratio = 1.0  # no cells = consider free
+
+    # Threshold: if less than 70% of cells are free, consider the path blocked
+    front_blocked = front_free_ratio < 0.7
+
+    # --- LEFT ZONE ---
+    # Cells to the left of the robot (full side, not just front-left)
+    mask_left = (proj_lateral < 0) & (proj_lateral >= -lateral_width) & \
+                (np.abs(proj_front) <= lateral_distance)
+    cells_left = cells_no_step[mask_left]
+
+    if len(cells_left) > 0:
+        left_free_count = np.sum(cells_left > 0.0)
+        left_free_ratio = left_free_count / len(cells_left)
+    else:
+        left_free_ratio = 1.0
+
+    left_free = left_free_ratio > 0.7
+
+    # --- RIGHT ZONE ---
+    # Cells to the right of the robot (full side, not just front-right)
+    mask_right = (proj_lateral > 0) & (proj_lateral <= lateral_width) & \
+                 (np.abs(proj_front) <= lateral_distance)
+    cells_right = cells_no_step[mask_right]
+
+    if len(cells_right) > 0:
+        right_free_count = np.sum(cells_right > 0.0)
+        right_free_ratio = right_free_count / len(cells_right)
+    else:
+        right_free_ratio = 1.0
+
+    right_free = right_free_ratio > 0.7
+
+    # --- REAR ZONE ---
+    # Cells behind the robot: proj_front < 0 and > -rear_distance, |proj_lateral| < 0.5m (robot width)
+    mask_rear = (proj_front < 0) & (proj_front >= -rear_distance) & (np.abs(proj_lateral) <= 0.5)
+    cells_rear = cells_no_step[mask_rear]
+
+    if len(cells_rear) > 0:
+        rear_free_count = np.sum(cells_rear > 0.0)
+        rear_free_ratio = rear_free_count / len(cells_rear)
+    else:
+        rear_free_ratio = 1.0
+
+    rear_free = rear_free_ratio > 0.7
+
+    # --- RECOMMENDATION ---
+    if not front_blocked:
+        recommendation = 'GO_STRAIGHT'
+    elif left_free and right_free:
+        # Both sides are free: choose the one with more space
+        recommendation = 'TURN_LEFT' if left_free_ratio >= right_free_ratio else 'TURN_RIGHT'
+    elif left_free:
+        recommendation = 'TURN_LEFT'
+    elif right_free:
+        recommendation = 'TURN_RIGHT'
+    else:
+        recommendation = 'BLOCKED'
+
+    return {
+        'front_blocked': front_blocked,
+        'left_free': left_free,
+        'right_free': right_free,
+        'rear_free': rear_free,
+        'front_free_ratio': front_free_ratio,
+        'left_free_ratio': left_free_ratio,
+        'right_free_ratio': right_free_ratio,
+        'rear_free_ratio': rear_free_ratio,
+        'recommendation': recommendation,
+        'masks': {  # for debug/visualization
+            'front': mask_front,
+            'left': mask_left,
+            'right': mask_right,
+            'rear': mask_rear
+        }
+    }
+
+#MIE AGGIUNTE
+
+def create_vtk_terrain_grid(proto, robot_state_client, layer_name='terrain'):
+    """Generate VTK polydata for any terrain-based grid from the local grid response."""
+    local_grid_proto = None
+    cell_size = 0.0
+
+    for local_grid_found in proto:
+        # Check against the dynamic layer_name instead of a hardcoded string
+        if local_grid_found.local_grid_type_name == layer_name:
+            local_grid_proto = local_grid_found
+            cell_size = local_grid_found.local_grid.extent.cell_size
+
+    if local_grid_proto is None:
+        return np.empty((0, 3), dtype=np.float32), np.array([], dtype=np.float32), np.zeros((0, 3), dtype=np.uint8)
+
+    # Decode values
+    terrain_values = unpack_grid(local_grid_proto).astype(np.float32)
+
+    # Build XY grid
+    ys, xs = np.mgrid[
+             0:local_grid_proto.local_grid.extent.num_cells_x,
+             0:local_grid_proto.local_grid.extent.num_cells_y
+             ]
+
+    z_vals = np.ravel(terrain_values)
+    pts = np.vstack([
+        np.ravel(xs).astype(np.float32),
+        np.ravel(ys).astype(np.float32),
+        z_vals
+    ]).T
+
+    pts[:, [0, 1]] *= (cell_size, cell_size)
+
+    transforms_snapshot = local_grid_proto.local_grid.transforms_snapshot
+    vision_tform_local_grid = get_a_tform_b(
+        transforms_snapshot,
+        VISION_FRAME_NAME,
+        local_grid_proto.local_grid.frame_name_local_grid_data
+    )
+
+    pts = offset_grid_pixels(pts, vision_tform_local_grid, cell_size)
+
+    color = np.zeros([len(z_vals), 3], dtype=np.uint8)
+    color[:, 1] = 255  # green
+
+    return pts, terrain_values, color
+
+
+def compute_gradient_and_roughness(terrain_values, terrain_valid_values, num_cells_x, num_cells_y, cell_size):
+    """
+    Genera layer di pendenza e rugosità inserendo dei NaN nelle celle non valide
+    per evitare la creazione di finti ostacoli ai bordi dei punti ciechi.
+    """
+    # 1. Ricostruisci la matrice 2D (float per poter usare np.nan)
+    terrain_2d = terrain_values.reshape((num_cells_x, num_cells_y)).astype(float)
+    valid_2d = terrain_valid_values.reshape((num_cells_x, num_cells_y))
+
+    # 2. Iniezione dei NaN nelle zone cieche
+    terrain_2d[valid_2d <= 0.0] = np.nan
+
+    # 3. Calcolo Gradiente (Pendenza)
+    grad_x, grad_y = np.gradient(terrain_2d, cell_size)
+    gradient_2d = np.sqrt(grad_x ** 2 + grad_y ** 2)
+
+    # 4. Calcolo Rugosità
+    window_size = 3
+    mean_t = uniform_filter(terrain_2d, size=window_size)
+    mean_t2 = uniform_filter(terrain_2d ** 2, size=window_size)
+    roughness_2d = np.sqrt(np.maximum(0, mean_t2 - mean_t ** 2))
+
+    # 5. Pulizia dei NaN in 0.0 prima di restituire l'array
+    gradient_2d = np.nan_to_num(gradient_2d, nan=0.0)
+    roughness_2d = np.nan_to_num(roughness_2d, nan=0.0)
+
+    return gradient_2d.ravel(), roughness_2d.ravel()
+
+
+def fuse_all_layers(pts,
+                    cells_no_step,
+                    terrain_values,
+                    grad_values,
+                    rough_values,
+                    terrain_valid_values=None,
+                    intensity_values=None,
+                    slope_threshold=0.35,
+                    rough_threshold=0.05,
+                    intensity_threshold=None):
+
+    fused = np.ones_like(cells_no_step)
+
+    # Ostacoli assoluti
+    fused[cells_no_step <= 0] = 0
+
+    # Pendenza e Rugosità
+    fused[grad_values > slope_threshold] = 0
+    fused[rough_values > rough_threshold] = 0
+
+    # VETO ASSOLUTO SUI PUNTI CIECHI (terrain_valid)
+    if terrain_valid_values is not None and len(terrain_valid_values) > 0:
+        fused[terrain_valid_values <= 0.0] = 0
+
+    # VETO SULLE ZONE SCURE (Intensity - Attualmente non implementato)
+    if intensity_values is not None and len(intensity_values) > 0 and intensity_threshold is not None:
+        fused[intensity_values < intensity_threshold] = 0
+
+    return fused
+
+
+#FINE MIE AGGIUNTE
