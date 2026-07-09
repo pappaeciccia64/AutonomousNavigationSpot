@@ -379,62 +379,85 @@ def create_vtk_terrain_grid(proto, robot_state_client, layer_name='terrain'):
 
 def compute_gradient_and_roughness(terrain_values, terrain_valid_values, num_cells_x, num_cells_y, cell_size):
     """
-    Genera layer di pendenza e rugosità inserendo dei NaN nelle celle non valide
-    per evitare la creazione di finti ostacoli ai bordi dei punti ciechi.
+    Genera layer di pendenza e rugosità escludendo completamente i punti ciechi.
+    Evita la propagazione di pendenze artificiali lungo i confini delle zone valide.
     """
-    # 1. Ricostruisci la matrice 2D (float per poter usare np.nan)
-    terrain_2d = terrain_values.reshape((num_cells_x, num_cells_y)).astype(float)
+    terrain_2d = terrain_values.reshape((num_cells_x, num_cells_y)).copy()
     valid_2d = terrain_valid_values.reshape((num_cells_x, num_cells_y))
 
-    # 2. Iniezione dei NaN nelle zone cieche
-    terrain_2d[valid_2d <= 0.0] = np.nan
+    # Identifichiamo la maschera dei non validi
+    invalid_mask = (valid_2d <= 0.0)
 
-    # 3. Calcolo Gradiente (Pendenza)
+    # Per evitare che il calcolo di np.gradient e del filtro uniforme crei "muri" artificiali
+    # sui bordi delle zone d'ombra, riempiamo temporaneamente i punti non validi con la media dei punti validi.
+    if np.any(~invalid_mask):
+        mean_valid = np.mean(terrain_2d[~invalid_mask])
+        terrain_2d[invalid_mask] = mean_valid
+
+    # Calcolo Gradiente (Pendenza)
     grad_x, grad_y = np.gradient(terrain_2d, cell_size)
     gradient_2d = np.sqrt(grad_x ** 2 + grad_y ** 2)
 
-    # 4. Calcolo Rugosità
+    # Calcolo Rugosità
     window_size = 3
     mean_t = uniform_filter(terrain_2d, size=window_size)
     mean_t2 = uniform_filter(terrain_2d ** 2, size=window_size)
     roughness_2d = np.sqrt(np.maximum(0, mean_t2 - mean_t ** 2))
 
-    # 5. Pulizia dei NaN in 0.0 prima di restituire l'array
-    gradient_2d = np.nan_to_num(gradient_2d, nan=0.0)
-    roughness_2d = np.nan_to_num(roughness_2d, nan=0.0)
+    # Escludiamo totalmente le celle non valide impostando i loro valori a 0
+    gradient_2d[invalid_mask] = 0.0
+    roughness_2d[invalid_mask] = 0.0
 
     return gradient_2d.ravel(), roughness_2d.ravel()
 
 
 def fuse_all_layers(pts,
-                    cells_no_step,
+                    cells_obstacle_dist,
                     terrain_values,
                     grad_values,
                     rough_values,
                     terrain_valid_values=None,
                     intensity_values=None,
+                    obstacle_threshold=0.15,
                     slope_threshold=0.35,
                     rough_threshold=0.05,
-                    intensity_threshold=None):
+                    intensity_threshold=None,
+                    robot_z=0.0,
+                    step_threshold=0.40):
+    """
+    Fonde i layer ambientali restituendo la mappa ad altezze reali
+    e una maschera binaria separata per gli ostacoli.
+    """
+    cells_obstacle_dist = cells_obstacle_dist.ravel()
+    terrain_values = terrain_values.ravel()
+    grad_values = grad_values.ravel()
+    rough_values = rough_values.ravel()
 
-    fused = np.ones_like(cells_no_step)
+    # Mappa ad altezze REALI intatta
+    terrain_real = terrain_values.copy().astype(np.float32)
 
-    # Ostacoli assoluti
-    fused[cells_no_step <= 0] = 0
-
-    # Pendenza e Rugosità
-    fused[grad_values > slope_threshold] = 0
-    fused[rough_values > rough_threshold] = 0
-
-    # VETO ASSOLUTO SUI PUNTI CIECHI (terrain_valid)
+    # Identifica le zone NON VALIDE (punti ciechi)
+    invalid_mask = np.zeros_like(cells_obstacle_dist, dtype=bool)
     if terrain_valid_values is not None and len(terrain_valid_values) > 0:
-        fused[terrain_valid_values <= 0.0] = 0
+        invalid_mask = (terrain_valid_values.ravel() <= 0.0)
 
-    # VETO SULLE ZONE SCURE (Intensity - Attualmente non implementato)
-    if intensity_values is not None and len(intensity_values) > 0 and intensity_threshold is not None:
-        fused[intensity_values < intensity_threshold] = 0
+    # Calcolo dei VETI (identico a prima)
+    v1 = ((cells_obstacle_dist <= obstacle_threshold) & ~invalid_mask)
+    v2 = ((grad_values > slope_threshold) & ~invalid_mask)
+    v3 = ((rough_values > rough_threshold) & ~invalid_mask)
 
-    return fused
+    print(f"[DEBUG FUSIONE] Totale celle griglia: {cells_obstacle_dist.size}")
+    print(f"[DEBUG FUSIONE] Celle bloccate da DISTANZA OSTACOLI: {np.sum(v1)}")
+    print(f"[DEBUG FUSIONE] Celle bloccate da PENDENZA: {np.sum(v2)}")
+    print(f"[DEBUG FUSIONE] Celle bloccate da RUGOSITÀ: {np.sum(v3)}")
+
+    # Maschera binaria finale degli ostacoli
+    obstacle_mask = v1 | v2 | v3
+
+    obstacle_mask = np.where(obstacle_mask, -1.0, 1.0)
+
+    # RESTITUIAMO ENTRAMBI I LAYER SEPARATI
+    return terrain_real, obstacle_mask
 
 
 #FINE MIE AGGIUNTE
