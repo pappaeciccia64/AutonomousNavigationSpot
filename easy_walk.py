@@ -21,10 +21,22 @@ import spotLogInUtils
 import environmentMap
 import spotUtils
 #import velodyneClient
-import archVerification
+import arcVerification
 
 import global_sampler
 import prm_graph
+
+import threading
+
+import matplotlib
+# CRUCIALE: Impostare il backend 'Agg' PRIMA di importare pyplot!
+# Questo disabilita Tkinter ed evita qualsiasi crash multithread/SIGABRT.
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+
+# Lock globale per garantire la thread-safety chiamando la visualizzazione da background thread
+_VIS_LOCK = threading.Lock()
 
 # TODO: check if we can avoid to set a sleep after each movement command
 # TODO: change the folder destination of the name download of graph
@@ -74,465 +86,414 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
 
 def visualize_grid_with_candidates(pts, terrain_real, obstacle_mask, robot_x, robot_y,
                                    candidates, chosen_point, iteration, env, save_path,
-                                   prm_graph=None, chosen_path=None, terrain_values=None,
+                                   prm_graph=None, chosen_path=None,
                                    cells_obstacle_dist=None, intensity_values=None,
-                                   valid_values=None, grad_values=None, rough_values=None):
-
+                                   valid_values=None, grad_values=None, rough_values=None,
+                                   include_diagnostics=True):
     """
-    Visualize the obstacle-distance grid with sampled candidates, chosen point, PRM Graph, and Chosen Path.
-    Sovrappone il grafo PRM e il percorso scelto (chosen_path) su TUTTE le mappe diagnostiche singole.
+    Visualizza e salva le mappe diagnostiche locali e la mappa globale.
+    Thread-safe per l'esecuzione da qualsiasi thread secondario (es. ArcVerificationTracker).
     """
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
-    import numpy as np
-    import os
+    # Acquisiamo il Lock per evitare accessi concorrenti allo stato globale di pyplot
+    with _VIS_LOCK:
+        x = pts[:, 0]
+        y = pts[:, 1]
 
-    x = pts[:, 0]
-    y = pts[:, 1]
-    PADDING_THRESHOLD = 0.15
+        # Limiti dello zoom locale (Area di 6m x 6m intorno a Spot)
+        ZOOM_RADIUS = 3.0
+        local_xmin_zoom = robot_x - ZOOM_RADIUS
+        local_xmax_zoom = robot_x + ZOOM_RADIUS
+        local_ymin_zoom = robot_y - ZOOM_RADIUS
+        local_ymax_zoom = robot_y + ZOOM_RADIUS
 
-    # --- FUNZIONE HELPER PER SOVRAPPORRE PRM, PATH, TARGET E ROBOT SULLE MAPPE DI DIAGNOSTICA ---
-    def _draw_prm_and_robot(target_ax):
-        # 1. Disegna nodi e archi del PRM se fornito
-        if prm_graph is not None and hasattr(prm_graph, 'nodes'):
-            for nid, (nx, ny) in prm_graph.nodes.items():
-                target_ax.plot(nx, ny, 'k.', markersize=3, alpha=0.5, zorder=3)
+        # Limiti reali dello scan locale
+        local_x_min, local_x_max = x.min(), x.max()
+        local_y_min, local_y_max = y.min(), y.max()
 
-            if hasattr(prm_graph, 'edges'):
-                for node_id, edges in prm_graph.edges.items():
-                    if node_id in prm_graph.nodes:
-                        nx1, ny1 = prm_graph.nodes[node_id]
-                        for neighbor_id in edges:
-                            if neighbor_id in prm_graph.nodes:
-                                nx2, ny2 = prm_graph.nodes[neighbor_id]
-                                target_ax.plot([nx1, nx2], [ny1, ny2], color='gray', linewidth=0.5, alpha=0.3, zorder=2)
+        # --- HELPER 1: APPLICA GLI STESSI LIMITI E ORIENTAMENTO A TUTTI GLI ASSI LOCALI ---
+        def _apply_common_axis_settings(target_ax, title_text):
+            target_ax.set_xlim(local_xmin_zoom, local_xmax_zoom)
+            target_ax.set_ylim(local_ymin_zoom, local_ymax_zoom)
+            target_ax.set_aspect('equal', adjustable='box')
+            target_ax.set_xlabel('X [m] (VISION)', fontsize=11, fontweight='bold')
+            target_ax.set_ylabel('Y [m] (VISION)', fontsize=11, fontweight='bold')
+            target_ax.set_title(title_text, fontsize=12, fontweight='bold')
+            target_ax.grid(True, alpha=0.3)
 
-        # 2. Disegna il percorso scelto (Path magenta)
-        if chosen_path is not None and len(chosen_path) > 1:
-            path_x = [p[0] for p in chosen_path if p is not None]
-            path_y = [p[1] for p in chosen_path if p is not None]
-            target_ax.plot(path_x, path_y, color='magenta', linewidth=3.0, linestyle='-', zorder=4)
-            target_ax.plot(path_x, path_y, 'mo', markersize=6, markeredgecolor='white', zorder=5)
+        # --- HELPER 2: SOVRAPPONE PRM, PATH, TARGET E ROBOT ---
+        def _draw_prm_and_robot(target_ax):
+            # 1. Nodi e Archi PRM (solo nella zona zoomata)
+            if prm_graph is not None and hasattr(prm_graph, 'nodes'):
+                for nid, (nx, ny) in prm_graph.nodes.items():
+                    if local_xmin_zoom <= nx <= local_xmax_zoom and local_ymin_zoom <= ny <= local_ymax_zoom:
+                        target_ax.plot(nx, ny, 'k.', markersize=3, alpha=0.5, zorder=3)
 
-        # 3. Disegna il Target stellato
-        if chosen_point is not None:
-            target_ax.plot(chosen_point[0], chosen_point[1], 'g*', markersize=20, markeredgewidth=1.5, zorder=6)
-            target_ax.plot([robot_x, chosen_point[0]], [robot_y, chosen_point[1]], 'g--', linewidth=2.0, alpha=0.6, zorder=3)
+                if hasattr(prm_graph, 'edges'):
+                    for node_id, edges in prm_graph.edges.items():
+                        if node_id in prm_graph.nodes:
+                            nx1, ny1 = prm_graph.nodes[node_id]
+                            if (local_xmin_zoom <= nx1 <= local_xmax_zoom and local_ymin_zoom <= ny1 <= local_ymax_zoom):
+                                for neighbor_id, weight in edges:
+                                    if neighbor_id in prm_graph.nodes:
+                                        nx2, ny2 = prm_graph.nodes[neighbor_id]
+                                        target_ax.plot([nx1, nx2], [ny1, ny2],
+                                                       color='gray', linewidth=0.5, alpha=0.3, zorder=2)
 
-        # 4. Disegna il Robot e i suoi anelli di prossimità
-        target_ax.plot(robot_x, robot_y, 'bo', markersize=14, zorder=7)
-        for r in [1.0, 2.0]:
-            circle = patches.Circle((robot_x, robot_y), r, fill=False, linestyle=':', linewidth=1, edgecolor='blue',
-                                    alpha=0.3, zorder=2)
-            target_ax.add_patch(circle)
+            # 2. Percorso scelto (Magenta)
+            if chosen_path is not None and len(chosen_path) > 1:
+                path_x = [p[0] for p in chosen_path if p is not None]
+                path_y = [p[1] for p in chosen_path if p is not None]
+                target_ax.plot(path_x, path_y, color='magenta', linewidth=3.0, linestyle='-', zorder=4)
+                target_ax.plot(path_x, path_y, 'mo', markersize=6, markeredgecolor='white', zorder=5)
 
-    # ================================================================== #
-    # FIGURE 1: ROBOT PATH VISUALIZATION (MAPPA CON SFORZO REALE + ROSSO)
-    # ================================================================== #
-    fig, ax = plt.subplots(figsize=(14, 12))
+            # 3. Target Stellato
+            if chosen_point is not None:
+                target_ax.plot(chosen_point[0], chosen_point[1], 'g*', markersize=18, markeredgewidth=1.5, zorder=6)
+                target_ax.plot([robot_x, chosen_point[0]], [robot_y, chosen_point[1]], 'g--', linewidth=1.8, alpha=0.6, zorder=3)
 
-    # --- RICOSTRUZIONE MATRICE COLORE BASATA SU TERRENO REALE + COLOURED OVERLAY ---
-    fused_colors = np.zeros((len(obstacle_mask), 3))
+            # 4. Robot e anelli di prossimità
+            target_ax.plot(robot_x, robot_y, 'bo', markersize=12, zorder=7)
+            for r in [1.0, 2.0]:
+                circle = patches.Circle((robot_x, robot_y), r, fill=False, linestyle=':', linewidth=1, edgecolor='blue',
+                                        alpha=0.3, zorder=2)
+                target_ax.add_patch(circle)
 
-    # 1. Recuperiamo la mappa delle altezze reali per lo sfondo calpestabile
-    if terrain_values is not None:
-        z_terrain = terrain_values.ravel()
-        z_min, z_max = z_terrain.min(), z_terrain.max()
-        if (z_max - z_min) > 0.001:
-            z_norm = (z_terrain - z_min) / (z_max - z_min)
+        # Base del percorso di salvataggio
+        base_save_path, ext = os.path.splitext(save_path) if save_path else (None, '.png')
+
+        # Matrice colore basata su terreno + ostacoli
+        fused_colors = np.zeros((len(obstacle_mask), 3))
+        if terrain_real is not None:
+            z_terrain = terrain_real.ravel()
+            z_min, z_max = z_terrain.min(), z_terrain.max()
+            z_norm = (z_terrain - z_min) / (z_max - z_min) if (z_max - z_min) > 0.001 else np.zeros_like(z_terrain)
+            cmap_walkable = matplotlib.colormaps.get_cmap('YlGn')
+            fused_colors[:] = cmap_walkable(z_norm)[:, :3]
         else:
-            z_norm = np.zeros_like(z_terrain)
+            fused_colors[:] = [0.9, 0.9, 0.9]
 
-        # Generiamo le sfumature di verde/giallo reali per il pavimento calpestabile
-        cmap_walkable = plt.colormaps.get_cmap('YlGn')
-        fused_colors[:] = cmap_walkable(z_norm)[:, :3]
-    else:
-        # Fallback neutro grigio chiaro se mancano i dati del terreno
-        fused_colors[:] = [0.9, 0.9, 0.9]
+        obs_flat = obstacle_mask.ravel()
+        fused_colors[obs_flat == -1] = [1.0, 0.0, 0.0]
 
-    # 2. Copriamo con il ROSSO ACCESO i punti identificati come veri ostacoli logici
-    obs_flat = obstacle_mask.ravel()
-    fused_colors[obs_flat == -1] = [1.0, 0.0, 0.0]
+        # ================================================================== #
+        # FIGURE 1: MAIN ROBOT PATH VISUALIZATION
+        # ================================================================== #
+        fig, ax = plt.subplots(figsize=(10, 10))
+        try:
+            ax.scatter(x, y, c=fused_colors, s=8, alpha=0.7, zorder=1, label='Terreno (Verde) / Ostacoli (Rosso)')
 
-    # Disegna lo sfondo della mappa locale filtrata
-    ax.scatter(x, y, c=fused_colors, s=8, alpha=0.7, zorder=1,
-                label='Calpestabile (Sfumature Verde) + Ostacoli/Scalini (Rosso)')
-
-    # Sovrappone PRM, Path, Target e Robot sulla mappa principale
-    _draw_prm_and_robot(ax)
-
-    # Calculate local grid bounds
-    local_x_min, local_x_max = x.min(), x.max()
-    local_y_min, local_y_max = y.min(), y.max()
-
-    if env is not None:
-        for row in range(env.rows):
-            for col in range(env.cols):
-                world_pos = env.get_world_position_from_cell(row, col)
-                if world_pos is None: continue
-                cell_x, cell_y = world_pos
-
-                margin = env.cell_size
-                if not (local_x_min - margin <= cell_x <= local_x_max + margin and
-                        local_y_min - margin <= cell_y <= local_y_max + margin):
-                    continue
-
-                half_size = env.cell_size / 2.0
-                grid_corners = [(-half_size, -half_size), (half_size, -half_size), (half_size, half_size),
-                                (-half_size, half_size)]
+            # Griglia di esplorazione Global Environment
+            if env is not None:
                 cos_yaw, sin_yaw = np.cos(env.origin_yaw), np.sin(env.origin_yaw)
-                world_corners = []
-                for gx, gy in grid_corners:
-                    wx = cell_x + (gx * cos_yaw - gy * sin_yaw)
-                    wy = cell_y + (gx * sin_yaw + gy * cos_yaw)
-                    world_corners.append((wx, wy))
+                for row in range(env.rows):
+                    for col in range(env.cols):
+                        world_pos = env.get_world_position_from_cell(row, col)
+                        if world_pos is None: continue
+                        cell_x, cell_y = world_pos
 
-                cell_status, _ = env.get_cell_status(row, col) if len(env.get_cell_status(row, col)) == 2 else (
-                    env.get_cell_status(row, col), None)
-                if cell_status == 1:
-                    rect = patches.Polygon(world_corners, linewidth=2, edgecolor='darkgreen', facecolor='lightgreen',
-                                           alpha=0.3, zorder=2)
-                elif cell_status == -1:
-                    rect = patches.Polygon(world_corners, linewidth=2, edgecolor='darkred', facecolor='lightcoral',
-                                           alpha=0.4, zorder=2)
-                else:
-                    rect = patches.Polygon(world_corners, linewidth=1.5, edgecolor='gray', facecolor='none', alpha=0.6,
-                                           linestyle='--', zorder=2)
-                ax.add_patch(rect)
-                ax.text(cell_x, cell_y, f'{row},{col}', ha='center', va='center', fontsize=7, color='black',
-                        weight='bold', zorder=3, bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+                        margin = env.cell_size
+                        if not (local_x_min - margin <= cell_x <= local_x_max + margin and
+                                local_y_min - margin <= cell_y <= local_y_max + margin):
+                            continue
 
-    if 'rejected' in candidates:
-        for point in candidates['rejected']:
-            ax.plot(point[0], point[1], 'rx', markersize=10, markeredgewidth=2.5, zorder=5)
+                        half_size = env.cell_size / 2.0
+                        grid_corners = [(-half_size, -half_size), (half_size, -half_size), (half_size, half_size),
+                                        (-half_size, half_size)]
+                        world_corners = [(cell_x + (gx * cos_yaw - gy * sin_yaw), cell_y + (gx * sin_yaw + gy * cos_yaw)) for
+                                         gx, gy in grid_corners]
 
-    if 'valid' in candidates:
-        for point in candidates['valid']:
-            ax.plot(point[0], point[1], 'yo', markersize=10, markerfacecolor='yellow', markeredgewidth=2,
-                    markeredgecolor='orange', zorder=5)
+                        status_res = env.get_cell_status(row, col)
+                        cell_status = status_res[0] if isinstance(status_res, (tuple, list)) else status_res
 
-    if chosen_point is not None:
-        target_dist = np.sqrt((chosen_point[0] - robot_x) ** 2 + (chosen_point[1] - robot_y) ** 2)
-        mid_x, mid_y = (robot_x + chosen_point[0]) / 2, (robot_y + chosen_point[1]) / 2
-        ax.text(mid_x, mid_y, f'{target_dist:.2f}m', fontsize=9, color='darkgreen', weight='bold', zorder=6,
-                bbox=dict(boxstyle='round,pad=0.3', facecolor='lightgreen', alpha=0.9, edgecolor='darkgreen'))
+                        if cell_status == 1:
+                            rect = patches.Polygon(world_corners, linewidth=1.5, edgecolor='darkgreen', facecolor='lightgreen',
+                                                   alpha=0.3, zorder=2)
+                        elif cell_status == -1:
+                            rect = patches.Polygon(world_corners, linewidth=1.5, edgecolor='darkred', facecolor='lightcoral',
+                                                   alpha=0.4, zorder=2)
+                        else:
+                            rect = patches.Polygon(world_corners, linewidth=1.0, edgecolor='gray', facecolor='none', alpha=0.5,
+                                                   linestyle='--', zorder=2)
 
-    if type(env.waypoints) != int:
-        if env is not None and hasattr(env, 'waypoints') and isinstance(env.waypoints, list) and len(env.waypoints) > 0:
-            visible_waypoints = []
-            for i, waypoint in enumerate(env.waypoints):
-                if not isinstance(waypoint, (tuple, list)): continue
-                if type(waypoint) != int and len(waypoint) >= 2:
-                    wp_x, wp_y = waypoint[0], waypoint[1]
-                    if (
-                            local_x_min - 0.5 <= wp_x <= local_x_max + 0.5 and local_y_min - 0.5 <= wp_y <= local_y_max + 0.5):
-                        visible_waypoints.append((wp_x, wp_y, i))
-            if isinstance(visible_waypoints, list) and len(visible_waypoints) > 0:
-                for wp_x, wp_y, idx in visible_waypoints:
-                    ax.plot(wp_x, wp_y, 'mo', markersize=12, markerfacecolor='magenta', markeredgewidth=2.5,
-                            markeredgecolor='purple', zorder=7, label='Waypoints' if idx == 0 else '')
-                    ax.text(wp_x + 0.12, wp_y + 0.12, f'W{idx + 1}', fontsize=9, color='purple', weight='bold',
-                            zorder=8,
-                            bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.9, edgecolor='purple'))
+                        ax.add_patch(rect)
+                        ax.text(cell_x, cell_y, f'{row},{col}', ha='center', va='center', fontsize=7, color='black',
+                                weight='bold', zorder=3,
+                                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
 
-    if type(env.robot_path) != int:
-        if env is not None and hasattr(env, 'robot_path') and isinstance(env.robot_path, list) and len(
-                env.robot_path) > 0:
-            all_positions = []
-            for entry in env.robot_path:
-                if not isinstance(entry, (tuple, list)): continue
-                if type(entry) != int and len(entry) >= 2:
-                    pos_x, pos_y = entry[0], entry[1]
-                    movement_type = entry[2] if len(entry) >= 3 else 'explore'
-                    if (
-                            local_x_min - 0.5 <= pos_x <= local_x_max + 0.5 and local_y_min - 0.5 <= pos_y <= local_y_max + 0.5):
-                        all_positions.append((pos_x, pos_y, movement_type))
+            # Punti Candidati
+            if 'rejected' in candidates:
+                for point in candidates['rejected']:
+                    ax.plot(point[0], point[1], 'rx', markersize=8, markeredgewidth=2, zorder=5)
+            if 'valid' in candidates:
+                for point in candidates['valid']:
+                    ax.plot(point[0], point[1], 'yo', markersize=8, markerfacecolor='yellow', markeredgewidth=1.5,
+                            markeredgecolor='orange', zorder=5)
 
-            if type(all_positions) != int and isinstance(all_positions, list) and len(all_positions) > 1:
-                for i in range(len(all_positions) - 1):
-                    pos1, pos2 = all_positions[i], all_positions[i + 1]
-                    if pos1[2] == 'navigate' or pos2[2] == 'navigate':
-                        ax.plot([pos1[0], pos2[0]], [pos1[1], pos2[1]], 'r--', linewidth=2.5, alpha=0.7, zorder=4,
-                                label='Navigation' if i == 0 and pos1[2] == 'navigate' else '')
-                    else:
-                        ax.plot([pos1[0], pos2[0]], [pos1[1], pos2[1]], 'g-', linewidth=2.5, alpha=0.7, zorder=4,
-                                label='Exploration' if i == 0 else '')
+            _draw_prm_and_robot(ax)
+            _apply_common_axis_settings(ax, f'Iterazione {iteration}: Path Visualization & Local Scan')
+            ax.legend(loc='upper right', fontsize=8)
+            plt.tight_layout()
 
-            for i, (pos_x, pos_y, movement_type) in enumerate(all_positions):
-                color_marker = 'orange' if movement_type == 'navigate' else 'lime'
-                ax.plot(pos_x, pos_y, 'o', color=color_marker, markersize=5, alpha=0.8, zorder=5)
+            if save_path:
+                fig.savefig(save_path, dpi=150, bbox_inches='tight')
+                print(f"[VISUALIZATION] Main local view saved to: {save_path}")
+        finally:
+            plt.close(fig)  # Chiusura garantita anche in caso di eccezioni
 
-    ax.set_xlim(local_x_min - 0.5, local_x_max + 0.5)
-    ax.set_ylim(local_y_min - 0.5, local_y_max + 0.5)
-    ax.set_xlabel('X [m] (VISION)', fontsize=12, fontweight='bold')
-    ax.set_ylabel('Y [m] (VISION)', fontsize=12, fontweight='bold')
-    ax.set_title(f'Iteration {iteration}: Robot Path Visualization', fontsize=13, fontweight='bold')
-    ax.axis('equal')
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc='upper right', fontsize=10)
-    plt.tight_layout()
+        # ================================================================== #
+        # MAPPE DIAGNOSTICHE SECONDARIE
+        # ================================================================== #
+        if include_diagnostics:   # <-- ADD this guard around the existing loop
+            diagnostic_layers = {
+                'terrain': (terrain_real, 'YlGn', 'Quota (m)', 'Layer: TERRAIN'),
+                'obstacle_dist': (cells_obstacle_dist, 'plasma', 'Distanza (m)', 'Layer: OBSTACLE DISTANCE'),
+                'valid': (valid_values, 'binary', '1=Valido, 0=Cieco', 'Layer: VALID MAP'),
+                'gradient': (grad_values, 'YlOrRd', 'Gradiente / Pendenza', 'Diagnostica: PENDENZA'),
+                'roughness': (rough_values, 'coolwarm', 'Indice di Rugosità', 'Diagnostica: RUGOSITÀ')
+            }
 
-    if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        print(f"[VISUALIZATION] Saved to: {save_path}")
+            for layer_key, (data_matrix, cmap, label_cb, title_suffix) in diagnostic_layers.items():
+                if data_matrix is not None and data_matrix.size > 0:
+                    fig_diag, ax_diag = plt.subplots(figsize=(8, 8))
+                    try:
+                        z_data = data_matrix.flatten() if data_matrix.shape != x.shape else data_matrix
+                        sc = ax_diag.scatter(x, y, c=z_data, cmap=cmap, s=6, alpha=0.6, zorder=1)
+                        fig_diag.colorbar(sc, ax=ax_diag, label=label_cb, shrink=0.8)
+                        _draw_prm_and_robot(ax_diag)
+                        _apply_common_axis_settings(ax_diag, f'Iterazione {iteration} - {title_suffix}')
+                        plt.tight_layout()
+                        if base_save_path:
+                            diag_save_path = f"{base_save_path}_{layer_key}{ext}"
+                            fig_diag.savefig(diag_save_path, dpi=120, bbox_inches='tight')
+                    finally:
+                        plt.close(fig_diag)
 
-    # ================================================================== #
-    # FIGURE 2: TERRAIN MAP (Altezze reali) + PRM (Cambiat colormap in YlGn)
-    # ================================================================== #
-    if terrain_values is not None:
-        fig_t, ax_t = plt.subplots(figsize=(8, 6))
-        z_t = terrain_values.flatten() if terrain_values.shape != x.shape else terrain_values
-        sc_t = ax_t.scatter(x, y, c=z_t, cmap='YlGn', s=6, alpha=0.6, zorder=1)
-        fig_t.colorbar(sc_t, ax=ax_t, label='Quota (m)')
+        # ================================================================== #
+        # MAPPA GLOBALE (GLOBAL ACCUMULATED MAP)
+        # ================================================================== #
+        if env is not None:
+            ACCUM_RES = 0.05
+            if not hasattr(env, '_accumulated_pts'):
+                env._accumulated_pts = {}
 
-        _draw_prm_and_robot(ax_t)  # <--- Sovrapposizione PRM
-        ax_t.set_title(f'Iterazione {iteration} - Layer: TERRAIN + PRM')
-        ax_t.axis('equal')
-        ax_t.grid(True, alpha=0.2)
+            for p, color_rgb in zip(pts, fused_colors):
+                key = (int(round(p[0] / ACCUM_RES)), int(round(p[1] / ACCUM_RES)))
+                env._accumulated_pts[key] = (color_rgb * 255).astype(np.uint8)
 
-    # ================================================================== #
-    # FIGURE 3: OBSTACLE DISTANCE + PRM
-    # ================================================================== #
-    if cells_obstacle_dist is not None:
-        fig_o, ax_o = plt.subplots(figsize=(8, 6))
-        z_o = cells_obstacle_dist.flatten() if cells_obstacle_dist.shape != x.shape else cells_obstacle_dist
-        sc_o = ax_o.scatter(x, y, c=z_o, cmap='plasma', s=6, alpha=0.6, zorder=1)
-        fig_o.colorbar(sc_o, ax=ax_o, label='Distanza (m)')
+            if env._accumulated_pts:
+                accum_keys = np.array(list(env._accumulated_pts.keys()), dtype=np.float32)
+                accum_wx = accum_keys[:, 0] * ACCUM_RES
+                accum_wy = accum_keys[:, 1] * ACCUM_RES
+                accum_colors = np.array(list(env._accumulated_pts.values()), dtype=np.float32) / 255.0
+            else:
+                accum_wx = np.array([robot_x], dtype=np.float32)
+                accum_wy = np.array([robot_y], dtype=np.float32)
+                accum_colors = np.array([[0.0, 0.0, 1.0]], dtype=np.float32)
 
-        _draw_prm_and_robot(ax_o)  # <--- Sovrapposizione PRM
-        ax_o.set_title(f'Iterazione {iteration} - Layer: OBSTACLE DISTANCE + PRM')
-        ax_o.axis('equal')
-        ax_o.grid(True, alpha=0.2)
+            fig2, ax2 = plt.subplots(figsize=(14, 12))
+            try:
+                ax2.scatter(accum_wx, accum_wy, c=accum_colors, s=2, alpha=0.6, label='Accumulated Local Scan')
 
-    # ================================================================== #
-    # FIGURE 4: INTENSITY MAP + PRM
-    # ================================================================== #
-    if intensity_values is not None and intensity_values.size > 0:
-        fig_i, ax_i = plt.subplots(figsize=(8, 6))
-        z_i = intensity_values.flatten() if intensity_values.shape != x.shape else intensity_values
-        sc_i = ax_i.scatter(x, y, c=z_i, cmap='gray', s=6, alpha=0.6, zorder=1)
-        fig_i.colorbar(sc_i, ax=ax_i, label='Intensità')
+                # Grafo PRM globale
+                if prm_graph is not None and hasattr(prm_graph, 'nodes'):
+                    for nid, (nx, ny) in prm_graph.nodes.items():
+                        ax2.plot(nx, ny, 'k.', markersize=4, alpha=0.5, zorder=3)
 
-        _draw_prm_and_robot(ax_i)  # <--- Sovrapposizione PRM
-        ax_i.set_title(f'Iterazione {iteration} - Layer: INTENSITY + PRM')
-        ax_i.axis('equal')
-        ax_i.grid(True, alpha=0.2)
+                    if hasattr(prm_graph, 'edges'):
+                        for node_id, edges in prm_graph.edges.items():
+                            if node_id in prm_graph.nodes:
+                                nx1, ny1 = prm_graph.nodes[node_id]
+                                for neighbor_id, weight in edges:
+                                    if neighbor_id in prm_graph.nodes:
+                                        nx2, ny2 = prm_graph.nodes[neighbor_id]
+                                        ax2.plot([nx1, nx2], [ny1, ny2], color='gray', linewidth=0.5, alpha=0.3, zorder=2)
 
-    # ================================================================== #
-    # FIGURE 5: VALID MAP + PRM
-    # ================================================================== #
-    if valid_values is not None and valid_values.size > 0:
-        fig_v, ax_v = plt.subplots(figsize=(8, 6))
-        z_v = valid_values.flatten() if valid_values.shape != x.shape else valid_values
-        sc_v = ax_v.scatter(x, y, c=z_v, cmap='binary', s=6, alpha=0.6, zorder=1)
-        fig_v.colorbar(sc_v, ax=ax_v, label='1=Valido, 0=Cieco')
+                if chosen_path is not None and len(chosen_path) > 1:
+                    path_x = [p[0] for p in chosen_path if p is not None]
+                    path_y = [p[1] for p in chosen_path if p is not None]
+                    ax2.plot(path_x, path_y, color='magenta', linewidth=3.5, linestyle='-', zorder=6, label='Chosen Path')
 
-        _draw_prm_and_robot(ax_v)  # <--- Sovrapposizione PRM
-        ax_v.set_title(f'Iterazione {iteration} - Layer: VALID MAP + PRM')
-        ax_v.axis('equal')
-        ax_v.grid(True, alpha=0.2)
+                # --- Storico completo di tutti gli archi percorsi nella missione ---
+                if env is not None and hasattr(env, '_traveled_arcs') and env._traveled_arcs:
+                    from matplotlib.collections import LineCollection
+                    segments = [[(x1, y1), (x2, y2)] for (x1, y1, x2, y2) in env._traveled_arcs]
+                    traveled_lc = LineCollection(segments, colors='blue', linewidths=2.0, alpha=0.6, zorder=5)
+                    ax2.add_collection(traveled_lc)
+                    # Voce di legenda manuale, dato che LineCollection non genera una entry automaticamente
+                    ax2.plot([], [], color='blue', linewidth=2.0, alpha=0.6, label='Traveled Path (mission history)')
 
-    # ================================================================== #
-    # FIGURE 6: PENDENZA (GRADIENT MAP) + PRM
-    # ================================================================== #
-    if grad_values is not None:
-        fig_g, ax_g = plt.subplots(figsize=(8, 6))
-        z_g = grad_values.flatten() if grad_values.shape != x.shape else grad_values
-        sc_g = ax_g.scatter(x, y, c=z_g, cmap='YlOrRd', s=6, alpha=0.6, zorder=1)
-        fig_g.colorbar(sc_g, ax=ax_g, label='Gradiente / Pendenza')
+                # Riquadro scan locale sulla mappa globale
+                rect_local = patches.Rectangle((local_x_min, local_y_min), local_x_max - local_x_min, local_y_max - local_y_min,
+                                               linewidth=2, edgecolor='cyan', facecolor='none', linestyle='-', alpha=0.8,
+                                               zorder=6, label='Current local scan')
+                ax2.add_patch(rect_local)
 
-        _draw_prm_and_robot(ax_g)  # <--- Sovrapposizione PRM
-        ax_g.set_title(f'Iterazione {iteration} - Diagnostica: PENDENZA + PRM')
-        ax_g.axis('equal')
-        ax_g.grid(True, alpha=0.2)
+                # Coordinate e Griglia Environment
+                cos_yaw, sin_yaw = np.cos(env.origin_yaw), np.sin(env.origin_yaw)
+                for row in range(env.rows):
+                    for col in range(env.cols):
+                        world_pos = env.get_world_position_from_cell(row, col)
+                        if world_pos is None: continue
+                        cell_x, cell_y = world_pos
 
-    # ================================================================== #
-    # FIGURE 7: RUGOSITÀ (ROUGHNESS MAP) + PRM
-    # ================================================================== #
-    if rough_values is not None:
-        fig_r, ax_r = plt.subplots(figsize=(8, 6))
-        z_r = rough_values.flatten() if rough_values.shape != x.shape else rough_values
-        sc_r = ax_r.scatter(x, y, c=z_r, cmap='coolwarm', s=6, alpha=0.6, zorder=1)
-        fig_r.colorbar(sc_r, ax=ax_r, label='Indice di Rugosità')
+                        half_size = env.cell_size / 2.0
+                        grid_corners = [(-half_size, -half_size), (half_size, -half_size), (half_size, half_size),
+                                        (-half_size, half_size)]
+                        world_corners = [(cell_x + (gx * cos_yaw - gy * sin_yaw), cell_y + (gx * sin_yaw + gy * cos_yaw)) for
+                                         gx, gy in grid_corners]
 
-        _draw_prm_and_robot(ax_r)  # <--- Sovrapposizione PRM
-        ax_r.set_title(f'Iterazione {iteration} - Diagnostica: RUGOSITÀ + PRM')
-        ax_r.axis('equal')
-        ax_r.grid(True, alpha=0.2)
+                        status_res = env.get_cell_status(row, col)
+                        cell_status = status_res[0] if isinstance(status_res, (tuple, list)) else status_res
 
-    # Mostra tutte le figure locali contemporaneamente a schermo prima della mappa globale
-    plt.show()
+                        if cell_status == 1:
+                            rect = patches.Polygon(world_corners, linewidth=1.5, edgecolor='darkgreen', facecolor='lightgreen',
+                                                   alpha=0.3, zorder=2)
+                        elif cell_status == -1:
+                            rect = patches.Polygon(world_corners, linewidth=1.5, edgecolor='darkred', facecolor='lightcoral',
+                                                   alpha=0.4, zorder=2)
+                        else:
+                            rect = patches.Polygon(world_corners, linewidth=1.0, edgecolor='gray', facecolor='none', alpha=0.5,
+                                                   linestyle='--', zorder=2)
 
-    # ------------------------------------------------------------------ #
-    # SECOND FIGURE: global map
-    # ------------------------------------------------------------------ #
-    if env is not None:
-        ACCUM_RES = 0.05
-        if not hasattr(env, '_accumulated_pts'):
-            env._accumulated_pts = {}
+                        ax2.add_patch(rect)
+                        ax2.text(cell_x, cell_y, f'{row},{col}', ha='center', va='center', fontsize=7, color='black',
+                                 weight='bold', zorder=3)
 
-        for p, color_rgb in zip(pts, fused_colors):
-            key = (int(round(p[0] / ACCUM_RES)), int(round(p[1] / ACCUM_RES)))
-            env._accumulated_pts[key] = (color_rgb * 255).astype(np.uint8)
+                if chosen_point is not None:
+                    ax2.plot(chosen_point[0], chosen_point[1], 'g*', markersize=20, markeredgewidth=2, label='Target', zorder=6)
 
-        if env._accumulated_pts:
-            accum_keys = np.array(list(env._accumulated_pts.keys()), dtype=np.float32)
-            accum_wx = accum_keys[:, 0] * ACCUM_RES
-            accum_wy = accum_keys[:, 1] * ACCUM_RES
-            accum_colors = np.array(list(env._accumulated_pts.values()), dtype=np.float32) / 255.0
-        else:
-            accum_wx = np.array([robot_x], dtype=np.float32)
-            accum_wy = np.array([robot_y], dtype=np.float32)
-            accum_colors = np.array([[0.0, 0.0, 1.0]], dtype=np.float32)
+                ax2.set_xlabel('X [m] (VISION)', fontsize=12, fontweight='bold')
+                ax2.set_ylabel('Y [m] (VISION)', fontsize=12, fontweight='bold')
+                ax2.set_title(f'Iteration {iteration}: Global Map View', fontsize=13, fontweight='bold')
+                ax2.set_aspect('equal', adjustable='box')
+                ax2.grid(True, alpha=0.3)
+                ax2.legend(loc='upper right', fontsize=9)
+                plt.tight_layout()
 
-        fig2, ax2 = plt.subplots(figsize=(18, 14))
-        ax2.scatter(accum_wx, accum_wy, c=accum_colors, s=2, alpha=0.6,
-                    label='Accumulated Local Grid (obstacle/padding/free)')
-
-        if prm_graph is not None and hasattr(prm_graph, 'nodes'):
-            for nid, (nx, ny) in prm_graph.nodes.items():
-                ax2.plot(nx, ny, 'k.', markersize=5, alpha=0.6, zorder=3)
-
-            if hasattr(prm_graph, 'edges'):
-                for node_id, edges in prm_graph.edges.items():
-                    if node_id in prm_graph.nodes:
-                        nx1, ny1 = prm_graph.nodes[node_id]
-                        for neighbor_id in edges:
-                            if neighbor_id in prm_graph.nodes:
-                                nx2, ny2 = prm_graph.nodes[neighbor_id]
-                                ax2.plot([nx1, nx2], [ny1, ny2], color='gray', linewidth=0.6, alpha=0.4, zorder=2)
-
-        if chosen_path is not None and len(chosen_path) > 1:
-            path_x = [p[0] for p in chosen_path if p is not None]
-            path_y = [p[1] for p in chosen_path if p is not None]
-            ax2.plot(path_x, path_y, color='magenta', linewidth=4.0, linestyle='-', zorder=6, label='Chosen PRM Path')
-            ax2.plot(path_x, path_y, 'mo', markersize=8, markeredgecolor='white', zorder=7)
-
-        cos_yaw, sin_yaw = np.cos(env.origin_yaw), np.sin(env.origin_yaw)
-
-        for row in range(env.rows):
-            for col in range(env.cols):
-                world_pos = env.get_world_position_from_cell(row, col)
-                if world_pos is None: continue
-                cell_x, cell_y = world_pos
-                half_size = env.cell_size / 2.0
-
-                world_corners = [(cell_x - half_size, cell_y - half_size), (cell_x + half_size, cell_y - half_size),
-                                 (cell_x + half_size, cell_y + half_size), (cell_x - half_size, cell_y + half_size)]
-
-                cell_status, _ = env.get_cell_status(row, col) if len(env.get_cell_status(row, col)) == 2 else (
-                    env.get_cell_status(row, col), None)
-                if cell_status == 1:
-                    rect = patches.Polygon(world_corners, linewidth=2, edgecolor='darkgreen', facecolor='lightgreen',
-                                           alpha=0.3, zorder=2)
-                elif cell_status == -1:
-                    rect = patches.Polygon(world_corners, linewidth=2, edgecolor='darkred', facecolor='lightcoral',
-                                           alpha=0.4, zorder=2)
-                else:
-                    rect = patches.Polygon(world_corners, linewidth=1.5, edgecolor='gray', facecolor='none', alpha=0.6,
-                                           linestyle='--', zorder=2)
-                ax2.add_patch(rect)
-                ax2.text(cell_x, cell_y, f'{row},{col}', ha='center', va='center', fontsize=7, color='black',
-                         weight='bold', zorder=3, bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
-
-        if 'rejected' in candidates:
-            for point in candidates['rejected']: ax2.plot(point[0], point[1], 'rx', markersize=10, markeredgewidth=2.5,
-                                                          zorder=5)
-
-        if 'valid' in candidates:
-            for point in candidates['valid']: ax2.plot(point[0], point[1], 'yo', markersize=10,
-                                                       markerfacecolor='yellow', markeredgewidth=2,
-                                                       markeredgecolor='orange', zorder=5)
-
-        if chosen_point is not None:
-            ax2.plot(chosen_point[0], chosen_point[1], 'g*', markersize=25, markeredgewidth=2, label='Target', zorder=6)
-            ax2.plot([robot_x, chosen_point[0]], [robot_y, chosen_point[1]], 'g--', linewidth=2.5, alpha=0.8, zorder=4)
-
-        rect_local = patches.Rectangle((local_x_min, local_y_min), local_x_max - local_x_min, local_y_max - local_y_min,
-                                       linewidth=2, edgecolor='cyan', facecolor='none', linestyle='-', alpha=0.8,
-                                       zorder=6, label='Current local scan')
-        ax2.add_patch(rect_local)
-
-        ax2.set_xlabel('X [m] (VISION)', fontsize=12, fontweight='bold')
-        ax2.set_ylabel('Y [m] (VISION)', fontsize=12, fontweight='bold')
-        ax2.set_title(f'Iteration {iteration}: Global Map View (accumulated local scans)', fontsize=13,
-                      fontweight='bold')
-        ax2.axis('equal')
-        ax2.grid(True, alpha=0.3)
-        ax2.legend(loc='upper right', fontsize=10)
-        plt.tight_layout()
-
-        if save_path:
-            base, ext = os.path.splitext(save_path)
-            global_save_path = f"{base}_global{ext}"
-            fig2.savefig(global_save_path, dpi=150, bbox_inches='tight')
-            print(f"[VISUALIZATION] Global map saved to: {global_save_path}")
-
-        plt.pause(0.5)
-        plt.close(fig2)
+                if base_save_path:
+                    global_save_path = f"{base_save_path}_global{ext}"
+                    fig2.savefig(global_save_path, dpi=150, bbox_inches='tight')
+                    print(f"[VISUALIZATION] Global map saved to: {global_save_path}")
+            finally:
+                plt.close(fig2)
 
 
-def attempt_enter_cell_from_position(local_grid_client, robot_state_client, command_client,
+def attempt_enter_cell_from_position(local_grid,global_grid, robot_state_client, command_client,
                                      env, target_row, target_col, global_sampler, prm_graph, mission_folder=None,
                                      iteration=0,
                                      recordingInterface=None, verification_tracker=None):
+
     """Attempt to enter a target cell from the current robot position."""
+
     print(f"\n[ATTEMPT] Trying to enter cell ({target_row},{target_col}) from current position...")
 
-    # 1. Richiedi TUTTI e 4 i layer a Spot per la pianificazione iniziale
-    all_grids_proto = local_grid_client.get_local_grids(['obstacle_distance', 'terrain', 'intensity', 'terrain_valid'])
+    # Recuperiamo il client nativo dall'istanza della nostra classe LocalGrid
+    local_grid_client = local_grid.local_grid_client
 
-    # Decodifica i singoli layer tramite le funzioni dedicate di spotGrid
-    pts, cells_obstacle_dist, color = spotGrid.create_vtk_obstacle_grid(all_grids_proto, robot_state_client)
-    _, terrain_values, _ = spotGrid.create_vtk_terrain_grid(all_grids_proto, robot_state_client, layer_name='terrain')
-    _, intensity_values, _ = spotGrid.create_vtk_terrain_grid(all_grids_proto, robot_state_client,
-                                                              layer_name='intensity')
-    _, valid_values, _ = spotGrid.create_vtk_terrain_grid(all_grids_proto, robot_state_client,
-                                                          layer_name='terrain_valid')
-
-    # Estrazione metadati geometrici dal layer 'obstacle_distance'
-    local_grid_proto = None
-    for local_grid_found in all_grids_proto:
-        if local_grid_found.local_grid_type_name == 'obstacle_distance':
-            local_grid_proto = local_grid_found
-            break
-
-    if local_grid_proto is None:
-        print("[ERROR] No 'obstacle_distance' grid found")
-        return False
-
-    num_x = local_grid_proto.local_grid.extent.num_cells_x
-    num_y = local_grid_proto.local_grid.extent.num_cells_y
-    cell_size = local_grid_proto.local_grid.extent.cell_size
-
-    # Calcolo derivate geometriche (Pendenza e Rugosità)
-    grad_values, rough_values = spotGrid.compute_gradient_and_roughness(
-        terrain_values, valid_values, num_x, num_y, cell_size
+    # 1. Richiedi TUTTI i layer necessari usando la nuova funzione
+    grids_data, main_proto, all_grids_proto = local_grid.return_local_grid(
+        ['obstacle_distance', 'terrain', 'terrain_valid'], #,'intensity'
+        robot_state_client
     )
 
-    transforms_snapshot = local_grid_proto.local_grid.transforms_snapshot
+    if grids_data is None or 'obstacle_distance' not in grids_data:
+        print("[ERROR] Rilevamento griglie locali fallito.")
+        return False
 
+    # 2. Estrai i valori dal dizionario
+    pts = grids_data['obstacle_distance']['pts']
+    cells_obstacle_dist = grids_data['obstacle_distance']['values']
+    terrain_values = grids_data['terrain']['values']
+    #intensity_values = grids_data['intensity']['values']
+    valid_values = grids_data['terrain_valid']['values']
+
+    # Estrai metadati geometrici
+    num_x = main_proto.local_grid.extent.num_cells_x
+    num_y = main_proto.local_grid.extent.num_cells_y
+    cell_size = main_proto.local_grid.extent.cell_size
+
+    # =========================================================================
+    # --- MODIFICA GLOBAL MAP: Gestione persistente della mappa di occupazione ---
+    # =========================================================================
+    # Verifichiamo se l'istanza di local_grid possiede già la mappa globale
+    if global_grid.global_occupancy_map is None:
+        global_grid.global_occupancy_map = spotGrid.GlobalGrid(resolution=cell_size)
+        print("[MAP] Inizializzata nuova mappa di occupazione globale persistente.")
+
+    # Estraiamo il riferimento per usarlo nel resto della funzione
+    global_map = global_grid.global_occupancy_map
+
+    transforms_snapshot = main_proto.local_grid.transforms_snapshot
     vision_tform_body = get_a_tform_b(transforms_snapshot, VISION_FRAME_NAME, BODY_FRAME_NAME)
     robot_x, robot_y, robot_z = vision_tform_body.position.x, vision_tform_body.position.y, vision_tform_body.position.z
 
+    quat = vision_tform_body.rotation
+    robot_yaw = np.arctan2(2.0 * (quat.w * quat.z + quat.x * quat.y), 1.0 - 2.0 * (quat.y ** 2 + quat.z ** 2))
+
+    footprint_mask_2d = local_grid.compute_robot_footprint_mask(
+        pts, robot_x, robot_y, robot_yaw, num_x, num_y
+    )
+
+    # Calcolo derivate geometriche (Pendenza e Rugosità)
+    grad_values, rough_values = local_grid.compute_gradient_and_roughness(
+        terrain_values, valid_values, num_x, num_y, cell_size,
+        robot_footprint_mask_2d=footprint_mask_2d
+    )
+
+    grad_for_prm = grad_values.copy()
+    rough_for_prm = rough_values.copy()
+
     # Esegui la fusione dei layer (Genera la mappa binaria di sicurezza)
-    terrain_real, obstacle_mask = spotGrid.fuse_all_layers(
+    terrain_real, obstacle_mask = local_grid.fuse_all_layers(
         pts=pts,
         cells_obstacle_dist=cells_obstacle_dist,
         terrain_values=terrain_values,
         grad_values=grad_values,
         rough_values=rough_values,
+        robot_footprint_mask=(footprint_mask_2d.ravel() if footprint_mask_2d is not None else None),
         terrain_valid_values=valid_values,
-        obstacle_threshold=0.0,
-        slope_threshold=0.35,
-        rough_threshold=0.05,
+        obstacle_threshold=0.15,
+        slope_threshold=0.6,
+        rough_threshold=0.15,
         robot_z=robot_z,
         step_threshold=0.40
     )
 
+    #Aggiorna la mappa di occupazione globale con i dati appena processati
+    global_map.update(pts, obstacle_mask)
+
+    # Salvataggio periodico su disco della mappa globale di occupazione (.pkl)
+    if mission_folder is not None:
+        pkl_map_path = os.path.join(mission_folder, "global_occupancy_map.pkl")
+        global_map.save_map(pkl_map_path)
+
     # Definizione anticipata del path di salvataggio per evitare NameError in caso di fallimento iniziale
     save_path = os.path.join(mission_folder,
                              f"iteration_{iteration}_cell_{target_row}_{target_col}.png") if mission_folder else None
+
+    # =========================================================================
+    # SALVATAGGIO DEI VALORI NUMERICI IN FORMATO NumPy (.npy)
+    # =========================================================================
+    if mission_folder is not None:
+        try:
+            # Usiamo le variabili reali della griglia di Spot
+            obstacle_grid_2d = obstacle_mask.reshape((num_y, num_x))
+            terrain_grid_2d = terrain_real.reshape((num_y, num_x))
+
+            # Definiamo i percorsi dei file .npy nella cartella di questa specifica missione
+            npy_obstacle_path = os.path.join(mission_folder,
+                                             f"iteration_{iteration}_cell_{target_row}_{target_col}_obstacles.npy")
+            npy_terrain_path = os.path.join(mission_folder,
+                                            f"iteration_{iteration}_cell_{target_row}_{target_col}_terrain.npy")
+
+            # Salvataggio dei file binari
+            np.save(npy_obstacle_path, obstacle_grid_2d)
+            np.save(npy_terrain_path, terrain_grid_2d)
+
+            print(f"[DATA SAVE] ✓ Matrici .npy salvate per cella ({target_row},{target_col})")
+
+        except Exception as e:
+            print(f"[DATA SAVE] ⚠️ Impossibile salvare i file .npy: {e}")
 
     # ================================================================== #
     # --- [CORREZIONE PRM] AGGIORNAMENTO LOCALE DI GRADIENTE E RUGOSITÀ ---
@@ -542,11 +503,23 @@ def attempt_enter_cell_from_position(local_grid_client, robot_state_client, comm
     local_y_min, local_y_max = pts[:, 1].min(), pts[:, 1].max()
 
     # Estrarre l'esatta origine della local grid rispetto al frame VISION
-    grid_frame_name = local_grid_proto.local_grid.frame_name_local_grid_data
+    grid_frame_name = main_proto.local_grid.frame_name_local_grid_data
     vision_tform_grid = get_a_tform_b(transforms_snapshot, VISION_FRAME_NAME, grid_frame_name)
-
     grid_origin_x = vision_tform_grid.position.x
     grid_origin_y = vision_tform_grid.position.y
+
+    # Convertiamo i layer monodimensionali in matrici 2D per poterle passare al PRM
+    grad_values_2d = grad_for_prm.reshape((num_y, num_x))
+    rough_values_2d = rough_for_prm.reshape((num_y, num_x))
+
+    # Passiamo le matrici complete e l'origine geometrica al PRM
+    prm_graph.update_local_grid_data(
+        grad_values_2d=grad_values_2d,
+        rough_values_2d=rough_values_2d,
+        grid_origin_x=grid_origin_x,
+        grid_origin_y=grid_origin_y,
+        cell_size=cell_size
+    )
 
     # Aggiorna gradienti e rugosità SOLO per i nodi PRM che ricadono all'interno della local grid
     for node_id, (nx, ny) in prm_graph.nodes.items():
@@ -564,24 +537,37 @@ def attempt_enter_cell_from_position(local_grid_client, robot_state_client, comm
                 if flat_idx < len(grad_values):
                     prm_graph.node_gradients[node_id] = grad_values[flat_idx]
                 if flat_idx < len(rough_values):
-                    prm_graph.node_roughness[node_id] = rough_values[flat_idx]  # <-- [NEW] Mappa rugosità live
+                    prm_graph.node_roughness[node_id] = rough_values[flat_idx]  # <-- Mappa rugosità live
         else:
             # Per i nodi fuori dalla scansione attuale, mantieni i costi base a zero
             if node_id not in prm_graph.node_gradients:
                 prm_graph.node_gradients[node_id] = 0.0
             if node_id not in prm_graph.node_roughness:
-                prm_graph.node_roughness[node_id] = 0.0  # <-- [NEW]
+                prm_graph.node_roughness[node_id] = 0.0
 
-    # Ricostruiamo la matrice di adiacenza ri-calcolando i pesi (Distanza + Slope + Roughness)
-    prm_graph.build_graph()
+    # --- MODIFICA PRM: Passiamo la mappa globale persistente per filtrare gli archi ostruiti storicamente ---
+    prm_graph.build_graph(global_map=global_map, edge_safety_margin=0.20)
+
     # ================================================================== #
 
+    # applica immediatamente gli archi bloccati al PRM appena ricostruito!
+    if verification_tracker is not None:
+        blocked_arcs = []
+        if hasattr(verification_tracker, 'get_blocked_arcs'):
+            blocked_arcs = verification_tracker.get_blocked_arcs()
+        elif hasattr(verification_tracker, 'blocked_arcs'):
+            with verification_tracker.path_lock:
+                blocked_arcs = list(verification_tracker.blocked_arcs)
+
+        for u, v in blocked_arcs:
+            prm_graph.mark_edge_invalid(u, v)
+
+    # Ricerca del punto target e pianificazione
     target_x, target_y, valid_samples, rejected_samples = find_best_point_in_cell(
         robot_x, robot_y, env, target_row, target_col, pts, cells_obstacle_dist, global_sampler)
 
     if target_x is None or target_y is None:
         print(f"[FAIL] No clear path found to cell ({target_row},{target_col}) from current position")
-        # CHIAMATA CORRETTA CON ARGOMENTI NOMINALI CONTRO GLI INDEX ERROR
         visualize_grid_with_candidates(
             pts=pts,
             terrain_real=terrain_real,
@@ -595,9 +581,8 @@ def attempt_enter_cell_from_position(local_grid_client, robot_state_client, comm
             save_path=save_path,
             prm_graph=prm_graph,
             chosen_path=None,
-            terrain_values=terrain_real,
             cells_obstacle_dist=cells_obstacle_dist,
-            intensity_values=intensity_values,
+            #intensity_values=intensity_values,
             valid_values=valid_values,
             grad_values=grad_values,
             rough_values=rough_values
@@ -609,16 +594,28 @@ def attempt_enter_cell_from_position(local_grid_client, robot_state_client, comm
     goal_id = prm_graph.get_nearest_node(target_x, target_y)
     path_ids = prm_graph.find_path_dijkstra(start_id, goal_id)
 
+    # ABILITAZIONE DIAGNOSTICA ESPLICITA
+    if path_ids is None:
+        print(
+            f"[DIJKSTRA CRITICAL FAIL] Impossibile trovare un percorso nel grafo PRM dal nodo di partenza {start_id} al nodo target {goal_id}!")
+        print(f" -> Coordinate partenza robot: ({robot_x:.2f}, {robot_y:.2f})")
+        print(f" -> Coordinate target cella: ({target_x:.2f}, {target_y:.2f})")
+
     full_path_coords = None
+    path_waypoints = []
+
     if path_ids is not None:
         full_path_coords = [prm_graph.get_node_position(nid) for nid in path_ids]
-        path_coords = full_path_coords.copy()
-        if len(path_coords) > 0:
-            path_coords.pop(0)
-    else:
-        path_coords = None
+        for nid in path_ids:
+            nx, ny = prm_graph.get_node_position(nid)
+            path_waypoints.append((nid, nx, ny))
 
-    # CHIAMATA CORRETTA CON ARGOMENTI NOMINALI CONTRO GLI INDEX ERROR
+        if len(path_waypoints) > 0:
+            path_waypoints.pop(0)  # Rimuove la posizione attuale di partenza
+    else:
+        path_waypoints = None
+
+    # Generazione della visualizzazione iniziale pianificata con successo
     visualize_grid_with_candidates(
         pts=pts,
         terrain_real=terrain_real,
@@ -632,83 +629,256 @@ def attempt_enter_cell_from_position(local_grid_client, robot_state_client, comm
         save_path=save_path,
         prm_graph=prm_graph,
         chosen_path=full_path_coords,
-        terrain_values=terrain_real,
         cells_obstacle_dist=cells_obstacle_dist,
-        intensity_values=intensity_values,
+        #intensity_values=intensity_values,
         valid_values=valid_values,
         grad_values=grad_values,
         rough_values=rough_values
     )
 
     # --- CICLO DI NAVIGAZIONE CON VERIFICA DEGLI ARCHI MULTI-LAYER ---
-    while path_coords and len(path_coords) > 0:
-        robot_x, robot_y, robot_z, _ = spotUtils.getPosition(robot_state_client)
+    replan_counter = 0
 
-        all_grids_proto_up = local_grid_client.get_local_grids(
-            ['obstacle_distance', 'terrain', 'intensity', 'terrain_valid'])
+    while path_waypoints and len(path_waypoints) > 0:
+        robot_x, robot_y, robot_z, robot_quat = spotUtils.getPosition(robot_state_client)
+        current_node_id = prm_graph.get_nearest_node(robot_x, robot_y)
 
-        pts_up, cells_obs_up, _ = spotGrid.create_vtk_obstacle_grid(all_grids_proto_up, robot_state_client)
-        _, terrain_up, _ = spotGrid.create_vtk_terrain_grid(all_grids_proto_up, robot_state_client,
-                                                            layer_name='terrain')
-        _, intensity_up, _ = spotGrid.create_vtk_terrain_grid(all_grids_proto_up, robot_state_client,
-                                                              layer_name='intensity')
-        _, valid_up, _ = spotGrid.create_vtk_terrain_grid(all_grids_proto_up, robot_state_client,
-                                                          layer_name='terrain_valid')
+        robot_yaw = np.arctan2(2.0 * (robot_quat.w * robot_quat.z + robot_quat.x * robot_quat.y),
+                               1.0 - 2.0 * (robot_quat.y ** 2 + robot_quat.z ** 2))
 
-        lg_proto_up = None
-        for lg in all_grids_proto_up:
-            if lg.local_grid_type_name == 'obstacle_distance':
-                lg_proto_up = lg
-                break
+        # 1. LETTURA AGGIORNATA DELLA SCENA LOCALE (fetch fresco, PRIMA di tutto il resto)
+        grids_data_up, main_proto_up, all_grids_proto_up = local_grid.return_local_grid(
+            ['obstacle_distance', 'terrain', 'terrain_valid'], #, 'intensity'
+            robot_state_client
+        )
 
-        if lg_proto_up is None:
+        if grids_data_up is None or 'obstacle_distance' not in grids_data_up:
             print("[ERROR] Rilevamento locale fallito durante il tracking. Arresto precauzionale.")
             return False
 
+        pts_up = grids_data_up['obstacle_distance']['pts']
+        cells_obs_up = grids_data_up['obstacle_distance']['values']
+        terrain_up = grids_data_up['terrain']['values']
+        #intensity_up = grids_data_up['intensity']['values']
+        valid_up = grids_data_up['terrain_valid']['values']
+
+        lg_proto_up = main_proto_up
         num_x_up = lg_proto_up.local_grid.extent.num_cells_x
         num_y_up = lg_proto_up.local_grid.extent.num_cells_y
         cell_size_up = lg_proto_up.local_grid.extent.cell_size
 
-        grad_up, rough_up = spotGrid.compute_gradient_and_roughness(
-            terrain_up, valid_up, num_x_up, num_y_up, cell_size_up
+        transforms_snapshot_up = main_proto_up.local_grid.transforms_snapshot
+        grid_frame_name_up = main_proto_up.local_grid.frame_name_local_grid_data
+        vision_tform_grid_up = get_a_tform_b(transforms_snapshot_up, VISION_FRAME_NAME, grid_frame_name_up)
+        grid_origin_x_up = vision_tform_grid_up.position.x
+        grid_origin_y_up = vision_tform_grid_up.position.y
+
+        footprint_mask_2d = local_grid.compute_robot_footprint_mask(
+            pts_up, robot_x, robot_y, robot_yaw, num_x_up, num_y_up
         )
 
-        terrain_real_up, obstacle_mask_updated = spotGrid.fuse_all_layers(
+        grad_up, rough_up = local_grid.compute_gradient_and_roughness(
+            terrain_up, valid_up, num_x_up, num_y_up, cell_size_up,
+            robot_footprint_mask_2d=footprint_mask_2d
+        )
+
+        terrain_real_up, obstacle_mask_updated = local_grid.fuse_all_layers(
             pts=pts_up,
             cells_obstacle_dist=cells_obs_up,
             terrain_values=terrain_up,
             grad_values=grad_up,
             rough_values=rough_up,
+            robot_footprint_mask=(footprint_mask_2d.ravel() if footprint_mask_2d is not None else None),
             terrain_valid_values=valid_up,
-            obstacle_threshold=0.0,
-            slope_threshold=0.35,
-            rough_threshold=0.05,
+            obstacle_threshold=0.15,
+            slope_threshold=0.6,
+            rough_threshold=0.15,
             robot_z=robot_z,
             step_threshold=0.40
         )
 
-        next_x, next_y = path_coords[0]
+        global_map.update(pts_up, obstacle_mask_updated)
 
-        arc_node1 = prm_graph.get_nearest_node(robot_x, robot_y)
-        arc_node2 = prm_graph.get_nearest_node(next_x, next_y)
+        # 2. NUOVO: iniettiamo i dati locali freschi nel PRM e ripianifichiamo dal nodo attuale
+        grad_up_2d = grad_up.reshape((num_y_up, num_x_up))
+        rough_up_2d = rough_up.reshape((num_y_up, num_x_up))
 
-        if verification_tracker.is_arc_blocked(arc_node1, arc_node2):
-            print(f"[FAIL] Arco {arc_node1}-{arc_node2} è BLOCCATO. Interruzione percorso.")
+        prm_graph.update_local_grid_data(
+            grad_values_2d=grad_up_2d,
+            rough_values_2d=rough_up_2d,
+            grid_origin_x=grid_origin_x_up,
+            grid_origin_y=grid_origin_y_up,
+            cell_size=cell_size_up
+        )
+        touched_nodes = prm_graph.refresh_local_edge_weights(global_map=global_map, edge_safety_margin=0.10)
+
+        if touched_nodes:
+            current_plan_ids = [current_node_id] + [w[0] for w in path_waypoints]
+            chosen_path_ids = prm_graph.find_path_dijkstra(current_node_id, goal_id,
+                                                           current_path_ids=current_plan_ids, margin=0.10)
+
+            if chosen_path_ids is None:
+                print(f"[REPLAN WARNING] Nessun percorso valido da {current_node_id} a {goal_id}. "
+                      f"Mantengo il percorso precedente.")
+            elif chosen_path_ids != current_plan_ids:
+                new_full_path_coords = [prm_graph.get_node_position(nid) for nid in chosen_path_ids]
+                new_path_waypoints = []
+                for nid in chosen_path_ids:
+                    nx, ny = prm_graph.get_node_position(nid)
+                    new_path_waypoints.append((nid, nx, ny))
+                if len(new_path_waypoints) > 0:
+                    new_path_waypoints.pop(0)
+
+                print(f"[REPLAN] Percorso aggiornato ({len(touched_nodes)} nodi locali rivalutati): "
+                      f"{len(new_path_waypoints)} waypoint rimanenti.")
+                path_waypoints = new_path_waypoints
+                full_path_coords = new_full_path_coords
+
+                replan_counter += 1
+                replan_save_path = os.path.join(
+                    mission_folder, f"iteration_{iteration}_cell_{target_row}_{target_col}_replan_{replan_counter}.png"
+                ) if mission_folder else None
+
+                visualize_grid_with_candidates(
+                    pts=pts_up,
+                    terrain_real=terrain_real_up,
+                    obstacle_mask=obstacle_mask_updated,
+                    robot_x=robot_x,
+                    robot_y=robot_y,
+                    candidates={'rejected': [], 'valid': []},
+                    chosen_point=(target_x, target_y),
+                    iteration=iteration,
+                    env=env,
+                    save_path=replan_save_path,
+                    prm_graph=prm_graph,
+                    chosen_path=full_path_coords,
+                    cells_obstacle_dist=cells_obs_up,
+                    valid_values=valid_up,
+                    grad_values=grad_up,
+                    rough_values=rough_up,
+                    include_diagnostics=False  # lightweight: main view + global map only
+                )
+            else:
+                print(f"[REPLAN WARNING] Nessun percorso trovato da {current_node_id} a {goal_id} "
+                      f"dopo l'aggiornamento locale. Mantengo il percorso precedente.")
+
+        if not path_waypoints:
+            break  # la ripianificazione indica che siamo di fatto già al nodo obiettivo
+
+        next_node_id, next_x, next_y = path_waypoints[0]
+
+        # 3. AGGIORNA IL TRACKER ASINCRONO (ora riflette il percorso eventualmente aggiornato)
+        tracker_payload = [(current_node_id, robot_x, robot_y)] + path_waypoints
+        verification_tracker.update_path(tracker_payload)
+
+        # 4. STAMPA LIVE DELLO STATO DEL THREAD SECONDARIO
+        print("\n================ [LIVE TRACKER MONITOR] ================")
+        current_tracker_path = verification_tracker.get_path_copy()
+        for idx, (nid, nx, ny, status) in enumerate(current_tracker_path):
+            if idx == 0:
+                print(f" -> [POS ATTUALE ROBOT] Nodo ID: {nid} ({nx:.2f}, {ny:.2f})")
+            else:
+                status_str = "ATTESA VERIFICA ⏳" if status is None else ("LIBERO ✅" if status is True else "BLOCCATO ❌")
+                print(f"    Segmento {idx}: Verso Nodo ID: {nid} ({nx:.2f}, {ny:.2f}) -> {status_str}")
+        print("========================================================\n")
+
+        # 5. CONTROLLO SICUREZZA ARCO CORRENTE
+        print(f"[INFO] Controllo sicurezza arco corrente: {current_node_id} -> {next_node_id}")
+        is_blocked = False
+
+        # Se l'arco è già noto come bloccato dal tracker, ci fermiamo subito
+        if verification_tracker.is_arc_blocked(current_node_id, next_node_id):
+            print(f"[FAIL] L'arco corrente {current_node_id}-{next_node_id} è BLOCCATO. Interruzione percorso!")
+            is_blocked = True
+
+        # Se non è ancora verificato come libero, entriamo in un loop di attesa sicuro con timeout
+        elif not verification_tracker.is_arc_verified(current_node_id, next_node_id):
+            print(
+                f"[INFO] L'arco {current_node_id}-{next_node_id} non è ancora verificato. Attesa elaborazione background...")
+
+            timeout = 4.0
+            start_wait = time.time()
+            verified_clear = False
+
+            while time.time() - start_wait < timeout:
+                if verification_tracker.is_arc_blocked(current_node_id, next_node_id):
+                    print(f"[FAIL] Il thread secondario ha rilevato l'arco come BLOCCATO durante l'attesa!")
+                    is_blocked = True
+                    break
+                if verification_tracker.is_arc_verified(current_node_id, next_node_id):
+                    verified_clear = True
+                    break
+                time.sleep(0.05)
+
+            # Se scatta il timeout, eseguiamo un controllo di fallback istantaneo usando la mappa fusa aggiornata
+            if not is_blocked and not verified_clear:
+                print(f"[WARNING] Timeout di attesa superato. Eseguo un controllo istantaneo di fallback...")
+
+                if arcVerification.is_arc_in_fov(robot_x, robot_y, next_x, next_y, pts_up):
+                    # Usiamo la maschera fusa ad alta precisione aggiornata per il controllo di sicurezza
+                    safety_status = arcVerification.verify_arc_safety(robot_x, robot_y, next_x, next_y, pts_up,
+                                                                      obstacle_mask_updated)
+                    if safety_status == 'blocked':
+                        print(f"[FAIL] Fallback manuale: Rilevato ostacolo sull'arco. Interruzione!")
+                        verification_tracker.mark_arc_blocked(current_node_id, next_node_id)
+                        is_blocked = True
+                    elif safety_status == 'clear':
+                        print(f"[OK] Fallback manuale: L'arco è libero. Procedo.")
+                        verification_tracker.mark_arc_verified(current_node_id, next_node_id)
+                else:
+                    # Se non è nemmeno nel FOV (es. alle spalle), procediamo con estrema cautela affidandoci al PRM globale
+                    print(f"[WARNING] L'arco non è nel FOV locale delle telecamere. Procedo basandomi sul PRM globale.")
+
+        # ---------------------------------------------------------------------
+        # GESTIONE BLOCCO RILEVATO (Salvataggio dati di diagnostica dedicati)
+        # ---------------------------------------------------------------------
+        if is_blocked:
+            if mission_folder is not None:
+                try:
+                    obs_array = np.asarray(obstacle_mask_updated)
+                    terr_array = np.asarray(terrain_real_up)
+
+                    obstacle_grid_2d = obs_array.reshape((num_y_up, num_x_up))
+                    terrain_grid_2d = terr_array.reshape((num_y_up, num_x_up))
+
+                    npy_obs_blocked = os.path.join(mission_folder,
+                                                   f"iteration_{iteration}_cell_{target_row}_{target_col}_obstacles_BLOCKED.npy")
+                    npy_terr_blocked = os.path.join(mission_folder,
+                                                    f"iteration_{iteration}_cell_{target_row}_{target_col}_terrain_BLOCKED.npy")
+
+                    np.save(npy_obs_blocked, obstacle_grid_2d)
+                    np.save(npy_terr_blocked, terrain_grid_2d)
+                    print(f"[DATA SAVE] ✓ Matrici di BLOCCO .npy salvate per cella ({target_row},{target_col})")
+                except Exception as e:
+                    print(f"[DATA SAVE] ⚠️ Impossibile salvare i file .npy di blocco: {e}")
+
+            blocked_save_path = os.path.join(mission_folder,
+                                             f"iteration_{iteration}_cell_{target_row}_{target_col}_BLOCKED.png") if mission_folder else None
+
+            print(f"[VISUALIZATION] Generazione della mappa con gli ostacoli che hanno causato il blocco...")
+            visualize_grid_with_candidates(
+                pts=pts_up,
+                terrain_real=terrain_real_up,
+                obstacle_mask=obstacle_mask_updated,
+                robot_x=robot_x,
+                robot_y=robot_y,
+                candidates={'rejected': [], 'valid': []},
+                chosen_point=(next_x, next_y),  # Evidenzia il nodo interrotto
+                iteration=iteration,
+                env=env,
+                save_path=blocked_save_path,
+                prm_graph=prm_graph,
+                chosen_path=full_path_coords,
+                cells_obstacle_dist=cells_obs_up,
+                #intensity_values=intensity_up,
+                valid_values=valid_up,
+                grad_values=grad_up,
+                rough_values=rough_up
+            )
             return False
 
-        if not verification_tracker.is_arc_verified(arc_node1, arc_node2):
-            status = archVerification.verify_arc_safety(robot_x, robot_y, next_x, next_y, pts_up,
-                                                        obstacle_mask_updated)
-
-            if status == 'clear':
-                verification_tracker.mark_arc_verified(arc_node1, arc_node2)
-                print(f"[ARC-VERIFY] Arco {arc_node1}-{arc_node2} verificato e LIBERO.")
-            elif status == 'blocked':
-                verification_tracker.mark_arc_blocked(arc_node1, arc_node2)
-                print(f"[FAIL] Ostacolo rilevato sull'arco {arc_node1}-{arc_node2}. Interruzione.")
-                return False
-
-        next_x, next_y = path_coords.pop(0)
+        # --- ESECUZIONE MOVIMENTO FISICO ---
+        print(f"[OK] Arco {current_node_id}->{next_node_id} verificato sicuro. Eseguo movimento...")
 
         vision_tform_body_current = get_a_tform_b(lg_proto_up.local_grid.transforms_snapshot, VISION_FRAME_NAME,
                                                   BODY_FRAME_NAME)
@@ -717,16 +887,43 @@ def attempt_enter_cell_from_position(local_grid_client, robot_state_client, comm
                                    vision_tform_body_current)
 
         if success_move:
-            print(f"[INFO] Spostamento completato su ({next_x:.2f}, {next_y:.2f})")
+            print(f"[INFO] Spostamento completato con successo su ({next_x:.2f}, {next_y:.2f})")
+
+            # --- Registriamo l'arco effettivamente percorso, persistente per tutta la missione ---
+            if not hasattr(env, '_traveled_arcs'):
+                env._traveled_arcs = []
+            env._traveled_arcs.append((robot_x, robot_y, next_x, next_y))
+
+            path_waypoints.pop(0)  # Rimuove il waypoint appena raggiunto
         else:
-            print(f"[FAIL] Comando di movimento fallito per ({next_x:.2f}, {next_y:.2f})")
+            print(f"[FAIL] Comando di movimento fallito meccanicamente per ({next_x:.2f}, {next_y:.2f})")
+
+            fail_save_path = os.path.join(mission_folder,
+                                          f"iteration_{iteration}_cell_{target_row}_{target_col}_MOVE_FAIL.png") if mission_folder else None
+            visualize_grid_with_candidates(
+                pts=pts_up,
+                terrain_real=terrain_real_up,
+                obstacle_mask=obstacle_mask_updated,
+                robot_x=robot_x,
+                robot_y=robot_y,
+                candidates={'rejected': [], 'valid': []},
+                chosen_point=(next_x, next_y),
+                iteration=iteration,
+                env=env,
+                save_path=fail_save_path,
+                prm_graph=prm_graph,
+                chosen_path=full_path_coords,
+                cells_obstacle_dist=cells_obs_up,
+                #intensity_values=intensity_up,
+                valid_values=valid_up,
+                grad_values=grad_up,
+                rough_values=rough_up
+            )
             return False
 
+    # Controllo finale della posizione a fine percorso
     robot_x, robot_y, _, _ = spotUtils.getPosition(robot_state_client)
-    if env.is_point_in_cell(robot_x, robot_y, target_row, target_col):
-        return True
-    else:
-        return False
+    return env.is_point_in_cell(robot_x, robot_y, target_row, target_col)
 
 def navigate_to(target_x, target_y, robot_x, robot_y, robot_state_client, command_client, vision_tform_body):
     dx, dy = target_x - robot_x, target_y - robot_y
@@ -760,13 +957,16 @@ def easy_walk(options):
     robot, lease_client, robot_state_client, client_metadata = spotLogInUtils.setLogInfo(options)
     estop = spotLogInUtils.SimpleEstop(robot, options.name + "_estop")
 
+    local_grid = spotGrid.LocalGrid(robot)
+    global_grid = spotGrid.GlobalGrid()
+
     recordingInterface = navGraphUtils.RecordingInterface(robot, options.download_filepath, client_metadata)
     recordingInterface.stop_recording()
     recordingInterface.clear_map()
 
     with bosdyn.client.lease.LeaseKeepAlive(lease_client, must_acquire=True, return_at_exit=True):
         command_client = robot.ensure_client(RobotCommandClient.default_service_name)
-        local_grid_client = robot.ensure_client(LocalGridClient.default_service_name)
+        #local_grid_client = robot.ensure_client(LocalGridClient.default_service_name)
         robot.time_sync.wait_for_sync()
         robot.logger.info('Powering on robot...')
         robot.power_on()
@@ -783,7 +983,7 @@ def easy_walk(options):
         start_row, start_col = 0, 0
         recordingInterface.create_default_waypoint(cell_row=start_row, cell_col=start_col)
 
-        env = environmentMap.EnvironmentMap(rows=3, cols=5, cell_size=2)
+        env = environmentMap.EnvironmentMap(rows=2, cols=3, cell_size=5)
 
         # --- [FIX CRUCIALE] Ricaviamo la posizione di boot PRIMA di configurare ed elaborare il grafo PRM ---
         x_boot, y_boot, z_boot, quat_boot = spotUtils.getPosition(robot_state_client)
@@ -791,18 +991,18 @@ def easy_walk(options):
                               1.0 - 2.0 * (quat_boot.y ** 2 + quat_boot.z ** 2))
         env.set_origin(x_boot, y_boot, yaw_boot, start_row=start_row, start_col=start_col)
 
-        gb_sampler = global_sampler.GlobalSampler(env, 3)
+        gb_sampler = global_sampler.GlobalSampler(env, 5)
         gb_sampler.sample_global_grid()
 
-        prm = prm_graph.PRM(max_edge_length=1, connection_radius=3)
+        prm = prm_graph.PRM(min_edge_length=0.5, max_edge_length=1.5, connection_radius=3)
         prm.add_nodes_from_sampler(gb_sampler)
 
-        # [NEW] Inseriamo il punto iniziale (Boot Node) dentro la lista dei nodi permanenti prima di generare gli archi
+        # Inseriamo il punto iniziale (Boot Node) dentro la lista dei nodi permanenti prima di generare gli archi
         current_max_id = max(prm.nodes.keys(), default=-1)
         start_node_id = current_max_id + 1
         prm.add_node(start_node_id, x_boot, y_boot)
 
-        # [NEW] Inseriamo forzatamente tutti i centri geometrici delle celle come nodi del PRM
+        # Inseriamo forzatamente tutti i centri geometrici delle celle come nodi del PRM
         current_max_id = start_node_id
         for r in range(env.rows):
             for c in range(env.cols):
@@ -813,8 +1013,10 @@ def easy_walk(options):
 
         # Costruiamo il grafo finale ADESSO: in questo modo collegherà in automatico
         # sia i nodi del campionatore che il punto iniziale ed i centri cella!
-        prm.build_graph()
-        verification_tracker = archVerification.ArcVerificationTracker()
+        prm.build_graph(global_map=global_grid.global_occupancy_map, edge_safety_margin=0.10)
+        verification_tracker = arcVerification.ArcVerificationTracker(robot)
+        verification_tracker.start()
+
 
         mission_timestamp = datetime.now().strftime("Mission_%d-%m-%Y_%H-%M-%S")
         base_graph_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "graph")
@@ -848,59 +1050,263 @@ def easy_walk(options):
 
             if len(borders_in_frontier) != 0:
                 selected_border = min(borders_in_frontier, key=lambda b: b[2])
-                check = attempt_enter_cell_from_position(local_grid_client, robot_state_client, command_client, env,
+                check = attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client, command_client, env,
                                                          selected_border[0], selected_border[1], gb_sampler, prm,
                                                          mission_folder,
                                                          visualization_counter, recordingInterface, verification_tracker)
                 visualization_counter += 1
                 frontier.remove(selected_border)
 
+                x_new, y_new, _, _ = spotUtils.getPosition(robot_state_client)
+                robot_row, robot_col = env.get_cell_from_world(x_new, y_new)
+
                 if check:
-                    env.update_position(x, y)
+                    env.update_position(x_new, y_new)
                     recordingInterface.create_default_waypoint(cell_row=selected_border[0], cell_col=selected_border[1])
-                    env.add_waypoint(x, y)
+                    env.add_waypoint(x_new, y_new)
                     env.mark_cell_visited(selected_border[0], selected_border[1])
-                    x_new, y_new, _, _ = spotUtils.getPosition(robot_state_client)
-                    robot_row, robot_col = env.get_cell_from_world(x_new, y_new)
                     frontier.extend(find_new_borders(env, robot_row, robot_col, path, frontier))
-            else:
-                lowest_rank_cell = env.get_lowest_rank_from_frontier_list(frontier, path)
-                if lowest_rank_cell is not None:
-                    target_row, target_col, rank = lowest_rank_cell
-                    x_current, y_current, _, _ = spotUtils.getPosition(robot_state_client)
+                else:
+                    # TODO qui se non ho trovato il percorso e devo verificare se sono dentro la cella esatta o meno
+                    if (selected_border[0], selected_border[1]) == (robot_row, robot_col):
+                        env.update_position(x_new, y_new)
+                        recordingInterface.create_default_waypoint(cell_row=selected_border[0],
+                                                                   cell_col=selected_border[1])
+                        env.add_waypoint(x_new, y_new)
+                        env.mark_cell_visited(selected_border[0], selected_border[1])
+                        frontier.extend(find_new_borders(env, robot_row, robot_col, path, frontier))
+                        # TODO qui sono dentro la cella ma n on sono arrivato nel punto desiderato e quindi va bene lo stesso
+                    else:
+                        # TODO: qui niente fallisco vuol dire nemmeno sono entrato nella cella e quindi procedo con il normale algoritmo
+                        # devo però controllare che ci se ho già trovato un path allora provo a trovarne un altro che sta sotto un certo costo...
 
-                    recordingInterface.stop_recording()
-                    target_cell = (target_row, target_col)
-                    waypoints_by_cell = recordingInterface.get_all_manual_waypoints_with_cells()
-                    nearest_cell = recordingInterface.find_nearest_waypoint_cell_to_target(target_cell,
-                                                                                           waypoints_by_cell, env)
-                    nearest_wp = recordingInterface.get_manual_waypoint_by_cell(nearest_cell[0], nearest_cell[1])
-                    navigation_success = recordingInterface.navigate_to_waypoint(nearest_wp['id'], robot_state_client)
+                        # 1. Sincronizziamo il PRM con gli archi bloccati rilevati dal tracker.
+                        # Questo è fondamentale per far sì che Dijkstra non riproponga la stessa strada.
+                        blocked_arcs = []
+                        if hasattr(verification_tracker, 'get_blocked_arcs'):
+                            blocked_arcs = verification_tracker.get_blocked_arcs()
+                        elif hasattr(verification_tracker, 'blocked_arcs'):
+                            with verification_tracker.path_lock:
+                                blocked_arcs = list(verification_tracker.blocked_arcs)
 
-                    if navigation_success:
-                        recordingInterface.start_recording()
-                        check = attempt_enter_cell_from_position(local_grid_client, robot_state_client, command_client,
-                                                                 env, target_row, target_col, gb_sampler, prm,
-                                                                 mission_folder,
-                                                                 visualization_counter, recordingInterface, verification_tracker)
-                        visualization_counter += 1
+                        for arc in blocked_arcs:
+                            prm.mark_edge_invalid(arc[0], arc[1])
 
-                        if check:
-                            x_final, y_final, _, _ = spotUtils.getPosition(robot_state_client)
-                            recordingInterface.create_default_waypoint(cell_row=target_row, cell_col=target_col)
-                            env.add_waypoint(x_final, y_final)
-                            env.mark_cell_visited(target_row, target_col)
-                            frontier.remove((target_row, target_col, rank))
-                            robot_row, robot_col = env.get_cell_from_world(x_final, y_final)
-                            frontier.extend(find_new_borders(env, robot_row, robot_col, path, frontier))
+                        # 2. Ricalcoliamo la posizione attuale (gestisce sia il fallimento in partenza che a metà strada)
+                        x_curr, y_curr, _, _ = spotUtils.getPosition(robot_state_client)
+
+                        # 3. Estrapoliamo nuovamente i dati locali per trovare il target point corretto
+                        grids_data_rec, main_proto_rec, _ = local_grid.return_local_grid(
+                            ['obstacle_distance', 'terrain', 'terrain_valid'], robot_state_client
+                        )
+
+                        if grids_data_rec and 'obstacle_distance' in grids_data_rec:
+                            # Estrazione dati nativi
+                            pts = grids_data_rec['obstacle_distance']['pts']
+                            cells_obstacle_dist = grids_data_rec['obstacle_distance']['values']
+                            terrain_values = grids_data_rec['terrain']['values']
+                            valid_values = grids_data_rec['terrain_valid']['values']
+
+                            # Estrazione metadati geometrici dal protobuffer principale
+                            num_x = main_proto_rec.local_grid.extent.num_cells_x
+                            num_y = main_proto_rec.local_grid.extent.num_cells_y
+                            cell_size = main_proto_rec.local_grid.extent.cell_size
+
+                            # Calcolo dei gradienti e della rugosità
+                            grad_values, rough_values = local_grid.compute_gradient_and_roughness(
+                                terrain_values, valid_values, num_x, num_y, cell_size
+                            )
+
+                            # Reshape in matrici 2D
+                            grad_2d = grad_values.reshape((num_y, num_x))
+                            rough_2d = rough_values.reshape((num_y, num_x))
+
+                            # Recupero dell'esatta origine geometrica della griglia nel frame VISION
+                            transforms_snapshot = main_proto_rec.local_grid.transforms_snapshot
+                            grid_frame_name = main_proto_rec.local_grid.frame_name_local_grid_data
+                            vision_tform_grid = get_a_tform_b(transforms_snapshot, VISION_FRAME_NAME, grid_frame_name)
+                            grid_origin_x = vision_tform_grid.position.x
+                            grid_origin_y = vision_tform_grid.position.y
+
+                            # Aggiorniamo il PRM locale
+                            prm.update_local_grid_data(
+                                grad_values_2d=grad_2d,
+                                rough_values_2d=rough_2d,
+                                grid_origin_x=grid_origin_x,
+                                grid_origin_y=grid_origin_y,
+                                cell_size=cell_size
+                            )
+                            # Ricostruiamo il grafo con i pesi aggiornati
+                            prm.build_graph(global_map=global_grid.global_occupancy_map, edge_safety_margin=0.20)
+
+                            # 3. Trova il target point ottimale all'interno della cella obiettivo
+                            target_x, target_y, _, _ = find_best_point_in_cell(
+                                x_curr, y_curr, env, selected_border[0], selected_border[1],
+                                pts, cells_obstacle_dist, gb_sampler
+                            )
                         else:
+                            print(
+                                "[RECOVERY ERROR] Impossibile recuperare il layer obstacle_distance per il ricalcolo.")
+                            target_x, target_y = None, None
+
+                        if target_x is not None and target_y is not None:
+                            # Troviamo i nodi più vicini sul PRM aggiornato
+                            start_id = prm.get_nearest_node(x_curr, y_curr)
+                            goal_id = prm.get_nearest_node(target_x, target_y)
+
+                            # 4. Ricalcoliamo il percorso
+                            path_ids = prm.find_path_dijkstra(start_id, goal_id)
+
+                            # Il costo in questo PRM corrisponde al numero di archi (ovvero numero di nodi - 1)
+                            COSTO_SOGLIA = 4
+
+                            if path_ids is not None and (len(path_ids) - 1) <= COSTO_SOGLIA:
+                                print(
+                                    f"[RECOVERY] Trovato percorso alternativo con costo {len(path_ids) - 1} <= {COSTO_SOGLIA}. Riprovo l'ingresso...")
+
+                                # 5. Ritentiamo il movimento con il nuovo path calcolato
+                                retry_check = attempt_enter_cell_from_position(
+                                    local_grid, global_grid, robot_state_client, command_client, env,
+                                    selected_border[0], selected_border[1], gb_sampler, prm,
+                                    mission_folder, visualization_counter, recordingInterface, verification_tracker
+                                )
+                                visualization_counter += 1
+
+                                if retry_check:
+                                    # Se il retry ha successo, eseguiamo le routine di aggiornamento frontiera
+                                    x_final, y_final, _, _ = spotUtils.getPosition(robot_state_client)
+                                    env.update_position(x_final, y_final)
+                                    recordingInterface.create_default_waypoint(cell_row=selected_border[0],
+                                                                               cell_col=selected_border[1])
+                                    env.add_waypoint(x_final, y_final)
+                                    env.mark_cell_visited(selected_border[0], selected_border[1])
+                                    robot_row_final, robot_col_final = env.get_cell_from_world(x_final, y_final)
+                                    frontier.extend(
+                                        find_new_borders(env, robot_row_final, robot_col_final, path, frontier))
+                                else:
+                                    # Fallito anche il percorso alternativo
+                                    print(
+                                        "[FAIL] Anche il percorso alternativo ha fallito. Abbandono la cella e continuo l'algoritmo normale.")
+                                    side_bit = env.get_side_bit_facing_origin(robot_row, robot_col, selected_border[0],
+                                                                              selected_border[1])
+                                    env.mark_cell_side_explored(selected_border[0], selected_border[1], side_bit)
+                                    env.mark_cell_blocked(selected_border[0], selected_border[1])
+                            else:
+                                # Costo troppo alto o percorso inesistente
+                                print(
+                                    f"[SKIP] Nessun percorso alternativo valido o costo superiore a {COSTO_SOGLIA}. Continuo l'algoritmo normale.")
+                                side_bit = env.get_side_bit_facing_origin(robot_row, robot_col, selected_border[0],
+                                                                          selected_border[1])
+                                env.mark_cell_side_explored(selected_border[0], selected_border[1], side_bit)
+                                env.mark_cell_blocked(selected_border[0], selected_border[1])
+                        else:
+                            print(
+                                "[SKIP] Impossibile trovare un target point valido nella cella. Continuo l'algoritmo normale.")
+                            side_bit = env.get_side_bit_facing_origin(robot_row, robot_col, selected_border[0],
+                                                                      selected_border[1])
+                            env.mark_cell_side_explored(selected_border[0], selected_border[1], side_bit)
+                            env.mark_cell_blocked(selected_border[0], selected_border[1])
+
+            else:
+
+                retry_candidates = env.get_blocked_neighbors_with_unexplored_side(robot_row, robot_col, path)
+
+                if retry_candidates:
+
+                    b_row, b_col = retry_candidates[0]
+
+                    print(f"[RETRY-BLOCKED] Re-attempting cell ({b_row},{b_col}) from a new unexplored side")
+
+                    check = attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client,
+                                                             command_client, env,
+
+                                                             b_row, b_col, gb_sampler, prm,
+
+                                                             mission_folder, visualization_counter,
+
+                                                             recordingInterface, verification_tracker)
+
+                    visualization_counter += 1
+
+                    x_new, y_new, _, _ = spotUtils.getPosition(robot_state_client)
+
+                    robot_row_new, robot_col_new = env.get_cell_from_world(x_new, y_new)
+
+                    if check:
+
+                        env.update_position(x_new, y_new)
+
+                        recordingInterface.create_default_waypoint(cell_row=b_row, cell_col=b_col)
+
+                        env.add_waypoint(x_new, y_new)
+
+                        env.mark_cell_visited(b_row, b_col)  # overwrites -1 -> 1, cell is now solved
+
+                        frontier.extend(find_new_borders(env, robot_row_new, robot_col_new, path, frontier))
+
+                    else:
+
+                        side_bit = env.get_side_bit_facing_origin(robot_row, robot_col, b_row, b_col)
+
+                        env.mark_cell_side_explored(b_row, b_col, side_bit)
+
+                        print(f"[RETRY-BLOCKED] Cell ({b_row},{b_col}) still blocked from this side too "
+
+                              f"(sides now {bin(env.get_cell_sides_status(b_row, b_col))})")
+                                # stays -1; will only resurface again if a still-unexplored side remains
+                else:
+                    lowest_rank_cell = env.get_lowest_rank_from_frontier_list(frontier, path)
+                    if lowest_rank_cell is not None:
+                        target_row, target_col, rank = lowest_rank_cell
+                        x_current, y_current, _, _ = spotUtils.getPosition(robot_state_client)
+
+                        recordingInterface.stop_recording()
+                        target_cell = (target_row, target_col)
+                        waypoints_by_cell = recordingInterface.get_all_manual_waypoints_with_cells()
+                        nearest_cell = recordingInterface.find_nearest_waypoint_cell_to_target(target_cell,
+                                                                                               waypoints_by_cell, env)
+                        nearest_wp = recordingInterface.get_manual_waypoint_by_cell(nearest_cell[0], nearest_cell[1])
+                        navigation_success = recordingInterface.navigate_to_waypoint(nearest_wp['id'], robot_state_client)
+
+                        if navigation_success:
+                            recordingInterface.start_recording()
+                            check = attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client, command_client,
+                                                                     env, target_row, target_col, gb_sampler, prm,
+                                                                     mission_folder,
+                                                                     visualization_counter, recordingInterface, verification_tracker)
+                            visualization_counter += 1
+
+                            if check:
+                                x_final, y_final, _, _ = spotUtils.getPosition(robot_state_client)
+                                env.update_position(x_final, y_final)
+                                recordingInterface.create_default_waypoint(cell_row=target_row, cell_col=target_col)
+                                env.add_waypoint(x_final, y_final)
+                                env.mark_cell_visited(target_row, target_col)
+                                frontier.remove((target_row, target_col, rank))
+                                robot_row, robot_col = env.get_cell_from_world(x_final, y_final)
+                                frontier.extend(find_new_borders(env, robot_row, robot_col, path, frontier))
+                            else:
+                                # --- FIX: mark side + block, instead of silently dropping the cell ---
+                                side_bit = env.get_side_bit_facing_origin(nearest_cell[0], nearest_cell[1],
+                                                                          target_row, target_col)
+                                env.mark_cell_side_explored(target_row, target_col, side_bit)
+                                env.mark_cell_blocked(target_row, target_col)
+                                print(f"[BLOCKED] Cell ({target_row},{target_col}) marked as blocked "
+                                      f"(entry attempt failed via nearest-waypoint navigation)")
+                                frontier.remove((target_row, target_col, rank))
+                        else:
+                            # --- FIX: navigation itself failed to even reach the staging waypoint ---
+                            recordingInterface.start_recording()
+                            side_bit = env.get_side_bit_facing_origin(nearest_cell[0], nearest_cell[1],
+                                                                      target_row, target_col)
+                            env.mark_cell_side_explored(target_row, target_col, side_bit)
+                            env.mark_cell_blocked(target_row, target_col)
+                            print(f"[BLOCKED] Cell ({target_row},{target_col}) marked as blocked "
+                                  f"(could not navigate to staging waypoint)")
                             frontier.remove((target_row, target_col, rank))
                     else:
-                        recordingInterface.start_recording()
-                        frontier.remove((target_row, target_col, rank))
-                else:
-                    if len(frontier) > 0:
-                        frontier.remove(frontier[0])
+                        if len(frontier) > 0:
+                            frontier.remove(frontier[0])
 
             if len(frontier) == 0:
                 break

@@ -133,6 +133,35 @@ class EnvironmentMap(object):
             return self.map[row][col] == -1
         return False
 
+    def mark_cell_side_explored(self, row, col, side_bit):
+        """
+        Record that entry was attempted into this cell from the given side.
+        side_bit convention (matches get_blocked_neighbors_with_unexplored_side):
+            North=0b1000, East=0b0100, South=0b0010, West=0b0001
+        """
+        cell_key = (row, col)
+        current = self.explored_sides.get(cell_key, 0b0000)
+        self.explored_sides[cell_key] = current | side_bit
+        print(f"[SIDE] Cell ({row},{col}) side {bin(side_bit)} marked explored "
+              f"(now {bin(self.explored_sides[cell_key])})")
+
+    def get_side_bit_facing_origin(self, origin_row, origin_col, target_row, target_col):
+        """
+        Robot moved/attempted from (origin_row,origin_col) toward (target_row,target_col).
+        Returns the bit on TARGET representing the side facing origin — the side that was
+        actually tested by this attempt.
+        """
+        dr, dc = target_row - origin_row, target_col - origin_col
+        if dr == -1 and dc == 0:
+            return 0b0010  # target is north of origin -> origin faces target's SOUTH side
+        if dr == 1 and dc == 0:
+            return 0b1000  # target is south of origin -> origin faces target's NORTH side
+        if dr == 0 and dc == 1:
+            return 0b0001  # target is east of origin -> origin faces target's WEST side
+        if dr == 0 and dc == -1:
+            return 0b0100  # target is west of origin -> origin faces target's EAST side
+        return 0b0000
+
     def return_visited_cells_near_blocked(self, path=None, blocked_index=None, robot_row=None, robot_col=None,
                                           blocked_row=None, blocked_col=None):
         """
