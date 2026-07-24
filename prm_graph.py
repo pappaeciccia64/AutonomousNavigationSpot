@@ -122,7 +122,7 @@ class PRM:
         self.grid_origin_y = grid_origin_y
         self.cell_size = cell_size
 
-    def refresh_local_edge_weights(self, global_map=None, edge_safety_margin: float = 0.0):
+    def refresh_local_edge_weights(self, global_map=None, edge_safety_margin: float = 0.05):
         """
         Fully re-derives all candidate edges among nodes currently inside the local
         grid window -- geometry, occupancy, and weight -- rather than only updating

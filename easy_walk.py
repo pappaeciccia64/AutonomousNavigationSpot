@@ -27,6 +27,7 @@ import global_sampler
 import prm_graph
 
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import matplotlib
 # CRUCIALE: Impostare il backend 'Agg' PRIMA di importare pyplot!
@@ -34,9 +35,11 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from matplotlib.collections import LineCollection
 
-# Lock globale per garantire la thread-safety chiamando la visualizzazione da background thread
+# Thread safety and background execution setup
 _VIS_LOCK = threading.Lock()
+_VIS_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vis_worker")
 
 # TODO: check if we can avoid to set a sleep after each movement command
 # TODO: change the folder destination of the name download of graph
@@ -91,291 +94,322 @@ def visualize_grid_with_candidates(pts, terrain_real, obstacle_mask, robot_x, ro
                                    valid_values=None, grad_values=None, rough_values=None,
                                    include_diagnostics=True):
     """
-    Visualizza e salva le mappe diagnostiche locali e la mappa globale.
-    Thread-safe per l'esecuzione da qualsiasi thread secondario (es. ArcVerificationTracker).
+    Non-blocking async wrapper. Snapshots current data and offloads heavy Matplotlib
+    rendering to a background thread executor so robot navigation is not delayed.
     """
-    # Acquisiamo il Lock per evitare accessi concorrenti allo stato globale di pyplot
-    with _VIS_LOCK:
-        x = pts[:, 0]
-        y = pts[:, 1]
+    if save_path is None:
+        return
 
-        # Limiti dello zoom locale (Area di 6m x 6m intorno a Spot)
-        ZOOM_RADIUS = 3.0
-        local_xmin_zoom = robot_x - ZOOM_RADIUS
-        local_xmax_zoom = robot_x + ZOOM_RADIUS
-        local_ymin_zoom = robot_y - ZOOM_RADIUS
-        local_ymax_zoom = robot_y + ZOOM_RADIUS
+    # 1. Fast snapshot of NumPy arrays to prevent thread race conditions
+    pts_snap = pts.copy() if pts is not None else None
+    terrain_snap = terrain_real.copy() if terrain_real is not None else None
+    obs_snap = obstacle_mask.copy() if obstacle_mask is not None else None
+    dist_snap = cells_obstacle_dist.copy() if cells_obstacle_dist is not None else None
+    valid_snap = valid_values.copy() if valid_values is not None else None
+    grad_snap = grad_values.copy() if grad_values is not None else None
+    rough_snap = rough_values.copy() if rough_values is not None else None
 
-        # Limiti reali dello scan locale
-        local_x_min, local_x_max = x.min(), x.max()
-        local_y_min, local_y_max = y.min(), y.max()
+    # 2. Extract graph snapshots safely
+    prm_nodes = dict(prm_graph.nodes) if (prm_graph and hasattr(prm_graph, 'nodes')) else {}
+    prm_edges = dict(prm_graph.edges) if (prm_graph and hasattr(prm_graph, 'edges')) else {}
 
-        # --- HELPER 1: APPLICA GLI STESSI LIMITI E ORIENTAMENTO A TUTTI GLI ASSI LOCALI ---
-        def _apply_common_axis_settings(target_ax, title_text):
-            target_ax.set_xlim(local_xmin_zoom, local_xmax_zoom)
-            target_ax.set_ylim(local_ymin_zoom, local_ymax_zoom)
-            target_ax.set_aspect('equal', adjustable='box')
-            target_ax.set_xlabel('X [m] (VISION)', fontsize=11, fontweight='bold')
-            target_ax.set_ylabel('Y [m] (VISION)', fontsize=11, fontweight='bold')
-            target_ax.set_title(title_text, fontsize=12, fontweight='bold')
-            target_ax.grid(True, alpha=0.3)
+    # 3. Snapshot environment structures safely
+    env_info = None
+    if env is not None:
+        # Pre-compute vectorized global accumulation on main thread (takes < 1ms)
+        ACCUM_RES = 0.05
+        if not hasattr(env, '_accumulated_pts'):
+            env._accumulated_pts = {}
 
-        # --- HELPER 2: SOVRAPPONE PRM, PATH, TARGET E ROBOT ---
-        def _draw_prm_and_robot(target_ax):
-            # 1. Nodi e Archi PRM (solo nella zona zoomata)
-            if prm_graph is not None and hasattr(prm_graph, 'nodes'):
-                for nid, (nx, ny) in prm_graph.nodes.items():
-                    if local_xmin_zoom <= nx <= local_xmax_zoom and local_ymin_zoom <= ny <= local_ymax_zoom:
-                        target_ax.plot(nx, ny, 'k.', markersize=3, alpha=0.5, zorder=3)
-
-                if hasattr(prm_graph, 'edges'):
-                    for node_id, edges in prm_graph.edges.items():
-                        if node_id in prm_graph.nodes:
-                            nx1, ny1 = prm_graph.nodes[node_id]
-                            if (local_xmin_zoom <= nx1 <= local_xmax_zoom and local_ymin_zoom <= ny1 <= local_ymax_zoom):
-                                for neighbor_id, weight in edges:
-                                    if neighbor_id in prm_graph.nodes:
-                                        nx2, ny2 = prm_graph.nodes[neighbor_id]
-                                        target_ax.plot([nx1, nx2], [ny1, ny2],
-                                                       color='gray', linewidth=0.5, alpha=0.3, zorder=2)
-
-            # 2. Percorso scelto (Magenta)
-            if chosen_path is not None and len(chosen_path) > 1:
-                path_x = [p[0] for p in chosen_path if p is not None]
-                path_y = [p[1] for p in chosen_path if p is not None]
-                target_ax.plot(path_x, path_y, color='magenta', linewidth=3.0, linestyle='-', zorder=4)
-                target_ax.plot(path_x, path_y, 'mo', markersize=6, markeredgecolor='white', zorder=5)
-
-            # 3. Target Stellato
-            if chosen_point is not None:
-                target_ax.plot(chosen_point[0], chosen_point[1], 'g*', markersize=18, markeredgewidth=1.5, zorder=6)
-                target_ax.plot([robot_x, chosen_point[0]], [robot_y, chosen_point[1]], 'g--', linewidth=1.8, alpha=0.6, zorder=3)
-
-            # 4. Robot e anelli di prossimità
-            target_ax.plot(robot_x, robot_y, 'bo', markersize=12, zorder=7)
-            for r in [1.0, 2.0]:
-                circle = patches.Circle((robot_x, robot_y), r, fill=False, linestyle=':', linewidth=1, edgecolor='blue',
-                                        alpha=0.3, zorder=2)
-                target_ax.add_patch(circle)
-
-        # Base del percorso di salvataggio
-        base_save_path, ext = os.path.splitext(save_path) if save_path else (None, '.png')
-
-        # Matrice colore basata su terreno + ostacoli
-        fused_colors = np.zeros((len(obstacle_mask), 3))
-        if terrain_real is not None:
-            z_terrain = terrain_real.ravel()
+        # Compute colors for accumulation
+        fused_colors_temp = np.zeros((len(obs_snap), 3), dtype=np.float32) if obs_snap is not None else np.zeros((0, 3))
+        if terrain_snap is not None:
+            z_terrain = terrain_snap.ravel()
             z_min, z_max = z_terrain.min(), z_terrain.max()
             z_norm = (z_terrain - z_min) / (z_max - z_min) if (z_max - z_min) > 0.001 else np.zeros_like(z_terrain)
             cmap_walkable = matplotlib.colormaps.get_cmap('YlGn')
-            fused_colors[:] = cmap_walkable(z_norm)[:, :3]
+            fused_colors_temp[:] = cmap_walkable(z_norm)[:, :3]
         else:
-            fused_colors[:] = [0.9, 0.9, 0.9]
+            fused_colors_temp[:] = [0.9, 0.9, 0.9]
 
-        obs_flat = obstacle_mask.ravel()
-        fused_colors[obs_flat == -1] = [1.0, 0.0, 0.0]
+        if obs_snap is not None:
+            fused_colors_temp[obs_snap.ravel() == -1] = [1.0, 0.0, 0.0]
 
-        # ================================================================== #
-        # FIGURE 1: MAIN ROBOT PATH VISUALIZATION
-        # ================================================================== #
-        fig, ax = plt.subplots(figsize=(10, 10))
+        # Vectorized key computation
+        keys = (np.round(pts_snap[:, :2] / ACCUM_RES)).astype(np.int32)
+        colors_uint8 = (fused_colors_temp * 255).astype(np.uint8)
+        for k, col in zip(keys, colors_uint8):
+            env._accumulated_pts[tuple(k)] = col
+
+        # Extract accumulated points array snapshot
+        if env._accumulated_pts:
+            accum_keys = np.array(list(env._accumulated_pts.keys()), dtype=np.float32)
+            accum_wx = accum_keys[:, 0] * ACCUM_RES
+            accum_wy = accum_keys[:, 1] * ACCUM_RES
+            accum_colors = np.array(list(env._accumulated_pts.values()), dtype=np.float32) / 255.0
+        else:
+            accum_wx = np.array([robot_x], dtype=np.float32)
+            accum_wy = np.array([robot_y], dtype=np.float32)
+            accum_colors = np.array([[0.0, 0.0, 1.0]], dtype=np.float32)
+
+        traveled_arcs = list(getattr(env, '_traveled_arcs', []))
+
+        # Snapshot grid cell parameters
+        grid_cells = []
+        cos_yaw, sin_yaw = np.cos(env.origin_yaw), np.sin(env.origin_yaw)
+        half_size = env.cell_size / 2.0
+        base_corners = np.array([[-half_size, -half_size], [half_size, -half_size],
+                                 [half_size, half_size], [-half_size, half_size]])
+        rot_matrix = np.array([[cos_yaw, -sin_yaw], [sin_yaw, cos_yaw]])
+
+        for row in range(env.rows):
+            for col in range(env.cols):
+                world_pos = env.get_world_position_from_cell(row, col)
+                if world_pos is None:
+                    continue
+                cell_x, cell_y = world_pos
+                world_corners = np.dot(base_corners, rot_matrix.T) + [cell_x, cell_y]
+                status_res = env.get_cell_status(row, col)
+                cell_status = status_res[0] if isinstance(status_res, (tuple, list)) else status_res
+                grid_cells.append((cell_x, cell_y, row, col, world_corners, cell_status))
+
+        env_info = {
+            'cell_size': env.cell_size,
+            'accum_wx': accum_wx,
+            'accum_wy': accum_wy,
+            'accum_colors': accum_colors,
+            'traveled_arcs': traveled_arcs,
+            'grid_cells': grid_cells
+        }
+
+    # 4. Dispatch rendering asynchronously to worker queue
+    _VIS_EXECUTOR.submit(
+        _async_render_worker,
+        pts_snap, terrain_snap, obs_snap, robot_x, robot_y, candidates,
+        chosen_point, iteration, env_info, save_path, prm_nodes, prm_edges,
+        chosen_path, dist_snap, valid_snap, grad_snap, rough_snap, include_diagnostics
+    )
+
+
+def _async_render_worker(pts, terrain_real, obstacle_mask, robot_x, robot_y,
+                         candidates, chosen_point, iteration, env_info, save_path,
+                         prm_nodes, prm_edges, chosen_path, cells_obstacle_dist,
+                         valid_values, grad_values, rough_values, include_diagnostics):
+    """Background thread worker handling figure creation and file I/O."""
+    with _VIS_LOCK:
         try:
-            ax.scatter(x, y, c=fused_colors, s=8, alpha=0.7, zorder=1, label='Terreno (Verde) / Ostacoli (Rosso)')
+            x = pts[:, 0]
+            y = pts[:, 1]
 
-            # Griglia di esplorazione Global Environment
-            if env is not None:
-                cos_yaw, sin_yaw = np.cos(env.origin_yaw), np.sin(env.origin_yaw)
-                for row in range(env.rows):
-                    for col in range(env.cols):
-                        world_pos = env.get_world_position_from_cell(row, col)
-                        if world_pos is None: continue
-                        cell_x, cell_y = world_pos
+            ZOOM_RADIUS = 3.0
+            local_xmin_zoom, local_xmax_zoom = robot_x - ZOOM_RADIUS, robot_x + ZOOM_RADIUS
+            local_ymin_zoom, local_ymax_zoom = robot_y - ZOOM_RADIUS, robot_y + ZOOM_RADIUS
+            local_x_min, local_x_max = x.min(), x.max()
+            local_y_min, local_y_max = y.min(), y.max()
 
-                        margin = env.cell_size
+            def _apply_common_axis_settings(target_ax, title_text):
+                target_ax.set_xlim(local_xmin_zoom, local_xmax_zoom)
+                target_ax.set_ylim(local_ymin_zoom, local_ymax_zoom)
+                target_ax.set_aspect('equal', adjustable='box')
+                target_ax.set_xlabel('X [m] (VISION)', fontsize=11, fontweight='bold')
+                target_ax.set_ylabel('Y [m] (VISION)', fontsize=11, fontweight='bold')
+                target_ax.set_title(title_text, fontsize=12, fontweight='bold')
+                target_ax.grid(True, alpha=0.3)
+
+            def _draw_prm_and_robot(target_ax):
+                # High-speed LineCollection rendering for PRM graph
+                if prm_nodes and prm_edges:
+                    edge_segments = []
+                    for node_id, edges in prm_edges.items():
+                        if node_id in prm_nodes:
+                            nx1, ny1 = prm_nodes[node_id]
+                            if local_xmin_zoom <= nx1 <= local_xmax_zoom and local_ymin_zoom <= ny1 <= local_ymax_zoom:
+                                for neighbor_id, _ in edges:
+                                    if neighbor_id in prm_nodes:
+                                        nx2, ny2 = prm_nodes[neighbor_id]
+                                        edge_segments.append([(nx1, ny1), (nx2, ny2)])
+
+                    if edge_segments:
+                        lc = LineCollection(edge_segments, colors='gray', linewidths=0.5, alpha=0.3, zorder=2)
+                        target_ax.add_collection(lc)
+
+                    # Plot visible PRM nodes
+                    visible_nodes = np.array([pos for pos in prm_nodes.values()
+                                              if local_xmin_zoom <= pos[0] <= local_xmax_zoom and
+                                              local_ymin_zoom <= pos[1] <= local_ymax_zoom])
+                    if visible_nodes.size > 0:
+                        target_ax.plot(visible_nodes[:, 0], visible_nodes[:, 1], 'k.', markersize=3, alpha=0.5, zorder=3)
+
+                # Path
+                if chosen_path and len(chosen_path) > 1:
+                    path_x = [p[0] for p in chosen_path if p is not None]
+                    path_y = [p[1] for p in chosen_path if p is not None]
+                    target_ax.plot(path_x, path_y, color='magenta', linewidth=3.0, linestyle='-', zorder=4)
+                    target_ax.plot(path_x, path_y, 'mo', markersize=6, markeredgecolor='white', zorder=5)
+
+                # Target
+                if chosen_point is not None:
+                    target_ax.plot(chosen_point[0], chosen_point[1], 'g*', markersize=18, markeredgewidth=1.5, zorder=6)
+                    target_ax.plot([robot_x, chosen_point[0]], [robot_y, chosen_point[1]], 'g--', linewidth=1.8, alpha=0.6, zorder=3)
+
+                # Robot
+                target_ax.plot(robot_x, robot_y, 'bo', markersize=12, zorder=7)
+                for r in [1.0, 2.0]:
+                    circle = patches.Circle((robot_x, robot_y), r, fill=False, linestyle=':', linewidth=1, edgecolor='blue', alpha=0.3, zorder=2)
+                    target_ax.add_patch(circle)
+
+            base_save_path, ext = os.path.splitext(save_path)
+
+            # Colors matrix
+            fused_colors = np.zeros((len(obstacle_mask), 3), dtype=np.float32)
+            if terrain_real is not None:
+                z_terrain = terrain_real.ravel()
+                z_min, z_max = z_terrain.min(), z_terrain.max()
+                z_norm = (z_terrain - z_min) / (z_max - z_min) if (z_max - z_min) > 0.001 else np.zeros_like(z_terrain)
+                cmap_walkable = matplotlib.colormaps.get_cmap('YlGn')
+                fused_colors[:] = cmap_walkable(z_norm)[:, :3]
+            else:
+                fused_colors[:] = [0.9, 0.9, 0.9]
+
+            fused_colors[obstacle_mask.ravel() == -1] = [1.0, 0.0, 0.0]
+
+            # ------------------------------------------------------------------ #
+            # FIGURE 1: MAIN LOCAL VIEW
+            # ------------------------------------------------------------------ #
+            fig, ax = plt.subplots(figsize=(8, 8))
+            try:
+                ax.scatter(x, y, c=fused_colors, s=8, alpha=0.7, zorder=1, label='Terreno / Ostacoli')
+
+                if env_info:
+                    margin = env_info['cell_size']
+                    for cell_x, cell_y, row, col, world_corners, cell_status in env_info['grid_cells']:
                         if not (local_x_min - margin <= cell_x <= local_x_max + margin and
                                 local_y_min - margin <= cell_y <= local_y_max + margin):
                             continue
 
-                        half_size = env.cell_size / 2.0
-                        grid_corners = [(-half_size, -half_size), (half_size, -half_size), (half_size, half_size),
-                                        (-half_size, half_size)]
-                        world_corners = [(cell_x + (gx * cos_yaw - gy * sin_yaw), cell_y + (gx * sin_yaw + gy * cos_yaw)) for
-                                         gx, gy in grid_corners]
-
-                        status_res = env.get_cell_status(row, col)
-                        cell_status = status_res[0] if isinstance(status_res, (tuple, list)) else status_res
-
                         if cell_status == 1:
-                            rect = patches.Polygon(world_corners, linewidth=1.5, edgecolor='darkgreen', facecolor='lightgreen',
-                                                   alpha=0.3, zorder=2)
+                            rect = patches.Polygon(world_corners, linewidth=1.5, edgecolor='darkgreen', facecolor='lightgreen', alpha=0.3, zorder=2)
                         elif cell_status == -1:
-                            rect = patches.Polygon(world_corners, linewidth=1.5, edgecolor='darkred', facecolor='lightcoral',
-                                                   alpha=0.4, zorder=2)
+                            rect = patches.Polygon(world_corners, linewidth=1.5, edgecolor='darkred', facecolor='lightcoral', alpha=0.4, zorder=2)
                         else:
-                            rect = patches.Polygon(world_corners, linewidth=1.0, edgecolor='gray', facecolor='none', alpha=0.5,
-                                                   linestyle='--', zorder=2)
+                            rect = patches.Polygon(world_corners, linewidth=1.0, edgecolor='gray', facecolor='none', alpha=0.5, linestyle='--', zorder=2)
 
                         ax.add_patch(rect)
-                        ax.text(cell_x, cell_y, f'{row},{col}', ha='center', va='center', fontsize=7, color='black',
-                                weight='bold', zorder=3,
-                                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
+                        ax.text(cell_x, cell_y, f'{row},{col}', ha='center', va='center', fontsize=7, color='black', weight='bold', zorder=3)
 
-            # Punti Candidati
-            if 'rejected' in candidates:
-                for point in candidates['rejected']:
-                    ax.plot(point[0], point[1], 'rx', markersize=8, markeredgewidth=2, zorder=5)
-            if 'valid' in candidates:
-                for point in candidates['valid']:
-                    ax.plot(point[0], point[1], 'yo', markersize=8, markerfacecolor='yellow', markeredgewidth=1.5,
-                            markeredgecolor='orange', zorder=5)
+                if candidates:
+                    if 'rejected' in candidates:
+                        for point in candidates['rejected']:
+                            ax.plot(point[0], point[1], 'rx', markersize=8, markeredgewidth=2, zorder=5)
+                    if 'valid' in candidates:
+                        for point in candidates['valid']:
+                            ax.plot(point[0], point[1], 'yo', markersize=8, markerfacecolor='yellow', markeredgewidth=1.5, markeredgecolor='orange', zorder=5)
 
-            _draw_prm_and_robot(ax)
-            _apply_common_axis_settings(ax, f'Iterazione {iteration}: Path Visualization & Local Scan')
-            ax.legend(loc='upper right', fontsize=8)
-            plt.tight_layout()
+                _draw_prm_and_robot(ax)
+                _apply_common_axis_settings(ax, f'Iterazione {iteration}: Path Visualization & Local Scan')
+                ax.legend(loc='upper right', fontsize=8)
+                plt.tight_layout()
+                fig.savefig(save_path, dpi=120, bbox_inches='tight')
+            finally:
+                plt.close(fig)
 
-            if save_path:
-                fig.savefig(save_path, dpi=150, bbox_inches='tight')
-                print(f"[VISUALIZATION] Main local view saved to: {save_path}")
-        finally:
-            plt.close(fig)  # Chiusura garantita anche in caso di eccezioni
+            # ------------------------------------------------------------------ #
+            # DIAGNOSTICS (Off by default during navigation)
+            # ------------------------------------------------------------------ #
+            if include_diagnostics:
+                diagnostic_layers = {
+                    'terrain': (terrain_real, 'YlGn', 'Quota (m)', 'Layer: TERRAIN'),
+                    'obstacle_dist': (cells_obstacle_dist, 'plasma', 'Distanza (m)', 'Layer: OBSTACLE DISTANCE'),
+                    'valid': (valid_values, 'binary', '1=Valido, 0=Cieco', 'Layer: VALID MAP'),
+                    'gradient': (grad_values, 'YlOrRd', 'Gradiente / Pendenza', 'Diagnostica: PENDENZA'),
+                    'roughness': (rough_values, 'coolwarm', 'Indice di Rugosità', 'Diagnostica: RUGOSITÀ')
+                }
 
-        # ================================================================== #
-        # MAPPE DIAGNOSTICHE SECONDARIE
-        # ================================================================== #
-        if include_diagnostics:   # <-- ADD this guard around the existing loop
-            diagnostic_layers = {
-                'terrain': (terrain_real, 'YlGn', 'Quota (m)', 'Layer: TERRAIN'),
-                'obstacle_dist': (cells_obstacle_dist, 'plasma', 'Distanza (m)', 'Layer: OBSTACLE DISTANCE'),
-                'valid': (valid_values, 'binary', '1=Valido, 0=Cieco', 'Layer: VALID MAP'),
-                'gradient': (grad_values, 'YlOrRd', 'Gradiente / Pendenza', 'Diagnostica: PENDENZA'),
-                'roughness': (rough_values, 'coolwarm', 'Indice di Rugosità', 'Diagnostica: RUGOSITÀ')
-            }
-
-            for layer_key, (data_matrix, cmap, label_cb, title_suffix) in diagnostic_layers.items():
-                if data_matrix is not None and data_matrix.size > 0:
-                    fig_diag, ax_diag = plt.subplots(figsize=(8, 8))
-                    try:
-                        z_data = data_matrix.flatten() if data_matrix.shape != x.shape else data_matrix
-                        sc = ax_diag.scatter(x, y, c=z_data, cmap=cmap, s=6, alpha=0.6, zorder=1)
-                        fig_diag.colorbar(sc, ax=ax_diag, label=label_cb, shrink=0.8)
-                        _draw_prm_and_robot(ax_diag)
-                        _apply_common_axis_settings(ax_diag, f'Iterazione {iteration} - {title_suffix}')
-                        plt.tight_layout()
-                        if base_save_path:
+                for layer_key, (data_matrix, cmap, label_cb, title_suffix) in diagnostic_layers.items():
+                    if data_matrix is not None and data_matrix.size > 0:
+                        fig_diag, ax_diag = plt.subplots(figsize=(8, 8))
+                        try:
+                            z_data = data_matrix.flatten() if data_matrix.shape != x.shape else data_matrix
+                            sc = ax_diag.scatter(x, y, c=z_data, cmap=cmap, s=6, alpha=0.6, zorder=1)
+                            fig_diag.colorbar(sc, ax=ax_diag, label=label_cb, shrink=0.8)
+                            _draw_prm_and_robot(ax_diag)
+                            _apply_common_axis_settings(ax_diag, f'Iterazione {iteration} - {title_suffix}')
+                            plt.tight_layout()
                             diag_save_path = f"{base_save_path}_{layer_key}{ext}"
-                            fig_diag.savefig(diag_save_path, dpi=120, bbox_inches='tight')
-                    finally:
-                        plt.close(fig_diag)
+                            fig_diag.savefig(diag_save_path, dpi=100, bbox_inches='tight')
+                        finally:
+                            plt.close(fig_diag)
 
-        # ================================================================== #
-        # MAPPA GLOBALE (GLOBAL ACCUMULATED MAP)
-        # ================================================================== #
-        if env is not None:
-            ACCUM_RES = 0.05
-            if not hasattr(env, '_accumulated_pts'):
-                env._accumulated_pts = {}
+            # ------------------------------------------------------------------ #
+            # FIGURE 2: GLOBAL MAP
+            # ------------------------------------------------------------------ #
+            if env_info:
+                fig2, ax2 = plt.subplots(figsize=(12, 10))
+                try:
+                    ax2.scatter(env_info['accum_wx'], env_info['accum_wy'], c=env_info['accum_colors'], s=2, alpha=0.6, label='Accumulated Local Scan')
 
-            for p, color_rgb in zip(pts, fused_colors):
-                key = (int(round(p[0] / ACCUM_RES)), int(round(p[1] / ACCUM_RES)))
-                env._accumulated_pts[key] = (color_rgb * 255).astype(np.uint8)
+                    # Vectorized global PRM edges
+                    if prm_nodes and prm_edges:
+                        global_segments = []
+                        for node_id, edges in prm_edges.items():
+                            if node_id in prm_nodes:
+                                nx1, ny1 = prm_nodes[node_id]
+                                for neighbor_id, _ in edges:
+                                    if neighbor_id in prm_nodes:
+                                        nx2, ny2 = prm_nodes[neighbor_id]
+                                        global_segments.append([(nx1, ny1), (nx2, ny2)])
+                        if global_segments:
+                            lc_glob = LineCollection(global_segments, colors='gray', linewidths=0.5, alpha=0.3, zorder=2)
+                            ax2.add_collection(lc_glob)
 
-            if env._accumulated_pts:
-                accum_keys = np.array(list(env._accumulated_pts.keys()), dtype=np.float32)
-                accum_wx = accum_keys[:, 0] * ACCUM_RES
-                accum_wy = accum_keys[:, 1] * ACCUM_RES
-                accum_colors = np.array(list(env._accumulated_pts.values()), dtype=np.float32) / 255.0
-            else:
-                accum_wx = np.array([robot_x], dtype=np.float32)
-                accum_wy = np.array([robot_y], dtype=np.float32)
-                accum_colors = np.array([[0.0, 0.0, 1.0]], dtype=np.float32)
+                        node_coords = np.array(list(prm_nodes.values()))
+                        if node_coords.size > 0:
+                            ax2.plot(node_coords[:, 0], node_coords[:, 1], 'k.', markersize=4, alpha=0.5, zorder=3)
 
-            fig2, ax2 = plt.subplots(figsize=(14, 12))
-            try:
-                ax2.scatter(accum_wx, accum_wy, c=accum_colors, s=2, alpha=0.6, label='Accumulated Local Scan')
+                    if chosen_path and len(chosen_path) > 1:
+                        path_x = [p[0] for p in chosen_path if p is not None]
+                        path_y = [p[1] for p in chosen_path if p is not None]
+                        ax2.plot(path_x, path_y, color='magenta', linewidth=3.5, linestyle='-', zorder=6, label='Chosen Path')
 
-                # Grafo PRM globale
-                if prm_graph is not None and hasattr(prm_graph, 'nodes'):
-                    for nid, (nx, ny) in prm_graph.nodes.items():
-                        ax2.plot(nx, ny, 'k.', markersize=4, alpha=0.5, zorder=3)
+                    if env_info['traveled_arcs']:
+                        segments = [[(x1, y1), (x2, y2)] for (x1, y1, x2, y2) in env_info['traveled_arcs']]
+                        traveled_lc = LineCollection(segments, colors='blue', linewidths=2.0, alpha=0.6, zorder=5)
+                        ax2.add_collection(traveled_lc)
+                        ax2.plot([], [], color='blue', linewidth=2.0, alpha=0.6, label='Traveled Path')
 
-                    if hasattr(prm_graph, 'edges'):
-                        for node_id, edges in prm_graph.edges.items():
-                            if node_id in prm_graph.nodes:
-                                nx1, ny1 = prm_graph.nodes[node_id]
-                                for neighbor_id, weight in edges:
-                                    if neighbor_id in prm_graph.nodes:
-                                        nx2, ny2 = prm_graph.nodes[neighbor_id]
-                                        ax2.plot([nx1, nx2], [ny1, ny2], color='gray', linewidth=0.5, alpha=0.3, zorder=2)
+                    rect_local = patches.Rectangle((local_x_min, local_y_min), local_x_max - local_x_min, local_y_max - local_y_min,
+                                                   linewidth=2, edgecolor='cyan', facecolor='none', alpha=0.8, zorder=6, label='Current scan')
+                    ax2.add_patch(rect_local)
 
-                if chosen_path is not None and len(chosen_path) > 1:
-                    path_x = [p[0] for p in chosen_path if p is not None]
-                    path_y = [p[1] for p in chosen_path if p is not None]
-                    ax2.plot(path_x, path_y, color='magenta', linewidth=3.5, linestyle='-', zorder=6, label='Chosen Path')
-
-                # --- Storico completo di tutti gli archi percorsi nella missione ---
-                if env is not None and hasattr(env, '_traveled_arcs') and env._traveled_arcs:
-                    from matplotlib.collections import LineCollection
-                    segments = [[(x1, y1), (x2, y2)] for (x1, y1, x2, y2) in env._traveled_arcs]
-                    traveled_lc = LineCollection(segments, colors='blue', linewidths=2.0, alpha=0.6, zorder=5)
-                    ax2.add_collection(traveled_lc)
-                    # Voce di legenda manuale, dato che LineCollection non genera una entry automaticamente
-                    ax2.plot([], [], color='blue', linewidth=2.0, alpha=0.6, label='Traveled Path (mission history)')
-
-                # Riquadro scan locale sulla mappa globale
-                rect_local = patches.Rectangle((local_x_min, local_y_min), local_x_max - local_x_min, local_y_max - local_y_min,
-                                               linewidth=2, edgecolor='cyan', facecolor='none', linestyle='-', alpha=0.8,
-                                               zorder=6, label='Current local scan')
-                ax2.add_patch(rect_local)
-
-                # Coordinate e Griglia Environment
-                cos_yaw, sin_yaw = np.cos(env.origin_yaw), np.sin(env.origin_yaw)
-                for row in range(env.rows):
-                    for col in range(env.cols):
-                        world_pos = env.get_world_position_from_cell(row, col)
-                        if world_pos is None: continue
-                        cell_x, cell_y = world_pos
-
-                        half_size = env.cell_size / 2.0
-                        grid_corners = [(-half_size, -half_size), (half_size, -half_size), (half_size, half_size),
-                                        (-half_size, half_size)]
-                        world_corners = [(cell_x + (gx * cos_yaw - gy * sin_yaw), cell_y + (gx * sin_yaw + gy * cos_yaw)) for
-                                         gx, gy in grid_corners]
-
-                        status_res = env.get_cell_status(row, col)
-                        cell_status = status_res[0] if isinstance(status_res, (tuple, list)) else status_res
-
+                    for cell_x, cell_y, row, col, world_corners, cell_status in env_info['grid_cells']:
                         if cell_status == 1:
-                            rect = patches.Polygon(world_corners, linewidth=1.5, edgecolor='darkgreen', facecolor='lightgreen',
-                                                   alpha=0.3, zorder=2)
+                            rect = patches.Polygon(world_corners, linewidth=1.5, edgecolor='darkgreen', facecolor='lightgreen', alpha=0.3, zorder=2)
                         elif cell_status == -1:
-                            rect = patches.Polygon(world_corners, linewidth=1.5, edgecolor='darkred', facecolor='lightcoral',
-                                                   alpha=0.4, zorder=2)
+                            rect = patches.Polygon(world_corners, linewidth=1.5, edgecolor='darkred', facecolor='lightcoral', alpha=0.4, zorder=2)
                         else:
-                            rect = patches.Polygon(world_corners, linewidth=1.0, edgecolor='gray', facecolor='none', alpha=0.5,
-                                                   linestyle='--', zorder=2)
+                            rect = patches.Polygon(world_corners, linewidth=1.0, edgecolor='gray', facecolor='none', alpha=0.5, linestyle='--', zorder=2)
 
                         ax2.add_patch(rect)
-                        ax2.text(cell_x, cell_y, f'{row},{col}', ha='center', va='center', fontsize=7, color='black',
-                                 weight='bold', zorder=3)
+                        ax2.text(cell_x, cell_y, f'{row},{col}', ha='center', va='center', fontsize=7, color='black', weight='bold', zorder=3)
 
-                if chosen_point is not None:
-                    ax2.plot(chosen_point[0], chosen_point[1], 'g*', markersize=20, markeredgewidth=2, label='Target', zorder=6)
+                    if chosen_point is not None:
+                        ax2.plot(chosen_point[0], chosen_point[1], 'g*', markersize=20, markeredgewidth=2, label='Target', zorder=6)
 
-                ax2.set_xlabel('X [m] (VISION)', fontsize=12, fontweight='bold')
-                ax2.set_ylabel('Y [m] (VISION)', fontsize=12, fontweight='bold')
-                ax2.set_title(f'Iteration {iteration}: Global Map View', fontsize=13, fontweight='bold')
-                ax2.set_aspect('equal', adjustable='box')
-                ax2.grid(True, alpha=0.3)
-                ax2.legend(loc='upper right', fontsize=9)
-                plt.tight_layout()
+                    ax2.set_xlabel('X [m] (VISION)', fontsize=12, fontweight='bold')
+                    ax2.set_ylabel('Y [m] (VISION)', fontsize=12, fontweight='bold')
+                    ax2.set_title(f'Iteration {iteration}: Global Map View', fontsize=13, fontweight='bold')
+                    ax2.set_aspect('equal', adjustable='box')
+                    ax2.grid(True, alpha=0.3)
+                    ax2.legend(loc='upper right', fontsize=9)
+                    plt.tight_layout()
 
-                if base_save_path:
                     global_save_path = f"{base_save_path}_global{ext}"
-                    fig2.savefig(global_save_path, dpi=150, bbox_inches='tight')
-                    print(f"[VISUALIZATION] Global map saved to: {global_save_path}")
-            finally:
-                plt.close(fig2)
+                    fig2.savefig(global_save_path, dpi=120, bbox_inches='tight')
+                finally:
+                    plt.close(fig2)
+
+        except Exception as err:
+            print(f"[VISUALIZATION ERROR] Async rendering failed: {err}")
 
 
 def attempt_enter_cell_from_position(local_grid,global_grid, robot_state_client, command_client,
@@ -546,7 +580,7 @@ def attempt_enter_cell_from_position(local_grid,global_grid, robot_state_client,
                 prm_graph.node_roughness[node_id] = 0.0
 
     # --- MODIFICA PRM: Passiamo la mappa globale persistente per filtrare gli archi ostruiti storicamente ---
-    prm_graph.build_graph(global_map=global_map, edge_safety_margin=0.20)
+    prm_graph.build_graph(global_map=global_map, edge_safety_margin=0.05)
 
     # ================================================================== #
 
@@ -710,7 +744,7 @@ def attempt_enter_cell_from_position(local_grid,global_grid, robot_state_client,
             grid_origin_y=grid_origin_y_up,
             cell_size=cell_size_up
         )
-        touched_nodes = prm_graph.refresh_local_edge_weights(global_map=global_map, edge_safety_margin=0.10)
+        touched_nodes = prm_graph.refresh_local_edge_weights(global_map=global_map, edge_safety_margin=0.05)
 
         if touched_nodes:
             current_plan_ids = [current_node_id] + [w[0] for w in path_waypoints]
@@ -1013,7 +1047,7 @@ def easy_walk(options):
 
         # Costruiamo il grafo finale ADESSO: in questo modo collegherà in automatico
         # sia i nodi del campionatore che il punto iniziale ed i centri cella!
-        prm.build_graph(global_map=global_grid.global_occupancy_map, edge_safety_margin=0.10)
+        prm.build_graph(global_map=global_grid.global_occupancy_map, edge_safety_margin=0.05)
         verification_tracker = arcVerification.ArcVerificationTracker(robot)
         verification_tracker.start()
 
@@ -1137,7 +1171,7 @@ def easy_walk(options):
                                 cell_size=cell_size
                             )
                             # Ricostruiamo il grafo con i pesi aggiornati
-                            prm.build_graph(global_map=global_grid.global_occupancy_map, edge_safety_margin=0.20)
+                            prm.build_graph(global_map=global_grid.global_occupancy_map, edge_safety_margin=0.05)
 
                             # 3. Trova il target point ottimale all'interno della cella obiettivo
                             target_x, target_y, _, _ = find_best_point_in_cell(
