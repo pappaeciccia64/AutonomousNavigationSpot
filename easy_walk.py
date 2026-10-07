@@ -1640,6 +1640,11 @@ def shortcut_index(robot_xy, path_waypoints, snap, global_map=None, prm=None, ro
             key = (min(robot_node_id, wid), max(robot_node_id, wid))
             if key in getattr(prm, 'tracker_blocked_edges', ()):
                 continue
+            # Anche gli scarti soft (mark_edge_blocked_soft: [SUBITO], rotazione rifiutata):
+            # nella missione del 2026-10-07 16:39 la scorciatoia ripuntava il nodo 218 subito
+            # dopo che l'arco 3169->218 era stato scartato per rotazione.
+            if getattr(prm, 'edge_validity', {}).get(key) is False:
+                continue
         d = float(np.hypot(wx - rx, wy - ry))
         if d > SHORTCUT_MAX_DIST_M:
             continue
@@ -2596,6 +2601,16 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             print(f"[NODI] {len(pruned_nodes)} nodi scartati: meno di "
                   f"{PRM_NODE_MIN_CLEARANCE_M:.2f} m di spazio libero dove li vediamo "
                   f"(primi: {pruned_nodes[:8]}).")
+
+        # Archi gia' rifiutati per rotazione DA QUESTO NODO: restano fuori finche' il robot
+        # non si sposta (2026-10-07). Lo scarto e' soft, quindi refresh_local_edge_weights li
+        # rimetteva in gioco a ogni giro: nella missione del 2026-10-07 16:39, cella (1,1), il
+        # robot e' rimasto fermo su 3169 alternando 3169->142 e 3169->218 per 112 giri
+        # ("tentativo 56/2"), senza mai arrivare alla ritirata. Spostandosi nasce un nodo di
+        # sosta nuovo, la chiave cambia e gli archi tornano valutabili da li'.
+        for (from_id, to_id), n_fails in rotation_fails.items():
+            if from_id == robot_node_id and n_fails > 0:
+                mark_edge_blocked_soft(prm_graph, from_id, to_id)
 
         if touched_nodes:
             current_plan_ids = [robot_node_id] + [w[0] for w in path_waypoints]
