@@ -166,6 +166,16 @@ ROTATION_CLEARANCE_AIR_M = 0.0
 ROTATION_CLEARANCE_M = float(np.hypot(ROBOT_HALF_LENGTH_M, ROBOT_HALF_WIDTH_M)) + ROTATION_CLEARANCE_AIR_M  # ~0.604
 ROTATION_CHECK_MIN_DYAW_DEG = 10.0
 
+# Tolleranza sul settore spazzato (2026-10-07, missione 16:50). rotation_is_clear accetta un
+# margine fino a -ROTATION_NOISE_TOLERANCE_M invece di pretendere >= 0. Misurato sugli scan
+# di quella missione: dalla STESSA posa, in cinque scansioni consecutive, obstacle_distance
+# in un punto a 50 cm dal robot oscilla fra -0.03 e +0.15 m; lo stesso punto visto da 2 m
+# risultava a +0.45. Un rifiuto a -0.03/-0.04 m (5 dei 17 della missione) sta dentro quel
+# rumore. I rifiuti veri restano: nei passaggi stretti fra i tavoli il margine e' -0.16/-0.19.
+# Rete sotto: l'anticollisione del CORPO di Spot e' attiva (movements.py spegne solo quella
+# dei piedi). Il prefiltro ROTATION_CLEARANCE_M non cambia. 0.0 = comportamento precedente.
+ROTATION_NOISE_TOLERANCE_M = 0.05
+
 
 def body_extents(heading, motion_dir):
     """
@@ -252,7 +262,7 @@ def rotation_is_clear(obstacle_dist, origin_x, origin_y, cell_size, robot_x, rob
                    (np.abs(-dx * sa + dy * ca) <= half_across + air))
         if in_body.any():
             worst = min(worst, float(window[in_body].min()))
-    return worst >= 0.0, worst
+    return worst >= -ROTATION_NOISE_TOLERANCE_M, worst
 
 # Margine con cui il PRM scarta gli archi che passano vicino a celle occupate nella mappa
 # globale. Le celle occupate sono quelle con obstacle_distance <= OBSTACLE_THRESHOLD,

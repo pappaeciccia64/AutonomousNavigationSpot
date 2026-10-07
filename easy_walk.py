@@ -3803,7 +3803,8 @@ def easy_walk(options):
             print(f"[CONFIG] ROTAZIONE: prefiltro {spotGrid.ROTATION_CLEARANCE_M:.3f} m "
                   f"(aria {spotGrid.ROTATION_CLEARANCE_AIR_M:.2f} m, separata dai "
                   f"{spotGrid.ROBOT_CLEARANCE_AIR_M:.2f} m dell'avanzamento), poi controllo sul "
-                  f"settore spazzato a passi di {spotGrid.ROTATION_SWEEP_STEP_DEG:.0f} gradi; "
+                  f"settore spazzato a passi di {spotGrid.ROTATION_SWEEP_STEP_DEG:.0f} gradi "
+                  f"(tolleranza {spotGrid.ROTATION_NOISE_TOLERANCE_M:.2f} m sul rumore); "
                   f"MARCIA DI TRAVERSO DISATTIVATA")
             print(f"[CONFIG] SE NON PUO' RUOTARE: 1) ventaglio nel cono +/-{CONE_SWEEP_MAX_DEG:.0f} gradi "
                   f"a passi di {CONE_SWEEP_STEP_DEG:.0f}, si va nella direzione piu' libera fra quelle "
