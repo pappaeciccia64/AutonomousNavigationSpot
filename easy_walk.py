@@ -2721,6 +2721,51 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
 
         decision = decide_next_move((robot_x, robot_y), path_waypoints, frontier, no_progress)
         next_node_id, next_x, next_y = path_waypoints[0]
+        keep_heading = False     # mai piu' True: tenuto per i dati salvati e per navigate_to
+
+        # Pacchetto della scansione salvato QUI, prima del blocco rotazione (2026-10-07): prima
+        # stava dopo, e i rami di rotazione rifiutata/cono/arretramento/trappola fanno
+        # `continue` prima di arrivarci -- nella missione del 2026-10-07 16:50 nessuno dei 17
+        # rifiuti di rotazione ha lasciato una scansione su disco. Il rifiuto si ricalcola
+        # offline da obstacle_distance, robot_xyz, robot_yaw e decision_target.
+        if SAVE_SCAN_BUNDLES and mission_folder is not None:
+            gf = local_grid.last_ground_filter
+            shape_up = (num_y_up, num_x_up)
+            _save_npz_async(
+                os.path.join(mission_folder, "scans",
+                             f"scan_it{iteration:03d}_cell{target_row}_{target_col}_{loop_iter:03d}.npz"),
+                time=time.time(), iteration=iteration, cell=np.array([target_row, target_col]),
+                loop_iter=loop_iter,
+                terrain_raw=np.asarray(terrain_up, dtype=np.float32).reshape(shape_up),
+                terrain_valid_raw=np.asarray(valid_up, dtype=np.float32).reshape(shape_up),
+                obstacle_distance=np.asarray(cells_obs_up, dtype=np.float32).reshape(shape_up),
+                terrain_corrected=np.asarray(terrain_real_up, dtype=np.float32).reshape(shape_up),
+                is_valid=np.asarray(is_valid_up, dtype=bool).reshape(shape_up),
+                roughness=np.asarray(rough_up, dtype=np.float32).reshape(shape_up),
+                gradient=np.asarray(grad_up, dtype=np.float32).reshape(shape_up),
+                obstacle_mask=np.asarray(obstacle_mask_updated, dtype=np.int8).reshape(shape_up),
+                footprint_mask=(np.zeros(shape_up, bool) if footprint_mask_2d is None
+                                else np.asarray(footprint_mask_2d, dtype=bool).reshape(shape_up)),
+                grid_origin=np.array([grid_origin_x_up, grid_origin_y_up]), cell_size=cell_size_up,
+                robot_xyz=np.array([robot_x, robot_y, robot_z]), robot_yaw=robot_yaw,
+                ground_z=np.nan if gf.get('ground_z') is None else gf['ground_z'],
+                ground_n_above=gf.get('n_above', 0),
+                mission_z0=_mission_z0(),
+                terrain_raw_zero=np.nan if _raw_zero(grids_data_up) is None else _raw_zero(grids_data_up),
+                terrain_scale=np.nan if not _raw_scale(grids_data_up) else _raw_scale(grids_data_up),
+                unwritten=np.asarray(unwritten_up, dtype=bool).reshape(shape_up),
+                polyline=np.array(polyline), path_node_ids=np.array([w[0] for w in path_waypoints]),
+                robot_node_id=robot_node_id, goal_xy=np.array([target_x, target_y]),
+                frontier_dist=frontier['dist'], frontier_reason=frontier['reason'],
+                frontier_stop_xy=np.array(frontier['stop_xy']),
+                frontier_value=np.nan if frontier['value'] is None else frontier['value'],
+                frontier_od_robot=frontier['od_robot'], frontier_half_along=frontier['half_along'],
+                frontier_clearance=frontier['clearance_nominal'], frontier_path_len=frontier['path_len'],
+                allowed_advance=arcVerification.allowed_advance(frontier),
+                keep_heading=keep_heading, no_progress=no_progress,
+                decision_kind=decision['kind'],
+                decision_target=np.array(decision.get('target', (np.nan, np.nan)), dtype=np.float64))
+            MISSION_STATS['scan_bundles'] += 1
 
         # 4. ROTAZIONE (riscritta il 2026-10-07) -----------------------------------------
         # Il muso punta SEMPRE il punto da raggiungere. Se la rotazione non e' possibile NON
@@ -2728,7 +2773,6 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         # invece di 0.30: il vecchio ripiego rendeva il robot piu' largo proprio dove lo
         # spazio e' poco). Si arretra dritti lungo l'asse del corpo e al giro dopo si riprova
         # da li'; alla seconda volta sullo stesso tratto il tratto si scarta.
-        keep_heading = False     # mai piu' True: tenuto per i dati salvati e per navigate_to
         if decision['kind'] == 'move':
             rot = rotation_plan(robot_yaw, (robot_x, robot_y), decision['target'],
                                 frontier['od_robot'], snap=snap)
@@ -2903,44 +2947,6 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
               f"mappe {t_maps - t_proc:.2f} | PRM {t_prm - t_maps:.2f} | fronte {t_front - t_prm:.2f} "
               f"| decisione: {decision['kind']}")
 
-        if SAVE_SCAN_BUNDLES and mission_folder is not None:
-            gf = local_grid.last_ground_filter
-            shape_up = (num_y_up, num_x_up)
-            _save_npz_async(
-                os.path.join(mission_folder, "scans",
-                             f"scan_it{iteration:03d}_cell{target_row}_{target_col}_{loop_iter:03d}.npz"),
-                time=time.time(), iteration=iteration, cell=np.array([target_row, target_col]),
-                loop_iter=loop_iter,
-                terrain_raw=np.asarray(terrain_up, dtype=np.float32).reshape(shape_up),
-                terrain_valid_raw=np.asarray(valid_up, dtype=np.float32).reshape(shape_up),
-                obstacle_distance=np.asarray(cells_obs_up, dtype=np.float32).reshape(shape_up),
-                terrain_corrected=np.asarray(terrain_real_up, dtype=np.float32).reshape(shape_up),
-                is_valid=np.asarray(is_valid_up, dtype=bool).reshape(shape_up),
-                roughness=np.asarray(rough_up, dtype=np.float32).reshape(shape_up),
-                gradient=np.asarray(grad_up, dtype=np.float32).reshape(shape_up),
-                obstacle_mask=np.asarray(obstacle_mask_updated, dtype=np.int8).reshape(shape_up),
-                footprint_mask=(np.zeros(shape_up, bool) if footprint_mask_2d is None
-                                else np.asarray(footprint_mask_2d, dtype=bool).reshape(shape_up)),
-                grid_origin=np.array([grid_origin_x_up, grid_origin_y_up]), cell_size=cell_size_up,
-                robot_xyz=np.array([robot_x, robot_y, robot_z]), robot_yaw=robot_yaw,
-                ground_z=np.nan if gf.get('ground_z') is None else gf['ground_z'],
-                ground_n_above=gf.get('n_above', 0),
-                mission_z0=_mission_z0(),
-                terrain_raw_zero=np.nan if _raw_zero(grids_data_up) is None else _raw_zero(grids_data_up),
-                terrain_scale=np.nan if not _raw_scale(grids_data_up) else _raw_scale(grids_data_up),
-                unwritten=np.asarray(unwritten_up, dtype=bool).reshape(shape_up),
-                polyline=np.array(polyline), path_node_ids=np.array([w[0] for w in path_waypoints]),
-                robot_node_id=robot_node_id, goal_xy=np.array([target_x, target_y]),
-                frontier_dist=frontier['dist'], frontier_reason=frontier['reason'],
-                frontier_stop_xy=np.array(frontier['stop_xy']),
-                frontier_value=np.nan if frontier['value'] is None else frontier['value'],
-                frontier_od_robot=frontier['od_robot'], frontier_half_along=frontier['half_along'],
-                frontier_clearance=frontier['clearance_nominal'], frontier_path_len=frontier['path_len'],
-                allowed_advance=arcVerification.allowed_advance(frontier),
-                keep_heading=keep_heading, no_progress=no_progress,
-                decision_kind=decision['kind'],
-                decision_target=np.array(decision.get('target', (np.nan, np.nan)), dtype=np.float64))
-            MISSION_STATS['scan_bundles'] += 1
 
         if decision['kind'] == 'reached_node':
             robot_node_id = next_node_id
