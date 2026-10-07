@@ -1873,9 +1873,47 @@ def graphnav_step_back(env, recordingInterface, robot_state_client, command_clie
     return ok, crumb
 
 
+def backtracking_cannot_help(env, prm_graph, goal_id, robot_state_client, max_hops,
+                             min_dist_m=0.40):
+    """
+    2026-10-07. Tornare indietro con GraphNav puo' servire a qualcosa?
+
+    escape_by_backtracking torna a una briciola e SOLO DOPO chiede al grafo un percorso da
+    li'. Ma ogni briciola ha gia' il suo nodo PRM: la stessa domanda si puo' fare prima di
+    muoversi. Nella missione del 2026-10-07 16:50 sono stati fatti 6 ritorni su 9 (celle
+    (0,2) e (0,3)) per scoprire tre volte di fila "da qui il grafo non offre percorsi":
+    l'obiettivo era in un'altra componente del grafo gia' da diversi giri ([REPLAN FALLITO]),
+    quindi nessun waypoint dietro poteva cambiare la risposta.
+
+    Risponde True solo se OGNI briciola che verrebbe visitata ha un nodo PRM collegato nel
+    grafo e da nessuno di essi c'e' un percorso. Se anche una sola non si puo' giudicare
+    (nodo mancante o isolato, es. scartato dentro un ostacolo) risponde False e si torna
+    indietro come prima: nel dubbio non si toglie la via d'uscita.
+    """
+    trail = getattr(env, '_graphnav_trail', None) or []
+    if not trail or goal_id not in prm_graph.nodes:
+        return False
+    try:
+        rx, ry, _, _ = spotUtils.getPosition(robot_state_client)
+    except Exception:
+        return False
+    candidates = [c for c in reversed(trail)
+                  if float(np.hypot(c['x'] - rx, c['y'] - ry)) >= min_dist_m][:int(max_hops)]
+    if not candidates:
+        return False
+    for crumb in candidates:
+        nid = crumb.get('prm_node')
+        if nid is None or nid not in prm_graph.nodes or not prm_graph.edges.get(nid):
+            return False
+        if prm_graph.find_path_dijkstra(nid, goal_id) is not None:
+            return False
+    return True
+
+
 def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_state_client,
                            command_client, global_map, mobility_kwargs, pts, obstacle_mask,
-                           max_hops=GRAPHNAV_MAX_BACKTRACK_HOPS, label=""):
+                           max_hops=GRAPHNAV_MAX_BACKTRACK_HOPS, label="",
+                           skip_if_graph_cannot_help=False):
     """
     2026-10-07. La via d'uscita quando da qui non si va da nessuna parte.
 
@@ -1894,6 +1932,16 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
     Restituisce dict: ok (si puo' continuare la missione), ids (nuovo percorso o None),
     robot_node (nuovo nodo del robot o None), how (cosa e' successo, per il log).
     """
+    # Solo quando il robot NON e' intrappolato (chiamanti "nessuna alternativa nel grafo"):
+    # in una trappola o dopo un fallimento fisico tornare indietro serve anche a liberarlo.
+    if skip_if_graph_cannot_help and backtracking_cannot_help(
+            env, prm_graph, goal_id, robot_state_client, max_hops):
+        print(f"[RITORNO] {label}: dai nodi delle prossime {max_hops} briciole il grafo non "
+              f"arriva comunque all'obiettivo (non dipende da dove sono io). Non torno "
+              f"indietro: rimando subito la cella.")
+        MISSION_STATS['backtracks_skipped'] = MISSION_STATS.get('backtracks_skipped', 0) + 1
+        return {'ok': False, 'ids': None, 'robot_node': None, 'how': 'cella rimandata'}
+
     for hop in range(1, int(max_hops) + 1):
         ok, crumb = graphnav_step_back(env, recordingInterface, robot_state_client, command_client)
         if not ok:
@@ -2834,7 +2882,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 esc = escape_by_backtracking(
                     env, prm_graph, goal_id, recordingInterface, robot_state_client,
                     command_client, global_map, mobility_kwargs, pts_up, obstacle_mask_updated,
-                    label=f"dal nodo {robot_node_id}")
+                    label=f"dal nodo {robot_node_id}", skip_if_graph_cannot_help=True)
                 if esc['ok']:
                     path_waypoints = _waypoints_from_ids(esc['ids'])
                     full_path_coords = [prm_graph.get_node_position(nid) for nid in esc['ids']]
@@ -3123,7 +3171,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             esc = escape_by_backtracking(
                 env, prm_graph, goal_id, recordingInterface, robot_state_client,
                 command_client, global_map, mobility_kwargs, pts_up, obstacle_mask_updated,
-                label=f"dal nodo {robot_node_id}")
+                label=f"dal nodo {robot_node_id}", skip_if_graph_cannot_help=True)
             if esc['ok']:
                 path_waypoints = _waypoints_from_ids(esc['ids'])
                 full_path_coords = [prm_graph.get_node_position(nid) for nid in esc['ids']]
