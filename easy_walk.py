@@ -855,18 +855,36 @@ def _segment_seen_free(global_map, x1, y1, x2, y2, margin_m, step_m=0.05):
     return True
 
 
-def graphnav_add_shortcuts(recordingInterface, label=""):
+def _graphnav_is_recording(recordingInterface):
+    """True/False dalla registrazione GraphNav, None se non si riesce a saperlo."""
+    try:
+        return bool(recordingInterface._recording_client.get_record_status().is_recording)
+    except Exception:
+        return None
+
+
+def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, sdk=True):
     """
     Aggiunge scorciatoie al grafo GraphNav prima di uno spostamento (vedi GRAPHNAV_SHORTCUTS).
     Non solleva mai: senza scorciatoie GraphNav funziona come prima.
+
+    Missione del 08-10 16:11: Spot accetta archi nuovi (create_edge) SOLO mentre registra
+    ("NotRecordingError"), mentre la chiusura d'anello (process_topology) va fatta a
+    registrazione ferma, e appena fermata puo' rispondere "MapModifiedError" finche' la mappa
+    non e' finita di elaborare. Quindi:
+      map_edges -- le scorciatoie dalla mappa globale: da chiamare PRIMA di stop_recording
+                   (si saltano da sole se la registrazione e' ferma);
+      sdk       -- la chiusura d'anello di Spot: da chiamare DOPO stop_recording (si salta da
+                   sola se si sta registrando), con qualche tentativo su MapModifiedError.
     """
     if not GRAPHNAV_SHORTCUTS or recordingInterface is None:
         return 0
     added = 0
+    recording = _graphnav_is_recording(recordingInterface)
     gg = _MISSION_CTX.get('global_grid')
     global_map = getattr(gg, 'global_occupancy_map', None) if gg is not None else None
     poses = getattr(recordingInterface, 'waypoint_poses', None) or {}
-    if global_map is not None and len(poses) >= 2:
+    if map_edges and recording is not False and global_map is not None and len(poses) >= 2:
         try:
             graph = recordingInterface._get_graph(force_refresh=True)
             by_id = {w.id: w for w in graph.waypoints}
@@ -924,11 +942,20 @@ def graphnav_add_shortcuts(recordingInterface, label=""):
             if added:
                 recordingInterface.invalidate_graph_cache()
     n_sdk = 0
-    if GRAPHNAV_SDK_LOOP_CLOSURE:
-        try:
-            n_sdk = recordingInterface.close_loops_checked(max_edge_length_m=GRAPHNAV_SHORTCUT_MAX_M)
-        except Exception as e:
-            print(f"[GRAPHNAV] Chiusura d'anello di Spot non riuscita ({e}).")
+    if sdk and GRAPHNAV_SDK_LOOP_CLOSURE and recording is not True:
+        for attempt in range(1, 4):
+            try:
+                n_sdk = recordingInterface.close_loops_checked(max_edge_length_m=GRAPHNAV_SHORTCUT_MAX_M)
+                break
+            except Exception as e:
+                if 'MapModified' in type(e).__name__ or 'modified' in str(e):
+                    time.sleep(1.0)      # mappa ancora in elaborazione dopo stop_recording
+                    continue
+                print(f"[GRAPHNAV] Chiusura d'anello di Spot non riuscita ({e}).")
+                break
+        else:
+            print("[GRAPHNAV] Chiusura d'anello di Spot: la mappa risulta ancora in "
+                  "elaborazione dopo 3 tentativi, proseguo senza.")
     if added or n_sdk:
         MISSION_STATS['graphnav_shortcuts'] = MISSION_STATS.get('graphnav_shortcuts', 0) + added + n_sdk
         print(f"[GRAPHNAV] {label}: {added} scorciatoie dalla mappa globale (waypoint a meno di "
@@ -940,8 +967,9 @@ def graphnav_add_shortcuts(recordingInterface, label=""):
 def _graphnav_navigate_to(recordingInterface, waypoint_id, robot_state_client, command_client, label,
                           timeout_s=GRAPHNAV_TIMEOUT_S):
     """Porta il robot a un waypoint con GraphNav. True solo se ci arriva davvero."""
-    # Prima di muoversi: scorciatoie nel grafo, cosi' GraphNav non ripercorre tutta la catena.
-    graphnav_add_shortcuts(recordingInterface, label)
+    # Prima di muoversi: chiusure d'anello di Spot (a registrazione ferma). Le scorciatoie
+    # dalla mappa le aggiunge chi chiama, PRIMA di fermare la registrazione.
+    graphnav_add_shortcuts(recordingInterface, label, map_edges=False, sdk=True)
     client = recordingInterface._graph_nav_client
     tp = _graph_nav_pb2.TravelParams()
     tp.velocity_limit.CopyFrom(movements._velocity_limit(GRAPHNAV_MAX_LINEAR_VEL_MPS, GRAPHNAV_MAX_ANGULAR_VEL_RPS))
@@ -2179,6 +2207,7 @@ def graphnav_step_back(env, recordingInterface, robot_state_client, command_clie
     hop = len(trail) - 1 - idx
     crumb = trail[idx]
     recording_stopped = False
+    graphnav_add_shortcuts(recordingInterface, "prima del ritorno", map_edges=True, sdk=False)
     try:
         recordingInterface.stop_recording()
         recording_stopped = True
@@ -3584,8 +3613,18 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                     full_path_coords = [prm_graph.get_node_position(nid) for nid in new_ids]
                     no_progress = 0
                     continue
-                print("[ARRIVO] Nessuna alternativa nel grafo: ci vado comunque, "
-                      "il fronte decide fin dove.")
+                # 2026-10-08 (missione 08-10 16:11): prima qui si andava "comunque". A
+                # (60.05, -31.06) il controllo aveva visto 0/24 uscite, il robot ci e' entrato,
+                # si e' trovato in trappola e ha dovuto tornare indietro con GraphNav per 3
+                # waypoint. Sapere in anticipo che il punto d'arrivo e' un vicolo cieco e
+                # andarci lo stesso non ha senso: si rinuncia a questo lato della cella, che
+                # verra' ritentata piu' avanti da un altro (finalize_or_defer_blocked_cell).
+                print(f"[ARRIVO] Nessuna alternativa nel grafo e il punto d'arrivo non ha "
+                      f"uscite: non ci vado. Rinuncio a entrare in ({target_row},{target_col}) "
+                      f"da questo lato.")
+                if verification_tracker is not None:
+                    verification_tracker.clear_path()
+                return False
 
         no_progress = 0
         retreats_in_a_row = 0   # 2026-10-07: un avanzamento vero rompe la catena di arretramenti
@@ -4512,6 +4551,8 @@ def easy_walk(options):
                 if target_row is not None:
                     x_current, y_current, _, _ = spotUtils.getPosition(robot_state_client)
 
+                    graphnav_add_shortcuts(recordingInterface, "prima dello spostamento fra celle",
+                                           map_edges=True, sdk=False)
                     recordingInterface.stop_recording()
                     nearest_wp = recordingInterface.get_manual_waypoint_by_cell(nearest_cell[0], nearest_cell[1])
                     navigation_success = _graphnav_navigate_to(
@@ -4658,6 +4699,8 @@ def easy_walk(options):
         # ---------------------------------------------------------------------
         _emit_mission_summary_once()
 
+        graphnav_add_shortcuts(recordingInterface, "prima del ritorno a wp_0",
+                               map_edges=True, sdk=False)
         recordingInterface.auto_close_loops(True, False)
         recordingInterface.stop_recording()
         recordingInterface.optimize_anchoring()
