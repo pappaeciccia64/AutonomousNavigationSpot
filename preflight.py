@@ -91,7 +91,9 @@ REQUIRED = {
         ],
     },
     "prm_graph.py": {
-        "costanti": ["OCCUPANCY_SAMPLES_PER_M", "OCCUPANCY_SAMPLES_MIN", "STOP_NODE_MIN_EDGE_M",
+        "costanti": ["ALLOW_NEW_STOP_NODES", "ANCHOR_SEARCH_M", "ANCHOR_ON_NODE_M",   # 2026-10-08
+                     "ANCHOR_IGNORE_NEAR_M",
+                     "OCCUPANCY_SAMPLES_PER_M", "OCCUPANCY_SAMPLES_MIN", "STOP_NODE_MIN_EDGE_M",
                      "STOP_NODE_MAP_IGNORE_M"],
         "funzioni": [],
         "metodi": [
@@ -108,6 +110,10 @@ REQUIRED = {
             ("PRM", "_global_slope"),             # revisione 2026-10-06 sera
             ("PRM", "_sync_global_slope_cache"),
             ("PRM", "_traversed_edge_ok"),
+            ("PRM", "anchor_node"),               # 2026-10-08: nessun nodo nuovo
+            ("PRM", "set_allowed_nodes"),         # 2026-10-08: solo celle visitate
+            ("PRM", "set_detour_limit"),
+            ("PRM", "path_length"),
         ],
     },
     "arcVerification.py": {
@@ -146,6 +152,8 @@ REQUIRED = {
                      # Grafo di missione regolare (2026-10-08, mission_graph.py)
                      "USE_MISSION_LATTICE", "MISSION_LATTICE_SPACING_M", "MISSION_LATTICE_RINGS",
                      "MISSION_GRID_ROWS", "MISSION_GRID_COLS", "MISSION_CELL_SIZE_M",
+                     "PLAN_ONLY_EXPLORED_CELLS", "PLAN_MAX_DETOUR_RATIO", "PLAN_DETOUR_SLACK_M",
+                     "ANCHOR_ON_NODE_M", "GLOBAL_MAP_SELF_RING_M",
                      "FALL_HAZARD_RADIUS_M",                                             # cadute
                      "RETREAT_MAX_SEGMENTS", "RETREAT_MIN_SEGMENT_M", "RETREAT_AFTER_ABORT_M",
                      "RETREAT_CONTINUITY_M", "RETREAT_MAX_SEGMENT_M",                    # revisione
@@ -158,7 +166,8 @@ REQUIRED = {
                      "_check_and_recover_fall", "_raw_zero", "_raw_scale",
                      "_mission_z0", "_set_mission_z0", "_mask_for_global_map",
                      "_graphnav_navigate_to", "_graphnav_return_to_start", "_append_csv",
-                     "_parse_args"],
+                     "_parse_args", "_mask_for_global_map", "_restrict_planning_to_explored_cells",
+                     "_node_cells", "_robot_on_node"],
         "metodi": [],
     },
 }

@@ -165,6 +165,22 @@ PRM_MIN_EDGE_M = 0.5
 PRM_MAX_EDGE_M = 2.0            # usato come tetto per gli anelli, e nel ripiego casuale
 PRM_CONNECTION_RADIUS_M = 3.0
 
+# --- Dove puo' passare il pianificatore (2026-10-08, missione 08-10 15:09) ---------------
+# Per entrare in una cella il percorso puo' usare SOLO le celle gia' visitate, la cella in
+# cui si trova il robot e la cella obiettivo. Se l'unica strada passa da una cella non
+# visitata non si prova: il tentativo fallisce, il lato viene segnato come provato
+# (finalize_or_defer_blocked_cell) e si passa a un'altra cella; quella bloccata verra'
+# ritentata piu' avanti, da un altro lato. Nella missione del 08-10 15:09, per entrare in
+# (0,2) il pianificatore passava dalla riga 1, mai esplorata.
+PLAN_ONLY_EXPLORED_CELLS = True
+# Tetto alla deviazione: un percorso piu' lungo di RATIO * linea d'aria + SLACK vale
+# "nessun percorso" (vedi PRM.set_detour_limit). Nella stessa missione, a 2.4 m
+# dall'obiettivo, il pianificatore proponeva ~15 m di giro. None = nessun tetto.
+PLAN_MAX_DETOUR_RATIO = 2.0
+PLAN_DETOUR_SLACK_M = 1.0
+# Copia del modulo: dentro attempt_enter_cell_from_position il nome prm_graph e' l'istanza.
+ANCHOR_ON_NODE_M = prm_graph.ANCHOR_ON_NODE_M
+
 
 def _build_mission_prm(env, verbose=True):
     """
@@ -184,6 +200,7 @@ def _build_mission_prm(env, verbose=True):
         prm = prm_graph.PRM(min_edge_length=PRM_MIN_EDGE_M, max_edge_length=mg.reach_m,
                             connection_radius=PRM_CONNECTION_RADIUS_M)
         prm.mission_graph = mg          # lo rilegge _rebuild_prm_edges
+        prm.set_detour_limit(PLAN_MAX_DETOUR_RATIO, PLAN_DETOUR_SLACK_M)
         mg.into_prm(prm)
         return prm, mg.as_sampler(), mg
 
@@ -193,6 +210,7 @@ def _build_mission_prm(env, verbose=True):
     prm = prm_graph.PRM(min_edge_length=PRM_MIN_EDGE_M, max_edge_length=PRM_MAX_EDGE_M,
                         connection_radius=PRM_CONNECTION_RADIUS_M)
     prm.mission_graph = None
+    prm.set_detour_limit(PLAN_MAX_DETOUR_RATIO, PLAN_DETOUR_SLACK_M)
     prm.add_nodes_from_sampler(sampler)
     node_id = max(prm.nodes.keys(), default=-1) + 1
     prm.add_node(node_id, env.origin_x, env.origin_y)       # boot node
@@ -204,6 +222,53 @@ def _build_mission_prm(env, verbose=True):
                 prm.add_node(node_id, world_pos[0], world_pos[1])
     print(f"[GRAFO] Campionamento CASUALE (USE_MISSION_LATTICE=False): {len(prm.nodes)} nodi")
     return prm, sampler, None
+
+
+def _node_cells(prm, env):
+    """
+    {id nodo: (riga, colonna)}. Dal reticolo quando c'e' (mission_graph.node_cell, stessa
+    regola di env.get_cell_from_world), altrimenti da env. In cache sul PRM: dal 2026-10-08 i
+    nodi non cambiano piu' durante la missione (prm_graph.ALLOW_NEW_STOP_NODES).
+    """
+    cache = getattr(prm, '_node_cell_cache', None)
+    if cache is None:
+        cache = {}
+        prm._node_cell_cache = cache
+    mg = getattr(prm, 'mission_graph', None)
+    for nid, (x, y) in prm.nodes.items():
+        if nid in cache:
+            continue
+        if mg is not None and 0 <= nid < mg.n_nodes:
+            r, c = mg.node_cell[nid]
+            cache[nid] = (int(r), int(c))
+        else:
+            cache[nid] = tuple(int(v) for v in env.get_cell_from_world(x, y))
+    return cache
+
+
+def _restrict_planning_to_explored_cells(prm, env, target_row, target_col, robot_xy):
+    """
+    Limita la ricerca del percorso ai nodi delle celle visitate, della cella del robot e
+    della cella obiettivo (vedi PLAN_ONLY_EXPLORED_CELLS). Da chiamare prima di ogni
+    tentativo di cella: le celle visitate cambiano fra un tentativo e l'altro.
+    """
+    if not PLAN_ONLY_EXPLORED_CELLS:
+        prm.set_allowed_nodes(None)
+        return
+    cells = {(r, c) for r in range(env.rows) for c in range(env.cols) if env.is_cell_visited(r, c)}
+    cells.add((int(target_row), int(target_col)))
+    cells.add(tuple(int(v) for v in env.get_cell_from_world(robot_xy[0], robot_xy[1])))
+    allowed = [nid for nid, cell in _node_cells(prm, env).items() if cell in cells]
+    prm.set_allowed_nodes(allowed)
+    print(f"[PIANO] Percorsi ammessi solo nelle celle {sorted(cells)}: {len(allowed)} nodi su "
+          f"{len(prm.nodes)}. Se serve passare da una cella non visitata, rinuncio a questo "
+          f"lato e passo a un'altra cella.")
+
+
+def _robot_on_node(prm, node_id, x, y):
+    """True se il robot e' praticamente sul nodo (vedi prm_graph.ANCHOR_ON_NODE_M)."""
+    pos = prm.get_node_position(node_id)
+    return pos is not None and float(np.hypot(pos[0] - x, pos[1] - y)) <= ANCHOR_ON_NODE_M
 
 
 def _rebuild_prm_edges(prm, global_map):
@@ -834,15 +899,53 @@ def _graphnav_return_to_start(recordingInterface, robot_state_client, command_cl
                                  "ritorno a wp_0", timeout_s=2 * GRAPHNAV_TIMEOUT_S)
 
 
-def _mask_for_global_map(obstacle_mask, is_valid):
+# --- Zona attorno al corpo nella mappa GLOBALE (2026-10-08, missione 08-10 15:09) -------
+# Le celle a ridosso del fianco del robot risultano "ostacolo" SOLO quando il robot ci sta
+# accanto: nella missione del 08-10 15:09, attorno a (58.6, -32.8) le stesse celle lette da
+# 1-2 m di distanza avevano obstacle_distance 0.18-0.24 (libere), lette con il robot fermo
+# li' accanto 0.09-0.15 (ostacolo), sempre a 0.23-0.45 m dall'asse, all'altezza delle zampe
+# posteriori. Due scansioni da fermo bastano a confermarle nella mappa globale
+# (GLOBAL_OCC_CONFIRM_OBS = 2), e il PRM scartava l'arco su cui il robot era APPENA passato:
+# "un percorso che prima vedeva libero, appena ci e' passato sopra e' diventato occupato".
+#   - NUCLEO (il rettangolo del corpo): il robot ci sta sopra, quindi e' libero per
+#     costruzione -> si scrive "visto libero".
+#   - ANELLO (fino a GLOBAL_MAP_SELF_RING_M oltre il corpo): da qui la lettura non e'
+#     attendibile -> un ostacolo NON si scrive (nessuna informazione); il libero si'.
+# Vale solo per la mappa globale: il fronte sicuro usa la scansione dal vivo, intera, quindi
+# un ostacolo vero accanto al robot continua a fermarlo. E un ostacolo vero viene comunque
+# scritto nella mappa globale dalle scansioni fatte da un altro punto.
+GLOBAL_MAP_SELF_BODY_LENGTH_M = 1.10
+GLOBAL_MAP_SELF_BODY_WIDTH_M = 0.50
+GLOBAL_MAP_SELF_RING_M = 0.25
+
+
+def _mask_for_global_map(obstacle_mask, is_valid, pts=None, robot_pose=None):
     """
     Maschera da passare a GlobalGrid.update: -1 ostacolo, +1 vista libera, 0 nessuna
     informazione (cella non attendibile in questa scansione). Prima le celle non attendibili
     arrivavano come +1, cioe' "viste libere" (vedi GlobalGrid.update).
+
+    pts, robot_pose=(x, y, yaw): se passati, applica la zona attorno al corpo (vedi
+    GLOBAL_MAP_SELF_RING_M): nucleo libero, anello senza ostacoli.
     """
     m = np.asarray(obstacle_mask, dtype=np.float64).ravel()
     v = np.asarray(is_valid, dtype=bool).ravel()
-    return np.where(m < 0, -1.0, np.where(v, 1.0, 0.0))
+    out = np.where(m < 0, -1.0, np.where(v, 1.0, 0.0))
+    if pts is None or robot_pose is None:
+        return out
+    rx, ry, ryaw = (float(robot_pose[0]), float(robot_pose[1]), float(robot_pose[2]))
+    p = np.asarray(pts, dtype=np.float64).reshape(-1, 3)
+    if len(p) != len(out):
+        return out
+    dx, dy = p[:, 0] - rx, p[:, 1] - ry
+    c, s_ = np.cos(ryaw), np.sin(ryaw)
+    xb, yb = np.abs(dx * c + dy * s_), np.abs(-dx * s_ + dy * c)
+    hl, hw = GLOBAL_MAP_SELF_BODY_LENGTH_M / 2.0, GLOBAL_MAP_SELF_BODY_WIDTH_M / 2.0
+    core = (xb <= hl) & (yb <= hw)
+    ring = ~core & (xb <= hl + GLOBAL_MAP_SELF_RING_M) & (yb <= hw + GLOBAL_MAP_SELF_RING_M)
+    out[ring & (out < 0)] = 0.0
+    out[core] = 1.0
+    return out
 
 
 def _log_ground_filter(local_grid, label):
@@ -2443,7 +2546,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                               rough_values=rough_values, is_valid=is_valid)
 
     # Aggiorna la mappa di occupazione globale con i dati appena processati
-    global_map.update(pts, _mask_for_global_map(obstacle_mask, is_valid))
+    global_map.update(pts, _mask_for_global_map(obstacle_mask, is_valid, pts,
+                                                (robot_x, robot_y, robot_yaw)))
     # Aggiorna anche la mappa globale del terreno -- solo altezze già corrette e valide
     global_terrain_map.update(pts, terrain_real, is_valid)
 
@@ -2563,7 +2667,14 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         )
         return False
 
-    # --- Nodi di partenza e di arrivo: SEMPRE nuovi, nella posizione reale ---------------
+    # Solo celle visitate + cella del robot + cella obiettivo (vedi PLAN_ONLY_EXPLORED_CELLS).
+    _restrict_planning_to_explored_cells(prm_graph, env, target_row, target_col,
+                                         (robot_x, robot_y))
+
+    # --- Nodi di partenza e di arrivo: dal 2026-10-08 nodi ESISTENTI del grafo ------------
+    # (prm_graph.ALLOW_NEW_STOP_NODES = False): add_stop_node aggancia la posizione al nodo
+    # adatto invece di crearne uno. L'obiettivo e' gia' un nodo del reticolo (lo sceglie
+    # find_best_point_in_cell fra i punti del campionatore).
     robot_node_id = prm_graph.add_stop_node(
         robot_x, robot_y, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
         label="partenza tentativo")
@@ -2634,6 +2745,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
     block_replans = 0
     loop_iter = 0
     rotation_fails = {}     # tratto -> quante volte la rotazione verso di esso e' stata rifiutata
+    rotation_fail_xy = {}   # tratto -> posizione del robot all'ultimo rifiuto
     retreats_in_a_row = 0   # arretramenti consecutivi: azzerato da un avanzamento vero
     early_replans = 0       # ripianificazioni alla prima cella bloccante (ramo 'wait')
     arrival_refusals = 0    # passi rifiutati perche' la posa d'arrivo non ha uscite
@@ -2722,7 +2834,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                                   rough_values=rough_up, is_valid=is_valid_up)
 
         t_proc = time.perf_counter()
-        global_map.update(pts_up, _mask_for_global_map(obstacle_mask_updated, is_valid_up))
+        global_map.update(pts_up, _mask_for_global_map(obstacle_mask_updated, is_valid_up, pts_up,
+                                                       (robot_x, robot_y, robot_yaw)))
         global_terrain_map.update(pts_up, terrain_real_up, is_valid_up)
         t_maps = time.perf_counter()
 
@@ -2766,8 +2879,13 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         # robot e' rimasto fermo su 3169 alternando 3169->142 e 3169->218 per 112 giri
         # ("tentativo 56/2"), senza mai arrivare alla ritirata. Spostandosi nasce un nodo di
         # sosta nuovo, la chiave cambia e gli archi tornano valutabili da li'.
+        # Dal 2026-10-08 non nascono piu' nodi di sosta: il robot puo' restare agganciato
+        # allo stesso nodo anche dopo essersi spostato, quindi lo scarto vale solo finche' il
+        # robot e' dove la rotazione e' stata rifiutata.
         for (from_id, to_id), n_fails in rotation_fails.items():
-            if from_id == robot_node_id and n_fails > 0:
+            fx, fy = rotation_fail_xy.get((from_id, to_id), (robot_x, robot_y))
+            if (from_id == robot_node_id and n_fails > 0
+                    and float(np.hypot(robot_x - fx, robot_y - fy)) <= ANCHOR_ON_NODE_M):
                 mark_edge_blocked_soft(prm_graph, from_id, to_id)
 
         if touched_nodes:
@@ -2890,6 +3008,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 MISSION_STATS['rotation_refusals'] += 1
                 edge_key = (robot_node_id, next_node_id)
                 rotation_fails[edge_key] = rotation_fails.get(edge_key, 0) + 1
+                rotation_fail_xy[edge_key] = (robot_x, robot_y)
                 margin_txt = (f"margine {rot['margin']:+.2f} m sulle celle spazzate"
                               if rot['margin'] is not None else f"motivo: {rot['why']}")
                 print(f"[ROTAZIONE] Servono {rot['dyaw_deg']:+.0f} gradi verso il nodo "
@@ -3259,8 +3378,13 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
 
             # Qui il blocco e' confermato da FRONTIER_BLOCK_CONFIRM_SCANS scansioni ferme:
             # l'invalidazione resta permanente (a differenza di [SUBITO], vedi
-            # mark_edge_blocked_soft).
-            prm_graph.mark_edge_invalid(edge_a, edge_b)
+            # mark_edge_blocked_soft). Eccezione (2026-10-08): sul primo tratto, se il robot
+            # non e' sul nodo a cui e' agganciato, il tratto bloccato e' robot->nodo, non
+            # l'arco del grafo: si scarta l'arco solo per ora.
+            if k == 0 and not _robot_on_node(prm_graph, edge_a, robot_x, robot_y):
+                mark_edge_blocked_soft(prm_graph, edge_a, edge_b)
+            else:
+                prm_graph.mark_edge_invalid(edge_a, edge_b)
             block_replans += 1
             no_progress = 0
 
@@ -3522,8 +3646,11 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                     came_from=robot_node_id, label="sosta (passo parziale)")
                 prm_graph.set_robot_node(robot_node_id, 0.0)
             else:
-                prm_graph.traversed_edges.add((min(robot_node_id, next_node_id),
-                                               max(robot_node_id, next_node_id)))
+                # Arco "percorso" solo se il robot e' partito dal nodo: altrimenti il tratto
+                # camminato non e' l'arco del grafo (vedi add_stop_node, nessun nodo nuovo).
+                if _robot_on_node(prm_graph, robot_node_id, robot_x, robot_y):
+                    prm_graph.traversed_edges.add((min(robot_node_id, next_node_id),
+                                                   max(robot_node_id, next_node_id)))
                 robot_node_id = next_node_id
                 prm_graph.set_robot_node(robot_node_id, 0.0)
                 path_waypoints.pop(0)
@@ -3561,7 +3688,10 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 ax, ay, _, _ = spotUtils.getPosition(robot_state_client)
                 env._traveled_arcs.append((robot_x, robot_y, ax, ay))
 
-            prm_graph.mark_edge_invalid(robot_node_id, next_node_id)
+            if _robot_on_node(prm_graph, robot_node_id, robot_x, robot_y):
+                prm_graph.mark_edge_invalid(robot_node_id, next_node_id)
+            else:   # il robot non partiva dal nodo: il tratto fallito non e' l'arco del grafo
+                mark_edge_blocked_soft(prm_graph, robot_node_id, next_node_id)
             print(f"[INFO] Tratto {robot_node_id}-{next_node_id} scartato dopo fallimento fisico.")
             if verification_tracker is not None:
                 verification_tracker.clear_path()
@@ -4157,6 +4287,8 @@ def easy_walk(options):
                             target_x, target_y = None, None
 
                         if target_x is not None and target_y is not None:
+                            _restrict_planning_to_explored_cells(
+                                prm, env, selected_border[0], selected_border[1], (x_curr, y_curr))
                             start_id = prm.add_stop_node(
                                 x_curr, y_curr, global_grid.global_occupancy_map,
                                 spotGrid.PRM_EDGE_SAFETY_MARGIN_M, label="verifica recupero (robot)")
@@ -4378,7 +4510,9 @@ def easy_walk(options):
 
             # Fold this last scan into the persistent global maps, same as every other iteration
             global_grid.global_occupancy_map.update(pts_final,
-                                                    _mask_for_global_map(obstacle_mask_final, is_valid_final))
+                                                    _mask_for_global_map(obstacle_mask_final, is_valid_final,
+                                                                         pts_final,
+                                                                         (x_final, y_final, final_yaw)))
             global_grid.global_terrain_map.update(pts_final, terrain_real_final, is_valid_final)
 
             final_save_path = os.path.join(

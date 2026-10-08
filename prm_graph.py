@@ -35,8 +35,26 @@ OCCUPANCY_SAMPLES_MIN = 5
 # Lunghezza minima degli archi che collegano un nodo di sosta ai vicini (vedi add_stop_node).
 STOP_NODE_MIN_EDGE_M = 0.20
 # Entro questa distanza una sosta non si ricrea: si riusa quella che c'e' gia'
-# (2026-10-08, vedi add_stop_node).
+# (2026-10-08, vedi add_stop_node). Vale solo con ALLOW_NEW_STOP_NODES = True.
 STOP_NODE_REUSE_M = 0.20
+
+# --- Niente nodi nuovi durante la missione (2026-10-08, decisione dell'utente) -----------
+# Il grafo resta quello costruito all'inizio (il reticolo di mission_graph): add_stop_node
+# NON crea piu' nodi, aggancia la posizione al nodo ESISTENTE adatto (vedi anchor_node).
+# Nella missione del 08-10 15:09 ne erano nati 14 (861..874) in 4 tentativi.
+# True rimette il comportamento di prima (un nodo nuovo a ogni sosta), per confronto.
+ALLOW_NEW_STOP_NODES = False
+# Raggio in cui cercare il nodo a cui agganciarsi. Con il reticolo a passo 0.5 m ogni punto
+# ha un nodo entro 0.35 m; 1.0 m lascia spazio per scartare quelli dietro un ostacolo.
+ANCHOR_SEARCH_M = 1.0
+# Entro questa distanza il robot e' "sul" nodo: solo allora un blocco o un fallimento
+# sull'arco che ne parte condanna l'arco del grafo per sempre (vedi easy_walk). Se il robot
+# e' piu' lontano, il tratto percorso davvero non e' l'arco del grafo.
+ANCHOR_ON_NODE_M = 0.15
+# Attorno alla posizione del robot la mappa globale non conta per l'aggancio: li' c'e' il
+# robot (stesso motivo di STOP_NODE_MAP_IGNORE_M, ma ristretto alla meta' larghezza del
+# corpo piu' un margine, per non agganciarsi a un nodo oltre un ostacolo vicino).
+ANCHOR_IGNORE_NEAR_M = 0.30
 
 # Attorno al nodo in cui il robot si trova ADESSO, la mappa globale degli ostacoli non si usa
 # per i primi STOP_NODE_MAP_IGNORE_M di ogni arco: li' giudica il fronte sicuro sui dati dal
@@ -128,6 +146,14 @@ class PRM:
         # per gli archi che ne partono (vedi STOP_NODE_MAP_IGNORE_M).
         self.robot_node = None
         self.robot_node_ignore_m = 0.0
+        # Nodi su cui la ricerca del percorso puo' passare (2026-10-08): None = tutti. Serve a
+        # tenere la pianificazione dentro le celle gia' visitate (vedi set_allowed_nodes).
+        self.allowed_nodes = None
+        # Tetto alla deviazione (2026-10-08): un percorso piu' lungo di
+        # max_detour_ratio * distanza in linea d'aria + detour_slack_m e' "nessun percorso".
+        # None = nessun tetto. Vedi set_detour_limit.
+        self.max_detour_ratio = None
+        self.detour_slack_m = 0.0
 
         # ==================================================================
         # STATISTICHE DI MISSIONE -- solo per debug/log, mai usate per decidere
@@ -852,10 +878,79 @@ class PRM:
                     added += 1
         return added
 
+    def set_allowed_nodes(self, node_ids=None):
+        """
+        Limita la ricerca del percorso a questi nodi (None = nessun limite). Partenza e arrivo
+        sono sempre ammessi. Usato da easy_walk per pianificare solo nelle celle visitate.
+        """
+        self.allowed_nodes = None if node_ids is None else set(node_ids)
+
+    def set_detour_limit(self, max_ratio: Optional[float] = None, slack_m: float = 0.0):
+        """Tetto alla lunghezza dei percorsi rispetto alla linea d'aria (None = nessuno)."""
+        self.max_detour_ratio = None if max_ratio is None else float(max_ratio)
+        self.detour_slack_m = float(slack_m)
+
+    def path_length(self, path_ids) -> float:
+        """Lunghezza geometrica di un percorso, in metri."""
+        if not path_ids or len(path_ids) < 2:
+            return 0.0
+        xy = np.array([self.nodes[i] for i in path_ids], dtype=np.float64)
+        return float(np.sum(np.hypot(np.diff(xy[:, 0]), np.diff(xy[:, 1]))))
+
+    def anchor_node(self, x: float, y: float, global_map=None, edge_safety_margin: float = 0.0,
+                    ignore_near_m: float = 0.0) -> Optional[int]:
+        """
+        Il nodo ESISTENTE a cui agganciare la posizione (x, y), senza crearne di nuovi.
+
+        Non e' semplicemente il piu' vicino (la preoccupazione del 2026-10-06: dopo un arresto
+        a meta' arco il piu' vicino puo' stare oltre cio' che ha fermato il robot). Si prende
+        il piu' vicino, entro ANCHOR_SEARCH_M, che:
+          - non ha penalita' infinita (nodo dentro un ostacolo, trappola);
+          - e' raggiungibile in linea retta senza passare su celle occupate della mappa
+            globale (i primi ignore_near_m attorno a (x, y) non contano: li' sta il robot).
+        Se nessuno passa i controlli, il piu' vicino in assoluto: il fronte sicuro decide
+        comunque, sui dati dal vivo, fin dove il robot puo' andare.
+        """
+        if not self.nodes:
+            return None
+        ids = np.fromiter(self.nodes.keys(), dtype=np.int64, count=len(self.nodes))
+        xy = np.array([self.nodes[int(i)] for i in ids], dtype=np.float64)
+        d = np.hypot(xy[:, 0] - x, xy[:, 1] - y)
+        order = np.argsort(d, kind='stable')
+        for k in order:
+            if d[k] > ANCHOR_SEARCH_M:
+                break
+            nid = int(ids[k])
+            if not np.isfinite(self.node_penalty(nid)):
+                continue
+            if global_map is not None and edge_safety_margin > 0.0 and d[k] > 1e-6:
+                nx, ny = xy[k]
+                n_s = max(OCCUPANCY_SAMPLES_MIN, int(np.ceil(d[k] * OCCUPANCY_SAMPLES_PER_M)) + 1)
+                blocked = False
+                for j in range(n_s):
+                    t = j / (n_s - 1)
+                    sx, sy = x + t * (nx - x), y + t * (ny - y)
+                    if np.hypot(sx - x, sy - y) <= ignore_near_m:
+                        continue
+                    if global_map.is_occupied(sx, sy, safety_margin=edge_safety_margin):
+                        blocked = True
+                        break
+                if blocked:
+                    continue
+            return nid
+        return int(ids[order[0]])
+
     def add_stop_node(self, x: float, y: float, global_map=None, edge_safety_margin: float = 0.0,
                       came_from: Optional[int] = None, label: str = "sosta",
                       is_robot: bool = True) -> int:
         """
+        Dal 2026-10-08 (ALLOW_NEW_STOP_NODES = False) NON crea nodi: restituisce il nodo
+        esistente a cui agganciare la posizione (anchor_node). Il grafo resta quello iniziale.
+        came_from non aggiunge piu' archi: il tratto percorso e' libero nella mappa globale
+        (zona attorno al corpo, vedi easy_walk._mask_for_global_map) e gli archi del reticolo
+        che lo seguono vengono rivalutati normalmente.
+
+        Comportamento precedente (ALLOW_NEW_STOP_NODES = True), invariato:
         Crea SEMPRE un nodo nuovo nella posizione indicata e lo collega ai vicini.
 
         Decisione dell'utente (2026-10-06): il robot non viene MAI agganciato al nodo
@@ -871,6 +966,18 @@ class PRM:
         min_edge_length: una sosta cade spesso a pochi decimetri da un nodo campionato, ed
         escluderlo lascerebbe la sosta poco collegata proprio verso dove si trova.
         """
+        if not ALLOW_NEW_STOP_NODES:
+            nid = self.anchor_node(x, y, global_map, edge_safety_margin,
+                                   ignore_near_m=(ANCHOR_IGNORE_NEAR_M if is_robot else 0.0))
+            if nid is None:
+                raise RuntimeError("add_stop_node: il grafo non ha nodi")
+            if is_robot:
+                self.set_robot_node(nid)
+            nx, ny = self.nodes[nid]
+            print(f"[NODO] {label}: agganciato al nodo {nid} in ({nx:.2f}, {ny:.2f}), a "
+                  f"{float(np.hypot(nx - x, ny - y)):.2f} m da ({x:.2f}, {y:.2f}) -- nessun nodo nuovo")
+            return nid
+
         # Riuso di una sosta vicina (2026-10-08). Nella missione del 08-10 10:47 il robot ha
         # creato un nodo nuovo a ogni ritorno nello stesso punto -- 3170, 3171, 3172, 3173,
         # 3174, 3175 entro 2 cm l'uno dall'altro -- e ogni creazione ricollega girando su
@@ -1062,6 +1169,7 @@ class PRM:
         pq = [(0, start_idx)]
         visited = set()
         new_path = None
+        allowed = self.allowed_nodes
 
         while pq:
             current_dist, current = heapq.heappop(pq)
@@ -1079,6 +1187,9 @@ class PRM:
                 break
 
             for neighbor, weight in self.edges.get(current, []):
+                if (allowed is not None and neighbor not in allowed
+                        and neighbor != goal_idx):
+                    continue          # fuori dalle celle ammesse (vedi set_allowed_nodes)
                 if neighbor not in visited:
                     # Costo = geometrico + strato dei costi (2026-10-08). Il grafo non viene
                     # mai modificato: un arco o un nodo impercorribile ha penalita' infinita
@@ -1099,6 +1210,19 @@ class PRM:
         # proprio la decisione voluta (il giro e' troppo lungo, si rinuncia alla cella).
         if new_path is not None and max_edges is not None and len(new_path) - 1 > max_edges:
             new_path = None
+
+        # Tetto alla deviazione (2026-10-08, missione 08-10 15:09): dal robot a 2.4 m
+        # dall'obiettivo il pianificatore aveva proposto un giro di ~15 m. Stessa logica del
+        # tetto sugli archi: il giro troppo lungo vale "nessun percorso", si rinuncia alla
+        # cella e la si riprova piu' tardi da un altro lato.
+        if new_path is not None and self.max_detour_ratio is not None:
+            (sx, sy), (gx, gy) = self.nodes[start_idx], self.nodes[goal_idx]
+            limit = self.max_detour_ratio * float(np.hypot(gx - sx, gy - sy)) + self.detour_slack_m
+            plen = self.path_length(new_path)
+            if plen > limit:
+                print(f"[DEVIAZIONE] Percorso {start_idx}->{goal_idx} lungo {plen:.1f} m, oltre "
+                      f"il tetto di {limit:.1f} m: lo considero impraticabile.")
+                new_path = None
 
         # --- Plain behavior: no stability check requested ---
         if current_path_ids is None or margin <= 0.0:
