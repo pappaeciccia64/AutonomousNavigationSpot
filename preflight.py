@@ -90,6 +90,17 @@ REQUIRED = {
             ("LatticeSampler", "get_nearest_points"),
         ],
     },
+    # 2026-10-08: easy_walk chiama questi metodi per le scorciatoie GraphNav.
+    "navGraphUtils.py": {
+        "costanti": [],
+        "funzioni": [],
+        "metodi": [
+            ("RecordingInterface", "close_loops_checked"),
+            ("RecordingInterface", "create_edge_between_waypoint_objs"),
+            ("RecordingInterface", "invalidate_graph_cache"),
+            ("RecordingInterface", "_get_graph"),
+        ],
+    },
     "prm_graph.py": {
         "costanti": ["ALLOW_NEW_STOP_NODES", "ANCHOR_SEARCH_M", "ANCHOR_ON_NODE_M",   # 2026-10-08
                      "ANCHOR_IGNORE_NEAR_M",
@@ -154,6 +165,8 @@ REQUIRED = {
                      "MISSION_GRID_ROWS", "MISSION_GRID_COLS", "MISSION_CELL_SIZE_M",
                      "PLAN_ONLY_EXPLORED_CELLS", "PLAN_MAX_DETOUR_RATIO", "PLAN_DETOUR_SLACK_M",
                      "ANCHOR_ON_NODE_M", "GLOBAL_MAP_SELF_RING_M",
+                     "GRAPHNAV_SHORTCUTS", "GRAPHNAV_SDK_LOOP_CLOSURE", "GRAPHNAV_SHORTCUT_MAX_M",
+                     "GRAPHNAV_SHORTCUT_MARGIN_M", "GRAPHNAV_SHORTCUT_MIN_HOPS",
                      "FALL_HAZARD_RADIUS_M",                                             # cadute
                      "RETREAT_MAX_SEGMENTS", "RETREAT_MIN_SEGMENT_M", "RETREAT_AFTER_ABORT_M",
                      "RETREAT_CONTINUITY_M", "RETREAT_MAX_SEGMENT_M",                    # revisione
@@ -167,7 +180,7 @@ REQUIRED = {
                      "_mission_z0", "_set_mission_z0", "_mask_for_global_map",
                      "_graphnav_navigate_to", "_graphnav_return_to_start", "_append_csv",
                      "_parse_args", "_mask_for_global_map", "_restrict_planning_to_explored_cells",
-                     "_node_cells", "_robot_on_node"],
+                     "_node_cells", "_robot_on_node", "graphnav_add_shortcuts", "_segment_seen_free"],
         "metodi": [],
     },
 }

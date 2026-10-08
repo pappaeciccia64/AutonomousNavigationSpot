@@ -91,6 +91,32 @@ class RecordingInterface(object):
         print(f'Created {len(response.new_subgraph.edges)} new edge(s).')
 
 
+    def close_loops_checked(self, max_edge_length_m=2.0, robot_radius_m=0.35,
+                            height_variation_m=0.25):
+        """
+        Chiusure d'anello di Spot (fiducial + odometria) DURANTE la missione, con il
+        controllo di collisione di Spot sugli archi nuovi (2026-10-08). Restituisce quanti
+        archi ha creato. Solleva in caso di errore: chi chiama decide cosa fare.
+
+        Prima si chiudevano gli anelli solo a fine missione e solo con i fiducial, quindi il
+        grafo restava una catena e ogni ritorno ripercorreva tutta la strada fatta.
+        """
+        odo = map_processing_pb2.ProcessTopologyRequest.OdometryLoopClosureParams(
+            max_loop_closure_edge_length=wrappers.DoubleValue(value=float(max_edge_length_m)))
+        col = map_processing_pb2.ProcessTopologyRequest.CollisionCheckingParams(
+            check_edges_for_collision=wrappers.BoolValue(value=True),
+            collision_check_robot_radius=wrappers.DoubleValue(value=float(robot_radius_m)),
+            collision_check_height_variation=wrappers.DoubleValue(value=float(height_variation_m)))
+        response = self._map_processing_client.process_topology(
+            params=map_processing_pb2.ProcessTopologyRequest.Params(
+                do_fiducial_loop_closure=wrappers.BoolValue(value=True),
+                do_odometry_loop_closure=wrappers.BoolValue(value=True),
+                odometry_loop_closure_params=odo,
+                collision_check_params=col),
+            modify_map_on_server=True)
+        self.invalidate_graph_cache()
+        return len(response.new_subgraph.edges)
+
     def _get_graph(self, force_refresh=False):
         """
         Get the graph, using cache if available.
@@ -1298,6 +1324,19 @@ class RecordingInterface(object):
 
         print(f"\n[EDGE_VERIFY] Summary: {len(missing_edges)} missing edges")
         return missing_edges
+
+    def create_edge_between_waypoint_objs(self, from_wp, to_wp):
+        """
+        Crea un arco fra due waypoint gia' letti dal grafo (oggetti map_pb2.Waypoint), senza
+        riscaricare il grafo ne' stampare la trasformazione. Stessa trasformazione di
+        create_edge_between_waypoints. Chi chiama invalida la cache alla fine
+        (invalidate_graph_cache). Solleva in caso di errore.
+        """
+        new_edge = map_pb2.Edge()
+        new_edge.id.from_waypoint = from_wp.id
+        new_edge.id.to_waypoint = to_wp.id
+        new_edge.from_tform_to.CopyFrom(self._get_transform(from_wp, to_wp))
+        self._recording_client.create_edge(edge=new_edge)
 
     def create_edge_between_waypoints(self, from_waypoint_name, to_waypoint_name):
         """

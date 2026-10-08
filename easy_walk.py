@@ -443,6 +443,29 @@ MAX_ARRIVAL_REFUSALS = 3          # per tentativo di cella, per non avvitarsi su
 # waypoint lungo la strada (vedi graphnav_drop_breadcrumb) e si torna su quella.
 GRAPHNAV_WAYPOINT_MIN_SPACING_M = 0.75   # distanza minima fra due briciole
 GRAPHNAV_MAX_BACKTRACK_HOPS = 3          # poi si rimanda la cella e si passa alla priorita' dopo
+
+# --- Scorciatoie nel grafo GraphNav (2026-10-08) -----------------------------------------
+# Ogni waypoint si collega solo al precedente: il grafo GraphNav e' una CATENA che ricalca la
+# strada fatta, e GraphNav cammina solo sugli archi. Tornare a un waypoint a un metro di
+# distanza ma registrato molti passi prima voleva dire ripercorrere tutta la catena: i "giri
+# strani" dei ritorni. Gli anelli si chiudevano solo a fine missione e solo con i fiducial
+# ("Created 0 new edge(s)" nel log del 08-10 15:40). Ora, prima di ogni spostamento con
+# GraphNav (graphnav_add_shortcuts):
+#   1. scorciatoie NOSTRE: due waypoint a meno di GRAPHNAV_SHORTCUT_MAX_M, senza arco
+#      diretto, la cui linea retta e' stata VISTA libera nella mappa globale con
+#      GRAPHNAV_SHORTCUT_MARGIN_M di margine (le celle occupate della mappa sono gia'
+#      gonfiate di OBSTACLE_THRESHOLD = 0.15: 0.20 + 0.15 = 0.35 m dall'ostacolo, piu' della
+#      meta' larghezza del corpo). Mai attraverso zone mai viste.
+#   2. chiusure d'anello di Spot (fiducial + odometria) con il loro controllo di collisione.
+# GraphNav conserva comunque il suo anti-ostacolo durante il movimento.
+GRAPHNAV_SHORTCUTS = True
+GRAPHNAV_SDK_LOOP_CLOSURE = True
+GRAPHNAV_SHORTCUT_MAX_M = 2.0
+GRAPHNAV_SHORTCUT_MARGIN_M = 0.20
+GRAPHNAV_SHORTCUT_MAX_PER_CALL = 30
+# Una scorciatoia serve solo se oggi, nel grafo, i due waypoint distano almeno tanti archi:
+# evita di riempire il grafo di archi doppi fra waypoint gia' vicini anche nella catena.
+GRAPHNAV_SHORTCUT_MIN_HOPS = 3
 # Un nodo PRM con meno di questo spazio libero non e' raggiungibile dal fronte: si scarta.
 PRM_NODE_MIN_CLEARANCE_M = spotGrid.FRONTIER_CLEARANCE_M   # 0.30
 # Ripianificazioni "precoci" (alla prima cella bloccante, senza aspettare la conferma da
@@ -822,9 +845,103 @@ _GRAPHNAV_FAIL_STATUSES = {
 }
 
 
+def _segment_seen_free(global_map, x1, y1, x2, y2, margin_m, step_m=0.05):
+    """True se il segmento e' stato osservato in ogni punto e non passa vicino a celle occupate."""
+    n = max(2, int(np.ceil(np.hypot(x2 - x1, y2 - y1) / step_m)) + 1)
+    for t in np.linspace(0.0, 1.0, n):
+        x, y = x1 + t * (x2 - x1), y1 + t * (y2 - y1)
+        if not global_map.is_known(x, y) or global_map.is_occupied(x, y, safety_margin=margin_m):
+            return False
+    return True
+
+
+def graphnav_add_shortcuts(recordingInterface, label=""):
+    """
+    Aggiunge scorciatoie al grafo GraphNav prima di uno spostamento (vedi GRAPHNAV_SHORTCUTS).
+    Non solleva mai: senza scorciatoie GraphNav funziona come prima.
+    """
+    if not GRAPHNAV_SHORTCUTS or recordingInterface is None:
+        return 0
+    added = 0
+    gg = _MISSION_CTX.get('global_grid')
+    global_map = getattr(gg, 'global_occupancy_map', None) if gg is not None else None
+    poses = getattr(recordingInterface, 'waypoint_poses', None) or {}
+    if global_map is not None and len(poses) >= 2:
+        try:
+            graph = recordingInterface._get_graph(force_refresh=True)
+            by_id = {w.id: w for w in graph.waypoints}
+            in_graph = set(by_id)
+            linked = {frozenset((e.id.from_waypoint, e.id.to_waypoint)) for e in graph.edges}
+            wps = [(name, p) for name, p in poses.items()
+                   if p.get('waypoint_id') in in_graph]
+            cand = []
+            for i in range(len(wps)):
+                for j in range(i + 1, len(wps)):
+                    (na, pa), (nb, pb) = wps[i], wps[j]
+                    d = float(np.hypot(pa['x'] - pb['x'], pa['y'] - pb['y']))
+                    if d > GRAPHNAV_SHORTCUT_MAX_M or d < 0.05:
+                        continue
+                    if frozenset((pa['waypoint_id'], pb['waypoint_id'])) in linked:
+                        continue
+                    cand.append((d, na, nb, pa, pb))
+            adj = {}
+            for e in graph.edges:
+                adj.setdefault(e.id.from_waypoint, set()).add(e.id.to_waypoint)
+                adj.setdefault(e.id.to_waypoint, set()).add(e.id.from_waypoint)
+
+            def _hops(a, b, limit=GRAPHNAV_SHORTCUT_MIN_HOPS):
+                """Archi fra a e b nel grafo attuale, fermandosi a `limit` (basta sapere se e' corto)."""
+                frontier, seen = {a}, {a}
+                for h in range(1, limit):
+                    frontier = {n for f in frontier for n in adj.get(f, ()) if n not in seen}
+                    if b in frontier:
+                        return h
+                    seen |= frontier
+                return limit
+
+            for d, na, nb, pa, pb in sorted(cand, key=lambda c: c[0]):
+                if added >= GRAPHNAV_SHORTCUT_MAX_PER_CALL:
+                    break
+                ida, idb = pa['waypoint_id'], pb['waypoint_id']
+                if _hops(ida, idb) < GRAPHNAV_SHORTCUT_MIN_HOPS:
+                    continue
+                if not _segment_seen_free(global_map, pa['x'], pa['y'], pb['x'], pb['y'],
+                                          GRAPHNAV_SHORTCUT_MARGIN_M):
+                    continue
+                try:
+                    recordingInterface.create_edge_between_waypoint_objs(
+                        by_id[pa['waypoint_id']], by_id[pb['waypoint_id']])
+                except Exception as e:
+                    print(f"[GRAPHNAV] Scorciatoia {na}-{nb} rifiutata ({e}).")
+                    continue
+                linked.add(frozenset((ida, idb)))
+                adj.setdefault(ida, set()).add(idb)
+                adj.setdefault(idb, set()).add(ida)
+                added += 1
+        except Exception as e:
+            print(f"[GRAPHNAV] Scorciatoie dalla mappa non aggiunte ({e}).")
+        finally:
+            if added:
+                recordingInterface.invalidate_graph_cache()
+    n_sdk = 0
+    if GRAPHNAV_SDK_LOOP_CLOSURE:
+        try:
+            n_sdk = recordingInterface.close_loops_checked(max_edge_length_m=GRAPHNAV_SHORTCUT_MAX_M)
+        except Exception as e:
+            print(f"[GRAPHNAV] Chiusura d'anello di Spot non riuscita ({e}).")
+    if added or n_sdk:
+        MISSION_STATS['graphnav_shortcuts'] = MISSION_STATS.get('graphnav_shortcuts', 0) + added + n_sdk
+        print(f"[GRAPHNAV] {label}: {added} scorciatoie dalla mappa globale (waypoint a meno di "
+              f"{GRAPHNAV_SHORTCUT_MAX_M:.1f} m, linea vista libera) + {n_sdk} da Spot "
+              f"(chiusure d'anello con controllo di collisione).")
+    return added + n_sdk
+
+
 def _graphnav_navigate_to(recordingInterface, waypoint_id, robot_state_client, command_client, label,
                           timeout_s=GRAPHNAV_TIMEOUT_S):
     """Porta il robot a un waypoint con GraphNav. True solo se ci arriva davvero."""
+    # Prima di muoversi: scorciatoie nel grafo, cosi' GraphNav non ripercorre tutta la catena.
+    graphnav_add_shortcuts(recordingInterface, label)
     client = recordingInterface._graph_nav_client
     tp = _graph_nav_pb2.TravelParams()
     tp.velocity_limit.CopyFrom(movements._velocity_limit(GRAPHNAV_MAX_LINEAR_VEL_MPS, GRAPHNAV_MAX_ANGULAR_VEL_RPS))
@@ -4002,6 +4119,7 @@ def easy_walk(options):
     local_grid = spotGrid.LocalGrid(robot)
     _MISSION_CTX['local_grid'] = local_grid
     global_grid = spotGrid.GlobalGrid()
+    _MISSION_CTX['global_grid'] = global_grid   # per graphnav_add_shortcuts
 
     recordingInterface = navGraphUtils.RecordingInterface(robot, options.download_filepath, client_metadata)
     recordingInterface.stop_recording()
