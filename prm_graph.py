@@ -34,6 +34,9 @@ OCCUPANCY_SAMPLES_MIN = 5
 
 # Lunghezza minima degli archi che collegano un nodo di sosta ai vicini (vedi add_stop_node).
 STOP_NODE_MIN_EDGE_M = 0.20
+# Entro questa distanza una sosta non si ricrea: si riusa quella che c'e' gia'
+# (2026-10-08, vedi add_stop_node).
+STOP_NODE_REUSE_M = 0.20
 
 # Attorno al nodo in cui il robot si trova ADESSO, la mappa globale degli ostacoli non si usa
 # per i primi STOP_NODE_MAP_IGNORE_M di ogni arco: li' giudica il fronte sicuro sui dati dal
@@ -147,6 +150,97 @@ class PRM:
         self.max_slope_seen = {'long': 0.0, 'lat': 0.0}  # massimi misurati su qualunque arco valutato
         self.slope_flip_count = 0         # volte in cui un arco vicino soglia ha cambiato stato tra due refresh
         self.edge_slope_info = {}         # {(idx1,idx2): (long_slope, lat_slope)} -- per visualizzazione, niente ricalcolo
+
+        # ==================================================================
+        # STRATO DEI COSTI (2026-10-08) -- decisione dell'utente, con i professori:
+        # "non modificare il grafo a livello di nodi; cosa cambia invece sono i costi".
+        #
+        # Il roadmap -- nodi e archi campionati -- resta quello che e'. Niente viene piu'
+        # cancellato per via di quello che si osserva durante la missione: cio' che si
+        # impara finisce QUI, come peso aggiuntivo che il pianificatore somma al costo
+        # geometrico quando risolve la query. Un arco o un nodo che si sa impercorribile
+        # prende costo infinito: Dijkstra non lo attraversa, ma e' ancora nel grafo, e se
+        # domani i dati dicono il contrario basta togliere la penalita'.
+        #
+        # Perche' non bastava togliere gli archi, misurato: nelle missioni del 2026-10-07
+        # la rimozione strutturale ha prodotto 8 archi condannati per sempre attorno a un
+        # nodo per un ostacolo marginale a 9 cm, e il nodo e' rimasto isolato per il resto
+        # della missione. Con i costi la stessa informazione non distrugge nulla.
+        #
+        # Due famiglie, con vite diverse:
+        #   persistent -- prove forti e definitive: blocco confermato da tre scansioni
+        #       ferme, fallimento fisico del movimento, trappola. Restano per la missione
+        #       (la trappola per il tentativo di cella, vedi clear_penalties).
+        #   transient  -- cio' che si rimisura a ogni scansione: nodi che ADESSO si vedono
+        #       dentro un ostacolo, celle non ancora esplorate. Si azzerano e si
+        #       ricalcolano ogni ciclo, cosi' una lettura rumorosa non condanna niente e
+        #       una cella appena esplorata rientra subito in gioco.
+        # ==================================================================
+        self.edge_penalty_persistent = {}   # (min,max) -> peso aggiuntivo (anche inf)
+        self.edge_penalty_transient = {}
+        self.node_penalty_persistent = {}   # idx -> peso aggiuntivo (anche inf)
+        self.node_penalty_transient = {}
+
+    # ---- strato dei costi: scrittura -------------------------------------------------
+    def penalize_edge(self, idx1: int, idx2: int, amount: float = float('inf'),
+                      persistent: bool = True):
+        """Aggiunge un peso all'arco. amount=inf lo rende impercorribile senza toccarlo."""
+        key = (min(idx1, idx2), max(idx1, idx2))
+        d = self.edge_penalty_persistent if persistent else self.edge_penalty_transient
+        d[key] = max(d.get(key, 0.0), float(amount))
+
+    def penalize_node(self, idx: int, amount: float = float('inf'), persistent: bool = True):
+        """Aggiunge un peso a TUTTI gli archi che toccano il nodo, senza rimuoverli."""
+        d = self.node_penalty_persistent if persistent else self.node_penalty_transient
+        d[idx] = max(d.get(idx, 0.0), float(amount))
+
+    def clear_transient_penalties(self):
+        """Azzera cio' che va rimisurato a ogni scansione (vedi lo strato dei costi)."""
+        self.edge_penalty_transient = {}
+        self.node_penalty_transient = {}
+
+    def clear_penalties_for_attempt(self):
+        """
+        Fine di un tentativo di cella: le trappole valevano per quel tentativo, non per la
+        missione. Si tolgono SOLO quelle registrate come tali.
+        """
+        for k in [k for k, v in self.edge_penalty_persistent.items() if v == self._ATTEMPT_MARK]:
+            del self.edge_penalty_persistent[k]
+        for k in [k for k, v in self.node_penalty_persistent.items() if v == self._ATTEMPT_MARK]:
+            del self.node_penalty_persistent[k]
+
+    # Valore usato per marcare "impercorribile, ma solo per questo tentativo di cella".
+    # E' un infinito distinguibile: si comporta come inf nel costo, e clear_penalties_for_attempt
+    # riconosce proprio queste voci.
+    _ATTEMPT_MARK = float('inf')
+
+    def penalize_node_for_attempt(self, idx: int):
+        """Nodo impercorribile per il resto del tentativo di cella (trappola)."""
+        self.node_penalty_persistent[idx] = self._ATTEMPT_MARK
+
+    # ---- strato dei costi: lettura ---------------------------------------------------
+    def node_penalty(self, idx: int) -> float:
+        return (self.node_penalty_persistent.get(idx, 0.0)
+                + self.node_penalty_transient.get(idx, 0.0))
+
+    def edge_penalty(self, idx1: int, idx2: int) -> float:
+        key = (min(idx1, idx2), max(idx1, idx2))
+        return (self.edge_penalty_persistent.get(key, 0.0)
+                + self.edge_penalty_transient.get(key, 0.0))
+
+    def effective_weight(self, idx1: int, idx2: int, weight: float) -> float:
+        """Costo geometrico + penalita' dell'arco + penalita' del nodo di arrivo."""
+        return weight + self.edge_penalty(idx1, idx2) + self.node_penalty(idx2)
+
+    def penalty_summary(self) -> str:
+        def c(d):
+            tot = sum(1 for v in d.values() if v > 0.0)
+            inf = sum(1 for v in d.values() if v == float('inf'))
+            return f"{tot} ({inf} proibitivi)"
+        return (f"archi penalizzati: {c(self.edge_penalty_persistent)} persistenti, "
+                f"{c(self.edge_penalty_transient)} di questo ciclo; nodi: "
+                f"{c(self.node_penalty_persistent)} persistenti, "
+                f"{c(self.node_penalty_transient)} di questo ciclo")
 
     def add_node(self, point_idx: int, x: float, y: float, gradient: float = 0.0, roughness: float = 0.0):
         """Add a node (waypoint) to the PRM along with its terrain gradient."""
@@ -777,6 +871,33 @@ class PRM:
         min_edge_length: una sosta cade spesso a pochi decimetri da un nodo campionato, ed
         escluderlo lascerebbe la sosta poco collegata proprio verso dove si trova.
         """
+        # Riuso di una sosta vicina (2026-10-08). Nella missione del 08-10 10:47 il robot ha
+        # creato un nodo nuovo a ogni ritorno nello stesso punto -- 3170, 3171, 3172, 3173,
+        # 3174, 3175 entro 2 cm l'uno dall'altro -- e ogni creazione ricollega girando su
+        # ~3200 nodi: 38 s su 212 di missione finivano li'. Coerente anche con la decisione
+        # di non far crescere il grafo a livello di nodi: se una sosta c'e' gia' a meno di
+        # STOP_NODE_REUSE_M, si riusa quella e si aggiunge solo l'arco percorso.
+        reuse = None
+        for nid in self.stop_nodes:
+            if nid in self.nodes and float(np.hypot(self.nodes[nid][0] - x,
+                                                    self.nodes[nid][1] - y)) <= STOP_NODE_REUSE_M:
+                reuse = nid
+                break
+        if reuse is not None:
+            if is_robot:
+                self.set_robot_node(reuse)
+            if came_from is not None and came_from in self.nodes and came_from != reuse:
+                fx, fy = self.nodes[came_from]
+                self._evaluate_and_add_edge(reuse, came_from,
+                                            float(np.hypot(fx - self.nodes[reuse][0],
+                                                           fy - self.nodes[reuse][1])), force=True)
+                self.traversed_edges.add((min(reuse, came_from), max(reuse, came_from)))
+            print(f"[NODO] {label}: riuso il nodo di sosta {reuse} in "
+                  f"({self.nodes[reuse][0]:.2f}, {self.nodes[reuse][1]:.2f}), a "
+                  f"{float(np.hypot(self.nodes[reuse][0] - x, self.nodes[reuse][1] - y)):.2f} m da qui"
+                  + (f" (con l'arco appena percorso da {came_from})" if came_from is not None else ""))
+            return reuse
+
         new_id = max(self.nodes.keys(), default=-1) + 1
         self.add_node(new_id, x, y)
         self.stop_nodes[new_id] = label
@@ -906,12 +1027,16 @@ class PRM:
                 weight = self.alpha * float(np.hypot(xb - xa, yb - ya))
             if weight is None:
                 return float('inf')  # edge no longer exists (e.g. invalidated)
-            total += weight
+            # Stessi costi usati da find_path_dijkstra (2026-10-08): altrimenti il controllo
+            # di stabilita' confronterebbe un piano penalizzato con uno non penalizzato.
+            total += self.effective_weight(a, b, weight)
         return total
 
     def find_path_dijkstra(self, start_idx: int, goal_idx: int,
                             current_path_ids: Optional[List[int]] = None,
-                            margin: float = 0.0) -> Optional[List[int]]:
+                            margin: float = 0.0,
+                            max_edges: Optional[int] = None,
+                            ignore_penalties: bool = False) -> Optional[List[int]]:
         """
         Find shortest path between two nodes using Dijkstra's algorithm.
 
@@ -955,11 +1080,25 @@ class PRM:
 
             for neighbor, weight in self.edges.get(current, []):
                 if neighbor not in visited:
-                    new_dist = current_dist + weight
+                    # Costo = geometrico + strato dei costi (2026-10-08). Il grafo non viene
+                    # mai modificato: un arco o un nodo impercorribile ha penalita' infinita
+                    # e Dijkstra semplicemente non lo attraversa.
+                    w = weight if ignore_penalties else self.effective_weight(current, neighbor, weight)
+                    if not np.isfinite(w):
+                        continue
+                    new_dist = current_dist + w
                     if new_dist < distances[neighbor]:
                         distances[neighbor] = new_dist
                         parents[neighbor] = current
                         heapq.heappush(pq, (new_dist, neighbor))
+
+        # Tetto sul numero di archi (2026-10-08, richiesta dell'utente: "non puo' fare
+        # percorsi troppo lunghi sulle celle gia' visitate"). Si verifica sul percorso
+        # TROVATO, non dentro la ricerca: cosi' resta il cammino di costo minimo, e se
+        # quello minimo e' piu' lungo del tetto si risponde "nessun percorso" -- che e'
+        # proprio la decisione voluta (il giro e' troppo lungo, si rinuncia alla cella).
+        if new_path is not None and max_edges is not None and len(new_path) - 1 > max_edges:
+            new_path = None
 
         # --- Plain behavior: no stability check requested ---
         if current_path_ids is None or margin <= 0.0:

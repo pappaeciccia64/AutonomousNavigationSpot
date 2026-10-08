@@ -272,6 +272,34 @@ GRAPHNAV_WAYPOINT_MIN_SPACING_M = 0.75   # distanza minima fra due briciole
 GRAPHNAV_MAX_BACKTRACK_HOPS = 3          # poi si rimanda la cella e si passa alla priorita' dopo
 # Un nodo PRM con meno di questo spazio libero non e' raggiungibile dal fronte: si scarta.
 PRM_NODE_MIN_CLEARANCE_M = spotGrid.FRONTIER_CLEARANCE_M   # 0.30
+
+# --- Grafo e query (2026-10-08, deciso con l'utente e i professori) ----------------
+# Il grafo NON si modifica piu' a livello di nodi e archi durante la missione: cio' che
+# si osserva diventa COSTO (vedi lo strato dei costi in prm_graph.PRM). Qui stanno i
+# numeri di quella politica.
+#
+# Lunghezza massima di un arco: deve starci dentro il campo visivo, cosi' il fronte
+# sicuro verifica l'arco per intero invece di fidarsi di dati fuori finestra.
+PRM_MAX_EDGE_LENGTH_M = 1.5
+# Tetto sul numero di archi di un percorso: un giro piu' lungo di cosi' non si fa, la cella
+# si rimanda. Con archi da 1.5 m sono ~22 m di cammino: una cella e' 5 m e la griglia di
+# missione ne ha poche, quindi per entrare in una cella adiacente ne servono 4-8 e il tetto
+# morde solo sui giri veri. Tarato sul caso misurato (missione 08-10 10:47, nodo 130): il
+# giro ammissibile verso la cella (0,3) era di 22 archi su un grafo con archi da 2 m, cioe'
+# ~29 con archi da 1.5 -- ben oltre il tetto, e rifiutarlo era la decisione giusta. Se in
+# prova si vedono celle rimandate che invece erano raggiungibili, questo e' il numero da
+# alzare: nel log la riga [PERCORSO] dice quanti archi aveva il percorso rifiutato.
+MAX_PATH_EDGES = 15
+# Penalita' per cio' che si e' osservato UNA volta: scoraggia senza vietare. Il percorso
+# ci passa solo se non c'e' altro.
+PENALTY_SOFT = 50.0
+# Penalita' per un nodo che cade in una cella MAI esplorata. E' grande ma FINITA, e la
+# ragione e' importante: se il percorso di costo minimo la paga, vuol dire che l'unica
+# strada passa da la', e noi vogliamo saperlo -- il costo del percorso ci dice QUALI celle
+# attraverserebbe, e quella diventa la prossima cella da esplorare invece di un corridoio
+# di passaggio (richiesta dell'utente, 2026-10-08). Con inf non avremmo questa
+# informazione, solo un "nessun percorso".
+PENALTY_UNEXPLORED_CELL = 1.0e5
 # Ripianificazioni "precoci" (alla prima cella bloccante, senza aspettare la conferma da
 # ferma) ammesse per tentativo di cella. Vedi il ramo 'wait'.
 MAX_EARLY_REPLANS = 4
@@ -1969,7 +1997,7 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
         # chiamante di set_robot_node nel ciclo principale.
         prm_graph.set_robot_node(new_node, 0.0)
 
-        ids = prm_graph.find_path_dijkstra(new_node, goal_id)
+        ids = prm_graph.find_path_dijkstra(new_node, goal_id, max_edges=MAX_PATH_EDGES)
         if ids is not None and len(ids) > 1:
             print(f"[RITORNO] {label}: tornato a {crumb['wp_name']} ({hop}/{max_hops}) e da qui "
                   f"c'e' un percorso con {len(ids) - 1} tratti. Riprendo.")
@@ -2016,8 +2044,11 @@ def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=PRM_NODE_MIN_CLEARAN
     pruned = []
     for k in np.nonzero(bad)[0]:
         nid = ids[int(k)]
-        for nb in [n for n, _ in prm.edges.get(nid, [])]:
-            mark_edge_blocked_soft(prm, nid, nb)
+        # 2026-10-08: penalita' infinita sul NODO, non rimozione dei suoi archi. Il grafo
+        # resta intatto; la penalita' e' transiente, quindi si rimisura a ogni scansione e
+        # un nodo che si rivede libero rientra da solo. Prima si toglievano gli archi e
+        # bastava una lettura rumorosa per lasciare un nodo mutilato.
+        prm.penalize_node(nid, float('inf'), persistent=False)
         pruned.append(nid)
     return pruned
 
@@ -2123,24 +2154,148 @@ def arrival_has_exit(snap, arrival_xy, heading, min_advance_m=ESCAPE_FAN_MIN_ADV
 
 def mark_edge_blocked_soft(prm, idx1, idx2):
     """
-    2026-10-07. Toglie un arco dal grafo ADESSO, senza condannarlo per sempre.
+    Un arco osservato bloccato UNA volta: si scoraggia, non si cancella.
 
-    prm_graph.mark_edge_invalid() lo mette anche in `tracker_blocked_edges`, che non viene
-    MAI ricreato -- ne' da refresh_local_edge_weights ne' da build_graph. Giusto per un
-    blocco confermato da tre scansioni ferme; sbagliato per [SUBITO], che scarta dopo UNA
-    scansione: nella missione del 2026-10-07 14:5x otto archi attorno al nodo 3164 sono
-    finiti fuori dal grafo per tutto il resto della missione a causa di un ostacolo
-    marginale a 9 cm dal robot, con il risultato che quel nodo e' rimasto isolato.
+    RISCRITTA il 2026-10-08. Prima toglieva l'arco dal grafo (e prima ancora
+    prm_graph.mark_edge_invalid lo condannava per sempre). Ora il grafo non si tocca: la
+    stessa informazione diventa un peso di PENALTY_SOFT sul costo, che Dijkstra evita se
+    ha alternative e accetta se non ne ha. E' transiente: si azzera a ogni scansione e si
+    riapplica finche' la si osserva, cosi' una lettura rumorosa non lascia cicatrici.
 
-    Qui si tolgono solo l'arco e la sua validita': alla prossima rivalutazione, se i dati
-    freschi dicono che e' libero, l'arco torna -- che e' esattamente il comportamento di
-    rientro che refresh_local_edge_weights e' stato scritto per avere.
+    Perche' contava, misurato: nelle missioni del 2026-10-07 la rimozione strutturale ha
+    condannato 8 archi attorno a un nodo per un ostacolo marginale a 9 cm, isolandolo per
+    il resto della missione; e dove invece lo scarto era soft, refresh_local_edge_weights
+    lo rimetteva in gioco al giro dopo e il robot alternava due archi per 112 giri. Con i
+    costi non serve scegliere fra condannare e dimenticare.
     """
-    key = (min(idx1, idx2), max(idx1, idx2))
-    prm.edge_validity[key] = False
-    prm.traversed_edges.discard(key)
-    prm.edges[idx1] = [(n, w) for n, w in prm.edges.get(idx1, []) if n != idx2]
-    prm.edges[idx2] = [(n, w) for n, w in prm.edges.get(idx2, []) if n != idx1]
+    prm.penalize_edge(idx1, idx2, PENALTY_SOFT, persistent=False)
+
+
+def _node_cell(prm, env, nid):
+    """Cella di missione in cui cade un nodo PRM, con cache: i nodi non si muovono."""
+    cache = getattr(prm, '_node_cell_cache', None)
+    if cache is None:
+        cache = prm._node_cell_cache = {}
+    if nid in cache:
+        return cache[nid]
+    xy = prm.nodes.get(nid)
+    cell = None
+    if xy is not None:
+        c = env.get_cell_from_world(xy[0], xy[1])
+        cell = None if c is None else (int(c[0]), int(c[1]))
+    cache[nid] = cell
+    return cell
+
+
+def _cell_status(env, cell):
+    st = env.get_cell_status(cell[0], cell[1])
+    return st[0] if isinstance(st, (tuple, list)) else st
+
+
+def penalize_unexplored_cells(prm, env, target_row, target_col, robot_x, robot_y):
+    """
+    2026-10-08, richiesta dell'utente. Un percorso non deve ATTRAVERSARE celle mai
+    esplorate: puo' passare solo da celle gia' visitate e accessibili, dalla cella in cui
+    il robot si trova, e ovviamente dalla cella in cui sta provando a entrare.
+
+    Il perche' e' il punto piu' interessante, e non e' una questione di sicurezza: se per
+    aggirare un blocco il robot dovesse traversare una cella mai vista, allora conviene
+    esplorare QUELLA, cambiando l'obiettivo di frontiera, invece di usarla come corridoio
+    per arrivare altrove. Attraversarla la esplorerebbe comunque, ma senza registrarlo e
+    senza che la scelta sia stata presa.
+
+    Si applica come penalita' FINITA e transiente (PENALTY_UNEXPLORED_CELL): se il percorso
+    minimo la paga comunque, il costo lo dice e sappiamo quali celle avrebbe attraversato
+    -- vedi unexplored_cells_on_path. Le celle tentate e risultate bloccate (stato -1) non
+    sono "da esplorare": quelle prendono costo infinito.
+
+    Restituisce quanti nodi sono stati penalizzati.
+    """
+    allowed = {(int(target_row), int(target_col))}
+    rc = env.get_cell_from_world(robot_x, robot_y)
+    if rc is not None:
+        allowed.add((int(rc[0]), int(rc[1])))
+    n = 0
+    for nid in prm.nodes:
+        cell = _node_cell(prm, env, nid)
+        if cell is None or cell in allowed:
+            continue
+        st = _cell_status(env, cell)
+        if st == 1:
+            continue                      # visitata e accessibile: si attraversa
+        if st == -1:
+            prm.penalize_node(nid, float('inf'), persistent=False)   # tentata e bloccata
+        else:
+            prm.penalize_node(nid, PENALTY_UNEXPLORED_CELL, persistent=False)
+        n += 1
+    return n
+
+
+def unexplored_cells_on_path(prm, env, ids, target_row, target_col):
+    """
+    Celle MAI esplorate che il percorso attraverserebbe, nell'ordine in cui le incontra.
+    Vuota = il percorso sta tutto su celle lecite. Vedi penalize_unexplored_cells.
+    """
+    out = []
+    allowed = {(int(target_row), int(target_col))}
+    for nid in (ids or []):
+        cell = _node_cell(prm, env, nid)
+        if cell is None or cell in allowed or cell in out:
+            continue
+        if _cell_status(env, cell) == 0:
+            out.append(cell)
+    return out
+
+
+def plan_for_cell(prm, env, robot_node_id, goal_id, target_row, target_col,
+                  max_edges=None, label=""):
+    """
+    2026-10-08. La query di pianificazione con le due regole decise con l'utente: niente
+    attraversamento di celle mai esplorate, e un tetto al numero di archi.
+
+    Restituisce (ids, suggerimento). ids e' il percorso da seguire, oppure None. Il
+    suggerimento, quando c'e', e' la cella che il robot dovrebbe andare a esplorare al
+    posto di questa: nasce quando l'unico percorso verso l'obiettivo attraverserebbe celle
+    ignote. In quel caso la cella corrente si rimanda e si cambia frontiera, invece di
+    usare l'ignoto come corridoio.
+    """
+    if max_edges is None:
+        max_edges = MAX_PATH_EDGES
+    ids = prm.find_path_dijkstra(robot_node_id, goal_id, max_edges=max_edges)
+
+    if ids is not None and len(ids) >= 2:
+        crossed = unexplored_cells_on_path(prm, env, ids, target_row, target_col)
+        if not crossed:
+            return ids, None
+        print(f"[PERCORSO] {label}: la strada verso la cella ({target_row},{target_col}) "
+              f"attraverserebbe celle mai esplorate {crossed}. Non le uso come corridoio: "
+              f"rimando questa cella e propongo di esplorare {crossed[0]}.")
+        return None, crossed[0]
+
+    # Nessun percorso ammissibile. Due cose da capire, e la seconda e' quella utile.
+    loose = prm.find_path_dijkstra(robot_node_id, goal_id)
+    if loose is not None and len(loose) - 1 > max_edges:
+        clean = not unexplored_cells_on_path(prm, env, loose, target_row, target_col)
+        print(f"[PERCORSO] {label}: il percorso piu' breve ha {len(loose) - 1} archi, oltre il "
+              f"tetto di {max_edges}"
+              + (" (e resta su celle esplorate)" if clean else " (e passa comunque da celle ignote)")
+              + ". Troppo giro: rimando la cella.")
+    else:
+        print(f"[PERCORSO] {label}: nessun percorso ammissibile verso la cella "
+              f"({target_row},{target_col}).")
+
+    # Quale cella ignota sta in mezzo? Si guarda la strada GEOMETRICA, ignorando le
+    # penalita': non e' un percorso da percorrere -- gli archi bloccati sono ignorati --
+    # serve solo a rispondere "cosa c'e' fra me e l'obiettivo", per scegliere la prossima
+    # cella di frontiera. Nel caso misurato (missione 08-10 10:47) la risposta e' (1,0):
+    # la strada naturale verso la cella (0,3) passava per (1,0) e (1,1), mai esplorate.
+    geo = prm.find_path_dijkstra(robot_node_id, goal_id, ignore_penalties=True)
+    crossed = unexplored_cells_on_path(prm, env, geo, target_row, target_col)
+    if crossed:
+        print(f"[PERCORSO] {label}: fra il robot e quella cella ci sono celle mai esplorate "
+              f"{crossed}. Propongo di esplorare {crossed[0]} invece di girarci attorno.")
+        return None, crossed[0]
+    return None, None
 
 
 def plan_cone_move(robot_xy, robot_yaw, snap, goal_xy, max_dyaw_deg=CONE_SWEEP_MAX_DEG,
@@ -2466,7 +2621,19 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         target_x, target_y, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
         label=f"obiettivo cella ({target_row},{target_col})", is_robot=False)
     prm_graph.set_robot_node(robot_node_id, 0.0)
-    path_ids = prm_graph.find_path_dijkstra(robot_node_id, goal_id)
+
+    # Le trappole valevano per il tentativo precedente, non per questo (2026-10-08).
+    prm_graph.clear_penalties_for_attempt()
+    # Vincolo sulle celle: si applica anche al piano iniziale, non solo alle ripianificazioni.
+    penalize_unexplored_cells(prm_graph, env, target_row, target_col, robot_x, robot_y)
+    path_ids, suggested_cell = plan_for_cell(
+        prm_graph, env, robot_node_id, goal_id, target_row, target_col,
+        label="piano iniziale")
+    if suggested_cell is not None:
+        # L'unica strada passerebbe da una cella ignota: quella diventa la prossima da
+        # esplorare (richiesta dell'utente). Si rimanda questa e si cambia frontiera.
+        env._suggested_frontier_cell = suggested_cell
+        return False
 
     if path_ids is None:
         print(
@@ -2527,6 +2694,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
     retreats_in_a_row = 0   # arretramenti consecutivi: azzerato da un avanzamento vero
     early_replans = 0       # ripianificazioni alla prima cella bloccante (ramo 'wait')
     arrival_refusals = 0    # passi rifiutati perche' la posa d'arrivo non ha uscite
+    arrival_fails = set()   # (nodo, vicino) rifiutati da [ARRIVO]: si riapplicano ogni ciclo
     goal_repicks = 0        # quante volte si e' riscelto il punto obiettivo
     tried_goals = []        # punti obiettivo gia' provati e risultati irraggiungibili
 
@@ -2633,6 +2801,16 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         touched_nodes = prm_graph.refresh_local_edge_weights(
             global_map=global_map, edge_safety_margin=spotGrid.PRM_EDGE_SAFETY_MARGIN_M)
 
+        # Strato dei costi (2026-10-08): si azzera cio' che va rimisurato e si riscrive da
+        # zero su questa scansione. Il grafo non viene toccato in nessun caso.
+        prm_graph.clear_transient_penalties()
+
+        # Celle non esplorate: non ci si passa ATTRAVERSO. Se per aggirare un blocco
+        # servisse traversare una cella mai vista, allora quella cella e' la prossima da
+        # esplorare, non un corridoio di passaggio -- vedi penalize_unexplored_cells.
+        n_inadm = penalize_unexplored_cells(prm_graph, env, target_row, target_col,
+                                            robot_x, robot_y)
+
         # Fotografia della scansione appena fatta: serve gia' qui per scartare i nodi negli
         # ostacoli, e poi al fronte sicuro. Va creata UNA volta sola per scansione:
         # make_grid_snapshot aggiorna anche il filtro temporale degli ostacoli.
@@ -2660,10 +2838,19 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             if from_id == robot_node_id and n_fails > 0:
                 mark_edge_blocked_soft(prm_graph, from_id, to_id)
 
+        # Idem per i rifiuti di [ARRIVO] (2026-10-08). Mancavano, e si vedeva: nella missione
+        # del 08-10 10:47 il robot ha rifiutato 3161->170, poi 3161->3158, poi DI NUOVO
+        # 3161->170; e 139->155, 139->185, 139->155. Tre coppie in ping-pong, perche' la
+        # penalita' veniva azzerata e nessuno la riscriveva.
+        for (from_id, to_id) in arrival_fails:
+            if from_id == robot_node_id:
+                mark_edge_blocked_soft(prm_graph, from_id, to_id)
+
         if touched_nodes:
             current_plan_ids = [robot_node_id] + [w[0] for w in path_waypoints]
             chosen_path_ids = prm_graph.find_path_dijkstra(robot_node_id, goal_id,
-                                                           current_path_ids=current_plan_ids, margin=0.10)
+                                                           current_path_ids=current_plan_ids,
+                                                           margin=0.10, max_edges=MAX_PATH_EDGES)
 
             if chosen_path_ids is None:
                 print(f"[REPLAN FALLITO] Nessun percorso esistente da {robot_node_id} a "
@@ -2879,8 +3066,10 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                     MISSION_STATS['traps_detected'] += 1
                     print(f"[TRAPPOLA] Non posso girarmi verso {next_node_id} e nessuna delle "
                           f"{len(fan_rot)} direzioni del giro e' insieme percorribile e "
-                          f"raggiungibile girandosi. Le piu' larghe: {fan_txt_r}. Ripercorro il "
-                          f"tratto da cui sono venuto.")
+                          f"raggiungibile girandosi. Le piu' larghe: {fan_txt_r}. Il nodo "
+                          f"{robot_node_id} resta a costo infinito per il resto del tentativo. "
+                          f"Ripercorro il tratto da cui sono venuto.")
+                    prm_graph.penalize_node_for_attempt(robot_node_id)
                     if verification_tracker is not None:
                         verification_tracker.clear_path()
                     # Ritorno con GraphNav invece che a zampe all'indietro (2026-10-07): si torna di un
@@ -2910,7 +3099,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 # chiedevano rotazioni di +/-179 gradi da un punto stretto. Permanente resta solo
                 # cio' che e' confermato da tre scansioni ferme o da un fallimento fisico.
                 mark_edge_blocked_soft(prm_graph, robot_node_id, next_node_id)
-                new_ids = prm_graph.find_path_dijkstra(robot_node_id, goal_id)
+                new_ids = prm_graph.find_path_dijkstra(robot_node_id, goal_id, max_edges=MAX_PATH_EDGES)
                 if new_ids is not None:
                     path_waypoints = _waypoints_from_ids(new_ids)
                     full_path_coords = [prm_graph.get_node_position(nid) for nid in new_ids]
@@ -2990,7 +3179,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                         target_x, target_y, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
                         label=f"obiettivo riscelto cella ({target_row},{target_col})",
                         is_robot=False)
-                    new_ids = prm_graph.find_path_dijkstra(robot_node_id, goal_id)
+                    new_ids = prm_graph.find_path_dijkstra(robot_node_id, goal_id, max_edges=MAX_PATH_EDGES)
                     if new_ids is not None:
                         path_waypoints = _waypoints_from_ids(new_ids)
                         full_path_coords = [prm_graph.get_node_position(nid) for nid in new_ids]
@@ -3039,8 +3228,9 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                     MISSION_STATS['traps_detected'] += 1
                     print(f"[TRAPPOLA] Nessuna delle {len(fan)} direzioni del giro e' insieme "
                           f"percorribile e raggiungibile girandosi. Le piu' larghe: {fan_txt}. "
-                          f"Non ho dove andare ne' come girarmi: ripercorro il tratto da cui "
-                          f"sono venuto, senza scartare altri archi.")
+                          f"Il nodo {robot_node_id} resta a costo infinito per il resto del "
+                          f"tentativo: ripercorro il tratto da cui sono venuto.")
+                    prm_graph.penalize_node_for_attempt(robot_node_id)
                     if verification_tracker is not None:
                         verification_tracker.clear_path()
                     # Ritorno con GraphNav invece che a zampe all'indietro (2026-10-07): si torna di un
@@ -3069,7 +3259,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 # Scarto NON permanente: dopo una sola scansione l'arco va tolto dal piano,
                 # non condannato per la missione (vedi mark_edge_blocked_soft).
                 mark_edge_blocked_soft(prm_graph, ea, eb)
-                new_ids = prm_graph.find_path_dijkstra(robot_node_id, goal_id)
+                new_ids = prm_graph.find_path_dijkstra(robot_node_id, goal_id, max_edges=MAX_PATH_EDGES)
                 if new_ids is not None and len(new_ids) > 1:
                     path_waypoints = _waypoints_from_ids(new_ids)
                     full_path_coords = [prm_graph.get_node_position(nid) for nid in new_ids]
@@ -3126,8 +3316,10 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             print(f"[BLOCCO] Direzioni utilizzabili da qui: {n_us_b}/{len(fan_blk)} ({fan_txt_b}).")
             if trapped_blk:
                 MISSION_STATS['traps_detected'] += 1
-                print("[TRAPPOLA] Nessuna via d'uscita girandomi: non scarto altri archi, "
-                      "ripercorro il tratto da cui sono venuto.")
+                print(f"[TRAPPOLA] Nessuna via d'uscita girandomi. Il nodo {robot_node_id} "
+                      f"resta a costo infinito per il resto del tentativo: il pianificatore non "
+                      f"ci riportera' il robot. Ripercorro il tratto da cui sono venuto.")
+                prm_graph.penalize_node_for_attempt(robot_node_id)
                 if verification_tracker is not None:
                     verification_tracker.clear_path()
                 # Ritorno con GraphNav invece che a zampe all'indietro (2026-10-07): si torna di un
@@ -3150,13 +3342,16 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             # Qui il blocco e' confermato da FRONTIER_BLOCK_CONFIRM_SCANS scansioni ferme:
             # l'invalidazione resta permanente (a differenza di [SUBITO], vedi
             # mark_edge_blocked_soft).
-            prm_graph.mark_edge_invalid(edge_a, edge_b)
+            # 2026-10-08: costo infinito persistente invece della rimozione. Il blocco e'
+            # confermato da tre scansioni ferme, quindi vale per la missione -- ma l'arco
+            # resta nel grafo e la decisione e' leggibile nello strato dei costi.
+            prm_graph.penalize_edge(edge_a, edge_b, float('inf'), persistent=True)
             block_replans += 1
             no_progress = 0
 
             new_ids = None
             if block_replans <= MAX_BLOCK_REPLANS:
-                new_ids = prm_graph.find_path_dijkstra(robot_node_id, goal_id)
+                new_ids = prm_graph.find_path_dijkstra(robot_node_id, goal_id, max_edges=MAX_PATH_EDGES)
             if new_ids is not None:
                 path_waypoints = _waypoints_from_ids(new_ids)
                 full_path_coords = [prm_graph.get_node_position(nid) for nid in new_ids]
@@ -3217,6 +3412,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             has_exit, fan_arr = arrival_has_exit(snap, (move_x, move_y), heading_arr)
             if not has_exit:
                 arrival_refusals += 1
+                arrival_fails.add((robot_node_id, next_node_id))
                 MISSION_STATS['arrival_refusals'] += 1
                 n_us_a, fan_txt_a = describe_escape_fan(fan_arr)
                 print(f"[ARRIVO] Il passo di {step_len:.2f} m verso ({move_x:.2f}, {move_y:.2f}) "
@@ -3225,7 +3421,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                       f"Non ci vado ({arrival_refusals}/{MAX_ARRIVAL_REFUSALS}), scarto il tratto "
                       f"{robot_node_id}->{next_node_id} e ripianifico.")
                 mark_edge_blocked_soft(prm_graph, robot_node_id, next_node_id)
-                new_ids = prm_graph.find_path_dijkstra(robot_node_id, goal_id)
+                new_ids = prm_graph.find_path_dijkstra(robot_node_id, goal_id, max_edges=MAX_PATH_EDGES)
                 if new_ids is not None and len(new_ids) > 1:
                     path_waypoints = _waypoints_from_ids(new_ids)
                     full_path_coords = [prm_graph.get_node_position(nid) for nid in new_ids]
@@ -3451,7 +3647,9 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 ax, ay, _, _ = spotUtils.getPosition(robot_state_client)
                 env._traveled_arcs.append((robot_x, robot_y, ax, ay))
 
-            prm_graph.mark_edge_invalid(robot_node_id, next_node_id)
+            # 2026-10-08: il movimento e' fallito MECCANICAMENTE, la prova piu' forte che
+            # esista -- costo infinito persistente, senza toccare il grafo.
+            prm_graph.penalize_edge(robot_node_id, next_node_id, float('inf'), persistent=True)
             print(f"[INFO] Tratto {robot_node_id}-{next_node_id} scartato dopo fallimento fisico.")
             if verification_tracker is not None:
                 verification_tracker.clear_path()
@@ -3819,6 +4017,14 @@ def easy_walk(options):
                   f"{ARRIVAL_EXIT_CHECK_MAX_STEP_M:.2f} m o con obstacle_distance sotto "
                   f"{ARRIVAL_EXIT_CHECK_OD_M:.2f} m, max {MAX_ARRIVAL_REFUSALS} rifiuti. "
                   f"Scarto da [SUBITO] e da [ARRIVO]: NON permanente")
+            print(f"[CONFIG] GRAFO: nodi e archi NON si modificano durante la missione; cio' "
+                  f"che si osserva diventa COSTO (strato delle penalita' in prm_graph). Archi "
+                  f"al massimo {PRM_MAX_EDGE_LENGTH_M:.2f} m, cioe' sempre dentro il campo "
+                  f"visivo. Tetto di {MAX_PATH_EDGES} archi per percorso. Celle mai esplorate "
+                  f"non attraversabili (penalita' {PENALTY_UNEXPLORED_CELL:.0e}): se l'unica "
+                  f"strada ci passa, quella cella diventa la prossima di frontiera. Celle "
+                  f"tentate e bloccate: costo infinito. Soste riusate entro "
+                  f"{prm_graph.STOP_NODE_REUSE_M:.2f} m")
             print(f"[CONFIG] RITORNI: briciola GraphNav ogni "
                   f"{GRAPHNAV_WAYPOINT_MIN_SPACING_M:.2f} m, ritorno con GraphNav fino a "
                   f"{GRAPHNAV_MAX_BACKTRACK_HOPS} waypoint indietro riprovando la "
@@ -3898,7 +4104,12 @@ def easy_walk(options):
         gb_sampler = global_sampler.GlobalSampler(env, 5)
         gb_sampler.sample_global_grid()
 
-        prm = prm_graph.PRM(min_edge_length=0.5, max_edge_length=2, connection_radius=3)
+        # 2026-10-08, richiesta dell'utente: archi al massimo 1.5 m, cosi' un arco sta
+        # SEMPRE dentro il campo visivo del robot e il fronte sicuro lo verifica per
+        # intero. La finestra locale e' 128 celle x 3 cm = 3.84 m di lato, cioe' ~1.9 m
+        # di raggio dal robot: un arco da 2 m poteva uscirne.
+        prm = prm_graph.PRM(min_edge_length=0.5, max_edge_length=PRM_MAX_EDGE_LENGTH_M,
+                            connection_radius=PRM_MAX_EDGE_LENGTH_M)
         _MISSION_CTX['prm'] = prm  # per il riepilogo di fine missione (anche se interrotta)
         prm.add_nodes_from_sampler(gb_sampler)
 
@@ -3950,7 +4161,26 @@ def easy_walk(options):
             borders_in_frontier = [b for b in borders if any((f[0] == b[0] and f[1] == b[1]) for f in frontier)]
 
             if len(borders_in_frontier) != 0:
-                selected_border = min(borders_in_frontier, key=lambda b: b[2])
+                # Cella suggerita da un tentativo precedente (2026-10-08): se l'unica strada
+                # verso una cella passava da una cella ignota, quella ignota e' da esplorare
+                # per prima -- attraversarla di nascosto sarebbe esplorarla senza deciderlo.
+                # Vale solo se e' ancora fra i bordi di frontiera: niente scorciatoie alla
+                # logica di priorita'.
+                suggested = getattr(env, '_suggested_frontier_cell', None)
+                env._suggested_frontier_cell = None
+                pick = None
+                if suggested is not None:
+                    pick = next((b for b in borders_in_frontier
+                                 if (b[0], b[1]) == tuple(suggested)), None)
+                    if pick is not None:
+                        print(f"[FRONTIERA] Esploro prima la cella {tuple(suggested)}: era "
+                              f"l'unica via verso la cella rimandata, e una cella ignota non "
+                              f"si usa come corridoio.")
+                    else:
+                        print(f"[FRONTIERA] La cella suggerita {tuple(suggested)} non e' fra i "
+                              f"bordi di frontiera raggiungibili: scelgo per priorita'.")
+                selected_border = pick if pick is not None else min(borders_in_frontier,
+                                                                    key=lambda b: b[2])
                 # Cella da cui si tenta l'ingresso: serve dopo per segnare il LATO provato.
                 # Prima si usava la cella in cui il robot si trovava DOPO il tentativo, che una
                 # ritirata o un passo parziale possono aver cambiato (lato sbagliato o nullo).
