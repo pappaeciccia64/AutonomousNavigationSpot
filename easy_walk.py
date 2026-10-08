@@ -3228,14 +3228,15 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             # una cella bloccante e' un'informazione da usare: l'arco si scarta e si cerca
             # subito un percorso che passi da un'altra parte. Le scansioni da ferma
             # restano come ultima rete, per dichiarare la cella irraggiungibile.
-            # 2026-10-08: 'fine_dati' e' entrato nell'elenco. Da quando i passi parziali
-            # non esistono piu', un arco che il fronte non riesce a confermare per intero
-            # perche' i dati finiscono prima non si percorre; e riguardare da fermo non
-            # aggiunge nulla, perche' il bordo dei dati sta dove sta finche' il robot non si
-            # muove. Tanto vale scartare l'arco e provare un'altra direzione subito, invece
-            # di spendere tre scansioni per arrivare alla stessa conclusione.
+            # 2026-10-08, correzione di Marco: si scartano SOLO gli archi che si vedono
+            # bloccati. 'fine_dati' non e' un blocco, e' un'informazione che non e' ancora
+            # arrivata -- e con archi da PRM_MAX_EDGE_LENGTH_M l'arco che parte dal nodo in
+            # cui il robot si trova sta sempre dentro cio' che il fronte conferma (minimo
+            # misurato 1.26 m), quindi un fronte fermato da 'fine_dati' riguarda un arco piu'
+            # avanti sul percorso, che si rivedra' dopo il movimento e da piu' vicino.
+            # Scartarlo adesso vorrebbe dire condannare un arco per non averlo ancora visto.
             if (early_replans < MAX_EARLY_REPLANS
-                    and frontier['reason'] in ('ostacolo', 'rugosita', 'pendenza', 'fine_dati')
+                    and frontier['reason'] in ('ostacolo', 'rugosita', 'pendenza')
                     and path_waypoints):
                 poly_now = [(robot_x, robot_y)] + [(x, y) for _, x, y in path_waypoints]
                 _, seg_blk = arcVerification.point_along(poly_now, frontier['dist'])
