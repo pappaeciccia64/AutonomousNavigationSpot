@@ -201,6 +201,8 @@ def _set_mission_z0(robot_state_client, z_body):
 #                                   l'obiettivo (es. un muro appena oltre), ci si accontenta.
 #   MAX_LOOP_ITERATIONS          -- salvaguardia anti-stallo del ciclo.
 # ==================================================================
+# 2026-10-08: non serve piu' a decidere (i passi parziali sono stati aboliti, vedi
+# decide_next_move), resta solo come soglia di "avanzamento trascurabile" nei log.
 MIN_PARTIAL_STEP_M = 0.40
 FRONTIER_BLOCK_CONFIRM_SCANS = 3
 FRONTIER_RESCAN_WAIT_S = 0.3
@@ -278,11 +280,17 @@ PRM_NODE_MIN_CLEARANCE_M = spotGrid.FRONTIER_CLEARANCE_M   # 0.30
 # si osserva diventa COSTO (vedi lo strato dei costi in prm_graph.PRM). Qui stanno i
 # numeri di quella politica.
 #
-# Lunghezza massima di un arco: deve starci dentro il campo visivo, cosi' il fronte
-# sicuro verifica l'arco per intero invece di fidarsi di dati fuori finestra.
-PRM_MAX_EDGE_LENGTH_M = 1.5
+# Lunghezza massima di un arco. Non e' il campo visivo a dettarla, ma cio' che il fronte
+# riesce a CONFERMARE: un arco si percorre solo se e' libero per intero (vedi
+# decide_next_move), quindi deve essere piu' corto dell'avanzamento che il fronte concede
+# nel caso peggiore, altrimenti il robot resta fermo per mancanza di dati invece che per un
+# ostacolo. Misurato sulla missione del 08-10 10:47, sui 32 fronti fermati da 'fine_dati':
+# avanzamento concesso minimo 1.26 m, mediano 1.34; 29 su 32 sotto 1.5 m, ZERO sotto 1.2.
+# Da cui 1.2 m, con 6 cm di margine sul caso peggiore misurato. Se in prova compaiono
+# [FRONTE] con motivo 'fine_dati' su archi interi, questo e' il numero da abbassare.
+PRM_MAX_EDGE_LENGTH_M = 1.2
 # Tetto sul numero di archi di un percorso: un giro piu' lungo di cosi' non si fa, la cella
-# si rimanda. Con archi da 1.5 m sono ~22 m di cammino: una cella e' 5 m e la griglia di
+# si rimanda. Con archi da 1.2 m sono ~18 m di cammino: una cella e' 5 m e la griglia di
 # missione ne ha poche, quindi per entrare in una cella adiacente ne servono 4-8 e il tetto
 # morde solo sui giri veri. Tarato sul caso misurato (missione 08-10 10:47, nodo 130): il
 # giro ammissibile verso la cella (0,3) era di 22 archi su un grafo con archi da 2 m, cioe'
@@ -1559,7 +1567,9 @@ def decide_next_move(robot_xy, path_waypoints, frontier, no_progress_count):
 
     Restituisce un dict con 'kind':
       'reached_node'  il prossimo nodo e' gia' sotto il robot (< 5 cm): consumarlo e basta
-      'move'          muoversi verso 'target'; 'full' = True se il target e' il nodo stesso
+      'move'          muoversi verso 'target', che e' SEMPRE il nodo stesso: un arco si
+                      percorre solo se il fronte lo conferma libero per intero. 'full' resta
+                      nel dict, sempre True, perche' i dati salvati lo registrano.
       'arrived'       non si puo' avanzare, ma l'obiettivo finale e' entro tolleranza
       'wait'          non si puo' avanzare: riscansionare da fermi prima di concludere
       'blocked'       non si puo' avanzare da FRONTIER_BLOCK_CONFIRM_SCANS scansioni
@@ -1576,11 +1586,15 @@ def decide_next_move(robot_xy, path_waypoints, frontier, no_progress_count):
     adv = arcVerification.allowed_advance(frontier)
     if adv >= seg_len - 0.02:
         return {'kind': 'move', 'target': (nx, ny), 'full': True, 'dist': seg_len}
-    if adv >= MIN_PARTIAL_STEP_M:
-        f = adv / seg_len
-        return {'kind': 'move', 'target': (rx + f * (nx - rx), ry + f * (ny - ry)),
-                'full': False, 'dist': adv}
 
+    # 2026-10-08, richiesta di Marco. Prima, se il fronte confermava solo una parte
+    # dell'arco, il robot percorreva quella parte e piantava un nodo di sosta dove si era
+    # fermato: nodi che il pianificatore non ha mai scelto, e su cui i professori hanno
+    # ragione (il grafo cambia a missione in corso e le proprieta' di ottimalita' si
+    # perdono). Ora la regola e' secca: arco libero per intero -> si va; altrimenti si
+    # scarta e si cerca un'altra strada. Nessun passo a pezzi, nessun nodo nuovo.
+    # Da qui si cade nei rami 'arrived' / 'wait' / 'blocked', e il ramo 'wait' scarta
+    # l'arco e ripianifica subito (vedi [SUBITO] nel ciclo).
     if frontier['path_len'] <= GOAL_REACHED_TOLERANCE_M:
         return {'kind': 'arrived'}
     if no_progress_count + 1 < FRONTIER_BLOCK_CONFIRM_SCANS:
@@ -2695,6 +2709,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
     early_replans = 0       # ripianificazioni alla prima cella bloccante (ramo 'wait')
     arrival_refusals = 0    # passi rifiutati perche' la posa d'arrivo non ha uscite
     arrival_fails = set()   # (nodo, vicino) rifiutati da [ARRIVO]: si riapplicano ogni ciclo
+    abort_fails = set()     # (nodo, vicino) interrotti a meta' movimento: idem
     goal_repicks = 0        # quante volte si e' riscelto il punto obiettivo
     tried_goals = []        # punti obiettivo gia' provati e risultati irraggiungibili
 
@@ -2843,6 +2858,12 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         # 3161->170; e 139->155, 139->185, 139->155. Tre coppie in ping-pong, perche' la
         # penalita' veniva azzerata e nessuno la riscriveva.
         for (from_id, to_id) in arrival_fails:
+            if from_id == robot_node_id:
+                mark_edge_blocked_soft(prm_graph, from_id, to_id)
+
+        # Idem per gli archi su cui il movimento e' stato interrotto a meta' (2026-10-08):
+        # senza questo, scartato l'arco e tornati sul nodo, il ciclo dopo lo riproverebbe.
+        for (from_id, to_id) in abort_fails:
             if from_id == robot_node_id:
                 mark_edge_blocked_soft(prm_graph, from_id, to_id)
 
@@ -3207,8 +3228,14 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             # una cella bloccante e' un'informazione da usare: l'arco si scarta e si cerca
             # subito un percorso che passi da un'altra parte. Le scansioni da ferma
             # restano come ultima rete, per dichiarare la cella irraggiungibile.
+            # 2026-10-08: 'fine_dati' e' entrato nell'elenco. Da quando i passi parziali
+            # non esistono piu', un arco che il fronte non riesce a confermare per intero
+            # perche' i dati finiscono prima non si percorre; e riguardare da fermo non
+            # aggiunge nulla, perche' il bordo dei dati sta dove sta finche' il robot non si
+            # muove. Tanto vale scartare l'arco e provare un'altra direzione subito, invece
+            # di spendere tre scansioni per arrivare alla stessa conclusione.
             if (early_replans < MAX_EARLY_REPLANS
-                    and frontier['reason'] in ('ostacolo', 'rugosita', 'pendenza')
+                    and frontier['reason'] in ('ostacolo', 'rugosita', 'pendenza', 'fine_dati')
                     and path_waypoints):
                 poly_now = [(robot_x, robot_y)] + [(x, y) for _, x, y in path_waypoints]
                 _, seg_blk = arcVerification.point_along(poly_now, frontier['dist'])
@@ -3271,7 +3298,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                       "lascio decidere il fronte.")
 
             no_progress += 1
-            print(f"[FRONTE] Non posso avanzare nemmeno di {MIN_PARTIAL_STEP_M:.2f} m: riguardo "
+            print(f"[FRONTE] Nessun arco confermato libero per intero da qui ({frontier['reason']}, "
+                  f"avanzamento concesso {arcVerification.allowed_advance(frontier):.2f} m): riguardo "
                   f"da fermo ({no_progress}/{FRONTIER_BLOCK_CONFIRM_SCANS} scansioni).")
             time.sleep(FRONTIER_RESCAN_WAIT_S)
             continue
@@ -3397,8 +3425,6 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
 
         # --- decision['kind'] == 'move' ----------------------------------------------------
         move_x, move_y = decision['target']
-        is_partial_step = not decision['full']
-
         # --- Controllo preventivo sulla posa d'arrivo (2026-10-07) -------------------------
         # Solo per i passi corti o verso spazi stretti: sono quelli con cui si entra negli
         # angoli senza uscita. Nella missione del 2026-10-07 14:5x l'ultimo passo prima della
@@ -3432,12 +3458,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
 
         no_progress = 0
         retreats_in_a_row = 0   # 2026-10-07: un avanzamento vero rompe la catena di arretramenti
-        if is_partial_step:
-            print(f"[PASSO PARZIALE] Verso il nodo {next_node_id}: avanzo di {decision['dist']:.2f} m "
-                  f"su {np.hypot(next_x - robot_x, next_y - robot_y):.2f} fino a "
-                  f"({move_x:.2f}, {move_y:.2f}), poi riguardo con una scansione fresca.")
-        else:
-            print(f"[OK] Tratto {robot_node_id}->{next_node_id} confermato libero dal fronte. Eseguo movimento...")
+        print(f"[OK] Tratto {robot_node_id}->{next_node_id} confermato libero PER INTERO dal "
+              f"fronte ({decision['dist']:.2f} m). Eseguo movimento...")
 
         vision_tform_body_current = get_a_tform_b(lg_proto_up.local_grid.transforms_snapshot, VISION_FRAME_NAME,
                                                   BODY_FRAME_NAME)
@@ -3601,18 +3623,12 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 env._traveled_arcs = []
             env._traveled_arcs.append((robot_x, robot_y, move_x, move_y))
 
-            if is_partial_step:
-                ax, ay, _, _ = spotUtils.getPosition(robot_state_client)
-                robot_node_id = prm_graph.add_stop_node(
-                    ax, ay, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
-                    came_from=robot_node_id, label="sosta (passo parziale)")
-                prm_graph.set_robot_node(robot_node_id, 0.0)
-            else:
-                prm_graph.traversed_edges.add((min(robot_node_id, next_node_id),
-                                               max(robot_node_id, next_node_id)))
-                robot_node_id = next_node_id
-                prm_graph.set_robot_node(robot_node_id, 0.0)
-                path_waypoints.pop(0)
+            # Si arriva sempre sul nodo: l'arco era confermato libero per intero.
+            prm_graph.traversed_edges.add((min(robot_node_id, next_node_id),
+                                           max(robot_node_id, next_node_id)))
+            robot_node_id = next_node_id
+            prm_graph.set_robot_node(robot_node_id, 0.0)
+            path_waypoints.pop(0)
 
             # Briciola per i ritorni (2026-10-07): un waypoint GraphNav ogni
             # GRAPHNAV_WAYPOINT_MIN_SPACING_M di strada percorsa.
@@ -3623,15 +3639,43 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             print(f"[STOP] Movimento verso ({move_x:.2f}, {move_y:.2f}) interrotto dopo "
                   f"{distance_traveled:.2f}m: {abort_state['reason']}.")
             MISSION_STATS['frontier_aborts'] += 1
+
+            # 2026-10-08, richiesta di Marco: niente nodi nuovi. Il robot e' a META' di un
+            # arco esistente, e prima qui nasceva una "sosta (arresto)". Ora si ripercorre
+            # all'indietro il pezzo appena fatto (al massimo PRM_MAX_EDGE_LENGTH_M, strada
+            # vista libera un istante prima e ricontrollata sui dati freschi dalla ritirata)
+            # e si ripianifica dal nodo di partenza, che il grafo ha gia'. L'arco si scarta
+            # in modo non permanente: l'arresto significa che una scansione fresca lo
+            # contraddice, non che sia condannato per la missione.
+            mark_edge_blocked_soft(prm_graph, robot_node_id, next_node_id)
+            abort_fails.add((robot_node_id, next_node_id))
+            if verification_tracker is not None:
+                verification_tracker.clear_path()
             if distance_traveled > 0.05:
                 if not hasattr(env, '_traveled_arcs'):
                     env._traveled_arcs = []
                 ax, ay, _, _ = spotUtils.getPosition(robot_state_client)
                 env._traveled_arcs.append((robot_x, robot_y, ax, ay))
-                robot_node_id = prm_graph.add_stop_node(
-                    ax, ay, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
-                    came_from=robot_node_id, label="sosta (arresto)")
-                prm_graph.set_robot_node(robot_node_id, 0.0)
+                done_back, dist_back = retreat_along_traveled_path(
+                    env, robot_state_client, command_client, max_segments=1,
+                    mobility_kwargs=mobility_kwargs, pts=pts_up,
+                    obstacle_mask=obstacle_mask_updated)
+                if done_back >= 1:
+                    print(f"[STOP] Tornato sul nodo {robot_node_id} ({dist_back:.2f} m "
+                          f"all'indietro): ripianifico da un nodo che il grafo ha gia', "
+                          f"senza crearne di nuovi.")
+                    prm_graph.set_robot_node(robot_node_id, 0.0)
+                else:
+                    # Non si e' potuto tornare: restare a meta' arco senza un nodo
+                    # renderebbe il robot invisibile al pianificatore. La sosta qui e' il
+                    # ripiego onesto, e nel log si vede che e' stata necessaria.
+                    ax, ay, _, _ = spotUtils.getPosition(robot_state_client)
+                    robot_node_id = prm_graph.add_stop_node(
+                        ax, ay, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
+                        came_from=robot_node_id, label="sosta (arresto, rientro impossibile)")
+                    prm_graph.set_robot_node(robot_node_id, 0.0)
+                    print(f"[STOP] Rientro sul nodo di partenza non possibile: resto qui "
+                          f"(nodo {robot_node_id}).")
             continue
 
         else:
@@ -4019,8 +4063,10 @@ def easy_walk(options):
                   f"Scarto da [SUBITO] e da [ARRIVO]: NON permanente")
             print(f"[CONFIG] GRAFO: nodi e archi NON si modificano durante la missione; cio' "
                   f"che si osserva diventa COSTO (strato delle penalita' in prm_graph). Archi "
-                  f"al massimo {PRM_MAX_EDGE_LENGTH_M:.2f} m, cioe' sempre dentro il campo "
-                  f"visivo. Tetto di {MAX_PATH_EDGES} archi per percorso. Celle mai esplorate "
+                  f"al massimo {PRM_MAX_EDGE_LENGTH_M:.2f} m, cosi' il fronte li conferma per "
+                  f"intero: un arco si percorre solo se e' libero TUTTO, altrimenti si scarta "
+                  f"-- nessun passo parziale, nessun nodo di sosta a meta' arco. Tetto di "
+                  f"{MAX_PATH_EDGES} archi per percorso. Celle mai esplorate "
                   f"non attraversabili (penalita' {PENALTY_UNEXPLORED_CELL:.0e}): se l'unica "
                   f"strada ci passa, quella cella diventa la prossima di frontiera. Celle "
                   f"tentate e bloccate: costo infinito. Soste riusate entro "
@@ -4183,7 +4229,8 @@ def easy_walk(options):
                                                                     key=lambda b: b[2])
                 # Cella da cui si tenta l'ingresso: serve dopo per segnare il LATO provato.
                 # Prima si usava la cella in cui il robot si trovava DOPO il tentativo, che una
-                # ritirata o un passo parziale possono aver cambiato (lato sbagliato o nullo).
+                # ritirata o un rientro dopo un arresto possono aver cambiato (lato sbagliato
+                # o nullo).
                 origin_row, origin_col = robot_row, robot_col
                 check = attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client, command_client, env,
                                                          selected_border[0], selected_border[1], gb_sampler, prm,
