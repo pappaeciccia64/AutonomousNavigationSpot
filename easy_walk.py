@@ -139,12 +139,14 @@ def _timing_add(phase, seconds):
 #                              toccare altro: serve per confrontare le due versioni sulla
 #                              stessa missione.
 #   MISSION_LATTICE_SPACING_M  passo fra i nodi, default mission_graph.DEFAULT_LATTICE_SPACING_M
-#                              = 0.5 m (il piu' fitto ammesso da PRM_MIN_EDGE_M). None =
-#                              mission_graph.suggested_spacing() (celle da 5 m -> 0.625 m).
-#                              Viene comunque arrotondato a cell_size/n, mai sotto
-#                              PRM_MIN_EDGE_M. Da riga di comando: --spacing.
-#   MISSION_LATTICE_RINGS      anelli di vicini collegati (2 = 8 vicini). None = tutti
-#                              quelli entro max_edge_length. Da riga di comando: --rings.
+#                              = 0.25 m. Puo' stare sotto PRM_MIN_EDGE_M: i vicini piu'
+#                              corti di PRM_MIN_EDGE_M non si collegano (vedi mission_graph,
+#                              SPAZIATURA e ANELLI). None = mission_graph.suggested_spacing().
+#                              Arrotondato a cell_size/n. Da riga di comando: --spacing.
+#   MISSION_LATTICE_RINGS      anelli di vicini collegati: k = tutti i nodi entro la diagonale
+#                              del k-esimo anello, purche' a >= PRM_MIN_EDGE_M. Con passo 0.25
+#                              e k=2: archi da 0.50, 0.56 e 0.71 m in 16 direzioni. None =
+#                              tutti quelli entro max_edge_length. Da riga di comando: --rings.
 #   MISSION_GRID_ROWS/COLS, MISSION_CELL_SIZE_M  dimensione della missione, default da
 #                              mission_graph (2 x 4 celle da 5 m). Si cambiano con
 #                              --rows --cols --cell oppure SPOT_MISSION_GRID (vedi easy_walk).
@@ -4554,7 +4556,7 @@ def easy_walk(options):
 def _parse_args(argv=None):
     """
     Argomenti da riga di comando. Tutti facoltativi: senza argomenti la missione usa i
-    default di mission_graph (2 x 4 celle da 5 m, passo 0.5 m, 2 anelli).
+    default di mission_graph (2 x 4 celle da 5 m, passo 0.25 m, 2 anelli).
     """
     import argparse
     p = argparse.ArgumentParser(description="Missione di esplorazione autonoma con Spot")
@@ -4565,8 +4567,9 @@ def _parse_args(argv=None):
     p.add_argument('--cell', type=float, default=None,
                    help=f"lato della cella in m (default {MISSION_CELL_SIZE_M:g})")
     p.add_argument('--spacing', type=float, default=None,
-                   help=f"passo fra i nodi del reticolo in m, arrotondato a cell/n e mai sotto "
-                        f"{PRM_MIN_EDGE_M:g} (default {MISSION_LATTICE_SPACING_M}; 0 = suggerito)")
+                   help=f"passo fra i nodi del reticolo in m, arrotondato a cell/n; gli archi "
+                        f"restano >= {PRM_MIN_EDGE_M:g} m (default {MISSION_LATTICE_SPACING_M}; "
+                        f"0 = suggerito)")
     p.add_argument('--rings', default=None,
                    help=f"anelli di vicini collegati, o 'tutti' (default {MISSION_LATTICE_RINGS})")
     a = p.parse_args(argv)

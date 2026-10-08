@@ -46,31 +46,32 @@ PERCHE' SOLO RETTANGOLARE -- e perche' il triangolare e' stato scartato (2026-10
 SPAZIATURA
   Il passo richiesto viene SEMPRE arrotondato a cell_size/n con n intero: e' la condizione
   che rende ogni centro cella un nodo del reticolo. La riga [GRAFO] del log dice il passo
-  effettivo. Deve stare fra min_edge_length e max_edge_length del PRM (0.5 e 2.0 oggi).
-  Default: DEFAULT_LATTICE_SPACING_M = 0.5 m (= 5/10), il passo piu' fitto che non scende
-  sotto min_edge_length. Con spacing_m=None si usa invece suggested_spacing(), il passo per
-  cui la COPERTURA vale circa min_edge_length (cell_size/8 = 0.625 m con celle da 5 m).
-  Se l'arrotondamento a cell_size/n finisse sotto min_edge_length (es. 0.5 m su celle da
-  2.75 m -> 2.75/6 = 0.458), si prende il divisore precedente: il passo resta >= soglia.
+  effettivo. Default: DEFAULT_LATTICE_SPACING_M = 0.25 m (= 5/20).
 
-  PERCHE' NON SOTTO min_edge_length. PRM._evaluate_and_add_edge rifiuta gli archi piu'
-  corti di min_edge_length (0.5 m), e quella soglia non e' arbitraria:
-  compute_arc_slope_profile misura la pendenza con una differenza centrata su una base di
-  ~0.48 m, quindi un arco piu' corto si vedrebbe misurare la pendenza su una finestra piu'
-  lunga dell'arco stesso -- su terreno che non percorrera'. Per questo il passo si scegle
-  sopra la soglia invece di abbassare la soglia.
+  PASSO SOTTO min_edge_length (2026-10-08, missione 08-10 15:40). Il passo PUO' essere piu'
+  corto di min_edge_length: i vicini troppo vicini semplicemente non si collegano, e gli
+  archi partono dagli anelli piu' esterni (vedi ANELLI). La soglia sugli archi resta 0.5 m
+  perche' serve alla pendenza (un arco troppo corto non dice nulla del terreno); a cosa
+  serve il passo fitto e' un'altra cosa: avere SEMPRE una fila di nodi dentro un corridoio.
+  Nella missione del 08-10 15:40 il corridoio di partenza aveva ~45 cm di linee centrali
+  ammesse (0.30 m di spazio per lato) e le due file del reticolo a passo 0.5 cadevano
+  entrambe fuori: il corridoio nel grafo non esisteva. A passo 0.25 ogni striscia larga
+  piu' di 0.25 m contiene una fila.
 
-ANELLI -- quante connessioni
-  Gli archi si fermano all'anello `rings` di vicini: 4 vicini a s, altri 4 a s*sqrt(2),
-  altri 4 a 2s, e cosi' via. Default 2, cioe' 8 vicini (le quattro direzioni ortogonali
-  piu' le diagonali).
-  Il solo anello 1 e' connesso ma ogni percorso diventa una scaletta a 90 gradi e un nodo
-  scartato isola i suoi vicini; spingersi fino ai 2.0 m di max_edge_length triplica gli
-  archi per guadagnare poco, perche' i tratti lunghi li produce gia'
-  easy_walk.shortcut_index, che salta i nodi intermedi fino a 2.5 m quando il FRONTE SICURO
-  conferma il tratto diretto sui dati DAL VIVO -- informazione migliore di un arco lungo
-  giudicato da lontano e spesso fuori finestra. rings=None toglie il limite e arriva fino a
-  min(connection_radius, max_edge_length).
+ANELLI -- quante connessioni (ridefiniti il 2026-10-08)
+  L'anello k e' il quadrato di nodi a k passi di indice (anello 1 = gli 8 intorno, anello 2
+  = i 16 del giro dopo, ...). `rings` = k collega ogni nodo a tutti i nodi entro la
+  diagonale dell'anello k, cioe' entro k*s*sqrt(2), purche' l'arco sia lungo almeno
+  min_edge_length. Il limite e' un cerchio e non il quadrato per coerenza con
+  PRM.refresh_local_edge_weights, che attorno al robot ricrea le coppie per distanza.
+  Con passo 0.25 e min_edge 0.5:
+    rings=2 -> archi da 0.50 (dritto), 0.56 (la "mossa del cavallo", 27 gradi) e 0.71 m
+               (diagonale): 16 direzioni invece di 8, 16 vicini per nodo;
+    rings=3 -> in piu' 0.75, 0.79, 0.90, 1.00, 1.03, 1.06 m: tratti piu' lunghi, ~2.5
+               volte gli archi.
+  I tratti lunghi in rettilineo li produce comunque easy_walk.shortcut_index, che salta i
+  nodi intermedi fino a 2.5 m quando il FRONTE SICURO conferma il tratto sui dati dal vivo.
+  rings=None arriva fino a min(connection_radius, max_edge_length).
 
 ANCORAGGIO
   Il reticolo e' ancorato all'ORIGINE, che per come e' scritta environmentMap e' insieme la
@@ -84,8 +85,11 @@ ALIASING -- il limite da conoscere
   di nodi, nel grafo non esiste. E' l'unico modo in cui la regolarita' e' peggiore del
   caso, ed e' il motivo per cui la spaziatura e' un parametro. Riferimento: il fronte
   sicuro pretende spotGrid.FRONTIER_CLEARANCE_M = 0.30 m di obstacle_distance dalla linea
-  centrale, quindi un corridoio utile e' largo almeno 0.60 m; a passo 0.714 m ogni punto
-  dell'area ha un nodo entro 0.51 m.
+  centrale, quindi un corridoio utile e' largo almeno 0.60 m. Le linee centrali ammesse
+  sono una striscia larga (larghezza - 0.60 m): perche' ci cada sempre una fila di nodi il
+  passo deve essere piu' corto di quella striscia. Missione del 08-10 15:40: striscia di
+  ~45 cm, file a passo 0.5 entrambe fuori, corridoio inesistente nel grafo; a passo 0.25
+  (default dal 2026-10-08) ci sono due file dentro.
 
 COME SI PASSA A SPOT
       mg = mission_graph.build_mission_graph(env=env)   # ~30 ms: nodi + adiacenza
@@ -107,7 +111,7 @@ environmentMap, prm_graph e matplotlib sono importati dentro le funzioni che li 
 
 Da riga di comando:
     python3 mission_graph.py --confronto
-    python3 mission_graph.py --spacing 0.71 --rings 2 --preview p.png --zoom -3.2 3.2 -3.2 3.2
+    python3 mission_graph.py --spacing 0.25 --rings 2 --preview p.png --zoom -2 2 -2 2
     python3 mission_graph.py --rows 2 --cols 3 --cell 3
     python3 mission_graph.py --save reticolo_2x4x5.npz
     python3 mission_graph.py --tempi
@@ -129,12 +133,12 @@ LATTICE_RINGS = 2
 # dagli stessi numeri. Per cambiarli per una sola missione: argomenti di easy_walk.py
 # (--rows --cols --cell --spacing --rings) o SPOT_MISSION_GRID="righe,colonne,lato".
 #   2 x 4 celle da 5 m = 10 m a sinistra x 20 m davanti al robot (colonne in avanti).
-#   Passo 0.5 m = 5/10: il piu' fitto ammesso con min_edge_length 0.5 (vedi SPAZIATURA);
-#   861 nodi e ~3260 archi sulla 2x4.
+#   Passo 0.25 m = 5/20 con archi da 0.5 m in su (vedi SPAZIATURA e ANELLI): 3321 nodi,
+#   ~26 mila archi sulla 2x4 con rings=2.
 DEFAULT_MISSION_ROWS = 2
 DEFAULT_MISSION_COLS = 4
 DEFAULT_CELL_SIZE_M = 5.0
-DEFAULT_LATTICE_SPACING_M = 0.5
+DEFAULT_LATTICE_SPACING_M = 0.25
 
 # Stessi default del PRM in uso (prm_graph.PRM(min_edge_length=0.5, max_edge_length=2,
 # connection_radius=3)). Passati come argomenti, non importati, per non trascinarsi dietro
@@ -464,7 +468,7 @@ class MissionGraph:
             f"max {int(self.degrees.max()) if self.n_nodes else 0})",
             f"[GRAFO] Lunghezze degli archi {lo:.2f}-{hi:.2f} m [{rings}], "
             f"min_edge_length={self.min_edge_m:.2f} m, "
-            f"{self.n_short_pairs} coppie scartate perche' troppo corte",
+            f"{self.n_short_pairs} coppie di vicini troppo vicini, non collegate",
             f"[GRAFO] Copertura {self.covering_m:.2f} m (un corridoio utile al fronte e' "
             f"largo almeno 0.60 m)",
             f"[GRAFO] Obiettivi di cella: {len(self.cell_center_ids)} su "
@@ -478,11 +482,10 @@ class MissionGraph:
         if self.origin_node_id is not None:
             out.append(f"[GRAFO] Accensione = centro della cella di partenza = nodo "
                        f"{self.origin_node_id} (nessun nodo di boot da aggiungere)")
-        if self.n_short_pairs:
-            out.append(f"[GRAFO] ATTENZIONE: il passo {self.spacing_m:.4f} m e' sotto "
-                       f"min_edge_length={self.min_edge_m:.2f} m, quindi il primo anello del "
-                       f"reticolo viene scartato dal PRM: il grafo resta appeso agli anelli "
-                       f"successivi, o spezzato.")
+        if not self.is_connected or self.n_isolated:
+            out.append(f"[GRAFO] ATTENZIONE: il reticolo non e' connesso con questi parametri "
+                       f"(passo {self.spacing_m:.4f} m, archi {self.min_edge_m:.2f}-"
+                       f"{self.reach_m:.2f} m): aumenta gli anelli.")
         return "\n".join(out)
 
     def preview_png(self, path, show_cells=True, zoom=None):
@@ -591,11 +594,11 @@ def build_mission_graph(rows=DEFAULT_MISSION_ROWS, cols=DEFAULT_MISSION_COLS,
         rows, cols, cell_size_m: la DIMENSIONE DELLA MISSIONE (default DEFAULT_MISSION_*,
             2 x 4 celle da 5 m, gli stessi di easy_walk). Ignorati se si passa `env`.
         spacing_m: FLAG DELLA SPAZIATURA, in metri; viene arrotondata a cell_size/n (vedi
-            align_spacing), mai sotto min_edge_length. Default DEFAULT_LATTICE_SPACING_M
-            (0.5 m); None = suggested_spacing().
-        rings: FLAG DELLE CONNESSIONI -- a quanti gusci di vicini arrivano gli archi
-            (2 = 8 vicini). None = tutti quelli entro min(connection_radius,
-            max_edge_length), come faceva build_graph.
+            align_spacing). Puo' essere sotto min_edge_length (vedi SPAZIATURA). Default
+            DEFAULT_LATTICE_SPACING_M (0.25 m); None = suggested_spacing().
+        rings: FLAG DELLE CONNESSIONI -- k = tutti i nodi entro la diagonale del k-esimo
+            anello (k*passo*sqrt(2)), con archi >= min_edge_length (vedi ANELLI). None =
+            tutti quelli entro min(connection_radius, max_edge_length).
         origin_xy, origin_yaw: posa del robot all'avvio nel frame VISION. Il reticolo e'
             ancorato qui. Ignorati se si passa `env`.
         start_cell: cella in cui il robot si accende (come env.start_cell).
@@ -624,10 +627,6 @@ def build_mission_graph(rows=DEFAULT_MISSION_ROWS, cols=DEFAULT_MISSION_COLS,
         raise ValueError("la spaziatura deve essere positiva")
     requested = float(spacing_m)
     spacing_m, n_div = align_spacing(requested, cell_size_m)
-    # Mai sotto min_edge_length: il PRM scarterebbe tutto il primo anello (vedi SPAZIATURA).
-    while n_div > 1 and spacing_m < float(min_edge_length) - 1e-9:
-        n_div -= 1
-        spacing_m = cell_size_m / n_div
     if abs(spacing_m - requested) > 1e-12 and verbose:
         print(f"[GRAFO] Passo allineato al lato cella: {requested:.3f} -> {spacing_m:.4f} m "
               f"(= {cell_size_m:.1f}/{n_div}); e' la condizione per cui ogni centro cella "
@@ -640,21 +639,18 @@ def build_mission_graph(rows=DEFAULT_MISSION_ROWS, cols=DEFAULT_MISSION_COLS,
         rings = int(rings)
         if rings < 1:
             raise ValueError("rings deve essere almeno 1")
-        rd = ring_distances(spacing_m, rings)
-        kept = [d for d in rd if d <= prm_reach]
-        if not kept:
+        ring_reach = rings * spacing_m * math.sqrt(2.0)      # diagonale dell'anello k
+        if ring_reach > prm_reach + 1e-9 and verbose:
+            print(f"[GRAFO] {rings} anelli arriverebbero a {ring_reach:.2f} m, oltre la "
+                  f"portata del PRM {prm_reach:.2f} m: mi fermo li'.")
+        # Tolleranza relativa (1e-6): le distanze del reticolo sono multipli irrazionali del
+        # passo, e senza tolleranza la diagonale dell'anello potrebbe cadere fuori per un ulp.
+        reach_m = min(ring_reach, prm_reach) * (1.0 + 1e-6)
+        if reach_m < float(min_edge_length):
             raise ValueError(
-                f"con passo {spacing_m:.4f} m il primo anello e' a {rd[0]:.2f} m, oltre la "
-                f"portata del PRM {prm_reach:.2f} m (= min(connection_radius, "
-                f"max_edge_length)): nessun arco sarebbe ammesso")
-        if len(kept) < rings and verbose:
-            print(f"[GRAFO] {rings} anelli arriverebbero a {rd[-1]:.2f} m, oltre la portata "
-                  f"del PRM {prm_reach:.2f} m: mi fermo a {len(kept)} anelli "
-                  f"({kept[-1]:.2f} m).")
-        # Tolleranza relativa generosa (1e-6 = qualche micron): ring_distances arrotonda a 6
-        # decimali, e con una tolleranza piu' stretta un anello poteva cadere fuori per un
-        # ulp. Fra due anelli ci sono almeno ~0.2 m: non puo' far entrare il successivo.
-        rings, reach_m = len(kept), kept[-1] * (1.0 + 1e-6)
+                f"con passo {spacing_m:.4f} m e {rings} anelli gli archi arrivano a "
+                f"{reach_m:.2f} m, sotto min_edge_length {float(min_edge_length):.2f} m: "
+                f"nessun arco sarebbe ammesso. Aumenta gli anelli o il passo.")
 
     extent = _mission_extent(rows, cols, cell_size_m, start_cell)
     ij, xy_local = _lattice_points(spacing_m, extent, float(border_margin_m))
@@ -793,7 +789,8 @@ def _main():
                    help=f"passo fra i nodi in m, arrotondato a cell/n (default "
                         f"{DEFAULT_LATTICE_SPACING_M:g}; 0 = suggested_spacing)")
     p.add_argument('--rings', default=str(LATTICE_RINGS),
-                   help="anelli di vicini collegati, o 'tutti' (default 2)")
+                   help="anelli di vicini collegati (k = entro la diagonale dell'anello k), "
+                        "o 'tutti' (default 2)")
     p.add_argument('--min-edge', type=float, default=DEFAULT_MIN_EDGE_M)
     p.add_argument('--max-edge', type=float, default=DEFAULT_MAX_EDGE_M)
     p.add_argument('--radius', type=float, default=DEFAULT_CONNECTION_RADIUS_M)
