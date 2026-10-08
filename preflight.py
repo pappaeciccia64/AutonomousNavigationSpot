@@ -67,6 +67,26 @@ REQUIRED = {
             ("LocalGrid", "fuse_obstacle_mask"),
         ],
     },
+    # Grafo di missione regolare (2026-10-08). easy_walk lo importa e ne usa queste cose:
+    # se il file sul robot e' una copia vecchia, la missione si fermerebbe subito dopo
+    # l'accensione -- che e' esattamente il caso per cui preflight esiste.
+    "mission_graph.py": {
+        "costanti": ["LATTICE_RINGS", "DEFAULT_MIN_EDGE_M", "DEFAULT_MAX_EDGE_M",
+                     "DEFAULT_CONNECTION_RADIUS_M"],
+        "funzioni": ["build_mission_graph", "load_npz", "align_spacing", "suggested_spacing",
+                     "ring_distances", "covering_radius", "node_density"],
+        "metodi": [
+            ("MissionGraph", "into_prm"),
+            ("MissionGraph", "add_edges_to_prm"),
+            ("MissionGraph", "as_sampler"),
+            ("MissionGraph", "target_for_cell"),
+            ("MissionGraph", "save_npz"),
+            ("MissionGraph", "report"),
+            ("LatticeSampler", "get_point_in_cell"),
+            ("LatticeSampler", "get_all_points"),
+            ("LatticeSampler", "get_nearest_points"),
+        ],
+    },
     "prm_graph.py": {
         "costanti": ["OCCUPANCY_SAMPLES_PER_M", "OCCUPANCY_SAMPLES_MIN", "STOP_NODE_MIN_EDGE_M",
                      "STOP_NODE_MAP_IGNORE_M"],
@@ -114,7 +134,14 @@ REQUIRED = {
                      "GOAL_REACHED_TOLERANCE_M", "MAX_LOOP_ITERATIONS",
                      "SAVE_FIGURES_DURING_MISSION", "SAVE_SCAN_BUNDLES",                 # passi 7-8
                      "ROTATION_ROOM_SEARCH_M", "ROTATION_ROOM_DIRECTIONS_DEG",           # passo 4
-                     "SHORTCUT_MAX_DIST_M", "MAX_MANEUVERS_SAME_EDGE",
+                     # 2026-10-08: MAX_MANEUVERS_SAME_EDGE non esiste piu' da quando la marcia
+                     # di traverso e' stata eliminata (2026-10-07): al suo posto ci sono il
+                     # limite per tratto e quello sugli arretramenti consecutivi. La tabella era
+                     # rimasta indietro, e preflight bocciava una copia di easy_walk.py corretta.
+                     "SHORTCUT_MAX_DIST_M", "MAX_ROTATION_FAILS_SAME_EDGE",
+                     "MAX_STRAIGHT_RETREATS_IN_A_ROW",
+                     # Grafo di missione regolare (2026-10-08, mission_graph.py)
+                     "USE_MISSION_LATTICE", "MISSION_LATTICE_SPACING_M", "MISSION_LATTICE_RINGS",
                      "FALL_HAZARD_RADIUS_M",                                             # cadute
                      "RETREAT_MAX_SEGMENTS", "RETREAT_MIN_SEGMENT_M", "RETREAT_AFTER_ABORT_M",
                      "RETREAT_CONTINUITY_M", "RETREAT_MAX_SEGMENT_M",                    # revisione

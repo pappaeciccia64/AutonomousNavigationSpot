@@ -166,6 +166,38 @@ ROTATION_CLEARANCE_AIR_M = 0.0
 ROTATION_CLEARANCE_M = float(np.hypot(ROBOT_HALF_LENGTH_M, ROBOT_HALF_WIDTH_M)) + ROTATION_CLEARANCE_AIR_M  # ~0.604
 ROTATION_CHECK_MIN_DYAW_DEG = 10.0
 
+# Tolleranza sul settore spazzato (2026-10-07, missione 16:50). rotation_is_clear accetta un
+# margine fino a -ROTATION_NOISE_TOLERANCE_M invece di pretendere >= 0. Misurato sugli scan
+# di quella missione: dalla STESSA posa, in cinque scansioni consecutive, obstacle_distance
+# in un punto a 50 cm dal robot oscilla fra -0.03 e +0.15 m; lo stesso punto visto da 2 m
+# risultava a +0.45. Un rifiuto a -0.03/-0.04 m (5 dei 17 della missione) sta dentro quel
+# rumore. I rifiuti veri restano: nei passaggi stretti fra i tavoli il margine e' -0.16/-0.19.
+# Rete sotto: l'anticollisione del CORPO di Spot e' attiva (movements.py spegne solo quella
+# dei piedi). Il prefiltro ROTATION_CLEARANCE_M non cambia. 0.0 = comportamento precedente.
+#
+# 2026-10-08, da 0.05 a 0.15 su richiesta dell'utente ("il padding dall'ostacolo non deve
+# bloccarlo nella rotazione, a volte lo spazio ci sarebbe, con GraphNav riesce").
+# Misurato sulle 46 scansioni della missione 08-10 10:47, contando per ogni scansione quante
+# delle 24 direzioni del giro sono insieme libere (fronte >= 0.30 m) e raggiungibili girandosi:
+#
+#     tolleranza   direzioni utilizzabili (mediana)   scansioni con ZERO   compenetrazione
+#        0.00                  3                            7/46              +0.00 m
+#        0.05                  6                            6/46              -0.04 m
+#        0.10                  6                            6/46              -0.10 m
+#        0.15                  6                            0/46              -0.15 m
+#
+# C'e' uno scalino netto: le sei scansioni in trappola avevano le direzioni libere rifiutate
+# per esattamente -0.12/-0.15 m, e fra 0.05 e 0.12 non cambia NIENTE. 0.15 le sblocca tutte.
+#
+# Va detto chiaro che a 0.15 questo non e' piu' solo "rumore": e' accettare che il corpo
+# compenetri la NOSTRA MAPPA di 15 cm. Lo regge un fatto misurato e uno osservato: l'errore
+# di registrazione della griglia e' 5-10 cm (celle chiamate ostacolo a 9-21 cm dall'asse del
+# corpo mentre il robot stava fermo li'), quindi una parte di quei 15 cm e' errore nostro e
+# non spazio reale; e GraphNav, che usa l'anticollisione di Spot invece della nostra mappa,
+# in quei punti ruota e passa. Se in prova si vedono sfioramenti dei muri durante le
+# rotazioni, questo e' il primo numero da riportare a 0.10.
+ROTATION_NOISE_TOLERANCE_M = 0.15
+
 
 def body_extents(heading, motion_dir):
     """
@@ -252,7 +284,7 @@ def rotation_is_clear(obstacle_dist, origin_x, origin_y, cell_size, robot_x, rob
                    (np.abs(-dx * sa + dy * ca) <= half_across + air))
         if in_body.any():
             worst = min(worst, float(window[in_body].min()))
-    return worst >= 0.0, worst
+    return worst >= -ROTATION_NOISE_TOLERANCE_M, worst
 
 # Margine con cui il PRM scarta gli archi che passano vicino a celle occupate nella mappa
 # globale. Le celle occupate sono quelle con obstacle_distance <= OBSTACLE_THRESHOLD,
