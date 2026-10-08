@@ -417,6 +417,19 @@ MAX_ROTATION_FAILS_SAME_EDGE = 2
 CONE_SWEEP_MAX_DEG = 90.0      # quanto in la' si guarda, a destra e a sinistra del muso
 CONE_SWEEP_STEP_DEG = 10.0     # passo della scansione angolare (9 direzioni per lato)
 CONE_MIN_GAIN_M = 0.20         # una direzione vale solo se avvicina all'obiettivo di tanto
+# 2026-10-08 (missione 08-10 16:11, scansione it001_cell0_2_007): il cono puntava all'OBIETTIVO
+# della cella in linea d'aria. Il percorso andava a ovest attorno a un blocco, l'obiettivo era
+# a est oltre un vicolo cieco: "avvicinarsi" all'obiettivo ha portato il robot 1.36 m dentro
+# il vicolo cieco, dalla parte opposta al percorso. Ora il cono punta al punto del PERCORSO
+# a questa distanza dal robot: se quel punto e' dietro, nessuna direzione del cono avvicina,
+# e si passa all'arretramento -- che e' la mossa giusta.
+CONE_PATH_LOOKAHEAD_M = 1.5
+# Durante la rotazione sul posto un fronte "fine dati" piu' corto non interrompe il movimento:
+# ruotando la zona vista si sposta e il bordo dei dati si accorcia di qualche centimetro senza
+# alcun ostacolo (stessa missione, scansione 008: 1.29 m raggiungibili su 1.38). Vale finche'
+# il robot non si e' spostato di almeno tanto; un fronte accorciato da un OSTACOLO interrompe
+# sempre.
+ABORT_IGNORE_DATA_EDGE_UNTIL_M = 0.15
 
 # Arretramenti consecutivi ammessi, CONTATI PER SEQUENZA e non per arco (2026-10-07).
 # Il limite precedente, MAX_ROTATION_FAILS_SAME_EDGE, era indicizzato su
@@ -3170,12 +3183,14 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 # quattro: nella missione del 2026-10-07 andare dritti, senza ruotare,
                 # avvicinava l'obiettivo di 0.76 m, e il robot ha arretrato perdendone 0.57.
                 # Vedi plan_cone_move per i numeri misurati.
-                cone = plan_cone_move((robot_x, robot_y), robot_yaw, snap, (target_x, target_y))
+                cone_goal, _ = arcVerification.point_along(polyline, CONE_PATH_LOOKAHEAD_M)
+                cone = plan_cone_move((robot_x, robot_y), robot_yaw, snap, cone_goal)
                 if cone is not None:
                     print(f"[CONO] Non posso girarmi di {rot['dyaw_deg']:+.0f} gradi, ma ruotando di "
                           f"{cone['dyaw_deg']:+.0f} posso avanzare {cone['dist']:.2f} m "
-                          f"({cone['reason']}) e avvicinarmi di {cone['gain']:.2f} m. Vado, "
-                          f"invece di arretrare.")
+                          f"({cone['reason']}) e avvicinarmi di {cone['gain']:.2f} m al percorso "
+                          f"({cone_goal[0]:.2f}, {cone_goal[1]:.2f}, {CONE_PATH_LOOKAHEAD_M:.1f} m "
+                          f"avanti lungo il percorso). Vado, invece di arretrare.")
                     if verification_tracker is not None:
                         verification_tracker.clear_path()
                     MISSION_STATS['cone_moves'] += 1
@@ -3710,6 +3725,10 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             if not live_frontiers or live_frontiers[-1][0] != f['time']:
                 live_frontiers.append((f['time'], frx, fry, f['reason'], float(f['dist']), reach, remaining,
                                        abort_state['bad']))
+            if (f['reason'] == 'fine_dati'
+                    and float(np.hypot(frx - robot_x, fry - robot_y)) < ABORT_IGNORE_DATA_EDGE_UNTIL_M):
+                abort_state['bad'] = 0      # sta ancora ruotando sul posto: vedi la costante
+                return False
             if reach + FRONTIER_ABORT_TOLERANCE_M < remaining:
                 abort_state['bad'] += 1
                 if abort_state['bad'] >= FRONTIER_ABORT_CONFIRM:

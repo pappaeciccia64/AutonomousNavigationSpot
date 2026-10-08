@@ -167,6 +167,7 @@ REQUIRED = {
                      "ANCHOR_ON_NODE_M", "GLOBAL_MAP_SELF_RING_M",
                      "GRAPHNAV_SHORTCUTS", "GRAPHNAV_SDK_LOOP_CLOSURE", "GRAPHNAV_SHORTCUT_MAX_M",
                      "GRAPHNAV_SHORTCUT_MARGIN_M", "GRAPHNAV_SHORTCUT_MIN_HOPS",
+                     "CONE_PATH_LOOKAHEAD_M", "ABORT_IGNORE_DATA_EDGE_UNTIL_M",
                      "FALL_HAZARD_RADIUS_M",                                             # cadute
                      "RETREAT_MAX_SEGMENTS", "RETREAT_MIN_SEGMENT_M", "RETREAT_AFTER_ABORT_M",
                      "RETREAT_CONTINUITY_M", "RETREAT_MAX_SEGMENT_M",                    # revisione
