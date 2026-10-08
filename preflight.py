@@ -72,7 +72,10 @@ REQUIRED = {
     # l'accensione -- che e' esattamente il caso per cui preflight esiste.
     "mission_graph.py": {
         "costanti": ["LATTICE_RINGS", "DEFAULT_MIN_EDGE_M", "DEFAULT_MAX_EDGE_M",
-                     "DEFAULT_CONNECTION_RADIUS_M"],
+                     "DEFAULT_CONNECTION_RADIUS_M",
+                     # 2026-10-08: dimensione della missione e passo di default, letti da easy_walk
+                     "DEFAULT_MISSION_ROWS", "DEFAULT_MISSION_COLS", "DEFAULT_CELL_SIZE_M",
+                     "DEFAULT_LATTICE_SPACING_M"],
         "funzioni": ["build_mission_graph", "load_npz", "align_spacing", "suggested_spacing",
                      "ring_distances", "covering_radius", "node_density"],
         "metodi": [
@@ -142,6 +145,7 @@ REQUIRED = {
                      "MAX_STRAIGHT_RETREATS_IN_A_ROW",
                      # Grafo di missione regolare (2026-10-08, mission_graph.py)
                      "USE_MISSION_LATTICE", "MISSION_LATTICE_SPACING_M", "MISSION_LATTICE_RINGS",
+                     "MISSION_GRID_ROWS", "MISSION_GRID_COLS", "MISSION_CELL_SIZE_M",
                      "FALL_HAZARD_RADIUS_M",                                             # cadute
                      "RETREAT_MAX_SEGMENTS", "RETREAT_MIN_SEGMENT_M", "RETREAT_AFTER_ABORT_M",
                      "RETREAT_CONTINUITY_M", "RETREAT_MAX_SEGMENT_M",                    # revisione
@@ -153,7 +157,8 @@ REQUIRED = {
                      "rotation_plan", "find_rotation_room", "shortcut_index",
                      "_check_and_recover_fall", "_raw_zero", "_raw_scale",
                      "_mission_z0", "_set_mission_z0", "_mask_for_global_map",
-                     "_graphnav_navigate_to", "_graphnav_return_to_start", "_append_csv"],
+                     "_graphnav_navigate_to", "_graphnav_return_to_start", "_append_csv",
+                     "_parse_args"],
         "metodi": [],
     },
 }

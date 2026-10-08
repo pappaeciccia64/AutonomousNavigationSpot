@@ -138,12 +138,16 @@ def _timing_add(phase, seconds):
 #   USE_MISSION_LATTICE        False torna al campionamento casuale di prima, senza
 #                              toccare altro: serve per confrontare le due versioni sulla
 #                              stessa missione.
-#   MISSION_LATTICE_SPACING_M  passo fra i nodi; None = mission_graph.suggested_spacing(),
-#                              cioe' il piu' grande la cui copertura non superi
-#                              PRM_MIN_EDGE_M (celle da 5 m -> 0.625 m). Viene comunque
-#                              arrotondato a cell_size/n.
+#   MISSION_LATTICE_SPACING_M  passo fra i nodi, default mission_graph.DEFAULT_LATTICE_SPACING_M
+#                              = 0.5 m (il piu' fitto ammesso da PRM_MIN_EDGE_M). None =
+#                              mission_graph.suggested_spacing() (celle da 5 m -> 0.625 m).
+#                              Viene comunque arrotondato a cell_size/n, mai sotto
+#                              PRM_MIN_EDGE_M. Da riga di comando: --spacing.
 #   MISSION_LATTICE_RINGS      anelli di vicini collegati (2 = 8 vicini). None = tutti
-#                              quelli entro max_edge_length.
+#                              quelli entro max_edge_length. Da riga di comando: --rings.
+#   MISSION_GRID_ROWS/COLS, MISSION_CELL_SIZE_M  dimensione della missione, default da
+#                              mission_graph (2 x 4 celle da 5 m). Si cambiano con
+#                              --rows --cols --cell oppure SPOT_MISSION_GRID (vedi easy_walk).
 #
 # PRM_MAX_EDGE_M segue il reticolo (mg.reach_m) e NON resta a 2.0: refresh_local_edge_weights
 # ricostruisce da se' le coppie candidate dentro la finestra usando max_edge_length del PRM,
@@ -152,8 +156,11 @@ def _timing_add(phase, seconds):
 # shortcut_index, che li conferma sui dati DAL VIVO invece di giudicarli da lontano.
 # ==================================================================
 USE_MISSION_LATTICE = True
-MISSION_LATTICE_SPACING_M = None
-MISSION_LATTICE_RINGS = 2
+MISSION_LATTICE_SPACING_M = mission_graph.DEFAULT_LATTICE_SPACING_M
+MISSION_LATTICE_RINGS = mission_graph.LATTICE_RINGS
+MISSION_GRID_ROWS = mission_graph.DEFAULT_MISSION_ROWS
+MISSION_GRID_COLS = mission_graph.DEFAULT_MISSION_COLS
+MISSION_CELL_SIZE_M = mission_graph.DEFAULT_CELL_SIZE_M
 PRM_MIN_EDGE_M = 0.5
 PRM_MAX_EDGE_M = 2.0            # usato come tetto per gli anelli, e nel ripiego casuale
 PRM_CONNECTION_RADIUS_M = 3.0
@@ -3962,19 +3969,36 @@ def easy_walk(options):
         recordingInterface.create_default_waypoint(cell_row=start_row, cell_col=start_col)
 
         # --- Mission Envoirment definition
-        # Dimensioni della griglia di missione. Default 5x5 celle da 5 m (esterno). Per una prova
-        # al chiuso si puo' ridurre SENZA toccare il codice con la variabile d'ambiente
-        #   SPOT_MISSION_GRID="righe,colonne,lato_cella"   es. SPOT_MISSION_GRID="2,3,3"
-        grid_rows, grid_cols, grid_cell = 5, 5, 5.0
+        # Dimensioni della griglia di missione. Default MISSION_GRID_ROWS x MISSION_GRID_COLS
+        # celle da MISSION_CELL_SIZE_M (2 x 4 da 5 m, presi da mission_graph). Si cambiano
+        # SENZA toccare il codice, in ordine di precedenza:
+        #   1. argomenti:  python3 easy_walk.py --rows 2 --cols 4 --cell 5
+        #   2. variabile:  SPOT_MISSION_GRID="righe,colonne,lato_cella"   es. "2,3,3"
+        grid_rows, grid_cols, grid_cell = MISSION_GRID_ROWS, MISSION_GRID_COLS, MISSION_CELL_SIZE_M
+        _grid_source = "default"
         _env_grid = os.environ.get("SPOT_MISSION_GRID", "").strip()
         if _env_grid:
             try:
                 _r, _c, _cs = _env_grid.split(",")
                 grid_rows, grid_cols, grid_cell = int(_r), int(_c), float(_cs)
+                _grid_source = f"SPOT_MISSION_GRID='{_env_grid}'"
             except Exception:
                 print(f"[CONFIG] SPOT_MISSION_GRID='{_env_grid}' non valido (atteso 'righe,colonne,lato'): "
-                      f"uso il default 5,5,5.")
-        print(f"[CONFIG] Griglia di missione: {grid_rows} x {grid_cols} celle da {grid_cell:.1f} m")
+                      f"uso {grid_rows},{grid_cols},{grid_cell:g}.")
+        _cli = (getattr(options, 'grid_rows', None), getattr(options, 'grid_cols', None),
+                getattr(options, 'grid_cell', None))
+        if any(v is not None for v in _cli):
+            grid_rows = int(_cli[0]) if _cli[0] is not None else grid_rows
+            grid_cols = int(_cli[1]) if _cli[1] is not None else grid_cols
+            grid_cell = float(_cli[2]) if _cli[2] is not None else grid_cell
+            _grid_source = "argomenti --rows/--cols/--cell"
+        print(f"[CONFIG] Griglia di missione: {grid_rows} x {grid_cols} celle da {grid_cell:.1f} m "
+              f"({grid_rows * grid_cell:.0f} m a sinistra x {grid_cols * grid_cell:.0f} m davanti; "
+              f"fonte: {_grid_source})")
+        print(f"[CONFIG] Reticolo: passo richiesto "
+              f"{'suggerito' if MISSION_LATTICE_SPACING_M is None else '%.3f m' % MISSION_LATTICE_SPACING_M}, "
+              f"anelli {MISSION_LATTICE_RINGS if MISSION_LATTICE_RINGS is not None else 'tutti'}"
+              f"{'' if USE_MISSION_LATTICE else ' (NON usato: USE_MISSION_LATTICE=False)'}")
         env = environmentMap.EnvironmentMap(rows=grid_rows, cols=grid_cols, cell_size=grid_cell)  # cols in front, rows on the left
 
         # --- Mission-wide movement/gait parameters ---
@@ -4393,8 +4417,45 @@ def easy_walk(options):
         estop.stop()
 
 
+def _parse_args(argv=None):
+    """
+    Argomenti da riga di comando. Tutti facoltativi: senza argomenti la missione usa i
+    default di mission_graph (2 x 4 celle da 5 m, passo 0.5 m, 2 anelli).
+    """
+    import argparse
+    p = argparse.ArgumentParser(description="Missione di esplorazione autonoma con Spot")
+    p.add_argument('--rows', type=int, default=None,
+                   help=f"righe di celle, a sinistra del robot (default {MISSION_GRID_ROWS})")
+    p.add_argument('--cols', type=int, default=None,
+                   help=f"colonne di celle, davanti al robot (default {MISSION_GRID_COLS})")
+    p.add_argument('--cell', type=float, default=None,
+                   help=f"lato della cella in m (default {MISSION_CELL_SIZE_M:g})")
+    p.add_argument('--spacing', type=float, default=None,
+                   help=f"passo fra i nodi del reticolo in m, arrotondato a cell/n e mai sotto "
+                        f"{PRM_MIN_EDGE_M:g} (default {MISSION_LATTICE_SPACING_M}; 0 = suggerito)")
+    p.add_argument('--rings', default=None,
+                   help=f"anelli di vicini collegati, o 'tutti' (default {MISSION_LATTICE_RINGS})")
+    a = p.parse_args(argv)
+    if a.rows is not None and a.rows < 1 or a.cols is not None and a.cols < 1:
+        p.error("--rows e --cols devono essere almeno 1")
+    if a.cell is not None and a.cell <= 0:
+        p.error("--cell deve essere positivo")
+    return a
+
+
 def main():
+    global MISSION_LATTICE_SPACING_M, MISSION_LATTICE_RINGS
+    args = _parse_args()
+    if args.spacing is not None:
+        MISSION_LATTICE_SPACING_M = None if args.spacing <= 0 else float(args.spacing)
+    if args.rings is not None:
+        MISSION_LATTICE_RINGS = (None if str(args.rings).lower() in ('none', 'tutti', 'all', '-1')
+                                 else int(args.rings))
+
     options = SimpleNamespace()
+    options.grid_rows = args.rows
+    options.grid_cols = args.cols
+    options.grid_cell = args.cell
     options.name = "easyWalk"
     options.hostname = "192.168.80.3"
     options.verbose = False

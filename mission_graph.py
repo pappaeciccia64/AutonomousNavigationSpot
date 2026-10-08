@@ -47,8 +47,11 @@ SPAZIATURA
   Il passo richiesto viene SEMPRE arrotondato a cell_size/n con n intero: e' la condizione
   che rende ogni centro cella un nodo del reticolo. La riga [GRAFO] del log dice il passo
   effettivo. Deve stare fra min_edge_length e max_edge_length del PRM (0.5 e 2.0 oggi).
-  Default: il passo per cui la COPERTURA vale circa min_edge_length (vedi
-  suggested_spacing), cioe' cell_size/7 = 0.714 m con celle da 5 m.
+  Default: DEFAULT_LATTICE_SPACING_M = 0.5 m (= 5/10), il passo piu' fitto che non scende
+  sotto min_edge_length. Con spacing_m=None si usa invece suggested_spacing(), il passo per
+  cui la COPERTURA vale circa min_edge_length (cell_size/8 = 0.625 m con celle da 5 m).
+  Se l'arrotondamento a cell_size/n finisse sotto min_edge_length (es. 0.5 m su celle da
+  2.75 m -> 2.75/6 = 0.458), si prende il divisore precedente: il passo resta >= soglia.
 
   PERCHE' NON SOTTO min_edge_length. PRM._evaluate_and_add_edge rifiuta gli archi piu'
   corti di min_edge_length (0.5 m), e quella soglia non e' arbitraria:
@@ -106,7 +109,7 @@ Da riga di comando:
     python3 mission_graph.py --confronto
     python3 mission_graph.py --spacing 0.71 --rings 2 --preview p.png --zoom -3.2 3.2 -3.2 3.2
     python3 mission_graph.py --rows 2 --cols 3 --cell 3
-    python3 mission_graph.py --save reticolo_5x5x5.npz
+    python3 mission_graph.py --save reticolo_2x4x5.npz
     python3 mission_graph.py --tempi
 """
 
@@ -120,6 +123,18 @@ import numpy as np
 # suggested_spacing() dai parametri del PRM e dal lato della cella.
 # ----------------------------------------------------------------------------------------
 LATTICE_RINGS = 2
+
+# La missione e il passo di default, in UN solo posto: easy_walk li importa da qui, quindi
+# la missione sul robot e le prove da riga di comando (python3 mission_graph.py) partono
+# dagli stessi numeri. Per cambiarli per una sola missione: argomenti di easy_walk.py
+# (--rows --cols --cell --spacing --rings) o SPOT_MISSION_GRID="righe,colonne,lato".
+#   2 x 4 celle da 5 m = 10 m a sinistra x 20 m davanti al robot (colonne in avanti).
+#   Passo 0.5 m = 5/10: il piu' fitto ammesso con min_edge_length 0.5 (vedi SPAZIATURA);
+#   861 nodi e ~3260 archi sulla 2x4.
+DEFAULT_MISSION_ROWS = 2
+DEFAULT_MISSION_COLS = 4
+DEFAULT_CELL_SIZE_M = 5.0
+DEFAULT_LATTICE_SPACING_M = 0.5
 
 # Stessi default del PRM in uso (prm_graph.PRM(min_edge_length=0.5, max_edge_length=2,
 # connection_radius=3)). Passati come argomenti, non importati, per non trascinarsi dietro
@@ -561,7 +576,9 @@ class LatticeSampler:
 # LA FUNZIONE DA CHIAMARE
 # ========================================================================================
 
-def build_mission_graph(rows=2, cols=4, cell_size_m=5.0, spacing_m=None, rings=LATTICE_RINGS,
+def build_mission_graph(rows=DEFAULT_MISSION_ROWS, cols=DEFAULT_MISSION_COLS,
+                        cell_size_m=DEFAULT_CELL_SIZE_M, spacing_m=DEFAULT_LATTICE_SPACING_M,
+                        rings=LATTICE_RINGS,
                         origin_xy=(0.0, 0.0), origin_yaw=0.0, start_cell=(0, 0),
                         min_edge_length=DEFAULT_MIN_EDGE_M,
                         max_edge_length=DEFAULT_MAX_EDGE_M,
@@ -571,10 +588,11 @@ def build_mission_graph(rows=2, cols=4, cell_size_m=5.0, spacing_m=None, rings=L
     Costruisce il grafo di missione.
 
     Args:
-        rows, cols, cell_size_m: la DIMENSIONE DELLA MISSIONE, come oggi (5, 5, 5.0 di
-            default, gli stessi numeri di SPOT_MISSION_GRID). Ignorati se si passa `env`.
+        rows, cols, cell_size_m: la DIMENSIONE DELLA MISSIONE (default DEFAULT_MISSION_*,
+            2 x 4 celle da 5 m, gli stessi di easy_walk). Ignorati se si passa `env`.
         spacing_m: FLAG DELLA SPAZIATURA, in metri; viene arrotondata a cell_size/n (vedi
-            align_spacing). None (default) = suggested_spacing().
+            align_spacing), mai sotto min_edge_length. Default DEFAULT_LATTICE_SPACING_M
+            (0.5 m); None = suggested_spacing().
         rings: FLAG DELLE CONNESSIONI -- a quanti gusci di vicini arrivano gli archi
             (2 = 8 vicini). None = tutti quelli entro min(connection_radius,
             max_edge_length), come faceva build_graph.
@@ -606,6 +624,10 @@ def build_mission_graph(rows=2, cols=4, cell_size_m=5.0, spacing_m=None, rings=L
         raise ValueError("la spaziatura deve essere positiva")
     requested = float(spacing_m)
     spacing_m, n_div = align_spacing(requested, cell_size_m)
+    # Mai sotto min_edge_length: il PRM scarterebbe tutto il primo anello (vedi SPAZIATURA).
+    while n_div > 1 and spacing_m < float(min_edge_length) - 1e-9:
+        n_div -= 1
+        spacing_m = cell_size_m / n_div
     if abs(spacing_m - requested) > 1e-12 and verbose:
         print(f"[GRAFO] Passo allineato al lato cella: {requested:.3f} -> {spacing_m:.4f} m "
               f"(= {cell_size_m:.1f}/{n_div}); e' la condizione per cui ogni centro cella "
@@ -705,7 +727,8 @@ def load_npz(path, origin_xy=(0.0, 0.0), origin_yaw=0.0, env=None):
         int(d['n_short_pairs']))
 
 
-def compare(rows=5, cols=5, cell_size_m=5.0, divisors=(4, 5, 6, 7, 8, 9, 10),
+def compare(rows=DEFAULT_MISSION_ROWS, cols=DEFAULT_MISSION_COLS,
+            cell_size_m=DEFAULT_CELL_SIZE_M, divisors=(4, 5, 6, 7, 8, 9, 10),
             rings_list=(1, 2, 3, None), **kw):
     """
     Tabella nodi/archi/copertura al variare del passo (come cell_size/n) e degli anelli:
@@ -760,11 +783,15 @@ def timing(path=None, **kw):
 def _main():
     import argparse
     p = argparse.ArgumentParser(description="Grafo di missione regolare per Spot")
-    p.add_argument('--rows', type=int, default=5, help="righe di celle (default 5)")
-    p.add_argument('--cols', type=int, default=5, help="colonne di celle (default 5)")
-    p.add_argument('--cell', type=float, default=5.0, help="lato della cella in m (default 5)")
-    p.add_argument('--spacing', type=float, default=None,
-                   help="passo fra i nodi in m, arrotondato a cell/n (default: copertura ~ min-edge)")
+    p.add_argument('--rows', type=int, default=DEFAULT_MISSION_ROWS,
+                   help=f"righe di celle, a sinistra del robot (default {DEFAULT_MISSION_ROWS})")
+    p.add_argument('--cols', type=int, default=DEFAULT_MISSION_COLS,
+                   help=f"colonne di celle, davanti al robot (default {DEFAULT_MISSION_COLS})")
+    p.add_argument('--cell', type=float, default=DEFAULT_CELL_SIZE_M,
+                   help=f"lato della cella in m (default {DEFAULT_CELL_SIZE_M:g})")
+    p.add_argument('--spacing', type=float, default=DEFAULT_LATTICE_SPACING_M,
+                   help=f"passo fra i nodi in m, arrotondato a cell/n (default "
+                        f"{DEFAULT_LATTICE_SPACING_M:g}; 0 = suggested_spacing)")
     p.add_argument('--rings', default=str(LATTICE_RINGS),
                    help="anelli di vicini collegati, o 'tutti' (default 2)")
     p.add_argument('--min-edge', type=float, default=DEFAULT_MIN_EDGE_M)
@@ -781,6 +808,8 @@ def _main():
     a = p.parse_args()
 
     rings = None if str(a.rings).lower() in ('none', 'tutti', 'all', '-1') else int(a.rings)
+    if a.spacing is not None and a.spacing <= 0:
+        a.spacing = None                 # 0 = passo suggerito da suggested_spacing()
     common = dict(rows=a.rows, cols=a.cols, cell_size_m=a.cell, min_edge_length=a.min_edge,
                   max_edge_length=a.max_edge, connection_radius=a.radius,
                   border_margin_m=a.margin)
