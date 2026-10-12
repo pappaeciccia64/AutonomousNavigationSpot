@@ -140,6 +140,39 @@ DEFAULT_MISSION_COLS = 4
 DEFAULT_CELL_SIZE_M = 5.0
 DEFAULT_LATTICE_SPACING_M = 0.25
 
+# ----------------------------------------------------------------------------------------
+# LA MISSIONE DA FARE: scrivi qui i valori che vuoi, None = il DEFAULT_* qui sopra.
+# easy_walk li legge con mission_settings() e ci costruisce SIA la mappa delle celle SIA il
+# grafo, quindi i due restano sempre uguali. Anche build_mission_graph() chiamata senza
+# argomenti usa questi. Gli argomenti di easy_walk (--rows --cols --cell --spacing) e
+# SPOT_MISSION_GRID restano piu' forti di questi valori.
+#   es. 4 x 4 celle da 4 m:  MISSION_ROWS = 4, MISSION_COLS = 4, MISSION_CELL_SIZE_M = 4.0
+# ----------------------------------------------------------------------------------------
+MISSION_ROWS = 4#None
+MISSION_COLS = 4#None
+MISSION_CELL_SIZE_M = 4#None
+MISSION_SPACING_M = None
+
+
+def mission_settings(rows=None, cols=None, cell_size_m=None, spacing_m=None):
+    """
+    (rows, cols, cell_size_m, spacing_m) della missione. Per ognuno vince, nell'ordine:
+    il valore passato qui, il MISSION_* sopra, il DEFAULT_*.
+    """
+    def pick(value, chosen, default):
+        if value is not None:
+            return value
+        return chosen if chosen is not None else default
+    return (int(pick(rows, MISSION_ROWS, DEFAULT_MISSION_ROWS)),
+            int(pick(cols, MISSION_COLS, DEFAULT_MISSION_COLS)),
+            float(pick(cell_size_m, MISSION_CELL_SIZE_M, DEFAULT_CELL_SIZE_M)),
+            float(pick(spacing_m, MISSION_SPACING_M, DEFAULT_LATTICE_SPACING_M)))
+
+
+# Valore di default di spacing_m in build_mission_graph: "prendilo da mission_settings()".
+# Non e' None perche' None vuol gia' dire suggested_spacing().
+_FROM_SETTINGS = "settings"
+
 # Stessi default del PRM in uso (prm_graph.PRM(min_edge_length=0.5, max_edge_length=2,
 # connection_radius=3)). Passati come argomenti, non importati, per non trascinarsi dietro
 # l'SDK: se li cambi nel PRM, cambiali anche nella chiamata.
@@ -624,8 +657,7 @@ class LatticeSampler:
 # LA FUNZIONE DA CHIAMARE
 # ========================================================================================
 
-def build_mission_graph(rows=DEFAULT_MISSION_ROWS, cols=DEFAULT_MISSION_COLS,
-                        cell_size_m=DEFAULT_CELL_SIZE_M, spacing_m=DEFAULT_LATTICE_SPACING_M,
+def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_SETTINGS,
                         rings=LATTICE_RINGS,
                         origin_xy=(0.0, 0.0), origin_yaw=0.0, start_cell=(0, 0),
                         min_edge_length=DEFAULT_MIN_EDGE_M,
@@ -636,11 +668,12 @@ def build_mission_graph(rows=DEFAULT_MISSION_ROWS, cols=DEFAULT_MISSION_COLS,
     Costruisce il grafo di missione.
 
     Args:
-        rows, cols, cell_size_m: la DIMENSIONE DELLA MISSIONE (default DEFAULT_MISSION_*,
-            2 x 4 celle da 5 m, gli stessi di easy_walk). Ignorati se si passa `env`.
+        rows, cols, cell_size_m: la DIMENSIONE DELLA MISSIONE. Se non passati: quelli di
+            mission_settings() (MISSION_*, o i DEFAULT_*). Ignorati se si passa `env`.
         spacing_m: FLAG DELLA SPAZIATURA, in metri; viene arrotondata a cell_size/n (vedi
-            align_spacing). Puo' essere sotto min_edge_length (vedi SPAZIATURA). Default
-            DEFAULT_LATTICE_SPACING_M (0.25 m); None = suggested_spacing().
+            align_spacing). Puo' essere sotto min_edge_length (vedi SPAZIATURA). Se non
+            passato: quello di mission_settings() (MISSION_SPACING_M, o 0.25 m); None =
+            suggested_spacing().
         rings: FLAG DELLE CONNESSIONI -- k = tutti i nodi entro la diagonale del k-esimo
             anello (k*passo*sqrt(2)), con archi >= min_edge_length (vedi ANELLI). None =
             tutti quelli entro min(connection_radius, max_edge_length).
@@ -662,7 +695,9 @@ def build_mission_graph(rows=DEFAULT_MISSION_ROWS, cols=DEFAULT_MISSION_COLS,
         origin_xy = (env.origin_x, env.origin_y)
         origin_yaw = env.origin_yaw
         start_cell = tuple(env.start_cell)
-    rows, cols, cell_size_m = int(rows), int(cols), float(cell_size_m)
+    rows, cols, cell_size_m, chosen_spacing = mission_settings(rows, cols, cell_size_m)
+    if spacing_m is _FROM_SETTINGS:
+        spacing_m = chosen_spacing
     if rows < 1 or cols < 1 or cell_size_m <= 0:
         raise ValueError("dimensione della missione non valida")
 
@@ -824,15 +859,16 @@ def timing(path=None, **kw):
 def _main():
     import argparse
     p = argparse.ArgumentParser(description="Grafo di missione regolare per Spot")
-    p.add_argument('--rows', type=int, default=DEFAULT_MISSION_ROWS,
-                   help=f"righe di celle, a sinistra del robot (default {DEFAULT_MISSION_ROWS})")
-    p.add_argument('--cols', type=int, default=DEFAULT_MISSION_COLS,
-                   help=f"colonne di celle, davanti al robot (default {DEFAULT_MISSION_COLS})")
-    p.add_argument('--cell', type=float, default=DEFAULT_CELL_SIZE_M,
-                   help=f"lato della cella in m (default {DEFAULT_CELL_SIZE_M:g})")
-    p.add_argument('--spacing', type=float, default=DEFAULT_LATTICE_SPACING_M,
+    s_rows, s_cols, s_cell, s_spacing = mission_settings()
+    p.add_argument('--rows', type=int, default=s_rows,
+                   help=f"righe di celle, a sinistra del robot (default {s_rows})")
+    p.add_argument('--cols', type=int, default=s_cols,
+                   help=f"colonne di celle, davanti al robot (default {s_cols})")
+    p.add_argument('--cell', type=float, default=s_cell,
+                   help=f"lato della cella in m (default {s_cell:g})")
+    p.add_argument('--spacing', type=float, default=s_spacing,
                    help=f"passo fra i nodi in m, arrotondato a cell/n (default "
-                        f"{DEFAULT_LATTICE_SPACING_M:g}; 0 = suggested_spacing)")
+                        f"{s_spacing:g}; 0 = suggested_spacing)")
     p.add_argument('--rings', default=str(LATTICE_RINGS),
                    help="anelli di vicini collegati (k = entro la diagonale dell'anello k), "
                         "o 'tutti' (default 2)")

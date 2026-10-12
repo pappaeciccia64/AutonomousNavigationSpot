@@ -145,8 +145,8 @@ def _timing_add(phase, seconds):
 #   USE_MISSION_LATTICE        False torna al campionamento casuale di prima, senza
 #                              toccare altro: serve per confrontare le due versioni sulla
 #                              stessa missione.
-#   MISSION_LATTICE_SPACING_M  passo fra i nodi, default mission_graph.DEFAULT_LATTICE_SPACING_M
-#                              = 0.25 m. Puo' stare sotto PRM_MIN_EDGE_M: i vicini piu'
+#   MISSION_LATTICE_SPACING_M  passo fra i nodi, da mission_graph.MISSION_SPACING_M (None =
+#                              0.25 m). Puo' stare sotto PRM_MIN_EDGE_M: i vicini piu'
 #                              corti di PRM_MIN_EDGE_M non si collegano (vedi mission_graph,
 #                              SPAZIATURA e ANELLI). None = mission_graph.suggested_spacing().
 #                              Arrotondato a cell_size/n. Da riga di comando: --spacing.
@@ -154,8 +154,8 @@ def _timing_add(phase, seconds):
 #                              del k-esimo anello, purche' a >= PRM_MIN_EDGE_M. Con passo 0.25
 #                              e k=2: archi da 0.50, 0.56 e 0.71 m in 16 direzioni. None =
 #                              tutti quelli entro max_edge_length. Da riga di comando: --rings.
-#   MISSION_GRID_ROWS/COLS, MISSION_CELL_SIZE_M  dimensione della missione, default da
-#                              mission_graph (2 x 4 celle da 5 m). Si cambiano con
+#   MISSION_GRID_ROWS/COLS, MISSION_CELL_SIZE_M  dimensione della missione, da
+#                              mission_graph.MISSION_* (None = 2 x 4 celle da 5 m). Si cambiano con
 #                              --rows --cols --cell oppure SPOT_MISSION_GRID (vedi easy_walk).
 #
 # PRM_MAX_EDGE_M segue il reticolo (mg.reach_m) e NON resta a 2.0: refresh_local_edge_weights
@@ -177,11 +177,15 @@ def _timing_add(phase, seconds):
 # Sulla missione delle 16:35 (4 costruzioni, 47 scansioni) sono ~39 s invece di ~9 s: il
 # prezzo e' noto e accettato, ed e' in parte restituito dal refresh a eventi qui sotto.
 USE_MISSION_LATTICE = True
-MISSION_LATTICE_SPACING_M = mission_graph.DEFAULT_LATTICE_SPACING_M
+# Righe, colonne, lato cella e passo vengono da mission_graph.mission_settings(): si
+# scelgono la' (MISSION_ROWS, MISSION_COLS, MISSION_CELL_SIZE_M, MISSION_SPACING_M; None =
+# default). Da qui si costruiscono sia la mappa delle celle sia il grafo.
+_MISSION = mission_graph.mission_settings()
+MISSION_GRID_ROWS = _MISSION[0]
+MISSION_GRID_COLS = _MISSION[1]
+MISSION_CELL_SIZE_M = _MISSION[2]
+MISSION_LATTICE_SPACING_M = _MISSION[3]
 MISSION_LATTICE_RINGS = None    # nessun limite per gusci: decide PRM_MAX_EDGE_M
-MISSION_GRID_ROWS = mission_graph.DEFAULT_MISSION_ROWS
-MISSION_GRID_COLS = mission_graph.DEFAULT_MISSION_COLS
-MISSION_CELL_SIZE_M = mission_graph.DEFAULT_CELL_SIZE_M
 PRM_MIN_EDGE_M = 0.5
 PRM_MAX_EDGE_M = 1.25           # tetto degli archi, e nel ripiego casuale
 PRM_CONNECTION_RADIUS_M = 3.0
@@ -5039,12 +5043,12 @@ def easy_walk(options):
 
         # --- Mission Envoirment definition
         # Dimensioni della griglia di missione. Default MISSION_GRID_ROWS x MISSION_GRID_COLS
-        # celle da MISSION_CELL_SIZE_M (2 x 4 da 5 m, presi da mission_graph). Si cambiano
+        # celle da MISSION_CELL_SIZE_M (da mission_graph.MISSION_*, o 2 x 4 da 5 m). Si cambiano
         # SENZA toccare il codice, in ordine di precedenza:
         #   1. argomenti:  python3 easy_walk.py --rows 2 --cols 4 --cell 5
         #   2. variabile:  SPOT_MISSION_GRID="righe,colonne,lato_cella"   es. "2,3,3"
         grid_rows, grid_cols, grid_cell = MISSION_GRID_ROWS, MISSION_GRID_COLS, MISSION_CELL_SIZE_M
-        _grid_source = "default"
+        _grid_source = "mission_graph.MISSION_*"
         _env_grid = os.environ.get("SPOT_MISSION_GRID", "").strip()
         if _env_grid:
             try:
