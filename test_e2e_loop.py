@@ -1,0 +1,554 @@
+"""
+Prova end-to-end del ciclo di navigazione VERO (attempt_enter_cell_from_position in
+easy_walk.py) contro un robot finto in un mondo sintetico.
+
+Cosa e' finto: la posizione del robot, la griglia locale (finestra 128x128 da 3 cm che
+segue il robot, con obstacle_distance calcolata dal mondo e celle fantasma negli angoli
+come il 2026-10-05), il movimento (il robot si sposta lungo la retta, interrogando
+should_abort a ogni tratto), il thread del fronte (calcola il fronte vero sulla posizione
+del momento). Tutto il resto e' il codice vero: correzione terreno, mappe globali, PRM,
+nodi di sosta, fronte, decisioni, blocchi, ripianificazioni, ritirata, salvataggio dati.
+
+    python3 test_e2e_loop.py
+"""
+import contextlib
+import io
+import os
+import shutil
+import sys
+import tempfile
+import time
+import types
+from types import SimpleNamespace as NS
+
+import numpy as np
+from scipy.ndimage import distance_transform_edt
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+STUBS = tempfile.mkdtemp(prefix="stub_moduli_")
+for name in ("navGraphUtils", "spotLogInUtils", "environmentMap", "global_sampler"):
+    open(os.path.join(STUBS, name + ".py"), "w").write("# vuoto: usato solo a runtime sul robot\n")
+sys.path.insert(0, HERE)
+sys.path.insert(1, STUBS)
+
+import matplotlib  # noqa: E402
+matplotlib.use("Agg")
+import easy_walk     # noqa: E402
+import spotGrid      # noqa: E402
+import arcVerification as av   # noqa: E402
+import prm_graph     # noqa: E402
+import movements     # noqa: E402
+import spotUtils     # noqa: E402
+
+FAILS = []
+
+
+def check(cond, msg):
+    print(f"  [{'OK ' if cond else 'FAIL'}] {msg}")
+    if not cond:
+        FAILS.append(msg)
+
+
+CS, N, W = 0.03, 128, 400          # mondo 12 x 12 m
+
+
+class World:
+    def __init__(self, rects, ghosts=True):
+        self.occ = np.zeros((W, W), bool)
+        wx = (np.arange(W) + 0.5) * CS
+        WX, WY = np.meshgrid(wx, wx)
+        for x0, x1, y0, y1 in rects:
+            self.occ |= (WX >= x0) & (WX <= x1) & (WY >= y0) & (WY <= y1)
+        self.dynamic = None          # rettangolo che compare durante un movimento
+        self.ghosts = ghosts
+        self._recompute()
+
+    def _recompute(self):
+        occ = self.occ.copy()
+        if self.dynamic is not None:
+            x0, x1, y0, y1 = self.dynamic
+            wx = (np.arange(W) + 0.5) * CS
+            WX, WY = np.meshgrid(wx, wx)
+            occ |= (WX >= x0) & (WX <= x1) & (WY >= y0) & (WY <= y1)
+        self.occ_now = occ
+        self.od = distance_transform_edt(~occ) * CS if occ.any() else np.full((W, W), 9.0)
+        # Distanza CON SEGNO dentro gli ostacoli, come il layer vero di Spot (nei dati del
+        # 2026-10-08 16:35 il 22% delle celle e' negativo, fino a oltre -0.5 m). Prima qui
+        # c'era -0.01 fisso: il controllo di rotazione vedeva "1 cm dentro il muro" anche
+        # quando il corpo ci entrava per 15, e approvava rotazioni impossibili.
+        if occ.any():
+            self.od[occ] = -(distance_transform_edt(occ) * CS)[occ]
+
+    def od_at(self, x, y):
+        r, c = int(y / CS), int(x / CS)
+        return self.od[r, c] if 0 <= r < W and 0 <= c < W else 9.0
+
+
+class Robot:
+    def __init__(self, x, y, yaw=0.0):
+        self.x, self.y, self.yaw = x, y, yaw
+        self.min_clear = np.inf
+        self.track = [(x, y)]
+        self.commands = 0          # quanti comandi di movimento sono stati dati
+        self.walked = 0.0          # metri percorsi
+        self.turns = 0             # rotazioni oltre la soglia di trascurabilita' (10 gradi)
+        self.turn_deg = 0.0        # gradi totali ruotati
+        self.max_endpoint_error = 0.0   # massimo scarto fra punto comandato e punto raggiunto
+
+
+WORLD, ROBOT = None, None
+
+
+def quat(yaw):
+    return NS(w=np.cos(yaw / 2), x=0.0, y=0.0, z=np.sin(yaw / 2))
+
+
+def window():
+    c0 = int(np.floor(ROBOT.x / CS)) - N // 2
+    r0 = int(np.floor(ROBOT.y / CS)) - N // 2
+    rr, cc = np.mgrid[0:N, 0:N]
+    wr, wc = rr + r0, cc + c0
+    ok = (wr >= 0) & (wr < W) & (wc >= 0) & (wc < W)
+    od = np.full((N, N), 9.0)
+    od[ok] = WORLD.od[wr[ok], wc[ok]]
+    terr = -3.23 + np.random.default_rng(int(ROBOT.x * 1000) % 99991).normal(0, 0.004, (N, N))
+    if WORLD.ghosts:
+        terr[108:, 120:] = -0.00052261
+        terr[:12, :10] = -0.00052261
+    ox, oy = c0 * CS, r0 * CS
+    xs = ox + (np.arange(N) + 0.5) * CS
+    ys = oy + (np.arange(N) + 0.5) * CS
+    X, Y = np.meshgrid(xs, ys)
+    pts = np.stack([X.ravel(), Y.ravel(), np.full(N * N, -3.23)], axis=1)
+    snapshot = NS(robot=(ROBOT.x, ROBOT.y, ROBOT.yaw), origin=(ox, oy))
+    return pts, od.ravel(), terr.astype(np.float32).ravel(), np.ones(N * N, np.float32), snapshot
+
+
+def fake_get_a_tform_b(snapshot, a, b):
+    if b == easy_walk.BODY_FRAME_NAME:
+        x, y, yaw = snapshot.robot
+        return NS(position=NS(x=x, y=y, z=-2.7), rotation=quat(yaw))
+    ox, oy = snapshot.origin
+    return NS(position=NS(x=ox, y=oy, z=0.0), rotation=quat(0.0))
+
+
+class FakeLocalGrid(spotGrid.LocalGrid):
+    def __init__(self):
+        self.footprint_correction_pending = True
+        self.last_ground_filter = {'ground_z': None, 'n_above': 0, 'max_above': 0.0,
+                                   'source': '', 'n_ref': 0}
+        self.local_grid_client = None
+        self.rejected_scans = 0
+
+    def return_local_grid(self, layers, robot_state_client=None):
+        pts, od, terr, valid, snap = window()
+        data = {'obstacle_distance': {'pts': pts, 'values': od},
+                'terrain': {'values': terr, 'raw_zero': float(np.float32(-0.00052261)), 'scale': 0.001},
+                'terrain_valid': {'values': valid}}
+        proto = NS(local_grid=NS(extent=NS(num_cells_x=N, num_cells_y=N, cell_size=CS),
+                                 transforms_snapshot=snap, frame_name_local_grid_data="grid"))
+        return data, proto, None
+
+
+class FakeTracker:
+    """Il thread del fronte: qui calcola il fronte VERO nella posizione del momento."""
+    def __init__(self):
+        self.version, self.waypoints, self.body = 0, [], None
+        self.lg = FakeLocalGrid()
+
+    def update_path(self, waypoints_xy, extend_end_m=None, body=None):
+        self.version += 1
+        self.waypoints, self.body = list(waypoints_xy), body
+        return self.version
+
+    def clear_path(self):
+        self.update_path([])
+
+    def get_frontier(self):
+        if not self.waypoints:
+            return None
+        pts, od, terr, valid, _ = window()
+        tc, iv = self.lg.correct_terrain(terr, valid, N, N, cell_size=CS)
+        _, rough = self.lg.compute_gradient_and_roughness(tc, valid, N, N, CS, is_valid=iv)
+        c0 = int(np.floor(ROBOT.x / CS)) - N // 2
+        r0 = int(np.floor(ROBOT.y / CS)) - N // 2
+        snap = av.make_grid_snapshot(od, rough, iv, valid, tc, N, N, c0 * CS, r0 * CS, CS, ROBOT.x, ROBOT.y)
+        f = av.compute_safe_frontier([(ROBOT.x, ROBOT.y)] + self.waypoints, snap, body=self.body)
+        f['path_version'] = self.version
+        f['time'] = time.time()
+        return f
+
+
+DYNAMIC_TRIGGER = {'armed': False, 'rect': None}
+FALL = {'armed': False, 'fallen': False, 'recoverable': True, 'where': None}
+
+
+def fake_check_fall(rsc):
+    return dict(fallen=FALL['fallen'], reason="fault di caduta (prova)" if FALL['fallen'] else "",
+                roll=80.0 if FALL['fallen'] else 0.0, pitch=0.0, x=ROBOT.x, y=ROBOT.y,
+                fall_faults=[1] if FALL['fallen'] else [], clearable=[1] if FALL['fallen'] else [],
+                unclearable=[], motors_on=True, standing=not FALL['fallen'])
+
+
+def fake_recover(cc, rsc, status=None):
+    if not FALL['fallen']:
+        return True
+    if not FALL['recoverable']:
+        raise movements.RobotFallenError("prova: il robot non si rialza da solo")
+    FALL['fallen'] = False
+    return True
+
+
+def _yaw_of(q):
+    return float(np.arctan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y ** 2 + q.z ** 2)))
+
+
+def fake_navigate_to(tx, ty, rx, ry, rsc, cc, vtb, should_abort=None, keep_heading=False, **kw):
+    """
+    FEDELE al navigate_to vero (2026-10-08). Prima questo finto metteva il robot dritto
+    verso il bersaglio ignorando `vtb`, quindi non poteva accorgersi di un orientamento
+    passato in ritardo. Il vero navigate_to invece:
+      1. calcola dyaw = direzione del bersaglio - orientamento letto da `vtb`;
+      2. relative_move(0, 0, dyaw): ruota di dyaw RISPETTO ALLA POSA VERA del robot;
+      3. relative_move(dist, 0, 0): cammina dritto per `dist`, lungo il muso VERO, con
+         dist calcolata da (rx, ry) passati, non dalla posizione vera.
+    Se `vtb` o (rx, ry) sono vecchi, il robot va da un'altra parte: ed e' esattamente
+    quello che questo finto ora riproduce.
+    """
+    ROBOT.commands += 1
+    dist = float(np.hypot(tx - rx, ty - ry))
+    if keep_heading:
+        sx, sy = ROBOT.x, ROBOT.y
+        ex, ey = tx, ty
+    else:
+        target_yaw = float(np.arctan2(ty - ry, tx - rx))
+        dyaw = float(np.arctan2(np.sin(target_yaw - _yaw_of(vtb.rotation)),
+                                np.cos(target_yaw - _yaw_of(vtb.rotation))))
+        ROBOT.turn_deg += abs(np.degrees(dyaw))
+        if abs(np.degrees(dyaw)) >= spotGrid.ROTATION_CHECK_MIN_DYAW_DEG:
+            ROBOT.turns += 1
+        ROBOT.yaw = float(np.arctan2(np.sin(ROBOT.yaw + dyaw), np.cos(ROBOT.yaw + dyaw)))
+        sx, sy = ROBOT.x, ROBOT.y
+        ex, ey = sx + dist * np.cos(ROBOT.yaw), sy + dist * np.sin(ROBOT.yaw)
+    # Quanto il punto d'arrivo vero si discosta da quello comandato: e' il sintomo.
+    ROBOT.max_endpoint_error = max(ROBOT.max_endpoint_error, float(np.hypot(ex - tx, ey - ty)))
+    steps = max(2, int(dist / 0.05))
+    for k in range(1, steps + 1):
+        t = k / steps
+        ROBOT.x, ROBOT.y = sx + t * (ex - sx), sy + t * (ey - sy)
+        ROBOT.min_clear = min(ROBOT.min_clear, WORLD.od_at(ROBOT.x, ROBOT.y))
+        ROBOT.track.append((ROBOT.x, ROBOT.y))
+        remaining = (1 - t) * dist
+        if DYNAMIC_TRIGGER['armed'] and t > 0.25 and remaining > 0.45:
+            ux, uy = (ex - sx) / max(dist, 1e-9), (ey - sy) / max(dist, 1e-9)
+            # 0.85 m davanti al CENTRO del robot: fuori dal mezzo corpo (0.55) piu' il
+            # margine del fronte (0.10), quindi fermarsi in tempo e' possibile.
+            cx, cy = ROBOT.x + 0.85 * ux, ROBOT.y + 0.85 * uy
+            WORLD.dynamic = (cx - 0.2, cx + 0.2, cy - 0.2, cy + 0.2); WORLD._recompute()
+            DYNAMIC_TRIGGER['armed'] = False
+        if FALL['armed'] and t > 0.5:
+            FALL.update(armed=False, fallen=True, where=(ROBOT.x, ROBOT.y))
+            d = float(np.hypot(ROBOT.x - sx, ROBOT.y - sy)); ROBOT.walked += d
+            return False, d, dist
+        if should_abort is not None and k % 2 == 0 and should_abort():
+            d = float(np.hypot(ROBOT.x - sx, ROBOT.y - sy)); ROBOT.walked += d
+            return False, d, dist
+    ROBOT.walked += dist
+    return True, dist, dist
+
+
+def fake_move_no_turn(tx, ty, frame, cc, rsc, **kw):
+    sx, sy = ROBOT.x, ROBOT.y
+    ROBOT.x, ROBOT.y = tx, ty
+    ROBOT.track.append((tx, ty))
+    ROBOT.commands += 1
+    ROBOT.walked += float(np.hypot(tx - sx, ty - sy))
+    return True, float(np.hypot(tx - sx, ty - sy))
+
+
+class FakeEnv:
+    rows, cols, cell_size, origin_yaw = 2, 2, 5.0, 0.0
+    start_cell = (0, 0)
+    origin_x, origin_y = 3.5, 3.5
+
+    def __init__(self):
+        # (0,0) visitata: e' la cella da cui il robot parte in tutti gli scenari.
+        self.visited = {(0, 0)}
+
+    def is_cell_visited(self, r, c):
+        return 1 if (r, c) in self.visited else 0
+
+    def mark_cell_visited(self, r, c):
+        self.visited.add((r, c))
+
+    def get_cell_from_world(self, x, y):
+        return (int(round((y - 3.5) / 5.0)), int(round((x - 3.5) / 5.0)))
+
+    def get_world_position_from_cell(self, r, c):
+        return (1.0 + c * 5.0 + 2.5, 1.0 + r * 5.0 + 2.5) if 0 <= r < 2 and 0 <= c < 2 else None
+
+    def is_point_in_cell(self, x, y, r, c):
+        cx, cy = self.get_world_position_from_cell(r, c)
+        return abs(x - cx) <= 2.5 and abs(y - cy) <= 2.5
+
+    def get_cell_status(self, r, c):
+        return (0, 0)
+
+
+class FakeSampler:
+    def get_point_in_cell(self, r, c):
+        cx, cy = FakeEnv().get_world_position_from_cell(r, c)
+        g = np.linspace(-2.2, 2.2, 9)
+        return [(cx + a, cy + b) for a in g for b in g]
+
+
+# ---- patch: solo i confini col robot ------------------------------------------------------
+easy_walk.get_a_tform_b = fake_get_a_tform_b
+spotUtils.getPosition = lambda rsc: (ROBOT.x, ROBOT.y, -2.7, quat(ROBOT.yaw))
+easy_walk.navigate_to = fake_navigate_to
+movements.move_to_world_point_without_turning = fake_move_no_turn
+movements.move_backward = lambda d, *a, **k: (True, d)
+easy_walk.FRONTIER_RESCAN_WAIT_S = 0.0
+movements.check_fall = fake_check_fall
+movements.recover_from_fall = fake_recover
+
+
+class _NoTilt:
+    def __init__(self, *a): pass
+    def start(self): pass
+    def stop(self):
+        return dict(roll_start=0, pitch_start=0, roll_end=0, pitch_end=0, roll_peak_abs=0,
+                    pitch_peak_abs=0, samples=0, errors=0)
+
+
+easy_walk.BodyTiltRecorder = _NoTilt
+
+
+def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, second_attempt=False,
+        nodes='random'):
+    global WORLD, ROBOT
+    WORLD, ROBOT = World(rects, ghosts), Robot(*start)
+    # Il filtro temporale degli ostacoli (arcVerification.OBSTACLE_HISTORY) e' allineato al
+    # MONDO e sopravvive fra una scansione e l'altra: sul robot e' giusto, il mondo e'
+    # sempre quello. Qui ogni scenario e' un mondo diverso con le stesse coordinate, e
+    # senza azzerarlo la mediana mescolava le scansioni dello scenario precedente con
+    # quelle nuove: S11 passava o falliva a seconda di cosa girava prima.
+    av.OBSTACLE_HISTORY.reset()
+    DYNAMIC_TRIGGER.update(armed=dynamic is not None, rect=dynamic)
+    FALL.update(armed=fall is not None, fallen=False, recoverable=(fall == 'recuperabile'), where=None)
+    easy_walk.MISSION_STATS['falls'] = easy_walk.MISSION_STATS['self_rights'] = 0
+    if nodes == 'lattice':
+        # Il reticolo vero: passo 0.25 m, archi 0.5-1.25 m (come in missione).
+        import mission_graph
+        mg = mission_graph.build_mission_graph(
+            rows=2, cols=2, cell_size_m=5.0, spacing_m=0.25, rings=None,
+            origin_xy=(3.5, 3.5), origin_yaw=0.0, min_edge_length=easy_walk.PRM_MIN_EDGE_M,
+            max_edge_length=easy_walk.PRM_MAX_EDGE_M,
+            connection_radius=easy_walk.PRM_CONNECTION_RADIUS_M, verbose=False)
+        prm = prm_graph.PRM(min_edge_length=easy_walk.PRM_MIN_EDGE_M,
+                            max_edge_length=easy_walk.PRM_MAX_EDGE_M,
+                            connection_radius=easy_walk.PRM_CONNECTION_RADIUS_M)
+        prm.mission_graph = mg
+        mg.into_prm(prm)
+    else:
+        prm = prm_graph.PRM(min_edge_length=0.5, max_edge_length=easy_walk.PRM_MAX_EDGE_M,
+                            connection_radius=3)
+        rng = np.random.default_rng(3)
+        for i in range(260):
+            prm.add_node(i, rng.uniform(0.5, 11.5), rng.uniform(0.5, 11.5))
+    folder = tempfile.mkdtemp(prefix="missione_e2e_")
+    for k in list(easy_walk.MISSION_STATS['time_s']):
+        easy_walk.MISSION_STATS['time_s'][k] = 0.0
+    for k in ('frontier_blocks', 'frontier_aborts', 'scan_bundles', 'prm_refresh',
+              'prm_refresh_skipped', 'multinode_moves', 'multinode_nodes', 'idle_loops'):
+        if k in easy_walk.MISSION_STATS:
+            easy_walk.MISSION_STATS[k] = 0
+    gg = NS(global_occupancy_map=None, global_terrain_map=None)
+    out = io.StringIO()
+    err = None
+    t0 = time.time()
+    with contextlib.redirect_stdout(out):
+        try:
+            ok = easy_walk.attempt_enter_cell_from_position(
+                FakeLocalGrid(), gg, None, None, FakeEnv(), target_cell[0], target_cell[1],
+                FakeSampler(), prm, mission_folder=folder, iteration=0,
+                recordingInterface=None, verification_tracker=FakeTracker())
+        except movements.RobotFallenError as e:
+            err, ok = None, f"RobotFallenError: {e}"
+        except Exception as e:
+            import traceback
+            err = traceback.format_exc()
+            ok = None
+        ok2, track2_from = None, None
+        if second_attempt and err is None:
+            ROBOT.track.append((ROBOT.x, ROBOT.y))
+            track2_from = len(ROBOT.track) - 1
+            ok2 = easy_walk.attempt_enter_cell_from_position(
+                FakeLocalGrid(), gg, None, None, FakeEnv(), target_cell[0], target_cell[1],
+                FakeSampler(), prm, mission_folder=folder, iteration=1,
+                recordingInterface=None, verification_tracker=FakeTracker())
+    easy_walk._VIS_EXECUTOR.submit(lambda: None).result()      # aspetta i salvataggi
+    # Il codice vero restituisce env.is_point_in_cell(...), che con coordinate numpy e' un
+    # np.bool_: il chiamante fa `if check:` e funziona, ma qui i controlli usano `is True`.
+    if isinstance(ok, np.bool_):
+        ok = bool(ok)
+    if isinstance(ok2, np.bool_):
+        ok2 = bool(ok2)
+    log = out.getvalue()
+    n_scans = len(os.listdir(os.path.join(folder, "scans"))) if os.path.isdir(os.path.join(folder, "scans")) else 0
+    print(f"\n{name}  ({time.time() - t0:.1f} s)")
+    if err:
+        print(err)
+    tags = {t: log.count(t) for t in ("[CADUTA] Rilevata", "[FRONTE]", "[PASSO PARZIALE]", "[OK] Tratto",
+                                      "[BLOCCO] Confermato", "[SCORCIATOIA]", "[MULTINODO]",
+                                      "[REPLAN] Dopo il blocco", "[STOP]", "[NODO]", "[RITIRATA]",
+                                      "[ROTAZIONE]", "[GROUND-FILTER]", "[OBIETTIVO]", "[STALLO]",
+                                      "[SUBITO]", "[TRAPPOLA]", "[ARRIVO]", "[CONO]")}
+    print("       " + "  ".join(f"{k} x{v}" for k, v in tags.items() if v))
+    print(f"       scarto massimo fra punto comandato e raggiunto: {ROBOT.max_endpoint_error:.3f} m")
+    print(f"       comandi di movimento: {ROBOT.commands}, metri percorsi: {ROBOT.walked:.1f}, "
+          f"scansioni: {n_scans}, refresh {easy_walk.MISSION_STATS.get('prm_refresh', 0)} fatti / "
+          f"{easy_walk.MISSION_STATS.get('prm_refresh_skipped', 0)} saltati")
+    return dict(ok=ok, err=err, log=log, scans=n_scans, folder=folder, tags=tags,
+                min_clear=ROBOT.min_clear, final=(ROBOT.x, ROBOT.y), ok2=ok2, gg=gg,
+                commands=ROBOT.commands, walked=ROBOT.walked,
+                turns=ROBOT.turns, turn_deg=ROBOT.turn_deg,
+                endpoint_error=ROBOT.max_endpoint_error,
+                stats=dict(easy_walk.MISSION_STATS),
+                track2=ROBOT.track[track2_from:] if track2_from is not None else [])
+
+
+if __name__ == '__main__':
+    print("Robot finto, codice vero. Cella obiettivo (0,1): centro (8.5, 3.5).")
+    print("NB: la cella obiettivo deve essere ADIACENTE a una visitata -- dal 2026-10-08\n    la pianificazione e' limitata alle celle esplorate (PLAN_ONLY_EXPLORED_CELLS).")
+
+    r = run("S1. campo libero, celle fantasma negli angoli di ogni finestra (2026-10-05)",
+            [], (2.0, 2.0, 0.785), (0, 1))
+    check(r['err'] is None, "nessuna eccezione")
+    check(r['ok'] is True, f"entrato nella cella, posizione finale ({r['final'][0]:.2f}, {r['final'][1]:.2f})")
+    check(r['tags']["[BLOCCO] Confermato"] == 0 and r['tags']["[RITIRATA]"] == 0,
+          "nessun blocco e nessuna ritirata su terreno libero")
+    check(r['scans'] > 0, f"{r['scans']} pacchetti di scansione salvati")
+    check("[TEMPO]" in r['log'], "riga [TEMPO] presente")
+
+    r = run("S2. muro con un varco largo 1.2 m lontano dalla retta: va trovato aggirando",
+            [(5.0, 5.2, 0.0, 5.0), (5.0, 5.2, 6.2, 12.0)], (2.0, 2.0, 0.785), (0, 1))
+    check(r['err'] is None, "nessuna eccezione")
+    check(r['ok'] is True, f"entrato nella cella passando dal varco ({r['final'][0]:.2f}, {r['final'][1]:.2f})")
+    check(r['min_clear'] >= spotGrid.FRONTIER_CLEARANCE_M - 0.05,
+          f"distanza minima del centro dagli ostacoli lungo tutto il tragitto: {r['min_clear']:.2f} m")
+
+    r = run("S3. una persona si mette davanti al robot mentre cammina",
+            [], (2.0, 2.0, 0.785), (0, 1), dynamic=True)
+    check(r['err'] is None, "nessuna eccezione")
+    check(r['min_clear'] > 0.0,
+          f"non tocca mai l'ostacolo apparso durante il movimento "
+          f"(distanza minima del centro {r['min_clear']:.2f} m)")
+    check(r['min_clear'] >= spotGrid.FRONTIER_CLEARANCE_M - 0.10,
+          f"e resta oltre la distanza minima richiesta dal fronte "
+          f"({spotGrid.FRONTIER_CLEARANCE_M:.2f} m): misurata {r['min_clear']:.2f} m")
+    print(f"       [STOP] x{r['tags']['[STOP]']}, [MULTINODO] x{r['tags']['[MULTINODO]']}")
+
+    r = run("S4. cella obiettivo chiusa da muri su tutti i lati",
+            [(6.1, 6.3, 1.0, 6.0), (6.1, 10.9, 1.0, 1.2), (10.7, 10.9, 1.0, 6.0), (6.1, 10.9, 5.8, 6.0)],
+            (2.0, 2.0, 0.785), (0, 1))
+    check(r['err'] is None, "nessuna eccezione")
+    check(r['ok'] is False, "tentativo fallito in modo ordinato (cella irraggiungibile)")
+    check(r['min_clear'] > 0.0, f"non entra mai nel muro (distanza minima {r['min_clear']:.2f} m)")
+
+    r = run("S5. partenza in uno spazio stretto: 0.45 m dal muro, bersaglio a 90 gradi",
+            [(2.45, 2.65, 0.0, 6.0)], (2.0, 3.0, 1.5708), (0, 0))
+    check(r['err'] is None, "nessuna eccezione")
+
+    r = run("S6. caduta a meta' movimento, il robot si rialza; poi un secondo tentativo",
+            [], (2.0, 2.0, 0.785), (0, 1), fall='recuperabile', second_attempt=True)
+    check(r['err'] is None, "nessuna eccezione")
+    check(r['tags']["[CADUTA] Rilevata"] == 1 and easy_walk.MISSION_STATS['self_rights'] == 1,
+          "caduta rilevata e robot rialzato")
+    fx, fy = FALL['where']
+    gm = r['gg'].global_occupancy_map
+    check(gm is not None and gm.is_occupied(fx, fy),
+          f"punto della caduta ({fx:.2f}, {fy:.2f}) occupato nella mappa globale")
+
+    r = run("S7. caduta da cui il robot NON si rialza da solo",
+            [], (2.0, 2.0, 0.785), (0, 1), fall='irrecuperabile')
+    check(r['err'] is None and isinstance(r['ok'], str) and r['ok'].startswith("RobotFallenError"),
+          "la missione si ferma con RobotFallenError (main() la intercetta e chiama l'operatore)")
+    check("[RITIRATA]" not in r['log'], "nessun tentativo di muoversi da terra")
+
+    r = run("S8. reticolo VERO (passo 0.25, archi 0.5-1.25) su campo libero",
+            [], (3.5, 3.5, 0.0), (0, 1), nodes='lattice')
+    check(r['err'] is None, "nessuna eccezione con il grafo di missione vero")
+    check(r['ok'] is True, f"entrato nella cella ({r['final'][0]:.2f}, {r['final'][1]:.2f})")
+    check(r['walked'] > 0 and r['commands'] > 0,
+          f"{r['commands']} comandi per {r['walked']:.1f} m = {r['walked'] / max(1, r['commands']):.2f} m per comando")
+
+    r = run("S10. reticolo VERO + muro con varco: il percorso CURVA (qui serve il multinodo)",
+            [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)], (3.5, 3.5, 0.0), (0, 1), nodes="lattice")
+    check(r['err'] is None, "nessuna eccezione")
+    check(r['min_clear'] >= spotGrid.FRONTIER_CLEARANCE_M - 0.10,
+          f"non sfiora il muro passando dal varco (distanza minima {r['min_clear']:.2f} m)")
+    print(f"       [MULTINODO] x{r['tags']['[MULTINODO]']}, [SCORCIATOIA] x{r['tags']['[SCORCIATOIA]']}, "
+          f"nodi attraversati dai movimenti multinodo: {r['stats'].get('multinode_nodes', 0)}")
+
+    # Ricostruzione della situazione della missione 08-10 16:35: corridoio stretto e
+    # obiettivo DIETRO il robot, cioe' rotazione di ~180 gradi dove non si puo' girare. La'
+    # il ciclo fece 8 giri in 3.2 s senza muoversi. Revisione 2026-10-08 sera: prima il
+    # corridoio era 0.90 m (non 0.80 come diceva il titolo) e il robot partiva GIA' dentro
+    # la cella obiettivo, quindi lo scenario passava senza provare niente.
+    r = run("S11. corridoio da 0.80 m, obiettivo dietro: rotazione impossibile (caso 16:35)",
+            [(0.0, 12.0, 0.0, 3.10), (0.0, 12.0, 3.90, 12.0)], (7.0, 3.5, 0.0), (0, 0),
+            nodes='lattice')
+    check(r['err'] is None, "nessuna eccezione")
+    giri = r['log'].count('[FRONTE]')
+    rifiuti = r['log'].count('[ROTAZIONE] Servono')
+    check(rifiuti >= 1, f"la rotazione di ~180 gradi nel corridoio viene rifiutata ({rifiuti} volte)")
+    check(r['turns'] == 0, f"il robot non ruota mai nel corridoio (rotazioni eseguite: {r['turns']})")
+    check(r['ok'] is False and giri <= 8,
+          f"il tentativo si chiude in modo ordinato e in pochi giri: {giri} giri, esito {r['ok']} "
+          f"(il 16:35 ne fece 8 in 3.2 s, e senza limite poteva continuare)")
+    print(f"       [STALLO] x{r['tags']['[STALLO]']}, "
+          f"limite rifiuti-rotazione x{r['log'].count('tratti scartati in questo tentativo')}, "
+          f"'nessuna alternativa nel grafo' x{r['log'].count('Nessuna alternativa nel grafo dal punto')}, "
+          f"[TRAPPOLA] x{r['tags']['[TRAPPOLA]']}, [CONO] x{r['tags']['[CONO]']}")
+
+    # S12 (2026-10-08 sera, revisione): l'avanzamento multinodo deve passare a ogni gamba
+    # l'orientamento VERO del robot. Con archi corti il multinodo scatta, e con un percorso
+    # che curva un orientamento vecchio di una gamba manda il robot fuori dal percorso.
+    easy_walk.PRM_MAX_EDGE_M = 0.70711
+    r = run("S12. multinodo su percorso che curva: ogni gamba va dove e' stata comandata",
+            [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)], (3.5, 3.5, 0.0), (0, 1),
+            nodes='lattice')
+    easy_walk.PRM_MAX_EDGE_M = 1.25
+    check(r['err'] is None, "nessuna eccezione")
+    check(r['stats'].get('multinode_moves', 0) >= 1,
+          f"il multinodo e' scattato ({r['stats'].get('multinode_moves', 0)} movimenti, "
+          f"{r['stats'].get('multinode_nodes', 0)} nodi)")
+    check(r['endpoint_error'] < 0.02,
+          f"ogni gamba arriva dove e' stata comandata: scarto massimo {r['endpoint_error']:.3f} m")
+    check(r['min_clear'] >= spotGrid.FRONTIER_CLEARANCE_M - 0.10,
+          f"non sfiora il muro (distanza minima {r['min_clear']:.2f} m)")
+
+    print("\n--- Confronto: quanto cammina il robot per ogni comando di movimento ---")
+    confronto = {}
+    for etichetta, maxe in (("archi 0.5-0.707 (missione 16:35)", 0.70711),
+                            ("archi 0.5-1.25 (nuovo)", 1.25)):
+        easy_walk.PRM_MAX_EDGE_M = maxe
+        r = run(f"S9. {etichetta}", [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)],
+                (3.5, 3.5, 0.0), (0, 1), nodes='lattice')
+        confronto[etichetta] = (r['commands'], r['walked'], r['stats'].get('multinode_moves', 0),
+                                r['stats'].get('multinode_nodes', 0), r['scans'], r['ok'],
+                                r['turns'], r['turn_deg'])
+    easy_walk.PRM_MAX_EDGE_M = 1.25
+    print()
+    for k, (c, w, mm, mn, sc, ok, tn, td) in confronto.items():
+        print(f"  {k:<34} {c:2d} comandi, {w:4.1f} m -> {w / max(1, c):.2f} m/comando; "
+              f"rotazioni oltre 10 gradi: {tn} ({td:.0f} gradi in tutto); "
+              f"multinodo {mm} ({mn} nodi); {sc} scansioni; arrivato: {ok}")
+
+    for d in [x for x in os.listdir(tempfile.gettempdir()) if x.startswith("missione_e2e_")]:
+        shutil.rmtree(os.path.join(tempfile.gettempdir(), d), ignore_errors=True)
+    shutil.rmtree(STUBS, ignore_errors=True)
+    print("\n" + "=" * 70)
+    print("TUTTO OK" if not FAILS else f"{len(FAILS)} CONTROLLI FALLITI:\n  - " + "\n  - ".join(FAILS))
+    sys.exit(1 if FAILS else 0)

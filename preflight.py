@@ -85,6 +85,7 @@ REQUIRED = {
             ("MissionGraph", "target_for_cell"),
             ("MissionGraph", "save_npz"),
             ("MissionGraph", "report"),
+            ("MissionGraph", "target_for_cell"),
             ("LatticeSampler", "get_point_in_cell"),
             ("LatticeSampler", "get_all_points"),
             ("LatticeSampler", "get_nearest_points"),
@@ -162,6 +163,9 @@ REQUIRED = {
                      "MAX_STRAIGHT_RETREATS_IN_A_ROW",
                      # Grafo di missione regolare (2026-10-08, mission_graph.py)
                      "USE_MISSION_LATTICE", "MISSION_LATTICE_SPACING_M", "MISSION_LATTICE_RINGS",
+                     "PRM_MIN_EDGE_M", "PRM_MAX_EDGE_M", "PRM_CONNECTION_RADIUS_M",
+                     # guardie anti-stallo e avanzamento multinodo (2026-10-08)
+                     "MAX_ROTATION_DISCARDS", "MAX_IDLE_LOOPS", "IDLE_MOVE_M",
                      "MISSION_GRID_ROWS", "MISSION_GRID_COLS", "MISSION_CELL_SIZE_M",
                      "PLAN_ONLY_EXPLORED_CELLS", "PLAN_MAX_DETOUR_RATIO", "PLAN_DETOUR_SLACK_M",
                      "ANCHOR_ON_NODE_M", "GLOBAL_MAP_SELF_RING_M",

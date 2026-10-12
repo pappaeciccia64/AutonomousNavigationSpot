@@ -198,6 +198,34 @@ ROTATION_CHECK_MIN_DYAW_DEG = 10.0
 # rotazioni, questo e' il primo numero da riportare a 0.10.
 ROTATION_NOISE_TOLERANCE_M = 0.15
 
+# --- METRICA DEL CONTROLLO DI ROTAZIONE (revisione 2026-10-08 sera) -----------------------
+# Prima rotation_is_clear confrontava con -ROTATION_NOISE_TOLERANCE_M il MINIMO di
+# obstacle_distance sulle celle spazzate dal corpo. Per un muro spesso quel minimo misura
+# davvero di quanto il corpo ci entra. Ma obstacle_distance dentro un ostacolo non scende
+# sotto meta' del suo spessore: un palo da 10 cm non va sotto -0.05, una gamba di tavolo da
+# 4 cm sotto -0.02. Con la tolleranza a 0.15 qualunque ostacolo piu' sottile di ~30 cm che
+# entra nel corpo durante la rotazione veniva APPROVATO. Misurato con distanze col segno
+# realistiche, palo in (0.15, 0.45) e rotazione di 90 gradi (il palo finisce dentro il
+# corpo): pali da 6, 10, 20 e 30 cm tutti approvati; solo da 40 cm rifiutato.
+# Il fronte sicuro non ha questo problema (soglia positiva sulla linea centrale, vale a
+# qualunque spessore): il buco era solo nelle rotazioni.
+#
+# Ora si misura la PENETRAZIONE: per ogni cella del corpo, la sua profondita' dentro il
+# corpo meno obstacle_distance. Per un muro che entra di p dal bordo da' esattamente p, come
+# prima (lungo il bordo la profondita' e' 0 e obstacle_distance vale -p); per un ostacolo
+# sottile da' quanto sta in fondo dentro il corpo. Non e' mai piu' permissiva della metrica
+# vecchia (profondita' >= 0), e coincide con essa quando gli ostacoli sono fuori dal corpo.
+# Le celle sotto il corpo ADESSO si escludono: il robot ci sta sopra, quindi sono libere per
+# definizione -- e' l'errore di registrazione che la tolleranza da 0.15 doveva assorbire, e
+# cosi' non serve tollerarlo. La tolleranza resta 0.15 per i muri, come deciso.
+#
+# Verificata sui 47 scan veri della missione 2026-10-08 16:35, 24 rotazioni per scan (1081):
+# stesso verdetto nel 97.8%; 24 verdetti cambiano, TUTTI da approvata a rifiutata, quasi
+# tutti al limite della tolleranza (-0.150 -> -0.151). L'eccezione e' lo scan 12 della
+# cella (0,2), in un punto strettissimo: vecchia metrica -0.085, nuova -0.17.
+# False = metrica vecchia, comportamento identico a prima.
+ROTATION_CHECK_PENETRATION = True
+
 
 def body_extents(heading, motion_dir):
     """
@@ -277,12 +305,27 @@ def rotation_is_clear(obstacle_dist, origin_x, origin_y, cell_size, robot_x, rob
 
     num_steps = max(2, int(abs(np.degrees(dyaw)) / step_deg) + 2)
     worst = float('inf')
+    if ROTATION_CHECK_PENETRATION:
+        # Celle sotto il corpo ADESSO: il robot ci sta in piedi sopra, quindi sono libere per
+        # definizione qualunque cosa dica la mappa (e' l'errore di registrazione per cui la
+        # tolleranza e' a 0.15). Si escludono invece di tollerarle.
+        c_now, s_now = np.cos(robot_yaw), np.sin(robot_yaw)
+        under_now = ((np.abs(dx * c_now + dy * s_now) <= half_along) &
+                     (np.abs(-dx * s_now + dy * c_now) <= half_across))
     for t in np.linspace(0.0, float(dyaw), num_steps):
         a = robot_yaw + t
         ca, sa = np.cos(a), np.sin(a)
-        in_body = ((np.abs(dx * ca + dy * sa) <= half_along + air) &
-                   (np.abs(-dx * sa + dy * ca) <= half_across + air))
-        if in_body.any():
+        along = np.abs(dx * ca + dy * sa)
+        across = np.abs(-dx * sa + dy * ca)
+        in_body = (along <= half_along + air) & (across <= half_across + air)
+        if ROTATION_CHECK_PENETRATION:
+            in_body &= ~under_now
+            if in_body.any():
+                # PENETRAZIONE = profondita' della cella dentro il corpo - obstacle_distance.
+                # Vedi ROTATION_CHECK_PENETRATION per il perche'.
+                depth = np.minimum(half_along + air - along, half_across + air - across)[in_body]
+                worst = min(worst, float((window[in_body] - depth).min()))
+        elif in_body.any():
             worst = min(worst, float(window[in_body].min()))
     return worst >= -ROTATION_NOISE_TOLERANCE_M, worst
 
