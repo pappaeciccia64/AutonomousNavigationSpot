@@ -202,6 +202,11 @@ class PRM:
         #       ricalcolano ogni ciclo, cosi' una lettura rumorosa non condanna niente e
         #       una cella appena esplorata rientra subito in gioco.
         # ==================================================================
+        # Disaccordo fra mappa binaria e mappa dello spazio libero sull'ultimo lotto di archi
+        # valutati: (solo la binaria blocca, solo lo spazio libero blocca, archi valutati).
+        # Solo diagnostica, vedi spotGrid.CLEARANCE_MAP_DECIDES.
+        self.clearance_disagreement = None
+
         self.edge_penalty_persistent = {}   # (min,max) -> peso aggiuntivo (anche inf)
         self.edge_penalty_transient = {}
         self.node_penalty_persistent = {}   # idx -> peso aggiuntivo (anche inf)
@@ -807,13 +812,21 @@ class PRM:
         # ceil + 1: passo fra campioni <= 1/OCCUPANCY_SAMPLES_PER_M (prima int() dava fino a
         # 0.147 m fra due campioni invece di 0.10, vedi revisione 2026-10-06 sera).
         num_samples = max(OCCUPANCY_SAMPLES_MIN, int(np.ceil(dist * OCCUPANCY_SAMPLES_PER_M)) + 1)
+        # 2026-10-12: con la mappa dello spazio libero il test diventa quello del fronte --
+        # "qui ci sono almeno FRONTIER_CLEARANCE_M?" -- sulla stessa grandezza, senza
+        # binarizzazione ne' margine. Vedi spotGrid.CLEARANCE_MAP_DECIDES.
+        use_clear = (spotGrid.CLEARANCE_MAP_DECIDES
+                     and hasattr(global_map, 'clearance_blocked'))
         for k in range(num_samples):
             t = k / (num_samples - 1)
             sx = x1 + t * (x2 - x1)
             sy = y1 + t * (y2 - y1)
             if ignore_xy is not None and np.hypot(sx - ignore_xy[0], sy - ignore_xy[1]) <= self.robot_node_ignore_m:
                 continue
-            if global_map.is_occupied(sx, sy, safety_margin=edge_safety_margin):
+            if use_clear:
+                if global_map.clearance_blocked(sx, sy, spotGrid.FRONTIER_CLEARANCE_M):
+                    return True
+            elif global_map.is_occupied(sx, sy, safety_margin=edge_safety_margin):
                 return True
         return False
 
@@ -847,16 +860,36 @@ class PRM:
             ignore_xy = self.nodes[self.robot_node]
             touches = np.array([(a == self.robot_node) or (b == self.robot_node)
                                 for a, b in zip(a_ids, b_ids)], dtype=bool)
+        # 2026-10-12: si calcolano ENTRAMBI i criteri -- la mappa binaria (bit occupato +
+        # margine) e la mappa dello spazio libero (stessa soglia del fronte). Decide quello
+        # scelto da spotGrid.CLEARANCE_MAP_DECIDES; l'altro serve a misurare quanto si
+        # discostano, riga [SPAZIO] nel ciclo. Vedi spotGrid.CLEARANCE_NEAR_M.
+        has_clear = hasattr(global_map, 'clearance_many')
+        out_clear = np.zeros(n_pairs, dtype=bool) if has_clear else None
         for m in np.unique(ns):
             sel = np.nonzero(ns == m)[0]
             t = np.arange(int(m)) / (int(m) - 1)
             sx = xy1[sel, 0, None] + t[None, :] * (xy2[sel, 0] - xy1[sel, 0])[:, None]
             sy = xy1[sel, 1, None] + t[None, :] * (xy2[sel, 1] - xy1[sel, 1])[:, None]
-            occ = global_map.occupied_many(sx, sy, safety_margin=edge_safety_margin)
+            keep = None
             if ignore_xy is not None and touches[sel].any():
                 near = np.hypot(sx - ignore_xy[0], sy - ignore_xy[1]) <= self.robot_node_ignore_m
-                occ &= ~(near & touches[sel, None])
+                keep = ~(near & touches[sel, None])
+            occ = global_map.occupied_many(sx, sy, safety_margin=edge_safety_margin)
+            if keep is not None:
+                occ &= keep
             out[sel] = occ.any(axis=1)
+            if has_clear:
+                cl = global_map.clearance_many(sx, sy)
+                blocked = np.isfinite(cl) & (cl < spotGrid.FRONTIER_CLEARANCE_M)
+                if keep is not None:
+                    blocked &= keep
+                out_clear[sel] = blocked.any(axis=1)
+        if has_clear:
+            self.clearance_disagreement = (
+                int((out & ~out_clear).sum()), int((~out & out_clear).sum()), n_pairs)
+            if spotGrid.CLEARANCE_MAP_DECIDES:
+                return out_clear
         return out
 
     def _prefill_global_slope_nodata(self, pairs):

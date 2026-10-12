@@ -381,6 +381,37 @@ GLOBAL_OCC_COARSE_CELLS = 8          # lato del blocco dell'indice a grana gross
 GLOBAL_OCC_CONFIRM_WALKED = 4
 
 # =========================================================================
+# MAPPA DELLO SPAZIO LIBERO (2026-10-12, dalla prima missione in esterno)
+#
+# La mappa di occupazione ricorda solo "ostacolo", cioe' obstacle_distance <= 0.15.
+# Un varco da 0.26 m, per lei, e' prato aperto: NON ESISTE, in cio' che il pianificatore
+# legge, un modo di dire "qui si passa a stento". Il fronte invece lavora sul valore
+# continuo e pretende FRONTIER_CLEARANCE_M. Da questa differenza nascono due sintomi
+# osservati nella missione del 12-10 14:47, cella (1,1):
+#   - il pianificatore propone un percorso nel varco, il fronte rifiuta, [SUBITO] scarta
+#     QUELL'arco, il pianificatore trova l'arco accanto -- stesso varco. Otto volte.
+#   - prune_prm_nodes_in_obstacles riconosce i nodi dentro un ostacolo ma non ha dove
+#     scriverlo: lo scarto e' soft e al refresh successivo gli archi tornano. 336 scarti
+#     per 88 nodi davvero cattivi, cioe' ognuno rifatto quasi 4 volte.
+#
+# Qui la mappa ricorda, per cella, QUANTO SPAZIO c'era: cosi' il pianificatore puo'
+# applicare lo stesso identico test del fronte, sulla stessa grandezza.
+#
+# Statistica: media delle osservazioni prese entro CLEARANCE_NEAR_M; dove non ce ne sono,
+# media di tutte. Impara quindi dalla PRIMA osservazione anche lontana, e si corregge
+# quando il robot si avvicina. Misurato sulle due missioni del 12-10 (fermate del fronte
+# riconosciute / punti su cui il robot e' davvero passato e che verrebbero vietati):
+#   bit + margine (oggi)      fuori 39% / 6.1%    al chiuso 43% / 16.0%
+#   vicine, se no tutte       fuori 52% / 1.9%    al chiuso 86% / 16.5%
+#   media di tutte            fuori 52% / 1.3%    al chiuso 21% / 16.0%  <- crolla in corridoio
+# La variante scelta domina quella di oggi su entrambe le missioni.
+#
+# CLEARANCE_MAP_DECIDES = False: la mappa impara e si misura il disaccordo con il criterio
+# attuale, ma a decidere resta la mappa binaria. Si commuta dopo una missione di prova.
+CLEARANCE_NEAR_M = 1.0
+CLEARANCE_MAP_DECIDES = False
+
+# =========================================================================
 # GAIT SELECTION THRESHOLDS -- three-tier terrain difficulty, well below the
 # OBSTACLE thresholds above (those mean "basically impassable"; these mean
 # "how carefully should Spot walk through terrain we've already decided is
@@ -1590,6 +1621,12 @@ class GlobalGrid:
         # Celle su cui il CORPO del robot e' passato: per dichiararle occupate servono
         # GLOBAL_OCC_CONFIRM_WALKED conferme invece di GLOBAL_OCC_CONFIRM_OBS.
         self.walked_cells = set()
+        # MAPPA DELLO SPAZIO LIBERO (vedi CLEARANCE_NEAR_M): media delle obstacle_distance
+        # osservate, tenuta separata fra viste ravvicinate e tutte.
+        self.clear_near_sum = {}
+        self.clear_near_n = {}
+        self.clear_all_sum = {}
+        self.clear_all_n = {}
         # Versione delle celle occupate (2026-10-12): cresce a ogni cambio da/verso -1. Serve
         # a riusare il raster dilatato di occupied_many finche' la mappa non cambia.
         self._occ_version = 0
@@ -1625,6 +1662,77 @@ class GlobalGrid:
                 ck = self._coarse_key(*key)
                 self._coarse_occ[ck] = self._coarse_occ.get(ck, 0) + 1
 
+
+    def clearance(self, x, y):
+        """
+        Spazio libero ricordato in quel punto (m), o None se mai osservato. Media delle
+        viste ravvicinate quando ce ne sono, altrimenti media di tutte -- vedi
+        CLEARANCE_NEAR_M per la misura che ha scelto questa statistica.
+        """
+        key = (int(np.floor(x / self.resolution)), int(np.floor(y / self.resolution)))
+        n = self.clear_near_n.get(key, 0)
+        if n:
+            return self.clear_near_sum[key] / n
+        n = self.clear_all_n.get(key, 0)
+        return (self.clear_all_sum[key] / n) if n else None
+
+    def clearance_many(self, xs, ys):
+        """clearance() su molti punti: array di float, NaN dove mai osservato."""
+        xs = np.asarray(xs, dtype=np.float64)
+        ys = np.asarray(ys, dtype=np.float64)
+        out = np.full(xs.shape, np.nan)
+        if xs.size == 0 or not self.clear_all_n:
+            return out
+        gx = np.floor(xs / self.resolution).astype(np.int64)
+        gy = np.floor(ys / self.resolution).astype(np.int64)
+        ns, na = self.clear_near_sum, self.clear_near_n
+        as_, an = self.clear_all_sum, self.clear_all_n
+        flat = out.ravel()
+        for i, k in enumerate(zip(gx.ravel().tolist(), gy.ravel().tolist())):
+            n = na.get(k, 0)
+            if n:
+                flat[i] = ns[k] / n
+            else:
+                n = an.get(k, 0)
+                if n:
+                    flat[i] = as_[k] / n
+        return out
+
+    def clearance_blocked(self, x, y, min_clearance):
+        """
+        True se in quel punto lo spazio ricordato e' sotto min_clearance. Una cella mai
+        osservata non blocca: ignoto non e' occupato, stessa regola del fronte sicuro
+        ('fine_dati' non e' 'ostacolo').
+        """
+        c = self.clearance(x, y)
+        return c is not None and c < min_clearance
+
+    def update_clearance(self, pts, obstacle_distance, usable, near=None):
+        """
+        2026-10-12. Impara lo spazio libero per cella. Chiamata accanto a update().
+
+        obstacle_distance: le distanze (gia' filtrate) della scansione, allineate a pts.
+        usable: celle da cui si puo' imparare (attendibili, oppure sotto il corpo).
+        near: osservazioni prese entro CLEARANCE_NEAR_M dal robot -- vanno in un
+            accumulatore separato, che ha la precedenza (vedi clearance()).
+        """
+        p = np.asarray(pts).reshape(-1, pts.shape[-1] if np.ndim(pts) > 1 else 2)
+        od = np.asarray(obstacle_distance, dtype=np.float64).ravel()
+        us = np.asarray(usable, dtype=bool).ravel()
+        if od.size != len(p) or us.size != len(p):
+            return
+        gx = np.floor(p[:, 0] / self.resolution).astype(np.int64)
+        gy = np.floor(p[:, 1] / self.resolution).astype(np.int64)
+        nr = (np.zeros(len(p), dtype=bool) if near is None
+              else np.asarray(near, dtype=bool).ravel())
+        for k, v, ok, isnear in zip(zip(gx.tolist(), gy.tolist()), od, us, nr):
+            if not ok:
+                continue
+            self.clear_all_sum[k] = self.clear_all_sum.get(k, 0.0) + float(v)
+            self.clear_all_n[k] = self.clear_all_n.get(k, 0) + 1
+            if isnear:
+                self.clear_near_sum[k] = self.clear_near_sum.get(k, 0.0) + float(v)
+                self.clear_near_n[k] = self.clear_near_n.get(k, 0) + 1
 
     def update(self, pts, obstacle_mask, walked=None):
         """
@@ -1862,6 +1970,11 @@ class GlobalGrid:
                 'grid': self.grid,
                 'hazards': list(getattr(self, 'hazards', [])),   # dischi delle cadute (x, y, raggio)
                 'walked_cells': list(getattr(self, 'walked_cells', ())),  # celle su cui il corpo e' passato
+                # mappa dello spazio libero (vedi clearance()): somme e conteggi
+                'clear_near_sum': getattr(self, 'clear_near_sum', {}),
+                'clear_near_n': getattr(self, 'clear_near_n', {}),
+                'clear_all_sum': getattr(self, 'clear_all_sum', {}),
+                'clear_all_n': getattr(self, 'clear_all_n', {}),
             }, f)
         print(f"[MAP] Mappa globale salvata correttamente in {file_path}")
 
@@ -1874,6 +1987,10 @@ class GlobalGrid:
                 self.grid = data['grid']
                 self.hazards = list(data.get('hazards', []))
                 self.walked_cells = {tuple(k) for k in data.get('walked_cells', ())}
+                self.clear_near_sum = dict(data.get('clear_near_sum', {}))
+                self.clear_near_n = dict(data.get('clear_near_n', {}))
+                self.clear_all_sum = dict(data.get('clear_all_sum', {}))
+                self.clear_all_n = dict(data.get('clear_all_n', {}))
             self.hazard_cells = set()
             for hx, hy, hr in self.hazards:          # i dischi delle cadute restano permanenti
                 st = int(np.ceil(hr / self.resolution))

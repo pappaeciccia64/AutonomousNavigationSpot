@@ -1164,6 +1164,55 @@ def _mask_for_global_map(obstacle_mask, is_valid, pts=None, robot_pose=None,
     return (out, core) if return_core else out
 
 
+def _update_clearance_map(global_map, pts, snap, is_valid, unwritten, core, robot_xy):
+    """
+    2026-10-12. Alimenta la mappa dello spazio libero con la scansione corrente.
+
+    Usa la obstacle_distance FILTRATA (quella su cui il fronte decide davvero, mediana +
+    isteresi: vedi arcVerification), non la lettura grezza. Imparano solo le celle
+    attendibili; sotto il corpo il valore non puo' essere minore di mezza larghezza, perche'
+    il robot ci sta sopra (stesso principio di _under_body nel fronte).
+    """
+    if not hasattr(global_map, 'update_clearance') or snap is None:
+        return
+    try:
+        od = np.asarray(snap.obstacle_dist, dtype=np.float64).ravel()
+        v = np.asarray(is_valid, dtype=bool).ravel()
+        if unwritten is not None and np.size(unwritten) == v.size:
+            v = v & ~np.asarray(unwritten, dtype=bool).ravel()
+        c = np.asarray(core, dtype=bool).ravel()
+        if od.size != v.size or c.size != v.size:
+            return
+        usable = v | c
+        od = np.where(c, np.maximum(od, spotGrid.ROBOT_HALF_WIDTH_M), od)
+        p = np.asarray(pts, dtype=np.float64).reshape(-1, 3)
+        near = np.hypot(p[:, 0] - robot_xy[0], p[:, 1] - robot_xy[1]) <= spotGrid.CLEARANCE_NEAR_M
+        global_map.update_clearance(p, od, usable, near=near)
+    except Exception as e:      # mai fatale: e' una mappa di appoggio
+        print(f"[SPAZIO] Mappa dello spazio libero non aggiornata: {e}")
+
+
+def _log_clearance_gap(prm, global_map):
+    """
+    2026-10-12. Una riga per giro sul divario fra i due criteri di percorribilita':
+    la mappa binaria (bit occupato + margine) e la mappa dello spazio libero (stessa soglia
+    del fronte). Tace quando sono d'accordo. Serve a decidere sul campo se commutare
+    spotGrid.CLEARANCE_MAP_DECIDES.
+    """
+    d = getattr(prm, 'clearance_disagreement', None)
+    if not d:
+        return
+    only_bin, only_clear, tot = d
+    if not (only_bin or only_clear) or not tot:
+        return
+    chi = "lo spazio libero" if spotGrid.CLEARANCE_MAP_DECIDES else "la mappa binaria"
+    n_cells = len(getattr(global_map, 'clear_all_n', ()) or ())
+    print(f"[SPAZIO] Archi su cui i due criteri non concordano: {only_bin + only_clear} su "
+          f"{tot} ({100.0 * (only_bin + only_clear) / tot:.1f}%) -- "
+          f"{only_bin} bloccati solo dalla mappa binaria, {only_clear} solo dallo spazio "
+          f"libero. Adesso decide {chi}. Celle con spazio libero noto: {n_cells}.")
+
+
 def _log_ground_filter(local_grid, label):
     """
     Una riga solo quando il filtro sull'altezza del suolo ha scartato qualcosa o non ha
@@ -2454,7 +2503,8 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
     return {'ok': False, 'ids': None, 'robot_node': None, 'how': 'cella rimandata'}
 
 
-def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=PRM_NODE_MIN_CLEARANCE_M):
+def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=PRM_NODE_MIN_CLEARANCE_M,
+                                 global_map=None):
     """
     2026-10-07. Scarta dal grafo i nodi che cadono DENTRO un ostacolo.
 
@@ -2476,6 +2526,14 @@ def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=PRM_NODE_MIN_CLEARAN
     Si rivaluta a ogni ciclo, quindi un nodo che si scopre dentro un muro cade subito; e
     siccome gli archi vengono tolti in modo NON permanente, un nodo giudicato male da una
     lettura rumorosa torna in gioco quando i dati freschi lo smentiscono.
+
+    2026-10-12, dalla missione in esterno: la finestra della scansione contiene solo ~235
+    nodi su 3321 (il 7% del grafo), quindi tutto il resto non viene nemmeno esaminato, per
+    quanto sia evidente nei dati che e' dentro un muro. E siccome lo scarto e' soft e la
+    mappa binaria non sa registrare "stretto", al refresh successivo gli archi tornano:
+    336 scarti per 88 nodi davvero cattivi, cioe' ognuno rifatto quasi 4 volte.
+    Con `global_map` si guarda ANCHE la mappa dello spazio libero, che copre tutto il grafo
+    e ricorda -- e il giudizio su un nodo lontano non va piu' perso a ogni giro.
     """
     ids = [nid for nid in prm.nodes if prm.edges.get(nid)]   # gia' isolati: niente da togliere
     if not ids:
@@ -2486,6 +2544,10 @@ def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=PRM_NODE_MIN_CLEARAN
     if np.any(inside):
         r, c = rows[inside], cols[inside]
         bad[inside] = snap.seen[r, c] & (snap.obstacle_dist[r, c] < min_clearance_m)
+    if (spotGrid.CLEARANCE_MAP_DECIDES and global_map is not None
+            and hasattr(global_map, 'clearance_many')):
+        cl = global_map.clearance_many(xy[:, 0], xy[:, 1])
+        bad |= np.isfinite(cl) & (cl < min_clearance_m)
     pruned = []
     for k in np.nonzero(bad)[0]:
         nid = ids[int(k)]
@@ -3199,14 +3261,26 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             num_x_up, num_y_up, grid_origin_x_up, grid_origin_y_up, cell_size_up,
             robot_x, robot_y, unwritten=unwritten_up, robot_yaw=robot_yaw)
 
+        # Mappa dello spazio libero: QUI, non insieme a global_map.update, perche' serve la
+        # obstacle_distance filtrata che vive nella fotografia (vedi _update_clearance_map).
+        # Si alimenta solo dal ciclo di navigazione, cosi' tutte le osservazioni passano per
+        # lo stesso filtro.
+        _update_clearance_map(global_map, pts_up, snap, is_valid_up, unwritten_up,
+                              _gm_core_up, (robot_x, robot_y))
+
         # Nodi DENTRO gli ostacoli: fuori dal grafo (2026-10-07). Vedi
         # prune_prm_nodes_in_obstacles -- gli archi erano gia' vetati, i nodi mai.
-        pruned_nodes = prune_prm_nodes_in_obstacles(prm_graph, snap)
+        pruned_nodes = prune_prm_nodes_in_obstacles(prm_graph, snap, global_map=global_map)
         if pruned_nodes:
             MISSION_STATS['nodes_pruned'] += len(pruned_nodes)
             print(f"[NODI] {len(pruned_nodes)} nodi scartati: meno di "
                   f"{PRM_NODE_MIN_CLEARANCE_M:.2f} m di spazio libero dove li vediamo "
                   f"(primi: {pruned_nodes[:8]}).")
+
+        # Quanto la mappa dello spazio libero si discosta dal criterio in uso (vedi
+        # spotGrid.CLEARANCE_MAP_DECIDES). Finche' decide la mappa binaria questa riga e'
+        # solo una misura: dice quanti archi cambierebbero verdetto commutando.
+        _log_clearance_gap(prm_graph, global_map)
 
         # Archi gia' rifiutati per rotazione DA QUESTO NODO: restano fuori finche' il robot
         # non si sposta (2026-10-07). Lo scarto e' soft, quindi refresh_local_edge_weights li
