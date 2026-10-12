@@ -1129,7 +1129,8 @@ GLOBAL_MAP_SELF_BODY_WIDTH_M = 0.50
 GLOBAL_MAP_SELF_RING_M = 0.25
 
 
-def _mask_for_global_map(obstacle_mask, is_valid, pts=None, robot_pose=None):
+def _mask_for_global_map(obstacle_mask, is_valid, pts=None, robot_pose=None,
+                         return_core=False):
     """
     Maschera da passare a GlobalGrid.update: -1 ostacolo, +1 vista libera, 0 nessuna
     informazione (cella non attendibile in questa scansione). Prima le celle non attendibili
@@ -1137,16 +1138,21 @@ def _mask_for_global_map(obstacle_mask, is_valid, pts=None, robot_pose=None):
 
     pts, robot_pose=(x, y, yaw): se passati, applica la zona attorno al corpo (vedi
     GLOBAL_MAP_SELF_RING_M): nucleo libero, anello senza ostacoli.
+
+    return_core (2026-10-12): restituisce anche la maschera del NUCLEO, cioe' le celle
+    coperte dal corpo adesso. Va passata a GlobalGrid.update come `walked`: sono celle su
+    cui il robot e' fisicamente passato, e per dichiararle occupate serviranno piu'
+    conferme (vedi spotGrid.GLOBAL_OCC_CONFIRM_WALKED).
     """
     m = np.asarray(obstacle_mask, dtype=np.float64).ravel()
     v = np.asarray(is_valid, dtype=bool).ravel()
     out = np.where(m < 0, -1.0, np.where(v, 1.0, 0.0))
     if pts is None or robot_pose is None:
-        return out
+        return (out, np.zeros(out.shape, dtype=bool)) if return_core else out
     rx, ry, ryaw = (float(robot_pose[0]), float(robot_pose[1]), float(robot_pose[2]))
     p = np.asarray(pts, dtype=np.float64).reshape(-1, 3)
     if len(p) != len(out):
-        return out
+        return (out, np.zeros(out.shape, dtype=bool)) if return_core else out
     dx, dy = p[:, 0] - rx, p[:, 1] - ry
     c, s_ = np.cos(ryaw), np.sin(ryaw)
     xb, yb = np.abs(dx * c + dy * s_), np.abs(-dx * s_ + dy * c)
@@ -1155,7 +1161,7 @@ def _mask_for_global_map(obstacle_mask, is_valid, pts=None, robot_pose=None):
     ring = ~core & (xb <= hl + GLOBAL_MAP_SELF_RING_M) & (yb <= hw + GLOBAL_MAP_SELF_RING_M)
     out[ring & (out < 0)] = 0.0
     out[core] = 1.0
-    return out
+    return (out, core) if return_core else out
 
 
 def _log_ground_filter(local_grid, label):
@@ -2256,9 +2262,17 @@ def graphnav_drop_breadcrumb(env, recordingInterface, robot_state_client, prm_no
             return None
     try:
         recordingInterface.create_default_waypoint(cell_row=cell_row, cell_col=cell_col)
-        loc = recordingInterface.get_localization_state()
-        wp_id = loc.get('waypoint_id') if isinstance(loc, dict) else None
-        wp_name = loc.get('waypoint_name') if isinstance(loc, dict) else None
+        # 2026-10-12: nome e id dal waypoint appena creato (li porta la risposta del robot),
+        # non da get_localization_state(), che riscarica tutto il grafo solo per leggerli --
+        # 41 briciole su 60 scaricamenti nella missione del 12-10 14:47. Ripiego sulla
+        # vecchia strada se l'interfaccia non li espone.
+        last = getattr(recordingInterface, 'last_created_waypoint', None)
+        if isinstance(last, dict) and last.get('id'):
+            wp_id, wp_name = last['id'], last.get('name')
+        else:
+            loc = recordingInterface.get_localization_state()
+            wp_id = loc.get('waypoint_id') if isinstance(loc, dict) else None
+            wp_name = loc.get('waypoint_name') if isinstance(loc, dict) else None
     except Exception as e:
         print(f"[BRICIOLA] Waypoint non creato: {e}")
         return None
@@ -2799,8 +2813,9 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                               rough_values=rough_values, is_valid=is_valid)
 
     # Aggiorna la mappa di occupazione globale con i dati appena processati
-    global_map.update(pts, _mask_for_global_map(obstacle_mask, is_valid, pts,
-                                                (robot_x, robot_y, robot_yaw)))
+    _gm_mask, _gm_core = _mask_for_global_map(obstacle_mask, is_valid, pts,
+                                              (robot_x, robot_y, robot_yaw), return_core=True)
+    global_map.update(pts, _gm_mask, walked=_gm_core)
     # Aggiorna anche la mappa globale del terreno -- solo altezze già corrette e valide
     global_terrain_map.update(pts, terrain_real, is_valid)
 
@@ -3120,8 +3135,10 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                                   rough_values=rough_up, is_valid=is_valid_up)
 
         t_proc = time.perf_counter()
-        global_map.update(pts_up, _mask_for_global_map(obstacle_mask_updated, is_valid_up, pts_up,
-                                                       (robot_x, robot_y, robot_yaw)))
+        _gm_mask_up, _gm_core_up = _mask_for_global_map(
+            obstacle_mask_updated, is_valid_up, pts_up, (robot_x, robot_y, robot_yaw),
+            return_core=True)
+        global_map.update(pts_up, _gm_mask_up, walked=_gm_core_up)
         global_terrain_map.update(pts_up, terrain_real_up, is_valid_up)
         t_maps = time.perf_counter()
 
@@ -5059,10 +5076,10 @@ def easy_walk(options):
             )
 
             # Fold this last scan into the persistent global maps, same as every other iteration
-            global_grid.global_occupancy_map.update(pts_final,
-                                                    _mask_for_global_map(obstacle_mask_final, is_valid_final,
-                                                                         pts_final,
-                                                                         (x_final, y_final, final_yaw)))
+            _gm_mask_f, _gm_core_f = _mask_for_global_map(
+                obstacle_mask_final, is_valid_final, pts_final,
+                (x_final, y_final, final_yaw), return_core=True)
+            global_grid.global_occupancy_map.update(pts_final, _gm_mask_f, walked=_gm_core_f)
             global_grid.global_terrain_map.update(pts_final, terrain_real_final, is_valid_final)
 
             final_save_path = os.path.join(

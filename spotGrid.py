@@ -355,6 +355,31 @@ GLOBAL_OCC_CONFIRM_OBS = 2
 GLOBAL_OCC_MAX_COUNT = 4
 GLOBAL_OCC_COARSE_CELLS = 8          # lato del blocco dell'indice a grana grossa (8 x 3 cm = 24 cm)
 
+# CELLE SU CUI IL ROBOT E' PASSATO (2026-10-12, dalla prima missione in esterno).
+#
+# Il contatore di update() azzera le prove di "libero" alla PRIMA osservazione di
+# ostacolo (`curr_count + 1 if curr_count >= 0 else 1`): e' il modo di pretendere
+# osservazioni CONSECUTIVE, e serve a reagire in fretta a un ostacolo nuovo. Il prezzo
+# e' che due osservazioni di ostacolo battono qualunque numero di osservazioni di
+# spazio libero.
+#
+# Misurato sulla missione del 2026-10-12 14:47, cella (1,1): una cella su cui il robot
+# era rimasto fermo per 16 scansioni, con obstacle_distance 0.35-0.38 m SOTTO DI SE',
+# e' stata dichiarata occupata da due letture prese da 1.8 e 2.5 m (0.121 e 0.109 m).
+# In 16 scansioni su 72 la mappa dichiarava occupata la cella in cui il robot si
+# trovava fisicamente: il pianificatore evitava terreno su cui il robot stava in piedi,
+# e ha speso 35 scansioni e 5 blocchi su quella cella.
+#
+# Che il robot ci sia passato sopra col corpo non e' un'osservazione come le altre: e'
+# una prova. Quelle celle non diventano immuni (il mondo cambia, qualcuno puo' mettersi
+# li'), ma per dichiararle occupate servono piu' conferme.
+#
+# Misurato rigiocando le 72 scansioni della missione, contro la verita' delle viste da
+# meno di 0.8 m: falsi ostacoli 274 -> 193 (-30%), ostacoli non visti 377 -> 384 (+7),
+# celle "il robot era qui ed e' occupata" 16 -> 0. L'alternativa (non azzerare mai le
+# prove di libero) dava 173 falsi ma 490 ostacoli non visti: scartata.
+GLOBAL_OCC_CONFIRM_WALKED = 4
+
 # =========================================================================
 # GAIT SELECTION THRESHOLDS -- three-tier terrain difficulty, well below the
 # OBSTACLE thresholds above (those mean "basically impassable"; these mean
@@ -1562,6 +1587,9 @@ class GlobalGrid:
         # Celle dei dischi pericolosi (mark_hazard): restano occupate per tutta la missione.
         self.hazard_cells = set()
         self.hazards = []
+        # Celle su cui il CORPO del robot e' passato: per dichiararle occupate servono
+        # GLOBAL_OCC_CONFIRM_WALKED conferme invece di GLOBAL_OCC_CONFIRM_OBS.
+        self.walked_cells = set()
         # Versione delle celle occupate (2026-10-12): cresce a ogni cambio da/verso -1. Serve
         # a riusare il raster dilatato di occupied_many finche' la mappa non cambia.
         self._occ_version = 0
@@ -1598,11 +1626,16 @@ class GlobalGrid:
                 self._coarse_occ[ck] = self._coarse_occ.get(ck, 0) + 1
 
 
-    def update(self, pts, obstacle_mask):
+    def update(self, pts, obstacle_mask, walked=None):
         """
         [FIX AGGIORNAMENTO PROBABILISTICO]
         Se una cella inizialmente vista occupata viene vista libera per
         piu' scansioni consecutive, torna ad essere considerata libera (1.0).
+
+        walked (2026-10-12): maschera booleana allineata a pts delle celle coperte dal CORPO
+        del robot adesso. Vengono ricordate (walked_cells) e da li' in poi, per dichiararle
+        occupate, servono GLOBAL_OCC_CONFIRM_WALKED osservazioni invece di
+        GLOBAL_OCC_CONFIRM_OBS. Vedi la costante per la misura che l'ha motivata.
         """
         pts_flat = pts.reshape(-1, 3)
         mask_flat = obstacle_mask.ravel()
@@ -1640,6 +1673,11 @@ class GlobalGrid:
         #     prima bastavano GLOBAL_OCC_MAX_COUNT = 4 scansioni normali, e il punto di una
         #     caduta di solito sembra normale ai sensori (verificato: spariva alla 4a).
         hazard_cells = self.hazard_cells
+        walked_cells = self.walked_cells
+        if walked is not None:
+            w = np.asarray(walked, dtype=bool).ravel()
+            if w.size == gx_array.size:
+                walked_cells.update(zip(gx_array[w].tolist(), gy_array[w].tolist()))
         for gx, gy, state in zip(gx_array, gy_array, mask_flat):
             if state == 0:
                 continue
@@ -1651,7 +1689,9 @@ class GlobalGrid:
             if state == -1.0:
                 new_count = min(curr_count + 1 if curr_count >= 0 else 1, GLOBAL_OCC_MAX_COUNT)
                 self.obs_count[key] = new_count
-                if new_count >= GLOBAL_OCC_CONFIRM_OBS:
+                confirm = (GLOBAL_OCC_CONFIRM_WALKED if key in walked_cells
+                           else GLOBAL_OCC_CONFIRM_OBS)
+                if new_count >= confirm:
                     self._set_state(key, -1.0)
                 elif key not in self.grid:
                     self._set_state(key, 1.0)    # vista, ma non ancora confermata occupata
@@ -1821,6 +1861,7 @@ class GlobalGrid:
                 'resolution': self.resolution,
                 'grid': self.grid,
                 'hazards': list(getattr(self, 'hazards', [])),   # dischi delle cadute (x, y, raggio)
+                'walked_cells': list(getattr(self, 'walked_cells', ())),  # celle su cui il corpo e' passato
             }, f)
         print(f"[MAP] Mappa globale salvata correttamente in {file_path}")
 
@@ -1832,6 +1873,7 @@ class GlobalGrid:
                 self.resolution = data['resolution']
                 self.grid = data['grid']
                 self.hazards = list(data.get('hazards', []))
+                self.walked_cells = {tuple(k) for k in data.get('walked_cells', ())}
             self.hazard_cells = set()
             for hx, hy, hr in self.hazards:          # i dischi delle cadute restano permanenti
                 st = int(np.ceil(hr / self.resolution))

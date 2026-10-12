@@ -42,6 +42,10 @@ class RecordingInterface(object):
         self._cached_graph = None
         self._graph_cache_valid = False
 
+        # Nome e id dell'ultimo waypoint creato (vedi create_default_waypoint): evita di
+        # riscaricare il grafo solo per rileggerli.
+        self.last_created_waypoint = None
+
     def optimize_anchoring(self):
         """
         Ottimizza l'ancoraggio della mappa direttamente sul server del robot.
@@ -479,6 +483,14 @@ class RecordingInterface(object):
             if cell_row is not None and cell_col is not None:
                 print(f"  Cell saved: ({cell_row}, {cell_col})")
             print(f"  Status: {resp.status}\n")
+
+            # 2026-10-12: nome e id dell'ultimo waypoint creato, per chi li vuole senza
+            # riscaricare il grafo. get_localization_state() li rilegge dal grafo e, dato
+            # che create_waypoint ha appena invalidato la cache, fa un download_graph()
+            # completo solo per l'etichetta: nella missione del 12-10 14:47 erano 41
+            # briciole su 60 scaricamenti, con un costo che cresce con la mappa (70
+            # waypoint a fine missione). Qui l'id arriva dalla risposta del robot.
+            self.last_created_waypoint = {'name': new_name, 'id': created_waypoint_id}
 
             self.invalidate_graph_cache()
 

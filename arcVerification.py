@@ -440,6 +440,15 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
             reason, value = 'fine_dati', None
         elif obstacle[k]:
             reason, value = 'ostacolo', float(od[k])
+            # 2026-10-12: la soglia EFFETTIVA in quel punto, per il log. Se a fermare il
+            # fronte e' stata l'isteresi (cella gia' bloccante, non ancora risalita sopra
+            # soglia + OBSTACLE_HYSTERESIS_M) la riga diceva "ostacolo a 0.32 m (minimo
+            # 0.30 m)", che sembra una contraddizione: nella missione del 12-10 14:47
+            # sono 23 fermate su 33. Ora si vede quale regola ha deciso.
+            result['stop_threshold'] = float(thr[k])
+            result['stop_by_latch'] = bool(
+                snap.blocked_latch is not None and use_latch
+                and snap.blocked_latch[rows[k], cols[k]] and od[k] >= thr[k])
         else:
             reason, value = 'rugosita', None
         dist, stop_xy = float(ss[k]), (float(xs[k]), float(ys[k]))
@@ -514,8 +523,15 @@ def describe_frontier(frontier):
     if r == 'fine_dati':
         return f"[FRONTE] {base} -- si ferma sul bordo dei dati in ({sx:.2f}, {sy:.2f}): avanzo e riguardo"
     if r == 'ostacolo':
+        thr = frontier.get('stop_threshold', frontier.get('clearance_nominal',
+                                                          spotGrid.FRONTIER_CLEARANCE_M))
+        if frontier.get('stop_by_latch'):
+            why = (f"(minimo {thr:.2f} m; qui decide l'isteresi, che tiene bloccante la cella "
+                   f"fino a {thr + OBSTACLE_HYSTERESIS_M:.2f} m)")
+        else:
+            why = f"(minimo {thr:.2f} m)"
         return (f"[FRONTE] {base} -- ostacolo a {frontier['value']:.2f} m dalla linea centrale in "
-                f"({sx:.2f}, {sy:.2f}) (minimo {frontier.get('clearance_nominal', spotGrid.FRONTIER_CLEARANCE_M):.2f} m)")
+                f"({sx:.2f}, {sy:.2f}) {why}")
     if r == 'rugosita':
         return f"[FRONTE] {base} -- terreno troppo irregolare in ({sx:.2f}, {sy:.2f})"
     return (f"[FRONTE] {base} -- tratto troppo ripido da ({sx:.2f}, {sy:.2f}) "
