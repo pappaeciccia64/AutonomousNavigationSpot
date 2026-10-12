@@ -299,13 +299,39 @@ def _arr(d, key, shape_tail=None):
     return np.empty((0,) + tuple(shape_tail or ()))
 
 
+# 2026-10-12: la mappa di colori si prende UNA volta. plt.get_cmap(...)(v) ricostruiva la
+# tavola a ogni chiamata: con ~3900 archi disegnati erano 15 000 ricostruzioni e ~2 s per
+# ridisegno, cioe' quasi tutta la lentezza del visualizzatore.
+_SLOPE_CMAP = plt.get_cmap('RdYlGn_r')
+_SLOPE_LUT_CACHE = {}   # ripiego quando il bundle non accetta attributi
+# Oltre questo numero di archi il pannello globale ne disegna uno ogni N: a quella densita'
+# sono comunque un velo e il costo di disegno diventa il collo di bottiglia (2026-10-12).
+GLOBAL_PRM_MAX_EDGES = 20000
+
+
 def _slope_color(long_s, lat_s):
     """Come easy_walk._slope_edge_color: verde = in avanti, rosso = di traverso; piu' marcato = piu' ripido."""
     total = long_s + lat_s
     if total < 1e-6:
         return (0.6, 0.6, 0.6, 0.25)
-    r, g, b, _ = plt.get_cmap('RdYlGn_r')(lat_s / total)
+    r, g, b, _ = _SLOPE_CMAP(lat_s / total)
     return (r, g, b, 0.3 + 0.5 * min(1.0, max(long_s, lat_s) / SLOPE_THRESHOLD))
+
+
+def _slope_colors_many(keys, long_s, lat_s):
+    """
+    2026-10-12. _slope_color su molti archi in una volta: stessi colori, calcolati con
+    operazioni su array invece che uno per uno.
+    """
+    long_s = np.asarray(long_s, dtype=np.float64)
+    lat_s = np.asarray(lat_s, dtype=np.float64)
+    total = long_s + lat_s
+    frac = np.where(total < 1e-6, 0.5, lat_s / np.where(total < 1e-6, 1.0, total))
+    rgba = np.asarray(_SLOPE_CMAP(frac), dtype=np.float64).reshape(-1, 4)
+    alpha = 0.3 + 0.5 * np.minimum(1.0, np.maximum(long_s, lat_s) / SLOPE_THRESHOLD)
+    rgba[:, 3] = np.where(total < 1e-6, 0.25, alpha)
+    rgba[total < 1e-6, :3] = 0.6
+    return rgba
 
 
 def _draw_cells(ax, vd):
@@ -344,20 +370,51 @@ def _overlay_prm_local(ax, ctx, i):
         return
     vd = vis[1]
     x0, x1, y0, y1 = _extent(d)
-    xy = {int(k): tuple(p) for k, p in zip(_arr(vd, 'prm_node_ids', ()), _arr(vd, 'prm_node_xy', (2,)))}
-    inside = lambda p: x0 - 1 <= p[0] <= x1 + 1 and y0 - 1 <= p[1] <= y1 + 1
-    slope = {(int(a), int(b)): tuple(v) for (a, b), v in zip(_arr(vd, 'prm_slope_keys', (2,)), _arr(vd, 'prm_slope_values', (2,)))}
-    segs, cols = [], []
-    for a, b in _arr(vd, 'prm_edges', (2,)):
-        a, b = int(a), int(b)
-        if a in xy and b in xy and inside(xy[a]) and inside(xy[b]):
-            segs.append((xy[a], xy[b]))
-            sv = slope.get((min(a, b), max(a, b)))
-            c = _slope_color(*sv) if sv else (0.2, 0.2, 0.2, 0.3)
-            cols.append((c[0], c[1], c[2], 0.35))
-    if segs:
+    # 2026-10-12: filtro VETTORIALE. Prima un ciclo Python su tutti gli archi del PRM --
+    # dalla missione in esterno sono ~80 000, ricontrollati a ogni ridisegno, ed e' il
+    # motivo per cui il visualizzatore era lento. Qui si tengono solo gli archi che toccano
+    # la finestra, con due operazioni su array. Il disegno e' identico.
+    ids = np.asarray(_arr(vd, 'prm_node_ids', ()), dtype=np.int64).ravel()
+    nxy = np.asarray(_arr(vd, 'prm_node_xy', (2,)), dtype=np.float64).reshape(-1, 2)
+    edges = np.asarray(_arr(vd, 'prm_edges', (2,)), dtype=np.int64).reshape(-1, 2)
+    if len(ids) == 0 or len(nxy) != len(ids):
+        ax.set_xlim(x0, x1); ax.set_ylim(y0, y1)
+        return
+    pos = np.full((int(ids.max()) + 2, 2), np.nan)
+    pos[ids] = nxy
+    inside_node = np.zeros(len(pos), dtype=bool)
+    inside_node[ids] = ((nxy[:, 0] >= x0 - 1) & (nxy[:, 0] <= x1 + 1)
+                        & (nxy[:, 1] >= y0 - 1) & (nxy[:, 1] <= y1 + 1))
+    if len(edges):
+        ok = (edges[:, 0] < len(pos)) & (edges[:, 1] < len(pos))
+        e = edges[ok]
+        e = e[inside_node[e[:, 0]] & inside_node[e[:, 1]]]
+    else:
+        e = edges
+    if len(e):
+        segs = np.stack([pos[e[:, 0]], pos[e[:, 1]]], axis=1)
+        # La tabella delle pendenze si costruisce una volta per vista e si tiene in cache
+        # sul bundle: prima veniva rifatta (80 000 voci) a ogni ridisegno.
+        slope = getattr(vd, '_slope_lut', None)
+        if slope is None:
+            slope = {(int(a), int(b)): (float(v[0]), float(v[1])) for (a, b), v in
+                     zip(_arr(vd, 'prm_slope_keys', (2,)), _arr(vd, 'prm_slope_values', (2,)))}
+            try:
+                vd._slope_lut = slope
+            except Exception:
+                _SLOPE_LUT_CACHE[id(vd)] = slope
+        cols = np.tile(np.array([0.2, 0.2, 0.2, 0.35]), (len(e), 1))
+        if slope:
+            lo = np.zeros(len(e)); la = np.zeros(len(e)); have = np.zeros(len(e), dtype=bool)
+            for i, (a, b) in enumerate(e):
+                sv = slope.get((min(int(a), int(b)), max(int(a), int(b))))
+                if sv is not None:
+                    lo[i], la[i], have[i] = sv[0], sv[1], True
+            if have.any():
+                cols[have] = _slope_colors_many(None, lo[have], la[have])
+            cols[:, 3] = 0.35
         ax.add_collection(LineCollection(segs, colors=cols, linewidths=0.5, zorder=3))
-    pts = np.array([p for p in xy.values() if inside(p)]).reshape(-1, 2)
+    pts = nxy[inside_node[ids]]
     if len(pts):
         ax.plot(pts[:, 0], pts[:, 1], '.', color='k', ms=3, alpha=0.6, zorder=3)
     ax.set_xlim(x0, x1); ax.set_ylim(y0, y1)
@@ -381,16 +438,39 @@ def draw_global(ax, ctx, i, final=False):
         print(f"[viewer] celle non disegnate: {e}")
     if vd is not None:
         xy = {int(k): tuple(p) for k, p in zip(_arr(vd, 'prm_node_ids', ()), _arr(vd, 'prm_node_xy', (2,)))}
-        slope = {(int(a), int(b)): tuple(v) for (a, b), v in zip(_arr(vd, 'prm_slope_keys', (2,)), _arr(vd, 'prm_slope_values', (2,)))}
-        segs, cols = [], []
-        for a, b in _arr(vd, 'prm_edges', (2,)):
-            a, b = int(a), int(b)
-            if a in xy and b in xy:
-                segs.append((xy[a], xy[b]))
-                sv = slope.get((min(a, b), max(a, b)))
-                cols.append(_slope_color(*sv) if sv else (0.5, 0.5, 0.5, 0.25))
-        if segs:
-            ax.add_collection(LineCollection(segs, colors=cols, linewidths=0.5, zorder=2))
+        # 2026-10-12: questo pannello disegna TUTTI gli archi del grafo -- 90 216 nella
+        # missione del 12-10 14:47 -- e lo faceva con un ciclo Python piu' una chiamata alla
+        # mappa di colori per arco. Era la causa principale della lentezza. Stesso disegno,
+        # con operazioni su array. Sopra GLOBAL_PRM_MAX_EDGES si assottiglia: a quella
+        # densita' gli archi sono comunque un velo indistinguibile.
+        ids = np.asarray(_arr(vd, 'prm_node_ids', ()), dtype=np.int64).ravel()
+        nxy = np.asarray(_arr(vd, 'prm_node_xy', (2,)), dtype=np.float64).reshape(-1, 2)
+        edges = np.asarray(_arr(vd, 'prm_edges', (2,)), dtype=np.int64).reshape(-1, 2)
+        if len(ids) and len(nxy) == len(ids) and len(edges):
+            pos = np.full((int(ids.max()) + 2, 2), np.nan)
+            pos[ids] = nxy
+            known = np.zeros(len(pos), dtype=bool)
+            known[ids] = True
+            ok = (edges[:, 0] < len(pos)) & (edges[:, 1] < len(pos))
+            e = edges[ok]
+            e = e[known[e[:, 0]] & known[e[:, 1]]]
+            if len(e) > GLOBAL_PRM_MAX_EDGES:
+                step = int(np.ceil(len(e) / GLOBAL_PRM_MAX_EDGES))
+                e = e[::step]
+            if len(e):
+                segs = np.stack([pos[e[:, 0]], pos[e[:, 1]]], axis=1)
+                slope = {(int(a), int(b)): (float(v[0]), float(v[1])) for (a, b), v in
+                         zip(_arr(vd, 'prm_slope_keys', (2,)), _arr(vd, 'prm_slope_values', (2,)))}
+                cols = np.tile(np.array([0.5, 0.5, 0.5, 0.25]), (len(e), 1))
+                if slope:
+                    lo = np.zeros(len(e)); la = np.zeros(len(e)); have = np.zeros(len(e), dtype=bool)
+                    for i, (a, b) in enumerate(e):
+                        sv = slope.get((min(int(a), int(b)), max(int(a), int(b))))
+                        if sv is not None:
+                            lo[i], la[i], have[i] = sv[0], sv[1], True
+                    if have.any():
+                        cols[have] = _slope_colors_many(None, lo[have], la[have])
+                ax.add_collection(LineCollection(segs, colors=cols, linewidths=0.5, zorder=2))
         stops = np.array([xy[int(k)] for k in _arr(vd, 'prm_stop_nodes', ()) if int(k) in xy]).reshape(-1, 2)
         if len(stops):
             ax.plot(stops[:, 0], stops[:, 1], '.', color='tab:orange', ms=5, zorder=4, label='nodi di sosta')

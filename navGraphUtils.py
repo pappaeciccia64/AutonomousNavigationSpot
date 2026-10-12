@@ -434,21 +434,37 @@ class RecordingInterface(object):
             1.0 - 2.0 * (quat.y**2 + quat.z**2)
         )
 
-        graph = self._get_graph()
-        if not graph.waypoints:
-            next_number = 0
+        # 2026-10-12: il numero successivo si ricava dai waypoint che abbiamo creato NOI
+        # (waypoint_poses), non riscaricando il grafo. create_waypoint invalida la cache a
+        # ogni briciola, quindi questa riga era un download_graph() completo per volta: nella
+        # missione del 12-10 14:47, 41 briciole su 60 scaricamenti, con una mappa cresciuta a
+        # 70 waypoint. Siamo gli unici a creare waypoint con il formato wp_N, quindi il
+        # massimo che conosciamo e' il massimo che esiste. Al primo giro (nessuno nostro) si
+        # guarda il grafo come prima, perche' la mappa potrebbe arrivare da una sessione
+        # precedente.
+        def _wp_number(name):
+            try:
+                return int(name.split('_')[-1])
+            except (ValueError, IndexError):
+                return -1
+
+        mine = [_wp_number(n) for n in self.waypoint_poses if n.startswith('wp_')]
+        if mine:
+            next_number = max(mine) + 1
         else:
-            # Find highest number among manual waypoints (wp_N format)
-            max_number = -1
-            for wp in graph.waypoints:
-                name = wp.annotations.name
-                if name and name.startswith('wp_'):
-                    try:
-                        number = int(name.split('_')[-1])
-                        max_number = max(max_number, number)
-                    except (ValueError, IndexError):
-                        continue
-            next_number = max_number + 1
+            graph = self._get_graph()
+            if not graph or not graph.waypoints:
+                next_number = 0
+            else:
+                # Find highest number among manual waypoints (wp_N format)
+                max_number = -1
+                for wp in graph.waypoints:
+                    name = wp.annotations.name
+                    if name and name.startswith('wp_'):
+                        n = _wp_number(name)
+                        if n >= 0:
+                            max_number = max(max_number, n)
+                next_number = max_number + 1
 
         new_name = f'wp_{next_number}'
         print(f"\n[WAYPOINT CREATION] Creating new MANUAL waypoint:")

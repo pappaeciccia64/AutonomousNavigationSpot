@@ -67,6 +67,30 @@ ANCHOR_IGNORE_NEAR_M = 0.30
 # sparisce e gli archi vengono rivalutati senza.
 STOP_NODE_MAP_IGNORE_M = 0.70
 
+# Raggio entro cui refresh_local_edge_weights rivaluta davvero gli archi (2026-10-12).
+#
+# Il refresh prende tutti i nodi dentro la finestra della scansione (~235) e li appaia con
+# tutti i vicini: ~8500 archi rivalutati per giro. Fuori costa 3.65 s a giro ed e' diventato
+# la voce di tempo piu' grossa della missione (37.5%), perche' sul prato il 53% delle
+# interrogazioni di pendenza trova dati veri contro l'8.6% al chiuso: e' lavoro, non spreco.
+# Ma di quegli 8500 archi il robot nel passo successivo ne percorre UNO, e l'avanzamento
+# misurato e' ~1.2 m per volta.
+#
+# Qui si rivaluta a piena fedelta' solo cio' che sta entro questo raggio dal robot; il resto
+# conserva i pesi dell'ultima valutazione e viene ripreso al giro dopo, quando si avvicina.
+# La rete di sicurezza non cambia: e' il fronte sicuro, che gira comunque a ogni scansione e
+# a 5 Hz nel thread, sui dati dal vivo.
+# Misurato sui dati veri della missione del 12-10 14:47 (1 costruzione + 27 refresh),
+# confrontando ogni refresh con la valutazione PIENA:
+#   raggio 2.00 m -> 0.80 s,   1 arco diverso in tutto   (la finestra e' ~1.9 m: non morde)
+#   raggio 1.50 m -> 0.58 s,  79 verdetti diversi
+#   raggio 1.25 m -> 0.49 s,  80 verdetti diversi        <- scelto
+#   raggio 1.00 m -> 0.38 s, 654 verdetti diversi        (troppo: comincia a perdere)
+# 1.25 m e' anche PRM_MAX_EDGE_M, quindi l'arco che il robot sta per percorrere ricade
+# sempre per intero nella zona rivalutata a piena fedelta'.
+# None = nessun limite, cioe' il comportamento precedente.
+REFRESH_RADIUS_M = 1.25
+
 
 class PRM:
     """
@@ -375,12 +399,24 @@ class PRM:
             return set()
 
         num_rows, num_cols = self.current_grad_2d.shape
+        # 2026-10-12: il centro da cui si misura il raggio e' il nodo del robot; se non e'
+        # noto si ripiega sul centro della finestra, che e' comunque il robot.
+        center = None
+        if REFRESH_RADIUS_M is not None:
+            if self.robot_node is not None and self.robot_node in self.nodes:
+                center = self.nodes[self.robot_node]
+            else:
+                center = (self.grid_origin_x + num_cols * self.cell_size / 2.0,
+                          self.grid_origin_y + num_rows * self.cell_size / 2.0)
         local_nodes = []
         for idx, (x, y) in self.nodes.items():
             col_idx = int(np.floor((x - self.grid_origin_x) / self.cell_size))
             row_idx = int(np.floor((y - self.grid_origin_y) / self.cell_size))
-            if 0 <= row_idx < num_rows and 0 <= col_idx < num_cols:
-                local_nodes.append(idx)
+            if not (0 <= row_idx < num_rows and 0 <= col_idx < num_cols):
+                continue
+            if center is not None and np.hypot(x - center[0], y - center[1]) > REFRESH_RADIUS_M:
+                continue        # fuori dal raggio: tiene i pesi dell'ultima valutazione
+            local_nodes.append(idx)
         local_set = set(local_nodes)
 
         all_ids = list(self.nodes.keys())

@@ -1032,6 +1032,19 @@ def _graphnav_navigate_to(recordingInterface, waypoint_id, robot_state_client, c
     """Porta il robot a un waypoint con GraphNav. True solo se ci arriva davvero."""
     # Prima di muoversi: chiusure d'anello di Spot (a registrazione ferma). Le scorciatoie
     # dalla mappa le aggiunge chi chiama, PRIMA di fermare la registrazione.
+    # 2026-10-12: tutto cio' che sta qui dentro finisce nella voce 'GraphNav' di [TEMPO].
+    # Nella missione del 12-10 14:47, 212 s su 806 di orologio (26%) non finivano in nessuna
+    # fase misurata, e la fetta piu' grossa era proprio questa (83 s il solo ritorno a wp_0).
+    _t_gn = time.perf_counter()
+    try:
+        return _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_client,
+                                           command_client, label, timeout_s)
+    finally:
+        _timing_add('GraphNav', time.perf_counter() - _t_gn)
+
+
+def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_client, command_client,
+                                label, timeout_s):
     graphnav_add_shortcuts(recordingInterface, label, map_edges=False, sdk=True)
     client = recordingInterface._graph_nav_client
     tp = _graph_nav_pb2.TravelParams()
@@ -4333,7 +4346,11 @@ def select_mobility_params(gradient, roughness):
                       max_angular_vel=spotGrid.GAIT_ANG_PLAIN)
     elif gradient < spotGrid.GAIT_MODERATE_SLOPE_MAX and roughness < spotGrid.GAIT_MODERATE_ROUGH_MAX:
         tier = "MODERATE"
-        params = dict(locomotion_hint=spot_command_pb2.HINT_AUTO,
+        # 2026-10-12, richiesta dell'utente dopo la prima missione in esterno: anche
+        # MODERATE va in CRAWL. Era HINT_AUTO. Nota: sul prato MODERATE prende ~60% dei
+        # passi, quindi il crawl diventa l'andatura prevalente e la missione rallenta --
+        # per tornare indietro basta rimettere HINT_AUTO qui.
+        params = dict(locomotion_hint=spot_command_pb2.HINT_CRAWL,
                       swing_height=spot_command_pb2.SWING_HEIGHT_HIGH,
                       ground_mu_hint=spotGrid.GAIT_MU_MODERATE,
                       max_linear_vel=spotGrid.GAIT_VEL_MODERATE,
@@ -5179,18 +5196,36 @@ def easy_walk(options):
         # ---------------------------------------------------------------------
         _emit_mission_summary_once()
 
+        # 2026-10-12: tutto cio' che segue avviene DOPO il riepilogo, quindi non entrava in
+        # nessuna voce di [TEMPO]: nella missione del 12-10 14:47 erano la fetta piu' grossa
+        # dei 212 s (26%) non attribuiti. Ora si misurano e si stampano in chiusura.
+        _t_close = {}
+        _t = time.perf_counter()
         graphnav_add_shortcuts(recordingInterface, "prima del ritorno a wp_0",
                                map_edges=True, sdk=False)
         recordingInterface.auto_close_loops(True, False)
         recordingInterface.stop_recording()
         recordingInterface.optimize_anchoring()
+        _t_close['chiusura mappa e ancoraggio'] = time.perf_counter() - _t
+
+        _t = time.perf_counter()
         if not _graphnav_return_to_start(recordingInterface, robot_state_client, command_client):
             print("[GRAPHNAV] Ritorno a wp_0 non riuscito: il robot si siede dove si trova.")
+        _t_close['ritorno a wp_0'] = time.perf_counter() - _t
 
+        _t = time.perf_counter()
         command_client.robot_command(RobotCommandBuilder.synchro_sit_command(), end_time_secs=time.time() + 20)
         sleep(3)
         robot.power_off(cut_immediately=False)
+        _t_close['seduta e spegnimento'] = time.perf_counter() - _t
+
+        _t = time.perf_counter()
         recordingInterface.download_full_graph()
+        _t_close['scaricamento della mappa'] = time.perf_counter() - _t
+
+        print(f"[TEMPO] Chiusura della missione, {sum(_t_close.values()):.1f} s in tutto:")
+        for k, v in sorted(_t_close.items(), key=lambda kv: -kv[1]):
+            print(f"  {k:32s} {v:6.1f} s")
         estop.stop()
 
 

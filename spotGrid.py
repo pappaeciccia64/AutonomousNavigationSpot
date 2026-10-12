@@ -425,7 +425,13 @@ CLEARANCE_MAP_DECIDES = False
 # =========================================================================
 GAIT_PLAIN_SLOPE_MAX = 0.15     # below this on BOTH -> PLAIN tier (flat ground)
 GAIT_PLAIN_ROUGH_MAX = 0.05
-GAIT_MODERATE_SLOPE_MAX = 0.35  # below this on BOTH -> MODERATE tier; at/above -> HARD tier
+# 2026-10-12: da 0.35 a 0.25, sui numeri VERI della prima missione in esterno. Con 0.35
+# HARD non e' mai scattato (48 passi su 48 fra PLAIN e MODERATE) perche' il gradiente
+# massimo misurato sul prato e' stato 0.330. Distribuzione del gradiente sui 48 archi
+# percorsi: p25 0.132, mediana 0.171, p75 0.203, p90 0.248, massimo 0.330.
+# Spostando la soglia qui: PLAIN 29%, MODERATE 60%, HARD 10% -- HARD scatta sul decimo
+# piu' ripido, che e' cio' che l'utente voleva.
+GAIT_MODERATE_SLOPE_MAX = 0.25  # below this on BOTH -> MODERATE tier; at/above -> HARD tier
 GAIT_MODERATE_ROUGH_MAX = 0.10
 
 # ground_mu_hint per tier (bosdyn.api.spot.TerrainParams): BD's own docs suggest 0.4-0.8,
