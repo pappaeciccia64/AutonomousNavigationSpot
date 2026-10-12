@@ -398,7 +398,15 @@ class PRM:
                     continue           # coppia locale-locale gia' considerata dall'altro estremo
                 pairs.append((idx1, idx2, float(d_all[j])))
 
-        for idx1, idx2, dist in pairs:
+        # 2026-10-12: occupazione di tutte le coppie in un colpo solo (esito identico a
+        # _occupancy_blocked) e cache della pendenza globale riempita dove certamente non ci
+        # sono dati. Vedi _occupancy_blocked_many e _prefill_global_slope_nodata.
+        use_occ = global_map is not None and edge_safety_margin > 0.0
+        occ_flags = (self._occupancy_blocked_many(pairs, global_map, edge_safety_margin)
+                     if use_occ else np.zeros(len(pairs), dtype=bool))
+        self._prefill_global_slope_nodata(pairs)
+
+        for (idx1, idx2, dist), occ_flag in zip(pairs, occ_flags):
             x1, y1 = self.nodes[idx1]
             x2, y2 = self.nodes[idx2]
             key = (min(idx1, idx2), max(idx1, idx2))
@@ -417,8 +425,8 @@ class PRM:
             long_slope, lat_slope, has_slope_data = 0.0, 0.0, False
 
             blocked = False
-            if global_map is not None and edge_safety_margin > 0.0:
-                if self._occupancy_blocked(idx1, idx2, dist, global_map, edge_safety_margin):
+            if use_occ:
+                if occ_flag:
                     blocked = True
                     self._record_occupancy_veto(key)
 
@@ -476,7 +484,8 @@ class PRM:
 
     def sample_terrain_between_points(self, x1: float, y1: float, x2: float, y2: float,
                                        node_idx1: Optional[int] = None, node_idx2: Optional[int] = None,
-                                       precomputed_slope: Optional[Tuple[float, float, bool]] = None):
+                                       precomputed_slope: Optional[Tuple[float, float, bool]] = None,
+                                       need_roughness: bool = True):
         """
         Sample terrain difficulty along the straight segment between two points, for use
         in edge costing.
@@ -519,8 +528,8 @@ class PRM:
 
         # --- Rugosità: isotropa, campionata come prima dal campo 2D pre-calcolato ---
         sampled_roughness = []
-        has_rough_grid = (self.current_rough_2d is not None and self.grid_origin_x is not None
-                          and self.cell_size is not None)
+        has_rough_grid = (need_roughness and self.current_rough_2d is not None
+                          and self.grid_origin_x is not None and self.cell_size is not None)
         if has_rough_grid:
             num_rows, num_cols = self.current_rough_2d.shape
             for i in range(num_samples):
@@ -681,9 +690,13 @@ class PRM:
         x1, y1 = self.nodes[idx1]
         x2, y2 = self.nodes[idx2]
 
+        # 2026-10-12: con gamma = 0 la rugosita' non entra nel costo (0 * qualunque valore),
+        # quindi non la si campiona: era il 10-15% del tempo di costruzione. Con gamma != 0
+        # tutto come prima. Il campionamento serve ancora a easy_walk per l'andatura, che
+        # chiama sample_terrain_between_points direttamente.
         longitudinal_slope, lateral_slope, actual_roughness = self.sample_terrain_between_points(
             x1, y1, x2, y2, node_idx1=idx1, node_idx2=idx2,
-            precomputed_slope=precomputed_slope
+            precomputed_slope=precomputed_slope, need_roughness=(self.gamma != 0.0)
         )
 
         # Calcolo costo esteso
@@ -804,9 +817,129 @@ class PRM:
                 return True
         return False
 
+    def _occupancy_blocked_many(self, pairs, global_map, edge_safety_margin):
+        """
+        2026-10-12. _occupancy_blocked per molti archi insieme: [(idx1, idx2, dist), ...] ->
+        array di bool, IDENTICO arco per arco (stessi campioni t = k / (n - 1), stesso n,
+        stessa deroga attorno al nodo del robot, stesso test di GlobalGrid tramite
+        occupied_many). Misurato sulla missione del 12-10 10:36: il controllo d'occupazione
+        era 7 s su 16 della costruzione del grafo, quasi tutti in chiamate Python a
+        is_occupied su terreno che nessun sensore aveva visto.
+        """
+        n_pairs = len(pairs)
+        out = np.zeros(n_pairs, dtype=bool)
+        if n_pairs == 0 or global_map is None or edge_safety_margin <= 0.0:
+            return out
+        if not hasattr(global_map, 'occupied_many'):
+            for i, (a, b, d) in enumerate(pairs):
+                out[i] = self._occupancy_blocked(a, b, d, global_map, edge_safety_margin)
+            return out
+        a_ids = [p[0] for p in pairs]
+        b_ids = [p[1] for p in pairs]
+        xy1 = np.array([self.nodes[a] for a in a_ids], dtype=np.float64)
+        xy2 = np.array([self.nodes[b] for b in b_ids], dtype=np.float64)
+        d = np.array([p[2] for p in pairs], dtype=np.float64)
+        ns = np.maximum(OCCUPANCY_SAMPLES_MIN,
+                        np.ceil(d * OCCUPANCY_SAMPLES_PER_M).astype(np.int64) + 1)
+        ignore_xy = None
+        touches = np.zeros(n_pairs, dtype=bool)
+        if self.robot_node is not None and self.robot_node_ignore_m > 0 and self.robot_node in self.nodes:
+            ignore_xy = self.nodes[self.robot_node]
+            touches = np.array([(a == self.robot_node) or (b == self.robot_node)
+                                for a, b in zip(a_ids, b_ids)], dtype=bool)
+        for m in np.unique(ns):
+            sel = np.nonzero(ns == m)[0]
+            t = np.arange(int(m)) / (int(m) - 1)
+            sx = xy1[sel, 0, None] + t[None, :] * (xy2[sel, 0] - xy1[sel, 0])[:, None]
+            sy = xy1[sel, 1, None] + t[None, :] * (xy2[sel, 1] - xy1[sel, 1])[:, None]
+            occ = global_map.occupied_many(sx, sy, safety_margin=edge_safety_margin)
+            if ignore_xy is not None and touches[sel].any():
+                near = np.hypot(sx - ignore_xy[0], sy - ignore_xy[1]) <= self.robot_node_ignore_m
+                occ &= ~(near & touches[sel, None])
+            out[sel] = occ.any(axis=1)
+        return out
+
+    def _prefill_global_slope_nodata(self, pairs):
+        """
+        2026-10-12. Mette in cache (0, 0, False) -- "nessun dato" -- per gli archi su cui la
+        mappa globale del terreno risponderebbe certamente cosi' (vedi
+        GlobalTerrainGrid.certainly_no_slope_data). E' lo stesso valore che _global_slope
+        calcolerebbe e metterebbe in cache alla prima chiamata, con lo stesso verso dell'arco;
+        si salta il calcolo, non lo si cambia. Misurato: la pendenza dalla mappa globale era
+        l'altra meta' dei 16 s della costruzione.
+        """
+        tm = self.global_terrain_map
+        if tm is None or not hasattr(tm, 'certainly_no_slope_data') or not pairs:
+            return 0
+        todo = [(a, b) for a, b, _ in pairs
+                if (min(a, b), max(a, b)) not in self._gslope_cache]
+        if not todo:
+            return 0
+        xy1 = np.array([self.nodes[a] for a, _ in todo], dtype=np.float64)
+        xy2 = np.array([self.nodes[b] for _, b in todo], dtype=np.float64)
+        nodata = tm.certainly_no_slope_data(xy1[:, 0], xy1[:, 1], xy2[:, 0], xy2[:, 1])
+        n = 0
+        for (a, b), nd in zip(todo, nodata):
+            if nd:
+                self._gslope_cache[(min(a, b), max(a, b))] = (0.0, 0.0, False)
+                n += 1
+        return n
+
+    def _live_slope_certainly_nodata(self, pairs):
+        """
+        2026-10-12. Per ogni coppia: True se compute_arc_slope_profile sulla griglia dal vivo
+        uscirebbe subito con "nessun dato" -- la sua stessa uscita rapida (rettangolo dell'arco
+        allargato di fetta laterale + una cella, che non tocca la griglia), stessi numeri.
+        """
+        n = len(pairs)
+        out = np.ones(n, dtype=bool)
+        if (n == 0 or self.current_terrain_2d is None or self.grid_origin_x is None
+                or self.cell_size is None):
+            return out
+        xy1 = np.array([self.nodes[a] for a, _, _ in pairs], dtype=np.float64)
+        xy2 = np.array([self.nodes[b] for _, b, _ in pairs], dtype=np.float64)
+        num_rows, num_cols = self.current_terrain_2d.shape
+        pad = spotGrid.LATERAL_SLICE_HALF_WIDTH_M + self.cell_size
+        x_hi = self.grid_origin_x + num_cols * self.cell_size
+        y_hi = self.grid_origin_y + num_rows * self.cell_size
+        out = ((np.maximum(xy1[:, 0], xy2[:, 0]) + pad < self.grid_origin_x)
+               | (np.minimum(xy1[:, 0], xy2[:, 0]) - pad > x_hi)
+               | (np.maximum(xy1[:, 1], xy2[:, 1]) + pad < self.grid_origin_y)
+               | (np.minimum(xy1[:, 1], xy2[:, 1]) - pad > y_hi))
+        return out
+
+    def _add_edge_without_data(self, idx1: int, idx2: int, dist: float) -> bool:
+        """
+        2026-10-12. ZONA SENZA DATI: arco su cui nessuna fonte ha informazione -- fuori dalla
+        griglia dal vivo, mappa globale del terreno certamente senza dati (in cache), mappa
+        d'occupazione libera, arco non bloccato, gamma = 0. In questo caso
+        _evaluate_and_add_edge non puo' che arrivare al costo di ripiego (lunghezza + media
+        della pendenza dei nodi): qui lo si calcola direttamente, con la stessa formula e
+        nello stesso ordine di operazioni, e si aggiornano gli stessi contatori. Risultato
+        identico al bit (verificato sulla missione del 12-10 10:36), senza i ~40 microsecondi
+        per arco del percorso completo. Misurato: 3 archi su 4 del reticolo sono qui.
+        Solo per adiacenze appena svuotate (fresh), come in add_edges_to_prm.
+        """
+        grad1 = self.node_gradients.get(idx1, 0.0)
+        grad2 = self.node_gradients.get(idx2, 0.0)
+        longitudinal_slope = float((grad1 + grad2) / 2.0)
+        lateral_slope = 0.0
+        r1 = self.node_roughness.get(idx1, 0.0)
+        r2 = self.node_roughness.get(idx2, 0.0)
+        actual_roughness = float((r1 + r2) / 2.0)
+        self.slope_source_counts['fallback_nodes'] += 1
+        self.last_slope_source = 'fallback_nodes'
+        weight = float((self.alpha * dist) + (self.beta * float(longitudinal_slope)) +
+                       (self.beta_lateral * float(lateral_slope)) + (self.gamma * actual_roughness))
+        self.edges.setdefault(idx1, []).append((idx2, weight))
+        self.edges.setdefault(idx2, []).append((idx1, weight))
+        self.edge_validity[(min(idx1, idx2), max(idx1, idx2))] = True
+        return True
+
     def _evaluate_and_add_edge(self, idx1: int, idx2: int, dist: float,
                                global_map=None, edge_safety_margin: float = 0.0,
-                               force: bool = False) -> bool:
+                               force: bool = False, occ_blocked=None,
+                               fresh: bool = False) -> bool:
         """
         Decide se l'arco idx1-idx2 e' ammesso e, se si', lo aggiunge con il suo peso.
         Estratta da build_graph() il 2026-10-06 perche' serve identica anche per collegare
@@ -818,6 +951,10 @@ class PRM:
         force=True salta i veti e aggiunge comunque l'arco: serve SOLO per il tratto che il
         robot ha appena percorso con le proprie zampe, che e' libero per costruzione.
         Restituisce True se l'arco e' stato aggiunto.
+
+        2026-10-12: occ_blocked = esito gia' calcolato da _occupancy_blocked_many (None = lo
+        calcola qui, come prima); fresh=True quando il chiamante ha appena svuotato le
+        adiacenze e passa coppie distinte, quindi non c'e' un arco vecchio da togliere.
         """
         x1, y1 = self.nodes[idx1]
         x2, y2 = self.nodes[idx2]
@@ -831,7 +968,9 @@ class PRM:
 
             # Se abbiamo una mappa globale, controlliamo che l'arco non passi in zone occupate.
             if global_map is not None and edge_safety_margin > 0.0:
-                if self._occupancy_blocked(idx1, idx2, dist, global_map, edge_safety_margin):
+                blocked_now = (bool(occ_blocked) if occ_blocked is not None else
+                               self._occupancy_blocked(idx1, idx2, dist, global_map, edge_safety_margin))
+                if blocked_now:
                     self._record_occupancy_veto(key)
                     self.edge_validity[key] = False
                     return False
@@ -850,10 +989,14 @@ class PRM:
             idx1, idx2, dist,
             precomputed_slope=(None if force else (long_slope, lat_slope, has_slope_data)))
 
-        self.edges[idx1] = [(n, w) for n, w in self.edges.get(idx1, []) if n != idx2]
-        self.edges[idx2] = [(n, w) for n, w in self.edges.get(idx2, []) if n != idx1]
-        self.edges[idx1].append((idx2, weight))
-        self.edges[idx2].append((idx1, weight))
+        if fresh:
+            self.edges.setdefault(idx1, []).append((idx2, weight))
+            self.edges.setdefault(idx2, []).append((idx1, weight))
+        else:
+            self.edges[idx1] = [(n, w) for n, w in self.edges.get(idx1, []) if n != idx2]
+            self.edges[idx2] = [(n, w) for n, w in self.edges.get(idx2, []) if n != idx1]
+            self.edges[idx1].append((idx2, weight))
+            self.edges[idx2].append((idx1, weight))
         self.edge_validity[key] = True
         return True
 

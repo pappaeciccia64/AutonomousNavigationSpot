@@ -2,7 +2,7 @@
 
 
 import numpy as np
-from scipy.ndimage import uniform_filter, distance_transform_edt
+from scipy.ndimage import uniform_filter, distance_transform_edt, binary_dilation
 import bosdyn.client
 from bosdyn.client.frame_helpers import *
 from bosdyn.client.frame_helpers import get_a_tform_b
@@ -137,6 +137,12 @@ FRONTIER_MIN_CLEARANCE_M = 0.05
 FRONTIER_ESCAPE_DIST_M = 1.0
 FRONTIER_BODY_HALF_LENGTH_M = ROBOT_HALF_LENGTH_M                       # = 0.55
 FRONTIER_MARGIN_M = 0.10
+# 2026-10-12, decisione dell'utente: "se lo vede libero va; non voglio che si fermi mentre
+# sta andando". Si PARTE solo se il percorso ha FRONTIER_CLEARANCE_M (0.30) dai lati; a
+# movimento in corso il thread del fronte ferma il robot solo se il percorso davanti scende
+# sotto ROBOT_HALF_WIDTH_M + FRONTIER_ABORT_AIR_M (0.25), cioe' se qualcosa entra davvero
+# nell'ingombro. 5 cm di isteresi fra decisione e arresto. Vedi compute_safe_frontier(air_m).
+FRONTIER_ABORT_AIR_M = 0.0
 
 # =========================================================================
 # ROTAZIONE SUL POSTO (2026-10-06, passo 4) -- vedi easy_walk.attempt_enter_cell...
@@ -1556,6 +1562,10 @@ class GlobalGrid:
         # Celle dei dischi pericolosi (mark_hazard): restano occupate per tutta la missione.
         self.hazard_cells = set()
         self.hazards = []
+        # Versione delle celle occupate (2026-10-12): cresce a ogni cambio da/verso -1. Serve
+        # a riusare il raster dilatato di occupied_many finche' la mappa non cambia.
+        self._occ_version = 0
+        self._margin_raster = None      # (versione, steps, raster, gx0, gy0)
 
     def _coarse_key(self, gx, gy):
         c = GLOBAL_OCC_COARSE_CELLS
@@ -1567,6 +1577,8 @@ class GlobalGrid:
         if old_state == new_state:
             return
         self.grid[key] = new_state
+        if new_state == -1.0 or old_state == -1.0:
+            self._occ_version = getattr(self, '_occ_version', 0) + 1
         ck = self._coarse_key(*key)
         if new_state == -1.0:
             self._coarse_occ[ck] = self._coarse_occ.get(ck, 0) + 1
@@ -1579,6 +1591,7 @@ class GlobalGrid:
 
     def _rebuild_coarse_index(self):
         self._coarse_occ = {}
+        self._occ_version = getattr(self, '_occ_version', 0) + 1
         for key, state in self.grid.items():
             if state == -1.0:
                 ck = self._coarse_key(*key)
@@ -1696,6 +1709,56 @@ class GlobalGrid:
 
         return False
 
+    def _get_margin_raster(self, safety_margin):
+        """
+        2026-10-12. Raster delle celle per cui is_occupied(x, y, safety_margin) e' True: le
+        celle occupate dilatate con LO STESSO disco di is_occupied (dx^2 + dy^2 <= steps^2,
+        steps = ceil(margin / resolution)). Restituisce (raster, gx0, gy0) oppure None se non
+        c'e' nessuna cella occupata. Ricostruito solo quando la mappa cambia (_occ_version).
+        """
+        steps = int(np.ceil(safety_margin / self.resolution)) if safety_margin > 0.0 else 0
+        ver = getattr(self, '_occ_version', 0)
+        cached = getattr(self, '_margin_raster', None)
+        if cached is not None and cached[0] == ver and cached[1] == steps:
+            return cached[2]
+        occ = [k for k, v in self.grid.items() if v == -1.0]
+        if not occ:
+            result = None
+        else:
+            k = np.array(occ, dtype=np.int64)
+            gx0, gy0 = int(k[:, 0].min()) - steps, int(k[:, 1].min()) - steps
+            nx = int(k[:, 0].max()) - gx0 + steps + 1
+            ny = int(k[:, 1].max()) - gy0 + steps + 1
+            raster = np.zeros((nx, ny), dtype=bool)
+            raster[k[:, 0] - gx0, k[:, 1] - gy0] = True
+            if steps > 0:
+                d = np.arange(-steps, steps + 1)
+                disk = (d[:, None] ** 2 + d[None, :] ** 2) <= steps ** 2
+                raster = binary_dilation(raster, structure=disk)
+            result = (raster, gx0, gy0)
+        self._margin_raster = (ver, steps, result)
+        return result
+
+    def occupied_many(self, xs, ys, safety_margin=0.0):
+        """
+        2026-10-12. is_occupied su molti punti insieme, con risultato IDENTICO punto per punto
+        (stesse chiavi floor(x / resolution), stesso disco). Serve alla costruzione del grafo:
+        prima 1 milione di chiamate Python a is_occupied per costruzione (~7 s misurati sulla
+        missione del 12-10 10:36), ora una lettura di array.
+        """
+        xs = np.asarray(xs, dtype=np.float64)
+        ys = np.asarray(ys, dtype=np.float64)
+        out = np.zeros(xs.shape, dtype=bool)
+        r = self._get_margin_raster(safety_margin)
+        if r is None or xs.size == 0:
+            return out
+        raster, gx0, gy0 = r
+        gx = np.floor(xs / self.resolution).astype(np.int64) - gx0
+        gy = np.floor(ys / self.resolution).astype(np.int64) - gy0
+        inside = (gx >= 0) & (gx < raster.shape[0]) & (gy >= 0) & (gy < raster.shape[1])
+        out[inside] = raster[gx[inside], gy[inside]]
+        return out
+
     def mark_hazard(self, x, y, radius=0.5):
         """
         Segna come occupato (con il contatore al massimo) un disco attorno a un punto in cui
@@ -1785,7 +1848,8 @@ def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
                                 perp_sample_spacing_m=0.10,
                                 baseline_m=SLOPE_BASELINE_M,
                                 lateral_half_width_m=LATERAL_SLICE_HALF_WIDTH_M,
-                                min_sample_fraction=MIN_ARC_SAMPLE_FRACTION):
+                                min_sample_fraction=MIN_ARC_SAMPLE_FRACTION,
+                                sample_array=None):
     """
     Nucleo di calcolo condiviso della pendenza longitudinale/laterale, indipendente
     dalla FONTE dei dati di altezza -- qui usato dalla mappa globale sparsa (vedi
@@ -1825,13 +1889,21 @@ def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
     # Tre lookup bastano a escludere il caso comune. Non e' una euristica sul
     # RISULTATO: se almeno un punto risponde si prosegue con il calcolo completo e
     # la decisione finale resta quella di min_sample_fraction, identica a prima.
-    if (sample_height(x1, y1) is None
+    # 2026-10-12: sample_array (opzionale) fa la stessa cosa di sample_height su un array di
+    # punti in una sola lettura, con valori identici (vedi GlobalTerrainGrid._sample_heights).
+    if sample_array is not None:
+        h3 = sample_array(np.array([x1, 0.5 * (x1 + x2), x2]), np.array([y1, 0.5 * (y1 + y2), y2]))
+        if not np.isfinite(h3).any():
+            return 0.0, 0.0, False
+    elif (sample_height(x1, y1) is None
             and sample_height(0.5 * (x1 + x2), 0.5 * (y1 + y2)) is None
             and sample_height(x2, y2) is None):
         return 0.0, 0.0, False
 
     def _sample_array(xs, ys):
         """Campiona un array di posizioni, NaN dove la mappa non ha dati."""
+        if sample_array is not None:
+            return sample_array(xs, ys)
         flat_x = np.ravel(xs)
         flat_y = np.ravel(ys)
         out = np.empty(flat_x.size, dtype=np.float64)
@@ -1981,8 +2053,117 @@ class GlobalTerrainGrid:
                     max(y1, y2) + pad < bymin or min(y1, y2) - pad > bymax):
                 return 0.0, 0.0, False
         return _slope_profile_from_sampler(
-            self.get_height, x1, y1, x2, y2, self.resolution, perp_sample_spacing_m
+            self.get_height, x1, y1, x2, y2, self.resolution, perp_sample_spacing_m,
+            sample_array=self._sample_heights
         )
+
+    def _mean_height_raster(self):
+        """
+        2026-10-12. Raster delle altezze medie (height_sum / height_count, NaN dove mai vista),
+        ricostruito solo quando la mappa cambia. Stessa divisione di get_height, quindi stessi
+        valori al bit.
+        """
+        ver = (len(self.height_count), len(getattr(self, 'update_rects', None) or []))
+        cached = getattr(self, '_mh_raster', None)
+        if cached is not None and cached[0] == ver:
+            return cached[1]
+        keys = [key for key, c in self.height_count.items() if c > 0]
+        if not keys:
+            result = None
+        else:
+            k = np.array(keys, dtype=np.int64)
+            s = np.array([self.height_sum[key] for key in keys], dtype=np.float64)
+            c = np.array([self.height_count[key] for key in keys], dtype=np.float64)
+            gx0, gy0 = int(k[:, 0].min()), int(k[:, 1].min())
+            raster = np.full((int(k[:, 0].max()) - gx0 + 1, int(k[:, 1].max()) - gy0 + 1), np.nan)
+            raster[k[:, 0] - gx0, k[:, 1] - gy0] = s / c
+            result = (raster, gx0, gy0)
+        self._mh_raster = (ver, result)
+        return result
+
+    def _sample_heights(self, xs, ys):
+        """get_height su un array di punti (NaN dove mai vista), stessa chiave floor(x / res)."""
+        xs = np.asarray(xs, dtype=np.float64)
+        ys = np.asarray(ys, dtype=np.float64)
+        out = np.full(xs.shape, np.nan)
+        rr = self._mean_height_raster()
+        if rr is None or xs.size == 0:
+            return out
+        raster, gx0, gy0 = rr
+        gx = np.floor(xs / self.resolution).astype(np.int64) - gx0
+        gy = np.floor(ys / self.resolution).astype(np.int64) - gy0
+        ok = (gx >= 0) & (gx < raster.shape[0]) & (gy >= 0) & (gy < raster.shape[1])
+        out[ok] = raster[gx[ok], gy[ok]]
+        return out
+
+    def _has_height_raster(self):
+        """Raster booleano delle celle con almeno un'altezza (height_count > 0), con cache."""
+        ver = (len(self.height_count), len(getattr(self, 'update_rects', None) or []))
+        cached = getattr(self, '_hh_raster', None)
+        if cached is not None and cached[0] == ver:
+            return cached[1]
+        if not self.height_count:
+            result = None
+        else:
+            k = np.array([key for key, c in self.height_count.items() if c > 0], dtype=np.int64)
+            if k.size == 0:
+                result = None
+            else:
+                gx0, gy0 = int(k[:, 0].min()), int(k[:, 1].min())
+                raster = np.zeros((int(k[:, 0].max()) - gx0 + 1, int(k[:, 1].max()) - gy0 + 1), dtype=bool)
+                raster[k[:, 0] - gx0, k[:, 1] - gy0] = True
+                result = (raster, gx0, gy0)
+        self._hh_raster = (ver, result)
+        return result
+
+    def certainly_no_slope_data(self, x1, y1, x2, y2, min_sample_fraction=MIN_ARC_SAMPLE_FRACTION):
+        """
+        2026-10-12. Per molti archi insieme (array): True dove compute_arc_slope_profile
+        risponderebbe CERTAMENTE "nessun dato". Riproduce esattamente le sue uscite anticipate
+        -- mappa vuota, arco fuori dal rettangolo del visto, i tre punti (inizio, meta', fine)
+        senza dati, copertura della mezzeria sotto min_sample_fraction -- con gli stessi
+        campioni (linspace su max(2, int(dist / resolution) + 1) punti). Dove risponde False
+        si chiama la funzione vera: il risultato complessivo e' identico, cambia solo quante
+        volte la si chiama (misurato: il 98% delle chiamate in costruzione finiva cosi').
+        """
+        x1 = np.asarray(x1, dtype=np.float64); y1 = np.asarray(y1, dtype=np.float64)
+        x2 = np.asarray(x2, dtype=np.float64); y2 = np.asarray(y2, dtype=np.float64)
+        n = x1.size
+        out = np.ones(n, dtype=bool)
+        if n == 0:
+            return out
+        rects = getattr(self, 'update_rects', None)
+        if rects is not None and not rects:
+            return out
+        rr = self._has_height_raster()
+        if rr is None:
+            return out
+        raster, gx0, gy0 = rr
+        res = self.resolution
+
+        def has(px, py):
+            gx = np.floor(px / res).astype(np.int64) - gx0
+            gy = np.floor(py / res).astype(np.int64) - gy0
+            ok = (gx >= 0) & (gx < raster.shape[0]) & (gy >= 0) & (gy < raster.shape[1])
+            h = np.zeros(px.shape, dtype=bool)
+            h[ok] = raster[gx[ok], gy[ok]]
+            return h
+
+        dist = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+        three = has(x1, y1) | has(0.5 * (x1 + x2), 0.5 * (y1 + y2)) | has(x2, y2)
+        cand = (dist >= 1e-6) & three
+        if not cand.any():
+            return out
+        idx = np.nonzero(cand)[0]
+        num_along = np.maximum(2, (dist[idx] / res).astype(np.int64) + 1)
+        for m in np.unique(num_along):
+            sel = idx[num_along == m]
+            t = np.linspace(0.0, 1.0, int(m))
+            px = x1[sel, None] + t[None, :] * (x2[sel] - x1[sel])[:, None]
+            py = y1[sel, None] + t[None, :] * (y2[sel] - y1[sel])[:, None]
+            cov = has(px, py).mean(axis=1)
+            out[sel] = cov < min_sample_fraction
+        return out
 
     def save_map(self, file_path):
         """Salva la mappa globale di altezza in un file pickle."""
@@ -2008,6 +2189,8 @@ class GlobalTerrainGrid:
                 self.mission_z0 = data.get('mission_z0')
                 # zone aggiornate sconosciute per una mappa ricaricata: niente uscite rapide
                 self.update_rects = None
+                self._hh_raster = None
+                self._mh_raster = None
             print(f"[MAP] Mappa globale del terreno caricata con {len(self.height_count)} celle osservate.")
         else:
             print(f"[WARNING] File {file_path} non trovato. Inizializzo mappa terreno vuota.")

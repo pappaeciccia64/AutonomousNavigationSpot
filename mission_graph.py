@@ -399,11 +399,44 @@ class MissionGraph:
             prm._sync_global_slope_cache()
 
         added = 0
-        for (a, b), d in zip(self.pairs, self.lengths):
-            a, b = int(a), int(b)
-            if a in prm.nodes and b in prm.nodes:
-                if prm._evaluate_and_add_edge(a, b, float(d), global_map, edge_safety_margin):
+        todo = [(int(a), int(b), float(d)) for (a, b), d in zip(self.pairs, self.lengths)
+                if int(a) in prm.nodes and int(b) in prm.nodes]
+        # 2026-10-12: occupazione di tutte le coppie in un colpo solo e cache della pendenza
+        # globale riempita dove certamente non ci sono dati (esiti identici, vedi
+        # PRM._occupancy_blocked_many e PRM._prefill_global_slope_nodata). Le adiacenze sono
+        # appena state svuotate e le coppie del reticolo sono distinte: fresh=True.
+        batch = hasattr(prm, '_occupancy_blocked_many')
+        use_occ = global_map is not None and edge_safety_margin > 0.0
+        occ_flags = (prm._occupancy_blocked_many(todo, global_map, edge_safety_margin)
+                     if (batch and use_occ) else [None] * len(todo))
+        if batch:
+            prm._prefill_global_slope_nodata(todo)
+        fresh = batch and self._pairs_distinct()
+        # ZONA SENZA DATI (2026-10-12): archi su cui nessuna fonte ha informazione prendono
+        # direttamente il costo di ripiego, identico a quello del percorso completo (vedi
+        # PRM._add_edge_without_data). Serve gamma = 0: con la rugosita' nel costo, no.
+        fast_ok = (fresh and hasattr(prm, '_add_edge_without_data') and prm.gamma == 0.0)
+        live_nd = prm._live_slope_certainly_nodata(todo) if fast_ok else None
+        tm = getattr(prm, 'global_terrain_map', None)
+        cache = getattr(prm, '_gslope_cache', {})
+        blocked_set = prm.tracker_blocked_edges
+        n_fast = 0
+        for i, ((a, b, d), occ) in enumerate(zip(todo, occ_flags)):
+            if fast_ok and live_nd[i] and not occ:
+                key = (a, b) if a < b else (b, a)
+                g = cache.get(key) if tm is not None else (0.0, 0.0, False)
+                if key not in blocked_set and g is not None and g[2] is False:
+                    prm._add_edge_without_data(a, b, d)
                     added += 1
+                    n_fast += 1
+                    continue
+            if batch:
+                ok = prm._evaluate_and_add_edge(a, b, d, global_map, edge_safety_margin,
+                                                occ_blocked=occ, fresh=fresh)
+            else:
+                ok = prm._evaluate_and_add_edge(a, b, d, global_map, edge_safety_margin)
+            if ok:
+                added += 1
 
         # Gli archi percorsi dal robot sono liberi per costruzione e vanno rimessi comunque,
         # come fa build_graph: i nodi di sosta stanno spesso sotto min_edge_length.
@@ -417,8 +450,18 @@ class MissionGraph:
         prm.built = True
         if verbose:
             print(f"[GRAFO] {added} archi ammessi su {self.n_edges} coppie del reticolo "
-                  f"({self.n_nodes} nodi, passo {self.spacing_m:.4f} m)")
+                  f"({self.n_nodes} nodi, passo {self.spacing_m:.4f} m); {n_fast} in zona senza "
+                  f"dati, con il solo costo geometrico")
         return added
+
+    def _pairs_distinct(self):
+        """True se nessuna coppia del reticolo compare due volte (in nessun verso). Calcolato una volta."""
+        cached = getattr(self, '_distinct_cache', None)
+        if cached is None:
+            p = np.sort(np.asarray(self.pairs, dtype=np.int64).reshape(-1, 2), axis=1)
+            cached = bool(p.shape[0] == 0 or np.unique(p, axis=0).shape[0] == p.shape[0])
+            self._distinct_cache = cached
+        return cached
 
     def as_sampler(self):
         """

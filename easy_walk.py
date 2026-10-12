@@ -3180,7 +3180,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         snap = arcVerification.make_grid_snapshot(
             cells_obs_up, rough_up, is_valid_up, valid_up, terrain_real_up,
             num_x_up, num_y_up, grid_origin_x_up, grid_origin_y_up, cell_size_up,
-            robot_x, robot_y, unwritten=unwritten_up)
+            robot_x, robot_y, unwritten=unwritten_up, robot_yaw=robot_yaw)
 
         # Nodi DENTRO gli ostacoli: fuori dal grafo (2026-10-07). Vedi
         # prune_prm_nodes_in_obstacles -- gli archi erano gia' vetati, i nodi mai.
@@ -3285,6 +3285,14 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 terrain_raw=np.asarray(terrain_up, dtype=np.float32).reshape(shape_up),
                 terrain_valid_raw=np.asarray(valid_up, dtype=np.float32).reshape(shape_up),
                 obstacle_distance=np.asarray(cells_obs_up, dtype=np.float32).reshape(shape_up),
+                # 2026-10-12: il layer su cui il fronte DECIDE (mediana sulle ultime letture +
+                # isteresi, vedi arcVerification._ObstacleHistory) e la maschera del latch.
+                # Senza questi due un rigioco offline non puo' riprodurre i blocchi che
+                # nascono dalle letture del thread durante il movimento (scansione 13 del
+                # 12-10 10:36). Stesso orientamento degli altri: (num_y, num_x), riga = y.
+                obstacle_distance_filtered=np.asarray(snap.obstacle_dist, dtype=np.float32),
+                blocked_latch=(np.zeros(shape_up, bool) if snap.blocked_latch is None
+                               else np.asarray(snap.blocked_latch, dtype=bool)),
                 terrain_corrected=np.asarray(terrain_real_up, dtype=np.float32).reshape(shape_up),
                 is_valid=np.asarray(is_valid_up, dtype=bool).reshape(shape_up),
                 roughness=np.asarray(rough_up, dtype=np.float32).reshape(shape_up),

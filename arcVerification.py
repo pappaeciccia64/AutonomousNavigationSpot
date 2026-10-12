@@ -205,11 +205,14 @@ class GridSnapshot:
     nessun filtro, comportamento identico a prima.
     """
     __slots__ = ('obstacle_dist', 'rough_veto', 'seen', 'terrain', 'origin_x', 'origin_y',
-                 'cell_size', 'robot_x', 'robot_y', 'time', 'valid', 'blocked_latch')
+                 'cell_size', 'robot_x', 'robot_y', 'time', 'valid', 'blocked_latch', 'robot_yaw')
 
     def __init__(self, obstacle_dist, rough_veto, seen, terrain, origin_x, origin_y, cell_size,
-                 robot_x, robot_y, timestamp=None, valid=None, blocked_latch=None):
+                 robot_x, robot_y, timestamp=None, valid=None, blocked_latch=None, robot_yaw=None):
         self.blocked_latch = blocked_latch
+        # 2026-10-12: imbardata del robot nella stessa fotografia, per riconoscere le celle
+        # sotto il corpo (vedi _under_body). None = non nota: si usa il cerchio inscritto.
+        self.robot_yaw = None if robot_yaw is None else float(robot_yaw)
         self.obstacle_dist = obstacle_dist
         self.rough_veto = rough_veto
         self.seen = seen
@@ -225,7 +228,7 @@ class GridSnapshot:
 
 def make_grid_snapshot(cells_obstacle_dist, rough_values, is_valid, terrain_valid_raw,
                        terrain_corrected, num_x, num_y, origin_x, origin_y, cell_size,
-                       robot_x, robot_y, unwritten=None):
+                       robot_x, robot_y, unwritten=None, robot_yaw=None):
     """
     Costruisce la fotografia dai vettori piatti che il codice calcola gia' a ogni scansione.
 
@@ -264,7 +267,31 @@ def make_grid_snapshot(cells_obstacle_dist, rough_values, is_valid, terrain_vali
         seen=seen,
         terrain=np.asarray(terrain_corrected, dtype=np.float64).reshape(shape),
         origin_x=origin_x, origin_y=origin_y, cell_size=cell_size,
-        robot_x=robot_x, robot_y=robot_y, valid=valid, blocked_latch=latch)
+        robot_x=robot_x, robot_y=robot_y, valid=valid, blocked_latch=latch, robot_yaw=robot_yaw)
+
+
+def _under_body(snap, xs, ys):
+    """
+    2026-10-12. True per i punti che stanno SOTTO IL CORPO del robot adesso: rettangolo
+    +/-ROBOT_HALF_LENGTH_M x +/-ROBOT_HALF_WIDTH_M attorno alla posa, orientato con
+    l'imbardata della fotografia. Senza imbardata, il cerchio inscritto (raggio mezza
+    larghezza), che sta sotto il corpo in qualunque orientamento.
+
+    Li' c'e' il robot: per definizione non c'e' un ostacolo in cui entrare. E' lo stesso
+    principio gia' usato da spotGrid.rotation_is_clear (punto 32d). Serve perche' nella
+    missione del 12-10 10:36 il fronte si e' fermato due volte -- a meta' movimento e poi
+    da fermo -- su un punto a 8-9 cm dal centro del robot, mentre passava rasente al
+    tavolo (obstacle_distance sotto il robot 0.21 m contro 0.25 di mezza larghezza).
+    """
+    dx = np.asarray(xs, dtype=np.float64) - snap.robot_x
+    dy = np.asarray(ys, dtype=np.float64) - snap.robot_y
+    yaw = getattr(snap, 'robot_yaw', None)
+    if yaw is None:
+        return np.hypot(dx, dy) <= spotGrid.ROBOT_HALF_WIDTH_M
+    c, s = np.cos(yaw), np.sin(yaw)
+    along = c * dx + s * dy
+    across = -s * dx + c * dy
+    return (np.abs(along) <= spotGrid.ROBOT_HALF_LENGTH_M) & (np.abs(across) <= spotGrid.ROBOT_HALF_WIDTH_M)
 
 
 def _cells(snap, xs, ys):
@@ -299,7 +326,8 @@ def _polyline_samples(polyline, step):
             np.concatenate(seg).astype(int), s0)
 
 
-def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, body=None):
+def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, body=None,
+                          air_m=None):
     """
     Fin dove il percorso e' confermato libero adesso.
 
@@ -314,6 +342,16 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
             spotGrid.body_extents. Default: robot che guarda dove va (0.55, 0.25). Quando il
             robot non puo' ruotare (passo 4) e cammina di lato, l'ingombro cambia: di
             traverso diventa 0.55 m.
+        air_m (2026-10-12): aria fra fianco e ostacolo. None = ROBOT_CLEARANCE_AIR_M (0.05),
+            cioe' la distanza minima 0.30 con cui si DECIDE di partire. Il thread di arresto
+            passa spotGrid.FRONTIER_ABORT_AIR_M (0.0): a movimento in corso ci si ferma solo
+            se il percorso davanti passa a meno di mezza larghezza (0.25) da qualcosa, cioe'
+            per un'intrusione vera. I 5 cm fra le due soglie sono l'isteresi fra "parto" e
+            "mi fermo" (richiesta dell'utente: un tratto dichiarato libero si percorre). Con
+            un'aria diversa dalla nominale il latch dell'isteresi non si applica: e' tarato
+            sulla soglia 0.30.
+
+        I campioni sotto il corpo del robot adesso non sono mai ostacolo (vedi _under_body).
 
     Returns: dict con
         dist        distanza lungo il percorso del primo punto NON libero (m)
@@ -327,7 +365,8 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
     """
     half_along, half_across = body if body is not None else (spotGrid.FRONTIER_BODY_HALF_LENGTH_M,
                                                              spotGrid.ROBOT_HALF_WIDTH_M)
-    clearance_nominal = half_across + spotGrid.ROBOT_CLEARANCE_AIR_M
+    use_latch = air_m is None
+    clearance_nominal = half_across + (spotGrid.ROBOT_CLEARANCE_AIR_M if air_m is None else float(air_m))
     if extend_end_m is None:
         extend_end_m = half_along
     pl = [(float(x), float(y)) for x, y in polyline]
@@ -353,17 +392,18 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
 
     od = snap.obstacle_dist[rows, cols]
     near_robot = np.hypot(xs - snap.robot_x, ys - snap.robot_y) <= spotGrid.FRONTIER_ROBOT_RADIUS_M
+    under_body = _under_body(snap, xs, ys)
 
     no_data = ~inside | (~snap.seen[rows, cols] & ~near_robot)
-    obstacle = inside & (od < thr)
+    obstacle = inside & (od < thr) & ~under_body
     # Isteresi (2026-10-07): una cella gia' giudicata bloccante resta bloccante finche' non
     # risale sopra FRONTIER_CLEARANCE_M + OBSTACLE_HYSTERESIS_M (vedi _ObstacleHistory).
     # Si applica SOLO dove vale la soglia nominale: dove la regola di uscita l'ha abbassata
     # il robot sta cercando di uscire da uno spazio stretto, e lagarci dentro l'isteresi lo
     # inchioderebbe li'.
-    if snap.blocked_latch is not None:
+    if snap.blocked_latch is not None and use_latch:
         nominal = thr >= clearance_nominal - 1e-9
-        obstacle |= inside & nominal & snap.blocked_latch[rows, cols]
+        obstacle |= inside & nominal & snap.blocked_latch[rows, cols] & ~under_body
     # Regola di uscita (2026-10-06 sera, corretta dopo la revisione): nel primo metro la
     # soglia scende a od_robot - 2 cm per permettere di uscire da uno spazio stretto, ma
     # quella soglia valeva per QUALUNQUE ostacolo lungo il tratto. Un palo a 15 cm dal
@@ -374,8 +414,12 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
     # il percorso (meno la tolleranza qui sotto). Allontanarsi resta permesso, riavvicinarsi no.
     if clearance_escape < clearance_nominal:
         od_capped = np.minimum(np.where(inside, od, clearance_nominal), clearance_nominal)
+        # 2026-10-12: sotto il corpo il riferimento e' la distanza del robot ADESSO, non le
+        # letture sotto la pancia: una cella sotto il corpo che legge di piu' alzava "il meglio
+        # raggiunto" e faceva scattare il riavvicinamento appena fuori dal corpo.
+        od_capped = np.where(under_body, min(od_robot, clearance_nominal), od_capped)
         best_so_far = np.maximum.accumulate(od_capped)
-        in_escape = inside & (ss < spotGrid.FRONTIER_ESCAPE_DIST_M) & (od < clearance_nominal)
+        in_escape = inside & (ss < spotGrid.FRONTIER_ESCAPE_DIST_M) & (od < clearance_nominal) & ~under_body
         # Tolleranza: almeno 1.5 celle. obstacle_distance va a gradini di una cella (3 cm):
         # con 2 cm un percorso quasi parallelo a un muro, a distanza costante, scattava al
         # gradino successivo (verificato dalla seconda revisione: bloccato 257 volte su 360
@@ -576,8 +620,11 @@ class ArcVerificationTracker:
                 if snap is None:
                     time.sleep(0.2)
                     continue
+                # Questo fronte serve SOLO all'arresto a meta' movimento: soglia d'intrusione
+                # (mezza larghezza, senza aria), vedi spotGrid.FRONTIER_ABORT_AIR_M.
                 frontier = compute_safe_frontier([(snap.robot_x, snap.robot_y)] + waypoints, snap,
-                                                 extend_end_m=extend, body=body)
+                                                 extend_end_m=extend, body=body,
+                                                 air_m=spotGrid.FRONTIER_ABORT_AIR_M)
                 frontier['path_version'] = version
                 with self._lock:
                     if version == self._path_version:   # nel frattempo non e' cambiato il percorso
@@ -623,7 +670,7 @@ class ArcVerificationTracker:
         return make_grid_snapshot(cells_obs, rough_vals, is_valid, valid_vals, terrain_corrected,
                                   num_x, num_y, vision_tform_grid.position.x,
                                   vision_tform_grid.position.y, cell_size, robot_x, robot_y,
-                                  unwritten=unwritten)
+                                  unwritten=unwritten, robot_yaw=robot_yaw)
 
 
 # =============================================================================
