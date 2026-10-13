@@ -28,6 +28,7 @@ import arcVerification
 
 import global_sampler
 import prm_graph
+import prm_graph as prm_graph_module   # dentro le funzioni `prm_graph` e' spesso il parametro (istanza)
 # 2026-10-08: grafo di missione REGOLARE (reticolo rettangolare deterministico) al posto del
 # campionamento casuale di global_sampler. Vedi mission_graph.py per il perche'. L'import di
 # global_sampler resta: e' il ripiego se mission_graph non c'e' (vedi _build_mission_prm).
@@ -534,6 +535,16 @@ PRM_NODE_MIN_CLEARANCE_M = spotGrid.FRONTIER_CLEARANCE_M   # 0.30
 # Ripianificazioni "precoci" (alla prima cella bloccante, senza aspettare la conferma da
 # ferma) ammesse per tentativo di cella. Vedi il ramo 'wait'.
 MAX_EARLY_REPLANS = 4
+# 2026-10-13 (missione 13-10 11:22, cella (1,2)): dopo una trappola il robot tornava con
+# GraphNav alla briciola precedente, ripianificava, ritrovava IDENTICO lo stesso percorso
+# (nessun arco scartato, contatori azzerati) e rientrava nella stessa trappola: 6 giri prima
+# che lo fermassimo a mano. Ora ogni ritorno indietro ha memoria per il tentativo (vedi
+# _trap_backtrack): l'arco su cui il robot si e' fermato diventa impercorribile fino alla fine
+# del tentativo, e al MAX_BACKTRACKS_PER_ATTEMPT-esimo ritorno il robot torna indietro e
+# rinuncia alla cella da questo lato.
+MAX_BACKTRACKS_PER_ATTEMPT = 2
+# Entro questa distanza l'obiettivo del recupero e' "lo stesso" di quello appena fallito.
+RECOVERY_SAME_GOAL_M = 0.30
 
 # ==================================================================
 # DATI DI MISSIONE (2026-10-06, passi 7-8).
@@ -908,6 +919,155 @@ _GRAPHNAV_FAIL_STATUSES = {
 }
 
 
+# --- LOCALIZZAZIONE DI GRAPHNAV (2026-10-13) ------------------------------------------
+# Missioni del 12-10 17:16 e 17:32, all'aperto: al primo uso di GraphNav il robot era GIA'
+# perso ("Cannot issue a navigation request when the robot is already lost"). Nella prima
+# questo ha anche chiuso l'esplorazione (tre spostamenti rifiutati). Verificato sui grafi
+# scaricati: la mappa era sana -- l'odometria delle zampe e la visione differivano al
+# massimo di 13-14 cm su 34-49 m (come nella missione delle 14:47, che e' tornata), e le
+# nostre scorciatoie coincidevano con la visione entro 6 cm. A perdersi e' il localizzatore
+# dal vivo, il cui stato nel grafo non c'e'. Quindi:
+#   1. riga [LOCALIZZAZIONE] a ogni briciola, solo quando qualcosa cambia, per vedere QUANDO
+#      e PERCHE' si perde (rilevatore di perdita di Spot);
+#   2. riaggancio: se GraphNav risulta perso, si rilocalizza sul waypoint piu' vicino secondo
+#      le nostre pose, con la stima iniziale dall'odometria (waypoint_tform_ko del grafo per
+#      ko_tform_body di adesso: esatta a meno della deriva misurata, 14 cm al massimo), poi
+#      la rifinisce l'ICP di Spot. NON si dichiara "arrivato": si riprova a navigare.
+#   3. rilevatore di perdita PERMISSIVO negli spostamenti GraphNav.
+GRAPHNAV_LOST_DETECTOR_STRICTNESS = 'LOST_DETECTOR_STRICTNESS_PERMISSIVE'   # None = quella di Spot
+GRAPHNAV_MAX_RELOCALIZATIONS = 3       # riagganci per singolo spostamento GraphNav
+GRAPHNAV_RELOC_MAX_DIST_M = 0.5        # raggio di ricerca dell'ICP attorno alla stima
+GRAPHNAV_RELOC_MAX_YAW_RAD = float(np.radians(20.0))
+GRAPHNAV_RELOC_MAX_WP_DIST_M = 3.0     # oltre questa distanza dal waypoint piu' vicino non si prova
+
+
+def _graphnav_localization(recordingInterface):
+    """Stato del localizzatore di GraphNav come dict, o None se non leggibile. Non scarica il grafo."""
+    try:
+        st = recordingInterface._graph_nav_client.get_localization_state()
+    except Exception as e:
+        return {'error': str(e)}
+    loc = st.localization
+    out = {'wp_id': loc.waypoint_id or None, 'is_lost': None}
+    try:
+        has_ld = st.HasField('lost_detector_state')
+    except Exception:
+        has_ld = False      # SDK senza rilevatore di perdita
+    if has_ld:
+        ld = st.lost_detector_state
+        out.update(is_lost=bool(ld.is_lost),
+                   accepted=int(ld.total_num_accepted_localizations),
+                   rejected=int(ld.total_num_rejected_localizations),
+                   rej_since=int(ld.num_rejected_localizations_since_accepted),
+                   dist_rej=float(ld.distance_traveled_with_rejected_localization),
+                   bad_edges=int(ld.num_consecutive_bad_edges))
+    return out
+
+
+def _graphnav_is_lost(loc):
+    return bool(loc) and (loc.get('is_lost') is True or ('error' not in loc and not loc.get('wp_id')))
+
+
+def _wp_name_by_id(recordingInterface, wp_id):
+    for name, p in (getattr(recordingInterface, 'waypoint_poses', None) or {}).items():
+        if p.get('waypoint_id') == wp_id:
+            return name
+    return (wp_id or '?')[:12]
+
+
+def graphnav_log_localization(env, recordingInterface, robot_state_client, where, force=False):
+    """
+    Riga [LOCALIZZAZIONE]: stampata solo se lo stato cambia (perso si'/no, localizzazioni
+    rifiutate dall'ultima accettata, archi cattivi di fila) o con force=True. Riporta anche
+    il tier del passo appena fatto e il beccheggio del corpo adesso, per vedere se la perdita
+    scatta in crawl o in salita. Non solleva mai.
+    """
+    if recordingInterface is None:
+        return None
+    loc = _graphnav_localization(recordingInterface)
+    if loc is None:
+        return None
+    if 'error' in loc:
+        print(f"[LOCALIZZAZIONE] {where}: stato non leggibile ({loc['error']}).")
+        return loc
+    key = (loc.get('is_lost'), bool(loc.get('wp_id')), (loc.get('rej_since') or 0) > 0,
+           (loc.get('bad_edges') or 0) > 0)
+    prev = getattr(env, '_loc_key', None) if env is not None else None
+    if env is not None:
+        env._loc_key = key
+    if not force and key == prev:
+        return loc
+    pitch = float('nan')
+    try:
+        q = spotUtils.getPosition(robot_state_client)[3]
+        pitch = float(np.degrees(np.arcsin(np.clip(2.0 * (q.w * q.y - q.z * q.x), -1.0, 1.0))))
+    except Exception:
+        pass
+    if loc.get('is_lost') is None:
+        det = "rilevatore di perdita non disponibile"
+    else:
+        det = (f"localizzazioni accettate {loc['accepted']}, rifiutate {loc['rejected']} "
+               f"({loc['rej_since']} dall'ultima accettata, {loc['dist_rej']:.1f} m fatti cosi'), "
+               f"archi cattivi di fila {loc['bad_edges']}")
+    stato = ("PERSO" if loc.get('is_lost') else
+             (f"localizzato su {_wp_name_by_id(recordingInterface, loc['wp_id'])}" if loc.get('wp_id')
+              else "NON localizzato"))
+    print(f"[LOCALIZZAZIONE] {where}: {stato} | {det} | ultimo passo {MISSION_STATS.get('last_tier')}, "
+          f"beccheggio {pitch:.1f} gradi.")
+    return loc
+
+
+def _graphnav_relocalize(recordingInterface, robot_state_client, why=""):
+    """
+    Riaggancia GraphNav sul waypoint piu' vicino (secondo le nostre pose in visione). La
+    stima iniziale e' waypoint_tform_ko (dal grafo) * ko_tform_body (adesso): la stessa
+    odometria con cui Spot ha registrato il waypoint. True se Spot accetta.
+    """
+    try:
+        rx, ry, _, _ = spotUtils.getPosition(robot_state_client)
+        poses = getattr(recordingInterface, 'waypoint_poses', None) or {}
+        cands = sorted(((float(np.hypot(p['x'] - rx, p['y'] - ry)), name, p['waypoint_id'])
+                        for name, p in poses.items() if p.get('waypoint_id')), key=lambda c: c[0])
+        if not cands:
+            print(f"[LOCALIZZAZIONE] Riaggancio {why}: nessun waypoint nostro noto.")
+            return False
+        d_wp, name, wp_id = cands[0]
+        if d_wp > GRAPHNAV_RELOC_MAX_WP_DIST_M:
+            print(f"[LOCALIZZAZIONE] Riaggancio {why}: il waypoint piu' vicino ({name}) e' a "
+                  f"{d_wp:.1f} m, troppo lontano.")
+            return False
+        graph = recordingInterface._get_graph()
+        wp = next((w for w in graph.waypoints if w.id == wp_id), None) if graph else None
+        if wp is None:
+            graph = recordingInterface._get_graph(force_refresh=True)
+            wp = next((w for w in graph.waypoints if w.id == wp_id), None) if graph else None
+        if wp is None:
+            print(f"[LOCALIZZAZIONE] Riaggancio {why}: {name} non e' nel grafo.")
+            return False
+        from bosdyn.client.math_helpers import SE3Pose
+        from bosdyn.api.graph_nav import nav_pb2 as _nav_pb2
+        state = robot_state_client.get_robot_state()
+        odom_tform_body = get_odom_tform_body(state.kinematic_state.transforms_snapshot)
+        guess = SE3Pose.from_proto(wp.waypoint_tform_ko) * odom_tform_body
+        loc = _nav_pb2.Localization()
+        loc.waypoint_id = wp.id
+        loc.waypoint_tform_body.CopyFrom(guess.to_proto())
+        recordingInterface._graph_nav_client.set_localization(
+            initial_guess_localization=loc,
+            ko_tform_body=odom_tform_body.to_proto(),
+            max_distance=GRAPHNAV_RELOC_MAX_DIST_M,
+            max_yaw=GRAPHNAV_RELOC_MAX_YAW_RAD,
+            fiducial_init=_graph_nav_pb2.SetLocalizationRequest.FIDUCIAL_INIT_NO_FIDUCIAL)
+        MISSION_STATS['graphnav_relocalizations'] = MISSION_STATS.get('graphnav_relocalizations', 0) + 1
+        print(f"[LOCALIZZAZIONE] Riaggancio {why}: riuscito su {name} (a {d_wp:.2f} m secondo le "
+              f"nostre pose; stima dall'odometria, rifinita dall'ICP).")
+        return True
+    except Exception as e:
+        MISSION_STATS['graphnav_relocalization_fail'] = MISSION_STATS.get('graphnav_relocalization_fail', 0) + 1
+        print(f"[LOCALIZZAZIONE] Riaggancio {why}: non riuscito ({e}).")
+        return False
+
+
 def _segment_seen_free(global_map, x1, y1, x2, y2, margin_m, step_m=0.05):
     """True se il segmento e' stato osservato in ogni punto e non passa vicino a celle occupate."""
     n = max(2, int(np.ceil(np.hypot(x2 - x1, y2 - y1) / step_m)) + 1)
@@ -1049,13 +1209,38 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
     client = recordingInterface._graph_nav_client
     tp = _graph_nav_pb2.TravelParams()
     tp.velocity_limit.CopyFrom(movements._velocity_limit(GRAPHNAV_MAX_LINEAR_VEL_MPS, GRAPHNAV_MAX_ANGULAR_VEL_RPS))
+    # 2026-10-13: rilevatore di perdita permissivo (vedi LOCALIZZAZIONE DI GRAPHNAV).
+    if GRAPHNAV_LOST_DETECTOR_STRICTNESS and hasattr(tp, 'lost_detector_strictness'):
+        try:
+            # dal descrittore: l'enum sta in lost_detection_pb2, che nelle versioni vecchie
+            # dell'SDK non c'e'; cosi' funziona ovunque il campo esista.
+            enum = tp.DESCRIPTOR.fields_by_name['lost_detector_strictness'].enum_type
+            tp.lost_detector_strictness = enum.values_by_name[GRAPHNAV_LOST_DETECTOR_STRICTNESS].number
+        except Exception:
+            pass
     print(f"[GRAPHNAV] {label}: avvio (massimo {timeout_s:.0f} s, {GRAPHNAV_MAX_LINEAR_VEL_MPS:.1f} m/s).")
+    # 2026-10-13: prima di partire si guarda lo stato del localizzatore; se e' perso si
+    # riaggancia subito, invece di farsi rifiutare il comando tre volte.
+    relocs = 0
+    loc0 = graphnav_log_localization(None, recordingInterface, robot_state_client,
+                                     f"prima di '{label}'", force=True)
+    if _graphnav_is_lost(loc0):
+        relocs += 1
+        _graphnav_relocalize(recordingInterface, robot_state_client, f"prima di '{label}'")
     t0, cmd_id, fb_errors, nav_errors = time.time(), None, 0, 0
     while time.time() - t0 < timeout_s:
         try:
             cmd_id = client.navigate_to(waypoint_id, 1.0, command_id=cmd_id, travel_params=tp)
             nav_errors = 0
         except Exception as e:
+            if 'RobotLost' in type(e).__name__ and relocs < GRAPHNAV_MAX_RELOCALIZATIONS:
+                relocs += 1
+                print(f"[GRAPHNAV] {label}: GraphNav dice che il robot e' perso: riaggancio "
+                      f"({relocs}/{GRAPHNAV_MAX_RELOCALIZATIONS}).")
+                _graphnav_relocalize(recordingInterface, robot_state_client, f"durante '{label}'")
+                cmd_id = None
+                time.sleep(0.5)
+                continue
             nav_errors += 1
             print(f"[GRAPHNAV] {label}: comando rifiutato ({nav_errors}/3): {e}")
             # 2026-10-07: qui il `return False` stava FUORI dall'if, quindi un solo errore
@@ -1087,6 +1272,17 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
             print(f"[GRAPHNAV] {label}: arrivato in {time.time() - t0:.0f} s.")
             MISSION_STATS['graphnav_ok'] += 1
             return True
+        if status == _GN.STATUS_LOST and relocs < GRAPHNAV_MAX_RELOCALIZATIONS:
+            # 2026-10-13: riaggancio sul waypoint piu' vicino (NON sulla destinazione, e senza
+            # dichiarare l'arrivo: si rimanda il comando e si continua a navigare).
+            relocs += 1
+            print(f"[GRAPHNAV] {label}: GraphNav ha perso la localizzazione per strada: "
+                  f"riaggancio ({relocs}/{GRAPHNAV_MAX_RELOCALIZATIONS}).")
+            graphnav_log_localization(None, recordingInterface, robot_state_client,
+                                      f"perso durante '{label}'", force=True)
+            _graphnav_relocalize(recordingInterface, robot_state_client, f"durante '{label}'")
+            cmd_id = None
+            continue
         if status == _GN.STATUS_LOST:
             # Non si forza la localizzazione sulla destinazione (vedi sopra): fallimento.
             print(f"[GRAPHNAV] {label}: GraphNav ha perso la localizzazione. Fermo il robot.")
@@ -1377,6 +1573,10 @@ def _emit_mission_summary_once():
                  if tot_r else ""))
         print(f"Cadute: {MISSION_STATS['falls']}, rialzate da solo: {MISSION_STATS['self_rights']}")
         print(f"Spostamenti GraphNav riusciti: {MISSION_STATS['graphnav_ok']}, falliti: {MISSION_STATS['graphnav_fail']}")
+        print(f"Riagganci GraphNav (robot perso): {MISSION_STATS.get('graphnav_relocalizations', 0)} riusciti, "
+              f"{MISSION_STATS.get('graphnav_relocalization_fail', 0)} falliti | celle rimandate dopo "
+              f"{MAX_BACKTRACKS_PER_ATTEMPT} ritorni nello stesso tentativo: {MISSION_STATS.get('backtrack_giveups', 0)} | "
+              f"archi tolti dalla scansione dal vivo nei refresh: {MISSION_STATS.get('live_arc_vetoes', 0)}")
         lg_main = _MISSION_CTX.get('local_grid')
         lg_trk = getattr(_MISSION_CTX.get('tracker'), '_local_grid', None)
         print(f"Scansioni scartate (layer mancanti o non allineati): ciclo principale "
@@ -2347,6 +2547,8 @@ def graphnav_drop_breadcrumb(env, recordingInterface, robot_state_client, prm_no
     trail.append(crumb)
     print(f"[BRICIOLA] Waypoint {wp_name} in ({x:.2f}, {y:.2f}), nodo PRM {prm_node_id} "
           f"(traccia: {len(trail)} waypoint).")
+    # 2026-10-13: stato del localizzatore di GraphNav, stampato solo quando cambia.
+    graphnav_log_localization(env, recordingInterface, robot_state_client, f"briciola {wp_name}")
     return crumb
 
 
@@ -2444,6 +2646,42 @@ def backtracking_cannot_help(env, prm_graph, goal_id, robot_state_client, max_ho
     return True
 
 
+def _trap_backtrack(trap_state, block_arc, env, prm_graph, goal_id, recordingInterface,
+                    robot_state_client, command_client, global_map, mobility_kwargs, pts,
+                    obstacle_mask, label="", **kwargs):
+    """
+    2026-10-13. Ritorno indietro (escape_by_backtracking) con MEMORIA per il tentativo.
+
+    trap_state: dict del tentativo ({'n': ritorni gia' fatti}), che non si azzera mai dentro
+    il tentativo. block_arc: (a, b), l'arco su cui il robot si e' fermato.
+
+    Prima di ripianificare, l'arco diventa impercorribile per il resto del tentativo
+    (penalita' del tentativo: sopravvive a refresh e ricostruzioni e si toglie solo
+    all'inizio del tentativo successivo, vedi prm_graph.clear_penalties_for_attempt). Da li'
+    il pianificatore deve proporre un'altra strada, o ammettere che non c'e'. Al
+    MAX_BACKTRACKS_PER_ATTEMPT-esimo ritorno il robot torna comunque indietro -- la' dov'e'
+    non puo' restare -- ma il tentativo finisce: la cella si rimanda e si prova da un altro
+    lato. Prima la missione del 13-10 11:22 ha fatto 6 volte lo stesso giro.
+    """
+    trap_state['n'] = trap_state.get('n', 0) + 1
+    if block_arc is not None and block_arc[0] is not None and block_arc[1] is not None:
+        a, b = int(block_arc[0]), int(block_arc[1])
+        if a != b:
+            key = (min(a, b), max(a, b))
+            prm_graph.edge_penalty_persistent[key] = prm_graph._ATTEMPT_MARK
+            print(f"[RITORNO] Arco {a}->{b} fuori dal piano per il resto del tentativo "
+                  f"(ritorno {trap_state['n']}/{MAX_BACKTRACKS_PER_ATTEMPT}).")
+    esc = escape_by_backtracking(
+        env, prm_graph, goal_id, recordingInterface, robot_state_client, command_client,
+        global_map, mobility_kwargs, pts, obstacle_mask, label=label, **kwargs)
+    if trap_state['n'] >= MAX_BACKTRACKS_PER_ATTEMPT and esc.get('ok'):
+        MISSION_STATS['backtrack_giveups'] = MISSION_STATS.get('backtrack_giveups', 0) + 1
+        print(f"[RITORNO] {trap_state['n']} ritorni in questo tentativo: sono tornato "
+              f"indietro, ma non riprovo. Rimando la cella e la provo da un altro lato.")
+        esc = dict(esc, ok=False, how='rinuncia dopo ritorni ripetuti')
+    return esc
+
+
 def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_state_client,
                            command_client, global_map, mobility_kwargs, pts, obstacle_mask,
                            max_hops=GRAPHNAV_MAX_BACKTRACK_HOPS, label="",
@@ -2493,6 +2731,9 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
 
         MISSION_STATS['graphnav_backtracks'] += 1
         prm_graph.needs_refresh = True       # il robot si e' spostato: vedi REFRESH A EVENTI
+        # 2026-10-13: la scansione dello scarto preliminare e' stata fatta da un altro punto (e
+        # l'esclusione del corpo starebbe dove il robot era): via, fino alla prossima scansione.
+        prm_graph.set_live_obstacles(None, None, 0, 0, 1, 0, 0)
         try:
             ax, ay, _, _ = spotUtils.getPosition(robot_state_client)
         except Exception:
@@ -2981,6 +3222,20 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             if node_id not in prm_graph.node_roughness:
                 prm_graph.node_roughness[node_id] = 0.0
 
+    # 2026-10-13: la scansione appena fatta entra anche nello scarto preliminare degli
+    # archi (prm_graph.LIVE_PREFILTER_OD_M): alla costruzione la mappa globale non ha ancora
+    # confermato niente di questo posto, e gli archi che attraversano gli ostacoli appena
+    # visti restavano tutti validi. Qui obstacle_distance e' quella grezza: la fotografia
+    # filtrata nasce nel ciclo di navigazione.
+    try:
+        prm_graph.set_live_obstacles(
+            np.asarray(cells_obstacle_dist, dtype=np.float64).reshape((num_y, num_x)),
+            np.asarray(valid_values, dtype=np.float64).reshape((num_y, num_x)) >= spotGrid.TERRAIN_VALID_MIN,
+            grid_origin_x, grid_origin_y, cell_size, robot_x, robot_y, robot_yaw)
+    except Exception as e:
+        prm_graph.set_live_obstacles(None, None, 0, 0, 1, 0, 0)
+        print(f"[ARCHI] Scansione non usabile per lo scarto preliminare ({e}).")
+
     t_build = time.perf_counter()
     # ATTENZIONE AI NOMI: qui `prm_graph` e' il PARAMETRO della funzione (l'istanza di PRM),
     # non il modulo omonimo. Se i nodi vengono dal reticolo (vedi _build_mission_prm) le
@@ -2989,6 +3244,14 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
     _rebuild_prm_edges(prm_graph, global_map)
     _timing_add('costruzione grafo', time.perf_counter() - t_build)
     print(f"[TEMPO] costruzione completa del grafo: {time.perf_counter() - t_build:.2f} s")
+    if getattr(prm_graph, 'live_veto_last', 0):
+        print(f"[ARCHI] {prm_graph.live_veto_last} archi scartati subito dalla scansione dal "
+              f"vivo (passano a meno di {prm_graph_module.LIVE_PREFILTER_OD_M:.2f} m da un "
+              f"ostacolo appena visto), prima della pendenza.")
+    # Un tentativo nuovo: le trappole del tentativo precedente non valgono piu' (vedi
+    # _trap_backtrack). Le penalita' sono uno strato separato dagli archi, quindi
+    # sopravvivono alle ricostruzioni DENTRO il tentativo.
+    prm_graph.clear_penalties_for_attempt()
 
     # ================================================================== #
 
@@ -2997,6 +3260,10 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         robot_x, robot_y, env, target_row, target_col, pts, cells_obstacle_dist, global_sampler,
         global_map=global_map)
 
+    # 2026-10-13: l'obiettivo di questo tentativo, per il recupero subito dopo un fallimento
+    # (vedi RECOVERY_SAME_GOAL_M nel ciclo principale).
+    env._last_attempt_goal = (None if target_x is None or target_y is None
+                              else (float(target_x), float(target_y)))
     if target_x is None or target_y is None:
         print(f"[FAIL] No clear path found to cell ({target_row},{target_col}) from current position")
         visualize_grid_with_candidates(
@@ -3099,6 +3366,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
     arrival_refusals = 0    # passi rifiutati perche' la posa d'arrivo non ha uscite
     goal_repicks = 0        # quante volte si e' riscelto il punto obiettivo
     tried_goals = []        # punti obiettivo gia' provati e risultati irraggiungibili
+    trap_state = {'n': 0}   # 2026-10-13: ritorni indietro in QUESTO tentativo, mai azzerato (vedi _trap_backtrack)
 
     while path_waypoints and len(path_waypoints) > 0:
         loop_iter += 1
@@ -3235,6 +3503,27 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             cell_size=cell_size_up
         )
 
+        # Fotografia della scansione appena fatta: serve gia' qui -- allo scarto preliminare
+        # degli archi nel refresh (2026-10-13, vedi prm_graph.LIVE_PREFILTER_OD_M), a quello
+        # dei nodi negli ostacoli -- e poi al fronte sicuro. Va creata UNA volta sola per scansione:
+        # make_grid_snapshot aggiorna anche il filtro temporale degli ostacoli.
+        snap = arcVerification.make_grid_snapshot(
+            cells_obs_up, rough_up, is_valid_up, valid_up, terrain_real_up,
+            num_x_up, num_y_up, grid_origin_x_up, grid_origin_y_up, cell_size_up,
+            robot_x, robot_y, unwritten=unwritten_up, robot_yaw=robot_yaw)
+
+        # Mappa dello spazio libero: QUI, non insieme a global_map.update, perche' serve la
+        # obstacle_distance filtrata che vive nella fotografia (vedi _update_clearance_map).
+        # Si alimenta solo dal ciclo di navigazione, cosi' tutte le osservazioni passano per
+        # lo stesso filtro.
+        _update_clearance_map(global_map, pts_up, snap, is_valid_up, unwritten_up,
+                              _gm_core_up, (robot_x, robot_y))
+
+        # 2026-10-13: lo scarto preliminare degli archi legge la obstacle_distance FILTRATA
+        # (mediana su 3 scansioni + isteresi), la stessa del fronte.
+        prm_graph.set_live_obstacles(snap.obstacle_dist, snap.seen, snap.origin_x, snap.origin_y,
+                                     snap.cell_size, robot_x, robot_y, robot_yaw)
+
         # --- REFRESH A EVENTI (2026-10-08) --------------------------------------------
         # Prima: refresh_local_edge_weights a OGNI giro di ciclo. Pesi e pendenze degli
         # archi cambiano solo quando cambiano i dati sotto di essi, cioe' quando la
@@ -3260,26 +3549,19 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 global_map=global_map, edge_safety_margin=spotGrid.PRM_EDGE_SAFETY_MARGIN_M)
             need_refresh = False
             MISSION_STATS['prm_refresh'] += 1
+            n_live = (getattr(prm_graph, 'live_veto_last', 0)
+                      + getattr(prm_graph, 'live_prune_last', 0))
+            MISSION_STATS['live_arc_vetoes'] = MISSION_STATS.get('live_arc_vetoes', 0) + n_live
+            if n_live:
+                print(f"[ARCHI] {n_live} archi fuori dal grafo per la scansione dal vivo "
+                      f"({prm_graph.live_veto_last} rivalutati, {prm_graph.live_prune_last} "
+                      f"oltre il raggio di refresh), prima della pendenza.")
         else:
             # Nessun dato nuovo sotto gli archi: si tengono i pesi del giro precedente e
             # non si ripianifica (il blocco sotto gira solo se touched_nodes non e' vuoto).
             touched_nodes = set()
             MISSION_STATS['prm_refresh_skipped'] += 1
 
-        # Fotografia della scansione appena fatta: serve gia' qui per scartare i nodi negli
-        # ostacoli, e poi al fronte sicuro. Va creata UNA volta sola per scansione:
-        # make_grid_snapshot aggiorna anche il filtro temporale degli ostacoli.
-        snap = arcVerification.make_grid_snapshot(
-            cells_obs_up, rough_up, is_valid_up, valid_up, terrain_real_up,
-            num_x_up, num_y_up, grid_origin_x_up, grid_origin_y_up, cell_size_up,
-            robot_x, robot_y, unwritten=unwritten_up, robot_yaw=robot_yaw)
-
-        # Mappa dello spazio libero: QUI, non insieme a global_map.update, perche' serve la
-        # obstacle_distance filtrata che vive nella fotografia (vedi _update_clearance_map).
-        # Si alimenta solo dal ciclo di navigazione, cosi' tutte le osservazioni passano per
-        # lo stesso filtro.
-        _update_clearance_map(global_map, pts_up, snap, is_valid_up, unwritten_up,
-                              _gm_core_up, (robot_x, robot_y))
 
         # Nodi DENTRO gli ostacoli: fuori dal grafo (2026-10-07). Vedi
         # prune_prm_nodes_in_obstacles -- gli archi erano gia' vetati, i nodi mai.
@@ -3549,7 +3831,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                     # Ritorno con GraphNav invece che a zampe all'indietro (2026-10-07): si torna di un
                     # waypoint, si riprova a pianificare da li', e cosi' via fino a
                     # GRAPHNAV_MAX_BACKTRACK_HOPS. La ritirata a zampe resta dentro come ultima rete.
-                    esc = escape_by_backtracking(
+                    esc = _trap_backtrack(
+                        trap_state, (robot_node_id, next_node_id),
                         env, prm_graph, goal_id, recordingInterface, robot_state_client,
                         command_client, global_map, mobility_kwargs, pts_up, obstacle_mask_updated,
                         label=f"dal nodo {robot_node_id}")
@@ -3576,7 +3859,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                           f"non e' l'arco, e' il posto. Ripercorro il tratto da cui sono venuto.")
                     if verification_tracker is not None:
                         verification_tracker.clear_path()
-                    esc = escape_by_backtracking(
+                    esc = _trap_backtrack(
+                        trap_state, (robot_node_id, next_node_id),
                         env, prm_graph, goal_id, recordingInterface, robot_state_client,
                         command_client, global_map, mobility_kwargs, pts_up, obstacle_mask_updated,
                         label=f"dal nodo {robot_node_id} (troppi rifiuti di rotazione)")
@@ -3613,7 +3897,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 # Ritorno con GraphNav invece che a zampe all'indietro (2026-10-07): si torna di un
                 # waypoint, si riprova a pianificare da li', e cosi' via fino a
                 # GRAPHNAV_MAX_BACKTRACK_HOPS. La ritirata a zampe resta dentro come ultima rete.
-                esc = escape_by_backtracking(
+                esc = _trap_backtrack(
+                    trap_state, (robot_node_id, next_node_id),
                     env, prm_graph, goal_id, recordingInterface, robot_state_client,
                     command_client, global_map, mobility_kwargs, pts_up, obstacle_mask_updated,
                     label=f"dal nodo {robot_node_id}", skip_if_graph_cannot_help=True)
@@ -3740,7 +4025,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                     # Ritorno con GraphNav invece che a zampe all'indietro (2026-10-07): si torna di un
                     # waypoint, si riprova a pianificare da li', e cosi' via fino a
                     # GRAPHNAV_MAX_BACKTRACK_HOPS. La ritirata a zampe resta dentro come ultima rete.
-                    esc = escape_by_backtracking(
+                    esc = _trap_backtrack(
+                        trap_state, (ea, eb),
                         env, prm_graph, goal_id, recordingInterface, robot_state_client,
                         command_client, global_map, mobility_kwargs, pts_up, obstacle_mask_updated,
                         label=f"dal nodo {robot_node_id}")
@@ -3829,7 +4115,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 # Ritorno con GraphNav invece che a zampe all'indietro (2026-10-07): si torna di un
                 # waypoint, si riprova a pianificare da li', e cosi' via fino a
                 # GRAPHNAV_MAX_BACKTRACK_HOPS. La ritirata a zampe resta dentro come ultima rete.
-                esc = escape_by_backtracking(
+                esc = _trap_backtrack(
+                    trap_state, (edge_a, edge_b),
                     env, prm_graph, goal_id, recordingInterface, robot_state_client,
                     command_client, global_map, mobility_kwargs, pts_up, obstacle_mask_updated,
                     label=f"dal nodo {robot_node_id}")
@@ -3877,7 +4164,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             # Ritorno con GraphNav invece che a zampe all'indietro (2026-10-07): si torna di un
             # waypoint, si riprova a pianificare da li', e cosi' via fino a
             # GRAPHNAV_MAX_BACKTRACK_HOPS. La ritirata a zampe resta dentro come ultima rete.
-            esc = escape_by_backtracking(
+            esc = _trap_backtrack(
+                trap_state, (edge_a, edge_b),
                 env, prm_graph, goal_id, recordingInterface, robot_state_client,
                 command_client, global_map, mobility_kwargs, pts_up, obstacle_mask_updated,
                 label=f"dal nodo {robot_node_id}", skip_if_graph_cannot_help=True)
@@ -4276,7 +4564,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 # Ritorno con GraphNav invece che a zampe all'indietro (2026-10-07): si torna di un
                 # waypoint, si riprova a pianificare da li', e cosi' via fino a
                 # GRAPHNAV_MAX_BACKTRACK_HOPS. La ritirata a zampe resta dentro come ultima rete.
-                esc = escape_by_backtracking(
+                esc = _trap_backtrack(
+                    trap_state, (robot_node_id, next_node_id),
                     env, prm_graph, goal_id, recordingInterface, robot_state_client,
                     command_client, global_map, mobility_kwargs, pts_up, obstacle_mask_updated,
                     label=f"dal nodo {robot_node_id}")
@@ -4953,6 +5242,20 @@ def easy_walk(options):
                             # Il costo in questo PRM corrisponde al numero di archi (ovvero numero di nodi - 1)
                             COSTO_SOGLIA = 4
 
+                            # 2026-10-13 (missione 13-10 11:22): il recupero ritrovava lo
+                            # STESSO obiettivo appena fallito, raggiungibile "con 1 arco" (era
+                            # proprio quello della trappola), e rientrava subito nel tentativo:
+                            # stesso posto, stesso esito. Se l'obiettivo e' quello di prima, la
+                            # cella si rimanda e torna in coda come le altre (vedi
+                            # finalize_or_defer_blocked_cell): deciso una volta, si va avanti.
+                            last_goal = getattr(env, '_last_attempt_goal', None)
+                            same_goal = (last_goal is not None and float(np.hypot(
+                                target_x - last_goal[0], target_y - last_goal[1])) <= RECOVERY_SAME_GOAL_M)
+                            if same_goal and path_ids is not None:
+                                print(f"[RECOVERY] L'obiettivo ({target_x:.2f}, {target_y:.2f}) e' "
+                                      f"quello del tentativo appena fallito: non riprovo subito, la "
+                                      f"cella torna in coda.")
+                                path_ids = None
                             if path_ids is not None and (len(path_ids) - 1) <= COSTO_SOGLIA:
                                 print(
                                     f"[RECOVERY] Trovato percorso alternativo con costo {len(path_ids) - 1} <= {COSTO_SOGLIA}. Riprovo l'ingresso...")

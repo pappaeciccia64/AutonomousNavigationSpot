@@ -32,6 +32,31 @@ except Exception:          # scipy c'e' gia' (spotGrid usa scipy.ndimage); ripie
 OCCUPANCY_SAMPLES_PER_M = 10
 OCCUPANCY_SAMPLES_MIN = 5
 
+# --- SCARTO PRELIMINARE SULLA SCANSIONE DAL VIVO (2026-10-13) --------------------------
+# Finora un arco veniva scartato per occupazione SOLO dalla mappa globale, che dichiara
+# occupata una cella dopo 2 conferme (4 dove il robot ha camminato) e non scrive gli
+# ostacoli nell'anello attorno al corpo. Alla prima scansione di un posto, quindi, gli archi
+# che lo attraversano restavano tutti validi: si vedeva benissimo nelle figure. Misurato
+# sui pacchetti della missione del 13-10 11:22: all'inizio del tentativo in cella (0,1)
+# 3160 archi validi su 9038 nella finestra passavano su celle con obstacle_distance < 0,
+# cioe' DENTRO un ostacolo, e 4575 su celle sotto 0.20 m. Ai giri successivi 20-110.
+# Ora c'e' un primo scarto, a lettura diretta della scansione appena fatta: un arco e'
+# fuori se un suo campione (ogni 10 cm, come sopra) cade su una cella VISTA con
+# obstacle_distance sotto LIVE_PREFILTER_OD_M e non sotto il corpo del robot.
+#   - 0.20 m = mezza larghezza del corpo (0.25) meno 5 cm di rumore misurato (1.5 tipici,
+#     7.3 di punta): la linea centrale passa cosi' vicino a un ostacolo che il fianco del
+#     robot ci entra. Il fronte ne pretende 0.30, quindi questo scarto toglie solo archi che
+#     il fronte rifiuterebbe comunque: misurato sui passi ESEGUITI nelle missioni del
+#     12-10 14:23 e 17:32 e del 13-10 11:22 (85 passi), nessuno sarebbe stato scartato,
+#     nemmeno a 0.25.
+#   - celle sotto il corpo escluse: li' c'e' il robot (stesso principio di
+#     arcVerification._under_body).
+#   - E' una lettura vettoriale, quindi costa pochissimo, e viene PRIMA della pendenza:
+#     gli archi scartati qui non si campionano piu'.
+#   - Non e' permanente: si rifa' a ogni refresh con la scansione nuova.
+# None = disattivato, comportamento precedente.
+LIVE_PREFILTER_OD_M = spotGrid.ROBOT_HALF_WIDTH_M - 0.05     # = 0.20
+
 # Lunghezza minima degli archi che collegano un nodo di sosta ai vicini (vedi add_stop_node).
 STOP_NODE_MIN_EDGE_M = 0.20
 # Entro questa distanza una sosta non si ricrea: si riusa quella che c'e' gia'
@@ -230,6 +255,11 @@ class PRM:
         # valutati: (solo la binaria blocca, solo lo spazio libero blocca, archi valutati).
         # Solo diagnostica, vedi spotGrid.CLEARANCE_MAP_DECIDES.
         self.clearance_disagreement = None
+        # Scansione dal vivo per lo scarto preliminare (vedi LIVE_PREFILTER_OD_M e
+        # set_live_obstacles). None = nessuna scansione: nessuno scarto.
+        self.live_obstacles = None
+        self.live_veto_last = 0       # archi scartati dalla scansione all'ultima chiamata
+        self.live_prune_last = 0      # archi validi fuori raggio tolti all'ultimo refresh
 
         self.edge_penalty_persistent = {}   # (min,max) -> peso aggiuntivo (anche inf)
         self.edge_penalty_transient = {}
@@ -377,6 +407,114 @@ class PRM:
         self.grid_origin_y = grid_origin_y
         self.cell_size = cell_size
 
+    def set_live_obstacles(self, obstacle_dist_2d, seen_2d, origin_x, origin_y, cell_size,
+                           robot_x, robot_y, robot_yaw=None):
+        """
+        2026-10-13. La scansione appena fatta, per lo scarto preliminare degli archi (vedi
+        LIVE_PREFILTER_OD_M). Array 2D (num_y, num_x), riga = y. obstacle_dist_2d: nel ciclo
+        di navigazione quella FILTRATA della fotografia del fronte (mediana + isteresi);
+        all'inizio del tentativo quella grezza. seen_2d: celle viste dal sensore.
+        """
+        if obstacle_dist_2d is None:
+            self.live_obstacles = None
+            return
+        od = np.asarray(obstacle_dist_2d, dtype=np.float64)
+        seen = (np.ones(od.shape, dtype=bool) if seen_2d is None
+                else np.asarray(seen_2d, dtype=bool).reshape(od.shape))
+        self.live_obstacles = {
+            'od': od, 'seen': seen, 'ox': float(origin_x), 'oy': float(origin_y),
+            'cs': float(cell_size), 'rx': float(robot_x), 'ry': float(robot_y),
+            'yaw': None if robot_yaw is None else float(robot_yaw)}
+
+    def _live_blocked_samples(self, sx, sy):
+        """
+        Campioni (array di qualunque forma) -> True dove la scansione dal vivo dice "qui il
+        fianco del robot entra in un ostacolo": cella dentro la finestra, vista, con
+        obstacle_distance sotto LIVE_PREFILTER_OD_M, fuori dal rettangolo del corpo.
+        """
+        lo = self.live_obstacles
+        if lo is None or LIVE_PREFILTER_OD_M is None:
+            return np.zeros(np.shape(sx), dtype=bool)
+        od = lo['od']
+        ny, nx = od.shape
+        cols = np.floor((sx - lo['ox']) / lo['cs']).astype(np.int64)
+        rows = np.floor((sy - lo['oy']) / lo['cs']).astype(np.int64)
+        inside = (rows >= 0) & (rows < ny) & (cols >= 0) & (cols < nx)
+        rows = np.clip(rows, 0, ny - 1)
+        cols = np.clip(cols, 0, nx - 1)
+        v = od[rows, cols]
+        hit = inside & lo['seen'][rows, cols] & np.isfinite(v) & (v < LIVE_PREFILTER_OD_M)
+        dx, dy = sx - lo['rx'], sy - lo['ry']
+        if lo['yaw'] is None:
+            body = np.hypot(dx, dy) <= spotGrid.ROBOT_HALF_WIDTH_M
+        else:
+            c, s = np.cos(lo['yaw']), np.sin(lo['yaw'])
+            body = ((np.abs(c * dx + s * dy) <= spotGrid.ROBOT_HALF_LENGTH_M)
+                    & (np.abs(-s * dx + c * dy) <= spotGrid.ROBOT_HALF_WIDTH_M))
+        return hit & ~body
+
+    def _live_blocked_many(self, pairs):
+        """[(idx1, idx2, dist), ...] -> array di bool: arco scartato dalla scansione dal vivo."""
+        n_pairs = len(pairs)
+        out = np.zeros(n_pairs, dtype=bool)
+        if n_pairs == 0 or self.live_obstacles is None or LIVE_PREFILTER_OD_M is None:
+            return out
+        xy1 = np.array([self.nodes[p[0]] for p in pairs], dtype=np.float64)
+        xy2 = np.array([self.nodes[p[1]] for p in pairs], dtype=np.float64)
+        d = np.array([p[2] for p in pairs], dtype=np.float64)
+        ns = np.maximum(OCCUPANCY_SAMPLES_MIN,
+                        np.ceil(d * OCCUPANCY_SAMPLES_PER_M).astype(np.int64) + 1)
+        for m in np.unique(ns):
+            sel = np.nonzero(ns == m)[0]
+            t = np.arange(int(m)) / (int(m) - 1)
+            sx = xy1[sel, 0, None] + t[None, :] * (xy2[sel, 0] - xy1[sel, 0])[:, None]
+            sy = xy1[sel, 1, None] + t[None, :] * (xy2[sel, 1] - xy1[sel, 1])[:, None]
+            out[sel] = self._live_blocked_samples(sx, sy).any(axis=1)
+        return out
+
+    def live_prune_valid_edges(self, skip_keys=()):
+        """
+        2026-10-13. Scarto preliminare sugli archi GIA' validi che il refresh non rivaluta
+        (fuori da REFRESH_RADIUS_M ma dentro la finestra della scansione): senza questo un
+        arco a 1.3-1.9 m dal robot che attraversa un ostacolo appena visto restava valido
+        fino a quando il robot non si avvicinava. Si tolgono solo dal grafo (validita' False),
+        come lo scarto soft: alla prossima valutazione piena tornano se i dati lo dicono.
+        Restituisce quanti archi ha tolto.
+        """
+        lo = self.live_obstacles
+        if lo is None or LIVE_PREFILTER_OD_M is None:
+            return 0
+        ny, nx = lo['od'].shape
+        x0, y0 = lo['ox'], lo['oy']
+        x1, y1 = x0 + nx * lo['cs'], y0 + ny * lo['cs']
+        reach = self.max_edge_length
+        cand = []
+        for a, nbrs in self.edges.items():
+            xa, ya = self.nodes.get(a, (None, None))
+            if xa is None or not (x0 - reach <= xa <= x1 + reach and y0 - reach <= ya <= y1 + reach):
+                continue
+            for b, _w in nbrs:
+                if b <= a:
+                    continue
+                key = (a, b)
+                if key in skip_keys or key in self.traversed_edges:
+                    continue
+                xb, yb = self.nodes[b]
+                cand.append((a, b, float(np.hypot(xb - xa, yb - ya))))
+        if not cand:
+            return 0
+        flags = self._live_blocked_many(cand)
+        n = 0
+        for (a, b, _d), f in zip(cand, flags):
+            if not f:
+                continue
+            self.edge_validity[(a, b)] = False
+            self.edges[a] = [(k, w) for k, w in self.edges.get(a, []) if k != b]
+            self.edges[b] = [(k, w) for k, w in self.edges.get(b, []) if k != a]
+            self._record_occupancy_veto((a, b))
+            n += 1
+        return n
+
     def refresh_local_edge_weights(self, global_map=None, edge_safety_margin: float = 0.05):
         """
         Fully re-derives all candidate edges among nodes currently inside the local
@@ -506,6 +644,12 @@ class PRM:
                 self.edges[idx1].append((idx2, weight))
                 self.edges[idx2].append((idx1, weight))
                 self.edge_validity[key] = True
+
+        # 2026-10-13: gli archi validi della finestra che stanno fuori dal raggio di refresh
+        # passano almeno dallo scarto preliminare sulla scansione dal vivo (vedi
+        # live_prune_valid_edges). Quelli appena rivalutati sono gia' passati di li'.
+        done = {(min(a, b), max(a, b)) for a, b, _d in pairs}
+        self.live_prune_last = self.live_prune_valid_edges(skip_keys=done)
 
         return set(local_nodes)
 
@@ -834,14 +978,19 @@ class PRM:
         self.robot_node = node_id
         self.robot_node_ignore_m = float(ignore_map_within_m)
 
-    def _occupancy_blocked(self, idx1, idx2, dist, global_map, edge_safety_margin) -> bool:
+    def _occupancy_blocked(self, idx1, idx2, dist, global_map, edge_safety_margin,
+                           use_live=True) -> bool:
         """
         True se l'arco passa vicino a celle occupate nella mappa globale. Unico punto usato da
         _evaluate_and_add_edge e da refresh_local_edge_weights. I campioni entro
         robot_node_ignore_m dal nodo in cui si trova il robot non contano.
+        2026-10-13: anche lo scarto preliminare sulla scansione dal vivo (LIVE_PREFILTER_OD_M).
         """
         x1, y1 = self.nodes[idx1]
         x2, y2 = self.nodes[idx2]
+        if use_live and self.live_obstacles is not None:
+            if self._live_blocked_many([(idx1, idx2, float(dist))])[0]:
+                return True
         ignore_xy = None
         if self.robot_node is not None and self.robot_node in (idx1, idx2) and self.robot_node_ignore_m > 0:
             ignore_xy = self.nodes[self.robot_node]
@@ -875,13 +1024,23 @@ class PRM:
         era 7 s su 16 della costruzione del grafo, quasi tutti in chiamate Python a
         is_occupied su terreno che nessun sensore aveva visto.
         """
+        # 2026-10-13: prima lo scarto preliminare sulla scansione dal vivo (vedi
+        # LIVE_PREFILTER_OD_M), poi la mappa globale. L'esito e' l'OR dei due.
+        live = self._live_blocked_many(pairs)
+        self.live_veto_last = int(live.sum())
+        out = self._global_occupancy_blocked_many(pairs, global_map, edge_safety_margin)
+        return out | live
+
+    def _global_occupancy_blocked_many(self, pairs, global_map, edge_safety_margin):
+        """Il controllo sulla mappa globale di _occupancy_blocked_many (com'era fino al 12-10)."""
         n_pairs = len(pairs)
         out = np.zeros(n_pairs, dtype=bool)
         if n_pairs == 0 or global_map is None or edge_safety_margin <= 0.0:
             return out
         if not hasattr(global_map, 'occupied_many'):
             for i, (a, b, d) in enumerate(pairs):
-                out[i] = self._occupancy_blocked(a, b, d, global_map, edge_safety_margin)
+                out[i] = self._occupancy_blocked(a, b, d, global_map, edge_safety_margin,
+                                                 use_live=False)
             return out
         a_ids = [p[0] for p in pairs]
         b_ids = [p[1] for p in pairs]
