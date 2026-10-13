@@ -372,13 +372,27 @@ def relative_move(dx, dy, dyaw, frame_name, robot_command_client, robot_state_cl
                 return False, distance_traveled
 
         if mobility_feedback.status != RobotCommandFeedbackStatus.STATUS_PROCESSING:
-            print(f'Failed to reach the goal (traveled {distance_traveled:.2f}m)')
+            print(f"[MOVIMENTO] Obiettivo non raggiunto: percorsi {distance_traveled:.2f} m su "
+                  f"{float(np.hypot(dx, dy)):.2f} richiesti (stato del comando "
+                  f"{mobility_feedback.status}).")
             return False, distance_traveled
 
         traj_feedback = mobility_feedback.se2_trajectory_feedback
         if (traj_feedback.status == traj_feedback.STATUS_AT_GOAL and
                 traj_feedback.body_movement_status == traj_feedback.BODY_STATUS_SETTLED):
-            print(f'Arrived at the goal (traveled {distance_traveled:.2f}m)')
+            # 2026-10-13: messaggio esplicito. Prima "Arrived at the goal (traveled 0.03m)"
+            # anche dopo una ROTAZIONE sul posto, dove quei 3 cm sono solo lo spostamento del
+            # centro del corpo mentre gira: sembrava un avanzamento minuscolo.
+            if abs(float(dx)) < 1e-6 and abs(float(dy)) < 1e-6:
+                turned = float(np.degrees(np.arctan2(
+                    np.sin(current_tform_body.angle - initial_tform_body.angle),
+                    np.cos(current_tform_body.angle - initial_tform_body.angle))))
+                print(f"[MOVIMENTO] Rotazione completata: {turned:+.0f} gradi su "
+                      f"{np.degrees(float(dyaw)):+.0f} richiesti (il centro del corpo si e' "
+                      f"spostato di {distance_traveled:.2f} m girando).")
+            else:
+                print(f"[MOVIMENTO] Arrivato: percorsi {distance_traveled:.2f} m su "
+                      f"{float(np.hypot(dx, dy)):.2f} richiesti.")
             return True, distance_traveled
 
         time.sleep(poll_period_s)
