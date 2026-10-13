@@ -34,6 +34,7 @@ import glob
 import os
 import sys
 
+import threading
 import numpy as np
 
 PNG_MODE = "--png" in sys.argv
@@ -334,6 +335,117 @@ def _slope_colors_many(keys, long_s, lat_s):
     return rgba
 
 
+# --- ARCHI COME IMMAGINE (2026-10-13) ----------------------------------------------------
+# Misurato sulla missione del 12-10 17:32: con ~10 000 archi nel pannello locale e ~16 000 in
+# quello globale, le due LineCollection costavano ~240 ms su ~400 di ogni ridisegno -- e un
+# ridisegno completo c'e' anche a ogni trascinamento o zoom col mouse, per questo "scorreva
+# male" con le mappe grandi. Ora gli archi si disegnano UNA volta in un'immagine RGBA (stessi
+# colori; dove si sovrappongono la trasparenza si somma come prima) e la si mostra con imshow,
+# che costa come la mappa. L'immagine si tiene in cache per vista PRM ed estensione.
+_EDGE_RASTER_CACHE = {}
+_EDGE_RASTER_CACHE_MAX = 256
+# Lato massimo dell'immagine degli archi, in pixel: oltre, la risoluzione si allarga.
+EDGE_RASTER_MAX_PX = 1600
+# Opacita' di un arco in un pixel rispetto a quella della vecchia linea da 0.5 punti: tarata a
+# occhio confrontando le due figure sulla missione del 12-10 17:32.
+EDGE_RASTER_COVERAGE = 0.45
+EDGE_RASTER_COVERAGE_GLOBAL = 0.22   # nel globale gli archi per pixel sono molti di piu'
+
+
+def _slope_table(vd):
+    """Chiavi (a, b) ordinate come codici interi + valori, per cercare le pendenze con searchsorted."""
+    tab = getattr(vd, '_slope_tab', None) if not isinstance(vd, dict) else vd.get('_slope_tab')
+    if tab is None:
+        tab = _SLOPE_LUT_CACHE.get(('tab', id(vd)))
+    if tab is None:
+        k = np.asarray(_arr(vd, 'prm_slope_keys', (2,)), dtype=np.int64).reshape(-1, 2)
+        v = np.asarray(_arr(vd, 'prm_slope_values', (2,)), dtype=np.float64).reshape(-1, 2)
+        k = np.sort(k, axis=1)
+        code = k[:, 0] * (1 << 32) + k[:, 1]
+        order = np.argsort(code)
+        tab = (code[order], v[order])
+        try:
+            vd._slope_tab = tab
+        except Exception:
+            _SLOPE_LUT_CACHE[('tab', id(vd))] = tab
+    return tab
+
+
+def _edge_colors(vd, e, grey_rgba, alpha=None):
+    """Colore di ogni arco come _slope_color (grigio se non c'e' la pendenza), tutto vettoriale."""
+    cols = np.tile(np.asarray(grey_rgba, dtype=np.float64), (len(e), 1))
+    codes, vals = _slope_table(vd)
+    if len(codes) and len(e):
+        ee = np.sort(e, axis=1)
+        q = ee[:, 0] * (1 << 32) + ee[:, 1]
+        j = np.clip(np.searchsorted(codes, q), 0, len(codes) - 1)
+        have = codes[j] == q
+        if have.any():
+            cols[have] = _slope_colors_many(None, vals[j[have], 0], vals[j[have], 1])
+    if alpha is not None:
+        cols[:, 3] = alpha
+    return cols
+
+
+def _edges_image(segs, cols, x0, x1, y0, y1, max_px=EDGE_RASTER_MAX_PX, min_res=None,
+                 coverage=EDGE_RASTER_COVERAGE):
+    """
+    Segmenti (N, 2, 2) con colori RGBA (N, 4) -> immagine RGBA (ny, nx, 4) sull'estensione
+    data. Ogni arco si campiona a passo di un pixel; in un pixel toccato da k archi il colore
+    e' la media e l'opacita' 1 - prod(1 - alpha), come sovrapponendo linee trasparenti.
+    """
+    w, h = max(x1 - x0, 1e-6), max(y1 - y0, 1e-6)
+    res = max(w, h) / float(max_px)
+    if min_res is not None:
+        res = max(res, float(min_res))
+    nx, ny = max(1, int(np.ceil(w / res))), max(1, int(np.ceil(h / res)))
+    img = np.zeros((ny, nx, 4), dtype=np.float32)
+    if len(segs) == 0:
+        return img
+    p0, p1 = segs[:, 0, :], segs[:, 1, :]
+    L = np.hypot(p1[:, 0] - p0[:, 0], p1[:, 1] - p0[:, 1])
+    n = np.maximum(2, np.ceil(L / res).astype(np.int64) + 1)
+    idx = np.repeat(np.arange(len(segs)), n)
+    start = np.cumsum(n) - n
+    t = (np.arange(int(n.sum())) - np.repeat(start, n)) / np.repeat(n - 1, n)
+    px = p0[idx, 0] + t * (p1[idx, 0] - p0[idx, 0])
+    py = p0[idx, 1] + t * (p1[idx, 1] - p0[idx, 1])
+    c = np.floor((px - x0) / res).astype(np.int64)
+    r = np.floor((py - y0) / res).astype(np.int64)
+    ok = (c >= 0) & (c < nx) & (r >= 0) & (r < ny)
+    flat, idx = r[ok] * nx + c[ok], idx[ok]
+    # un arco conta una volta per pixel: i suoi campioni sono consecutivi, quindi basta
+    # scartare quelli che ricadono nello stesso pixel del precedente (niente ordinamento).
+    if len(flat) > 1:
+        keep = np.empty(len(flat), dtype=bool)
+        keep[0] = True
+        keep[1:] = (flat[1:] != flat[:-1]) | (idx[1:] != idx[:-1])
+        flat, idx = flat[keep], idx[keep]
+    m = nx * ny
+    cnt = np.bincount(flat, minlength=m).astype(np.float64)
+    hit = cnt > 0
+    out = img.reshape(-1, 4)
+    for ch in range(3):
+        sch = np.bincount(flat, weights=cols[idx, ch], minlength=m)
+        out[hit, ch] = (sch[hit] / cnt[hit]).astype(np.float32)
+    # coverage: frazione di pixel che una linea sottile (0.5 punti) copre davvero; senza, un
+    # pixel dell'immagine "toccato" diventerebbe pieno e il disegno molto piu' scuro di prima.
+    logt = np.bincount(flat, weights=np.log1p(-np.clip(coverage * cols[idx, 3], 0.0, 0.999)),
+                       minlength=m)
+    out[hit, 3] = (1.0 - np.exp(logt[hit])).astype(np.float32)
+    return img
+
+
+def _cached_edges_image(key, build):
+    img = _EDGE_RASTER_CACHE.get(key)
+    if img is None:
+        img = build()
+        if len(_EDGE_RASTER_CACHE) >= _EDGE_RASTER_CACHE_MAX:
+            _EDGE_RASTER_CACHE.pop(next(iter(_EDGE_RASTER_CACHE)))
+        _EDGE_RASTER_CACHE[key] = img
+    return img
+
+
 def _draw_cells(ax, vd):
     """Griglia di missione: verde = visitata, rosso = bloccata, tratteggio = da esplorare."""
     if vd is None or 'env_cells' not in vd or not len(vd['env_cells']):
@@ -392,32 +504,63 @@ def _overlay_prm_local(ax, ctx, i):
     else:
         e = edges
     if len(e):
-        segs = np.stack([pos[e[:, 0]], pos[e[:, 1]]], axis=1)
-        # La tabella delle pendenze si costruisce una volta per vista e si tiene in cache
-        # sul bundle: prima veniva rifatta (80 000 voci) a ogni ridisegno.
-        slope = getattr(vd, '_slope_lut', None)
-        if slope is None:
-            slope = {(int(a), int(b)): (float(v[0]), float(v[1])) for (a, b), v in
-                     zip(_arr(vd, 'prm_slope_keys', (2,)), _arr(vd, 'prm_slope_values', (2,)))}
-            try:
-                vd._slope_lut = slope
-            except Exception:
-                _SLOPE_LUT_CACHE[id(vd)] = slope
-        cols = np.tile(np.array([0.2, 0.2, 0.2, 0.35]), (len(e), 1))
-        if slope:
-            lo = np.zeros(len(e)); la = np.zeros(len(e)); have = np.zeros(len(e), dtype=bool)
-            for i, (a, b) in enumerate(e):
-                sv = slope.get((min(int(a), int(b)), max(int(a), int(b))))
-                if sv is not None:
-                    lo[i], la[i], have[i] = sv[0], sv[1], True
-            if have.any():
-                cols[have] = _slope_colors_many(None, lo[have], la[have])
-            cols[:, 3] = 0.35
-        ax.add_collection(LineCollection(segs, colors=cols, linewidths=0.5, zorder=3))
+        # 2026-10-13: immagine invece di LineCollection (vedi ARCHI COME IMMAGINE).
+        def build():
+            segs = np.stack([pos[e[:, 0]], pos[e[:, 1]]], axis=1)
+            cols = _edge_colors(vd, e, (0.2, 0.2, 0.2, 0.35), alpha=0.35)
+            return _edges_image(segs, cols, x0, x1, y0, y1, max_px=480)
+        img = _cached_edges_image(('loc', vis[0], round(x0, 3), round(y0, 3), round(x1, 3), round(y1, 3)), build)
+        ax.imshow(img, origin='lower', extent=[x0, x0 + img.shape[1] * ((x1 - x0) / img.shape[1]),
+                                              y0, y0 + img.shape[0] * ((y1 - y0) / img.shape[0])],
+                  interpolation='nearest', zorder=3)
     pts = nxy[inside_node[ids]]
     if len(pts):
         ax.plot(pts[:, 0], pts[:, 1], '.', color='k', ms=3, alpha=0.6, zorder=3)
     ax.set_xlim(x0, x1); ax.set_ylim(y0, y1)
+
+
+def _global_edges_image(ctx, name, vd):
+    """
+    2026-10-13. Immagine degli archi del pannello globale per una vista PRM, in cache (vedi
+    ARCHI COME IMMAGINE). Tutti gli archi, senza assottigliamento. (img, extent) o (None, None).
+    """
+    gx0, gx1 = ctx.x0, ctx.x0 + ctx.nx * ctx.res
+    gy0, gy1 = ctx.y0, ctx.y0 + ctx.ny * ctx.res
+
+    def build():
+        ids = np.asarray(_arr(vd, 'prm_node_ids', ()), dtype=np.int64).ravel()
+        nxy = np.asarray(_arr(vd, 'prm_node_xy', (2,)), dtype=np.float64).reshape(-1, 2)
+        edges = np.asarray(_arr(vd, 'prm_edges', (2,)), dtype=np.int64).reshape(-1, 2)
+        if not (len(ids) and len(nxy) == len(ids) and len(edges)):
+            return None
+        pos = np.full((int(ids.max()) + 2, 2), np.nan)
+        pos[ids] = nxy
+        known = np.zeros(len(pos), dtype=bool)
+        known[ids] = True
+        ok = (edges[:, 0] < len(pos)) & (edges[:, 1] < len(pos)) & (edges[:, 0] >= 0) & (edges[:, 1] >= 0)
+        e = edges[ok]
+        e = e[known[e[:, 0]] & known[e[:, 1]]]
+        if not len(e):
+            return None
+        segs = np.stack([pos[e[:, 0]], pos[e[:, 1]]], axis=1)
+        cols = _edge_colors(vd, e, (0.5, 0.5, 0.5, 0.25))
+        return _edges_image(segs, cols, gx0, gx1, gy0, gy1, min_res=ctx.res,
+                            coverage=EDGE_RASTER_COVERAGE_GLOBAL)
+
+    img = _cached_edges_image(('glob', name, gx0, gy0, gx1, gy1), build)
+    if img is None:
+        return None, None
+    return img, [gx0, gx0 + img.shape[1] * ((gx1 - gx0) / img.shape[1]),
+                 gy0, gy0 + img.shape[0] * ((gy1 - gy0) / img.shape[0])]
+
+
+def _prebuild_global_images(ctx):
+    """In sottofondo, all'apertura: le immagini di tutte le viste PRM, cosi' scorrere non aspetta."""
+    for _mt, name, vd in list(ctx.vis):
+        try:
+            _global_edges_image(ctx, name, vd)
+        except Exception as e:
+            print(f"[viewer] immagine archi di {name} non preparata: {e}")
 
 
 def draw_global(ax, ctx, i, final=False):
@@ -438,39 +581,12 @@ def draw_global(ax, ctx, i, final=False):
         print(f"[viewer] celle non disegnate: {e}")
     if vd is not None:
         xy = {int(k): tuple(p) for k, p in zip(_arr(vd, 'prm_node_ids', ()), _arr(vd, 'prm_node_xy', (2,)))}
-        # 2026-10-12: questo pannello disegna TUTTI gli archi del grafo -- 90 216 nella
-        # missione del 12-10 14:47 -- e lo faceva con un ciclo Python piu' una chiamata alla
-        # mappa di colori per arco. Era la causa principale della lentezza. Stesso disegno,
-        # con operazioni su array. Sopra GLOBAL_PRM_MAX_EDGES si assottiglia: a quella
-        # densita' gli archi sono comunque un velo indistinguibile.
-        ids = np.asarray(_arr(vd, 'prm_node_ids', ()), dtype=np.int64).ravel()
-        nxy = np.asarray(_arr(vd, 'prm_node_xy', (2,)), dtype=np.float64).reshape(-1, 2)
-        edges = np.asarray(_arr(vd, 'prm_edges', (2,)), dtype=np.int64).reshape(-1, 2)
-        if len(ids) and len(nxy) == len(ids) and len(edges):
-            pos = np.full((int(ids.max()) + 2, 2), np.nan)
-            pos[ids] = nxy
-            known = np.zeros(len(pos), dtype=bool)
-            known[ids] = True
-            ok = (edges[:, 0] < len(pos)) & (edges[:, 1] < len(pos))
-            e = edges[ok]
-            e = e[known[e[:, 0]] & known[e[:, 1]]]
-            if len(e) > GLOBAL_PRM_MAX_EDGES:
-                step = int(np.ceil(len(e) / GLOBAL_PRM_MAX_EDGES))
-                e = e[::step]
-            if len(e):
-                segs = np.stack([pos[e[:, 0]], pos[e[:, 1]]], axis=1)
-                slope = {(int(a), int(b)): (float(v[0]), float(v[1])) for (a, b), v in
-                         zip(_arr(vd, 'prm_slope_keys', (2,)), _arr(vd, 'prm_slope_values', (2,)))}
-                cols = np.tile(np.array([0.5, 0.5, 0.5, 0.25]), (len(e), 1))
-                if slope:
-                    lo = np.zeros(len(e)); la = np.zeros(len(e)); have = np.zeros(len(e), dtype=bool)
-                    for i, (a, b) in enumerate(e):
-                        sv = slope.get((min(int(a), int(b)), max(int(a), int(b))))
-                        if sv is not None:
-                            lo[i], la[i], have[i] = sv[0], sv[1], True
-                    if have.any():
-                        cols[have] = _slope_colors_many(None, lo[have], la[have])
-                ax.add_collection(LineCollection(segs, colors=cols, linewidths=0.5, zorder=2))
+        # Questo pannello disegna TUTTI gli archi del grafo (90 216 nella missione del 12-10
+        # 14:47). Dal 2026-10-13 come immagine in cache, preparata in sottofondo all'apertura
+        # (vedi ARCHI COME IMMAGINE); GLOBAL_PRM_MAX_EDGES non serve piu'.
+        img, gext = _global_edges_image(ctx, vis[0], vd)
+        if img is not None:
+            ax.imshow(img, origin='lower', interpolation='nearest', zorder=2, extent=gext)
         stops = np.array([xy[int(k)] for k in _arr(vd, 'prm_stop_nodes', ()) if int(k) in xy]).reshape(-1, 2)
         if len(stops):
             ax.plot(stops[:, 0], stops[:, 1], '.', color='tab:orange', ms=5, zorder=4, label='nodi di sosta')
@@ -631,6 +747,8 @@ def main():
     for k, layer in enumerate(LAYERS):
         print(f"  {k + 1}: {layer[0]}")
     redraw()
+    # 2026-10-13: le immagini degli archi del pannello globale si preparano in sottofondo.
+    threading.Thread(target=_prebuild_global_images, args=(ctx,), daemon=True).start()
     plt.show()
     return 0
 
