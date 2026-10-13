@@ -57,6 +57,13 @@ OCCUPANCY_SAMPLES_MIN = 5
 # None = disattivato, comportamento precedente.
 LIVE_PREFILTER_OD_M = spotGrid.ROBOT_HALF_WIDTH_M - 0.05     # = 0.20
 
+# 2026-10-13: le righe [SLOPE-VETO] (prima volta che un arco viene vetato) e [SLOPE-FLIP] (arco
+# vicino soglia che cambia verdetto fra due refresh) erano 1338 righe su 3155 nella missione
+# del 12-10 17:32, il 42% del log. Con False se ne stampa UNA riassuntiva [PENDENZE] per ogni
+# costruzione o refresh (vedi flush_slope_log); i valori arco per arco restano nei pacchetti
+# _vis.npz (prm_slope_keys / prm_slope_values) e i totali nel riepilogo di fine missione.
+VERBOSE_SLOPE_LOG = False
+
 # Lunghezza minima degli archi che collegano un nodo di sosta ai vicini (vedi add_stop_node).
 STOP_NODE_MIN_EDGE_M = 0.20
 # Entro questa distanza una sosta non si ricrea: si riusa quella che c'e' gia'
@@ -625,6 +632,9 @@ class PRM:
                     new_valid = not blocked
                     if is_near_threshold and old_valid is not None and old_valid != new_valid:
                         self.slope_flip_count += 1
+                        self._slope_pending()['flip'] += 1
+                    if (VERBOSE_SLOPE_LOG and is_near_threshold and old_valid is not None
+                            and old_valid != new_valid):
                         print(f"[SLOPE-FLIP] Arco {idx1}-{idx2}: stato cambiato "
                               f"{old_valid}->{new_valid} vicino soglia "
                               f"(long={long_slope:.3f}, lat={lat_slope:.3f}, "
@@ -650,6 +660,7 @@ class PRM:
         # live_prune_valid_edges). Quelli appena rivalutati sono gia' passati di li'.
         done = {(min(a, b), max(a, b)) for a, b, _d in pairs}
         self.live_prune_last = self.live_prune_valid_edges(skip_keys=done)
+        self.flush_slope_log("refresh")
 
         return set(local_nodes)
 
@@ -781,21 +792,50 @@ class PRM:
         self.max_slope_seen['lat'] = max(self.max_slope_seen['lat'], lat_slope)
 
         vetoed = False
+        pend = self._slope_pending()
         if long_slope > spotGrid.SLOPE_THRESHOLD:
             vetoed = True
             self.veto_count_longitudinal += 1
+            pend['long'] += 1
+            pend['max_long'] = max(pend['max_long'], long_slope)
             if key not in self.vetoed_arcs_longitudinal:
                 self.vetoed_arcs_longitudinal.add(key)
-                print(f"[SLOPE-VETO] Arco {key[0]}-{key[1]}: LONGITUDINALE {long_slope:.3f} > "
-                      f"soglia {spotGrid.SLOPE_THRESHOLD:.3f} (lat={lat_slope:.3f})")
+                pend['new'] += 1
+                if VERBOSE_SLOPE_LOG:
+                    print(f"[SLOPE-VETO] Arco {key[0]}-{key[1]}: LONGITUDINALE {long_slope:.3f} > "
+                          f"soglia {spotGrid.SLOPE_THRESHOLD:.3f} (lat={lat_slope:.3f})")
         if lat_slope > spotGrid.SLOPE_THRESHOLD:
             vetoed = True
             self.veto_count_lateral += 1
+            pend['lat'] += 1
+            pend['max_lat'] = max(pend['max_lat'], lat_slope)
             if key not in self.vetoed_arcs_lateral:
                 self.vetoed_arcs_lateral.add(key)
-                print(f"[SLOPE-VETO] Arco {key[0]}-{key[1]}: LATERALE {lat_slope:.3f} > "
-                      f"soglia {spotGrid.SLOPE_THRESHOLD:.3f} (long={long_slope:.3f})")
+                pend['new'] += 1
+                if VERBOSE_SLOPE_LOG:
+                    print(f"[SLOPE-VETO] Arco {key[0]}-{key[1]}: LATERALE {lat_slope:.3f} > "
+                          f"soglia {spotGrid.SLOPE_THRESHOLD:.3f} (long={long_slope:.3f})")
         return vetoed
+
+    def _slope_pending(self):
+        p = getattr(self, '_slope_log_pending', None)
+        if p is None:
+            p = self._slope_log_pending = {'long': 0, 'lat': 0, 'new': 0, 'flip': 0,
+                                           'max_long': 0.0, 'max_lat': 0.0}
+        return p
+
+    def flush_slope_log(self, where=""):
+        """
+        2026-10-13. Una riga [PENDENZE] al posto delle righe arco per arco (vedi
+        VERBOSE_SLOPE_LOG), poi azzera. Non stampa niente se non c'e' stato nessun veto.
+        """
+        p = self._slope_pending()
+        if p['long'] or p['lat'] or p['flip']:
+            print(f"[PENDENZE] {where}: archi vetati per pendenza -- longitudinale {p['long']} "
+                  f"(max {p['max_long']:.2f}), laterale {p['lat']} (max {p['max_lat']:.2f}), "
+                  f"{p['new']} mai vetati prima; {p['flip']} cambi di verdetto vicino soglia "
+                  f"(soglia {spotGrid.SLOPE_THRESHOLD:.2f}).")
+        self._slope_log_pending = None
 
     def _record_occupancy_veto(self, key):
         """Conteggio di debug dei veti per occupazione globale (comportamento invariato)."""
@@ -1449,6 +1489,7 @@ class PRM:
 
         total_edges = sum(len(neighbors) for neighbors in self.edges.values()) // 2
         print(f"[PRM] Built graph with {total_edges} edges using Slope-Distance cost function")
+        self.flush_slope_log("costruzione")
 
     def mark_edge_invalid(self, idx1: int, idx2: int):
         """

@@ -448,6 +448,8 @@ class MissionGraph:
                 (xa, ya), (xb, yb) = prm.nodes[a], prm.nodes[b]
                 prm._evaluate_and_add_edge(a, b, float(math.hypot(xb - xa, yb - ya)), force=True)
         prm.built = True
+        if hasattr(prm, 'flush_slope_log'):
+            prm.flush_slope_log("costruzione")
         if verbose:
             print(f"[GRAFO] {added} archi ammessi su {self.n_edges} coppie del reticolo "
                   f"({self.n_nodes} nodi, passo {self.spacing_m:.4f} m); {n_fast} in zona senza "
