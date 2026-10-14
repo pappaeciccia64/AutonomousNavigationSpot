@@ -1714,33 +1714,6 @@ def _emit_mission_summary_once():
 # TODO: check if we can avoid to set a sleep after each movement command
 # TODO: change the folder destination of the name download of graph
 
-def sample_cell_points(env, cell_row, cell_col, num_samples=200):
-    """Sample random points within a cell."""
-    world_pos = env.get_world_position_from_cell(cell_row, cell_col)
-    if world_pos is None:
-        return []
-
-    cell_center_x, cell_center_y = world_pos
-    half_size = env.cell_size / 2.0
-
-    samples = []
-    for _ in range(num_samples):
-        offset_x = np.random.uniform(-half_size * 0.8, half_size * 0.8)
-        offset_y = np.random.uniform(-half_size * 0.8, half_size * 0.8)
-
-        cos_yaw = np.cos(env.origin_yaw)
-        sin_yaw = np.sin(env.origin_yaw)
-
-        world_offset_x = offset_x * cos_yaw - offset_y * sin_yaw
-        world_offset_y = offset_x * sin_yaw + offset_y * cos_yaw
-
-        sample_x = cell_center_x + world_offset_x
-        sample_y = cell_center_y + world_offset_y
-
-        samples.append((sample_x, sample_y))
-
-    return samples
-
 def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cells_obstacle_dist,
                             global_sampler, global_map=None, safety_margin=None, exclude=None):
     """
@@ -2528,34 +2501,6 @@ def shortcut_index(robot_xy, path_waypoints, snap, global_map=None, prm=None, ro
 
 ROTATION_ROOM_SEARCH_M = (0.15, 0.30, 0.45, 0.60, 0.80, 1.00, 1.20)
 ROTATION_ROOM_DIRECTIONS_DEG = (180, 135, -135, 90, -90, 45, -45, 0)   # rispetto al muso: indietro prima
-
-
-def find_rotation_room(robot_xy, robot_yaw, snap):
-    """
-    NON PIU' USATA dal ciclo principale (2026-10-07), lasciata per riferimento e per i test.
-
-    Cercava il punto piu' vicino con spazio per ruotare, raggiungibile SENZA girarsi, cioe'
-    camminando di traverso. Non serve piu' perche' la marcia di traverso e' stata eliminata:
-    di traverso Spot e' largo 1.10 m e il fronte pretende 0.59 m invece di 0.30, quindi
-    questa ricerca falliva proprio nelle situazioni per cui era stata scritta (misurato il
-    2026-10-07: punti con spazio pieno a 0.03-0.56 m dal robot, nessuno raggiungibile).
-    Al suo posto: arretramento dritto lungo l'asse del corpo, vedi retreat_straight().
-
-    Funzione pura. Restituisce (x, y, direzione_relativa_gradi, distanza) oppure None.
-    """
-    rx, ry = robot_xy
-    for dist in ROTATION_ROOM_SEARCH_M:
-        for rel in ROTATION_ROOM_DIRECTIONS_DEG:
-            d = robot_yaw + np.radians(rel)
-            tx, ty = rx + dist * np.cos(d), ry + dist * np.sin(d)
-            rows, cols, inside = arcVerification._cells(snap, np.array([tx]), np.array([ty]))
-            if not inside[0] or snap.obstacle_dist[rows[0], cols[0]] < spotGrid.ROTATION_CLEARANCE_M:
-                continue
-            body = spotGrid.body_extents(robot_yaw, d)
-            f = arcVerification.compute_safe_frontier([(rx, ry), (tx, ty)], snap, body=body)
-            if arcVerification.allowed_advance(f) >= dist - 0.02:
-                return float(tx), float(ty), float(rel), float(dist)
-    return None
 
 
 def plan_straight_retreat(robot_xy, robot_yaw, snap, max_dist=ROTATION_RETREAT_M):

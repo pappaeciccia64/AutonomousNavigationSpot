@@ -77,18 +77,15 @@ REQUIRED = {
                      "DEFAULT_MISSION_ROWS", "DEFAULT_MISSION_COLS", "DEFAULT_CELL_SIZE_M",
                      "DEFAULT_LATTICE_SPACING_M"],
         "funzioni": ["build_mission_graph", "load_npz", "align_spacing", "suggested_spacing",
-                     "ring_distances", "covering_radius", "node_density"],
+                     "covering_radius", "node_density"],
         "metodi": [
             ("MissionGraph", "into_prm"),
             ("MissionGraph", "add_edges_to_prm"),
             ("MissionGraph", "as_sampler"),
-            ("MissionGraph", "target_for_cell"),
             ("MissionGraph", "save_npz"),
             ("MissionGraph", "report"),
-            ("MissionGraph", "target_for_cell"),
             ("LatticeSampler", "get_point_in_cell"),
             ("LatticeSampler", "get_all_points"),
-            ("LatticeSampler", "get_nearest_points"),
         ],
     },
     # 2026-10-08: easy_walk chiama questi metodi per le scorciatoie GraphNav.
@@ -130,7 +127,7 @@ REQUIRED = {
     },
     "arcVerification.py": {
         "costanti": [],
-        "funzioni": ["arc_visible_fraction", "is_arc_in_fov", "verify_arc_safety",
+        "funzioni": ["is_arc_in_fov", "verify_arc_safety",
                      "make_grid_snapshot", "compute_safe_frontier", "allowed_advance",   # passo 3
                      "point_along", "describe_frontier"],
         "metodi": [("ArcVerificationTracker", "update_path"),
@@ -144,8 +141,7 @@ REQUIRED = {
                      "FALL_TILT_DEG", "UPRIGHT_TILT_DEG", "SELF_RIGHT_TIMEOUT_S",       # cadute
                      "STAND_TIMEOUT_S", "SELF_RIGHT_MAX_ATTEMPTS",
                      "MOVE_TIMEOUT_FACTOR", "MOVE_TIMEOUT_MARGIN_S", "MOVE_MAX_RPC_ERRORS"],
-        "funzioni": ["relative_move", "stop_robot", "move_backward",
-                     "move_to_world_point_without_turning", "_build_mobility_params",
+        "funzioni": ["relative_move", "stop_robot",                      "move_to_world_point_without_turning", "_build_mobility_params",
                      "_velocity_limit", "check_fall", "recover_from_fall", "_roll_pitch_deg"],
         "metodi": [],
     },
@@ -180,7 +176,7 @@ REQUIRED = {
         "funzioni": ["find_best_point_in_cell", "retreat_along_traveled_path",
                      "navigate_to", "attempt_enter_cell_from_position",
                      "_log_footprint_diagnostic", "_log_ground_filter", "decide_next_move",
-                     "rotation_plan", "find_rotation_room", "shortcut_index",
+                     "rotation_plan", "shortcut_index",
                      "_check_and_recover_fall", "_raw_zero", "_raw_scale",
                      "_mission_z0", "_set_mission_z0", "_mask_for_global_map",
                      "_graphnav_navigate_to", "_graphnav_return_to_start", "_append_csv",

@@ -8,6 +8,7 @@ easy_walk.py): salva i dati grezzi, e le figure si fanno qui, dopo.
 
     python3 mission_viewer.py                                  # (o tasto Run) l'ultima missione in MissionMap/
     python3 mission_viewer.py <cartella_missione>              # interattivo, tutte le scansioni
+    python3 mission_viewer.py 13-10-2026_12-40-38              # oppure solo il nome della missione
     python3 mission_viewer.py <file.npz>                       # una scansione o una vista PRM
     python3 mission_viewer.py <cartella_missione> --png <dir>  # esporta tutte le figure in PNG
     python3 mission_viewer.py <cartella_missione> --overview   # solo il riepilogo della missione
@@ -149,27 +150,6 @@ def draw_scan(ax, d, layer_idx, title_prefix=""):
     return im, label
 
 
-def draw_overview(ax, scans):
-    ax.clear()
-    track = np.array([d['robot_xyz'][:2] for d in scans])
-    ax.plot(track[:, 0], track[:, 1], '-o', color='blue', ms=3, lw=1, label='robot')
-    for reason, col in REASON_COLORS.items():
-        pts = np.array([d['frontier_stop_xy'] for d in scans if str(d['frontier_reason']) == reason])
-        if len(pts):
-            ax.plot(pts[:, 0], pts[:, 1], 'x', color=col, ms=6, label=f"fronte: {reason} ({len(pts)})")
-    blocks = [d for d in scans if str(d['decision_kind']) == 'blocked']
-    for d in blocks:
-        ax.plot(*d['frontier_stop_xy'], 's', color='red', ms=12, mfc='none', mew=2)
-    for d in scans:
-        x0, x1, y0, y1 = _extent(d)
-        ax.plot([x0, x1, x1, x0, x0], [y0, y0, y1, y1, y0], color='gray', lw=0.3, alpha=0.4)
-    ax.set_aspect('equal'); ax.grid(alpha=0.3)
-    ax.set_title(f"Missione: {len(scans)} scansioni, {len(blocks)} blocchi confermati "
-                 f"(quadrati rossi)", fontsize=10)
-    ax.set_xlabel("X [m] (VISION)"); ax.set_ylabel("Y [m] (VISION)")
-    ax.legend(fontsize=7)
-
-
 def draw_vis_bundle(ax, d):
     """Le vecchie figure 'Path Visualization': scansione, grafo PRM, percorso, celle."""
     ax.clear()
@@ -308,15 +288,6 @@ _SLOPE_LUT_CACHE = {}   # ripiego quando il bundle non accetta attributi
 # Oltre questo numero di archi il pannello globale ne disegna uno ogni N: a quella densita'
 # sono comunque un velo e il costo di disegno diventa il collo di bottiglia (2026-10-12).
 GLOBAL_PRM_MAX_EDGES = 20000
-
-
-def _slope_color(long_s, lat_s):
-    """Come easy_walk._slope_edge_color: verde = in avanti, rosso = di traverso; piu' marcato = piu' ripido."""
-    total = long_s + lat_s
-    if total < 1e-6:
-        return (0.6, 0.6, 0.6, 0.25)
-    r, g, b, _ = _SLOPE_CMAP(lat_s / total)
-    return (r, g, b, 0.3 + 0.5 * min(1.0, max(long_s, lat_s) / SLOPE_THRESHOLD))
 
 
 def _slope_colors_many(keys, long_s, lat_s):
@@ -659,7 +630,12 @@ def main():
         print(f"Nessuna cartella indicata: apro l'ultima missione, {found}")
         args = [found]
     target = args[0]
-    out_dir = sys.argv[sys.argv.index("--png") + 1] if PNG_MODE else None
+    # Basta anche il nome della missione (es. 13-10-2026_12-40-38), come per mission_report.py.
+    by_name = os.path.join(os.path.dirname(os.path.abspath(__file__)), "MissionMap",
+                           "Mission_" + target.replace("Mission_", ""))
+    if not os.path.exists(target) and os.path.isdir(by_name):
+        target = by_name
+    out_dir =sys.argv[sys.argv.index("--png") + 1] if PNG_MODE else None
 
     if os.path.isdir(target):
         scan_files = sorted(glob.glob(os.path.join(target, "scans", "scan_*.npz")))

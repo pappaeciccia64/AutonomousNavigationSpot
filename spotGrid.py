@@ -31,9 +31,6 @@ SLOPE_THRESHOLD = 0.6       # gradient (tan of slope): tan(28deg)=~0.53, tan(25d
 # Sul campo (13-10) il gradino piu' alto superato e' stato di ~25 cm (pendenza 0.54).
 # Una misura separata del salto di quota non serve: vedi GAIT_MODERATE_SLOPE_MAX.
 ROUGH_THRESHOLD = 0.15      # local roughness (std-dev of terrain height, m)
-STEP_THRESHOLD = 0.40       # matches Spot's own >40cm obstacle-platform convention
-# 2026-10-14: NON USATA da nessuna parte del codice. Il limite sui gradini lo da' di fatto
-# SLOPE_THRESHOLD (circa 29 cm, vedi sopra).
 
 # =========================================================================
 # VALIDITA' DEL TERRENO (2026-10-07). Il layer `terrain_valid` di Spot contiene 0 e 1,

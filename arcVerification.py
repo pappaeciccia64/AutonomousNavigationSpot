@@ -44,8 +44,6 @@ import spotGrid
 
 LOGGER = logging.getLogger(__name__)
 
-FRONTIER_REASONS_STOP = ('ostacolo', 'rugosita', 'pendenza')   # c'e' qualcosa
-FRONTIER_REASONS_OPEN = ('fine_dati', 'fine_percorso')          # non si vede oltre / finito
 
 
 # =============================================================================
@@ -687,37 +685,6 @@ class ArcVerificationTracker:
                                   num_x, num_y, vision_tform_grid.position.x,
                                   vision_tform_grid.position.y, cell_size, robot_x, robot_y,
                                   unwritten=unwritten, robot_yaw=robot_yaw)
-
-
-# =============================================================================
-# Funzioni di supporto (usate dalla ritirata e dai controlli puntuali).
-# =============================================================================
-def arc_visible_fraction(x1, y1, x2, y2, pts, fov_margin=0.0, num_samples=40):
-    """
-    Frazione in [0, 1] dell'arco, misurata A PARTIRE da (x1, y1), che ricade dentro il
-    rettangolo della griglia locale. Non piu' usata dal ciclo principale (sostituita dal
-    fronte sicuro), lasciata per i controlli puntuali.
-    """
-    if len(pts) == 0:
-        return 0.0
-
-    x_min, x_max = pts[:, 0].min() - fov_margin, pts[:, 0].max() + fov_margin
-    y_min, y_max = pts[:, 1].min() - fov_margin, pts[:, 1].max() + fov_margin
-
-    def _inside(px, py):
-        return (x_min <= px <= x_max) and (y_min <= py <= y_max)
-
-    if not _inside(x1, y1):
-        return 0.0
-
-    last_ok = 0.0
-    for i in range(1, num_samples + 1):
-        t = i / num_samples
-        if _inside(x1 + t * (x2 - x1), y1 + t * (y2 - y1)):
-            last_ok = t
-        else:
-            break
-    return last_ok
 
 
 def is_arc_in_fov(x1, y1, x2, y2, pts, fov_margin=0.0):

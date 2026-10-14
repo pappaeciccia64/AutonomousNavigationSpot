@@ -301,24 +301,6 @@ class PRM:
         self.node_penalty_persistent = {}   # idx -> peso aggiuntivo (anche inf)
         self.node_penalty_transient = {}
 
-    # ---- strato dei costi: scrittura -------------------------------------------------
-    def penalize_edge(self, idx1: int, idx2: int, amount: float = float('inf'),
-                      persistent: bool = True):
-        """Aggiunge un peso all'arco. amount=inf lo rende impercorribile senza toccarlo."""
-        key = (min(idx1, idx2), max(idx1, idx2))
-        d = self.edge_penalty_persistent if persistent else self.edge_penalty_transient
-        d[key] = max(d.get(key, 0.0), float(amount))
-
-    def penalize_node(self, idx: int, amount: float = float('inf'), persistent: bool = True):
-        """Aggiunge un peso a TUTTI gli archi che toccano il nodo, senza rimuoverli."""
-        d = self.node_penalty_persistent if persistent else self.node_penalty_transient
-        d[idx] = max(d.get(idx, 0.0), float(amount))
-
-    def clear_transient_penalties(self):
-        """Azzera cio' che va rimisurato a ogni scansione (vedi lo strato dei costi)."""
-        self.edge_penalty_transient = {}
-        self.node_penalty_transient = {}
-
     def clear_penalties_for_attempt(self):
         """
         Fine di un tentativo di cella: le trappole valevano per quel tentativo, non per la
@@ -334,10 +316,6 @@ class PRM:
     # riconosce proprio queste voci.
     _ATTEMPT_MARK = float('inf')
 
-    def penalize_node_for_attempt(self, idx: int):
-        """Nodo impercorribile per il resto del tentativo di cella (trappola)."""
-        self.node_penalty_persistent[idx] = self._ATTEMPT_MARK
-
     # ---- strato dei costi: lettura ---------------------------------------------------
     def node_penalty(self, idx: int) -> float:
         return (self.node_penalty_persistent.get(idx, 0.0)
@@ -351,16 +329,6 @@ class PRM:
     def effective_weight(self, idx1: int, idx2: int, weight: float) -> float:
         """Costo geometrico + penalita' dell'arco + penalita' del nodo di arrivo."""
         return weight + self.edge_penalty(idx1, idx2) + self.node_penalty(idx2)
-
-    def penalty_summary(self) -> str:
-        def c(d):
-            tot = sum(1 for v in d.values() if v > 0.0)
-            inf = sum(1 for v in d.values() if v == float('inf'))
-            return f"{tot} ({inf} proibitivi)"
-        return (f"archi penalizzati: {c(self.edge_penalty_persistent)} persistenti, "
-                f"{c(self.edge_penalty_transient)} di questo ciclo; nodi: "
-                f"{c(self.node_penalty_persistent)} persistenti, "
-                f"{c(self.node_penalty_transient)} di questo ciclo")
 
     def add_node(self, point_idx: int, x: float, y: float, gradient: float = 0.0, roughness: float = 0.0):
         """Add a node (waypoint) to the PRM along with its terrain gradient."""
@@ -1066,19 +1034,6 @@ class PRM:
                 return False
         return True
 
-    def get_nearest_node(self, x: float, y: float) -> Optional[int]:
-        """Find the ID of the nearest node in the PRM to the given coordinates."""
-        if not self.nodes:
-            return None
-        min_dist = float('inf')
-        nearest_idx = None
-        for idx, (nx, ny) in self.nodes.items():
-            dist = np.sqrt((nx - x)**2 + (ny - y)**2)
-            if dist < min_dist:
-                min_dist = dist
-                nearest_idx = idx
-        return nearest_idx
-
     def set_robot_node(self, node_id, ignore_map_within_m: float = STOP_NODE_MAP_IGNORE_M):
         """Registra il nodo in cui si trova il robot adesso (vedi STOP_NODE_MAP_IGNORE_M)."""
         self.robot_node = node_id
@@ -1628,11 +1583,6 @@ class PRM:
         if idx1 in [n[0] for n in self.edges.get(idx2, [])]:
             self.edges[idx2] = [(n, w) for n, w in self.edges[idx2] if n != idx1]
 
-    def is_edge_valid(self, idx1: int, idx2: int) -> bool:
-        """Check if an edge is assumed valid (not yet marked as blocked)."""
-        key = (min(idx1, idx2), max(idx1, idx2))
-        return self.edge_validity.get(key, False)
-
     def compute_path_cost(self, path_ids, allow_direct_first_hop: bool = False):
         """
         Sum of edge weights along a sequence of node ids, using the graph's current weights.
@@ -1775,59 +1725,3 @@ class PRM:
     def get_node_position(self, node_idx: int) -> Optional[Tuple[float, float]]:
         """Get the (x, y) position of a node."""
         return self.nodes.get(node_idx)
-
-    def get_node_neighbors(self, node_idx: int) -> List[int]:
-        """Get indices of neighboring nodes."""
-        return [idx for idx, _ in self.edges.get(node_idx, [])]
-
-    def add_temporary_node(self, x: float, y: float, current_gradient: float = 0.0, current_roughness: float = 0.0) -> int:
-        """
-        Add a temporary node (e.g., current robot position) for pathfinding.
-
-        Returns:
-        Temporary node index (negative value)
-        """
-        temp_idx = -(len(self.nodes) + 1)
-        self.nodes[temp_idx] = (x, y)
-        self.node_gradients[temp_idx] = current_gradient  # Salva gradiente temporaneo
-        self.node_roughness[temp_idx] = current_roughness
-        self.edges[temp_idx] = []
-
-        # Connect to nearby permanent nodes
-        for perm_idx, (px, py) in self.nodes.items():
-            if perm_idx >= 0: # Only permanent nodes
-                dist = np.sqrt((px - x)**2 + (py - y)**2)
-                if dist <= self.connection_radius:
-                    # Calcolo dinamico del costo anche per i nodi temporanei inseriti al volo
-                    weight = self._compute_edge_weight(temp_idx, perm_idx, dist)
-                    self.edges[temp_idx].append((perm_idx, weight))
-                    self.edges[perm_idx].append((temp_idx, weight))
-                    key = (min(temp_idx, perm_idx), max(temp_idx, perm_idx))
-                    self.edge_validity[key] = True
-
-        return temp_idx
-
-    def remove_temporary_node(self, temp_idx: int):
-        """Remove a temporary node and its edges."""
-        if temp_idx in self.nodes:
-
-            # 1. Rimuoviamo gli archi di ritorno (Unpacking corretto della tupla!)
-            for neighbor_idx, weight in list(self.edges.get(temp_idx, [])):
-                if neighbor_idx in self.edges:
-                    self.edges[neighbor_idx] = [(n, w) for n, w in self.edges[neighbor_idx] if n != temp_idx]
-
-                key = (min(temp_idx, neighbor_idx), max(temp_idx, neighbor_idx))
-                self.edge_validity.pop(key, None)
-
-            # 2. Rimuoviamo le coordinate fisiche
-            del self.nodes[temp_idx]
-
-            # 3. Rimuoviamo il nodo dalla lista degli archi
-            if temp_idx in self.edges:
-                del self.edges[temp_idx]
-
-            # 4. Puliamo i dati ambientali legati al nodo in modo sicuro
-            if temp_idx in self.node_gradients:
-                del self.node_gradients[temp_idx]
-            if temp_idx in self.node_roughness:
-                del self.node_roughness[temp_idx]

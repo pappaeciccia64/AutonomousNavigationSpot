@@ -398,34 +398,6 @@ def relative_move(dx, dy, dyaw, frame_name, robot_command_client, robot_state_cl
         time.sleep(poll_period_s)
 
 
-def move_backward(distance, frame_name, robot_command_client, robot_state_client,
-                  locomotion_hint=None, ground_mu_hint=None, swing_height=None,
-                  disable_foot_obstacle_avoidance=None, should_abort=None,
-                  max_linear_vel=None, max_angular_vel=None):
-    """
-    Cammina ALL'INDIETRO di `distance` metri senza girarsi.
-    Velocita' di default: RETREAT_MAX_LINEAR_VEL_MPS (piu' bassa: all'indietro vede peggio).
-
-    E' la manovra giusta quando il robot si e' infilato in uno spazio stretto: girarsi
-    richiede spazio che li' non c'e', mentre arretrare ripercorre esattamente il varco
-    da cui si e' entrati, che per definizione era abbastanza largo da passarci.
-
-    `distance` va passata POSITIVA; il segno lo mette questa funzione.
-    """
-    distance = abs(float(distance))
-    if distance < 1e-3:
-        return True, 0.0
-    print(f"[RETROMARCIA] Arretro di {distance:.2f} m senza girarmi...")
-    if max_linear_vel is None:
-        max_linear_vel = RETREAT_MAX_LINEAR_VEL_MPS
-    return relative_move(-distance, 0.0, 0.0, frame_name, robot_command_client, robot_state_client,
-                         locomotion_hint=locomotion_hint, ground_mu_hint=ground_mu_hint,
-                         swing_height=swing_height,
-                         disable_foot_obstacle_avoidance=disable_foot_obstacle_avoidance,
-                         should_abort=should_abort,
-                         max_linear_vel=max_linear_vel, max_angular_vel=max_angular_vel)
-
-
 def move_to_world_point_without_turning(target_x, target_y, frame_name,
                                         robot_command_client, robot_state_client,
                                         locomotion_hint=None, ground_mu_hint=None,
@@ -460,39 +432,3 @@ def move_to_world_point_without_turning(target_x, target_y, frame_name,
                          disable_foot_obstacle_avoidance=disable_foot_obstacle_avoidance,
                          should_abort=should_abort,
                          max_linear_vel=max_linear_vel, max_angular_vel=max_angular_vel)
-
-def relative_move_velocity_command(v_x, v_y, v_rot, robot_command_client, robot_state_client, frame_name,
-                                    locomotion_hint=None, ground_mu_hint=None, swing_height=None,
-                                    disable_foot_obstacle_avoidance=None,
-                                    max_linear_vel=None, max_angular_vel=None):
-    """
-    Args:
-        locomotion_hint: Optional spot_command_pb2.LocomotionHint value (e.g. HINT_CRAWL) to set the gait.
-        ground_mu_hint: Optional float friction coefficient hint (e.g. 0.4-0.8) for terrain_params.
-        swing_height: Optional spot_command_pb2.SwingHeight value (e.g. SWING_HEIGHT_HIGH).
-        disable_foot_obstacle_avoidance: vedi relative_move().
-    """
-    transforms = robot_state_client.get_robot_state().kinematic_state.transforms_snapshot
-
-    initial_tform_body = get_se2_a_tform_b(transforms, frame_name, BODY_FRAME_NAME)
-    initial_x = initial_tform_body.x
-    initial_y = initial_tform_body.y
-
-    mobility_params = _build_mobility_params(
-        locomotion_hint=locomotion_hint, ground_mu_hint=ground_mu_hint,
-        swing_height=swing_height,
-        disable_foot_obstacle_avoidance=disable_foot_obstacle_avoidance,
-        max_linear_vel=max_linear_vel, max_angular_vel=max_angular_vel)
-
-    cmd = RobotCommandBuilder.synchro_velocity_command(v_x=v_x, v_y=v_y, v_rot=v_rot, params=mobility_params)
-
-    robot_command_client.robot_command(command=cmd, end_time_secs=time.time() + 1.0)
-
-    current_state = robot_state_client.get_robot_state()
-    current_transforms = current_state.kinematic_state.transforms_snapshot
-    current_tform_body = get_se2_a_tform_b(current_transforms, frame_name, BODY_FRAME_NAME)
-
-    distance_traveled = np.sqrt((current_tform_body.x - initial_x) ** 2 +
-                                (current_tform_body.y - initial_y) ** 2)
-
-    return distance_traveled

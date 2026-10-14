@@ -213,17 +213,6 @@ def suggested_spacing(cell_size_m=5.0, min_edge_length=DEFAULT_MIN_EDGE_M):
     return float(cell_size_m) / n
 
 
-def ring_distances(spacing, n_rings=6):
-    """
-    Le distanze dei primi n_rings gusci di vicini: s, s*sqrt(2), 2s, s*sqrt(5), 2s*sqrt(2)...
-    Calcolate dalla geometria vera, non da una tabella scritta a mano.
-    """
-    w = int(n_rings) + 2
-    d = {round(spacing * math.hypot(di, dj), 6)
-         for di in range(-w, w + 1) for dj in range(-w, w + 1) if di or dj}
-    return sorted(d)[:int(n_rings)]
-
-
 def _mission_extent(rows, cols, cell_size_m, start_cell):
     """
     Rettangolo della missione nel FRAME DELLA GRIGLIA (x = colonne, y = righe), con il
@@ -408,16 +397,6 @@ class MissionGraph:
     def node_ids(self):
         """Gli id dei nodi, 0..N-1: gli stessi che useranno PRM.nodes."""
         return np.arange(self.n_nodes, dtype=np.int64)
-
-    def target_for_cell(self, row, col):
-        """
-        (x, y) in coordinate mondo del nodo che sta nel centro geometrico della cella --
-        esatto per costruzione. (None, None) se la cella non e' nella griglia.
-        """
-        nid = self.cell_center_ids.get((int(row), int(col)))
-        if nid is None:
-            return None, None
-        return float(self.xy[nid, 0]), float(self.xy[nid, 1])
 
     # -- aggancio al PRM ---------------------------------------------------------------
     def into_prm(self, prm):
@@ -721,20 +700,6 @@ class LatticeSampler:
 
     def get_point_in_cell(self, row, col):
         return [self.global_points[k] for k in self._by_cell.get((int(row), int(col)), ())]
-
-    def get_points_in_cell(self, row, col):
-        return [(k, self.global_points[k]) for k in self._by_cell.get((int(row), int(col)), ())]
-
-    def get_nearest_points(self, x, y, k=5):
-        d = np.hypot(self._mg.xy[:, 0] - x, self._mg.xy[:, 1] - y)
-        order = np.argsort(d)[:max(0, int(k))]
-        return [(int(i), float(d[i]), self.global_points[int(i)]) for i in order]
-
-    def update_density(self, point_density):
-        raise NotImplementedError(
-            "la densita' di un reticolo si cambia dal passo: ricostruisci con "
-            "build_mission_graph(spacing_m=...)")
-
 
 # ========================================================================================
 # LA FUNZIONE DA CHIAMARE
