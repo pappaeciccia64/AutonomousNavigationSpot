@@ -791,6 +791,206 @@ def compute_arc_slope_profile(terrain_2d, grid_origin_x, grid_origin_y, cell_siz
                               min_sample_fraction, body_ext_m)
 
 
+# =========================================================================
+# PENDENZA DI MOLTI ARCHI INSIEME (2026-10-14)
+#
+# Stesso calcolo di compute_arc_slope_profile / _slope_profile_from_sampler / _body_slope,
+# fatto con matrici: una riga per arco. Gli archi si raggruppano per numero di campioni (che
+# dipende solo dalla lunghezza: sul reticolo le lunghezze sono poche decine), e per ogni
+# gruppo posizioni, letture delle quote, differenze su SLOPE_BASELINE_M e 90 percentile si
+# fanno in un colpo solo. Le operazioni sono le stesse, nello stesso ordine, quindi i numeri
+# sono IDENTICI al bit a quelli arco per arco (verificato sulle missioni rigiocate: vedi
+# test_replay.py e la prova di confronto nel commit). Prima l'aggiornamento del grafo passava
+# il 90% del tempo in decine di migliaia di chiamate su array di poche decine di numeri.
+# =========================================================================
+def p90_rows(m):
+    """p90 riga per riga di una matrice, ignorando i NaN; IDENTICO a p90 sui valori finiti di
+    ogni riga. Restituisce (valori, quanti finiti); 0.0 dove la riga non ha valori finiti."""
+    m = np.asarray(m, dtype=np.float64)
+    if m.ndim == 1:
+        m = m[None, :]
+    cnt = np.isfinite(m).sum(axis=1)
+    out = np.zeros(m.shape[0], dtype=np.float64)
+    ok = cnt > 0
+    if not ok.any() or m.shape[1] == 0:
+        return out, cnt
+    srt = np.sort(m[ok], axis=1)                      # i NaN vanno in fondo
+    n = cnt[ok]
+    v = (n - 1) * 0.9
+    lo = np.floor(v).astype(np.int64)
+    hi = np.minimum(lo + 1, n - 1)
+    r = np.arange(srt.shape[0])
+    x0, x1 = srt[r, lo], srt[r, hi]
+    t = v - lo
+    d = x1 - x0
+    out[ok] = np.where(t >= 0.5, x1 - d * (1.0 - t), x0 + d * t)
+    return out, cnt
+
+
+def _baseline_gradient_rows(h, step, baseline_m):
+    """_baseline_gradient su un gruppo di righe con lo STESSO k (step: un valore per riga).
+    Restituisce la matrice delle pendenze con NaN dove manca un campione (nessuna
+    compattazione: ci pensa p90_rows), o None se la riga e' troppo corta."""
+    n = h.shape[-1]
+    k = max(1, int(round(baseline_m / float(step[0]))))
+    if n <= 2 * k:
+        k = max(1, (n - 1) // 2)
+    if n <= 2 * k:
+        return None
+    den = (2 * k * step).reshape((-1,) + (1,) * (h.ndim - 1))
+    return np.abs(h[..., 2 * k:] - h[..., :-2 * k]) / den
+
+
+def _k_of(baseline_m, step):
+    """Il k di _baseline_gradient per ogni riga (serve a raggruppare)."""
+    return np.array([max(1, int(round(baseline_m / float(s)))) for s in step], dtype=np.int64)
+
+
+def arc_slope_profiles_batch(sample, x1, y1, x2, y2, cell_size, perp_sample_spacing_m=0.10,
+                             baseline_m=SLOPE_BASELINE_M,
+                             lateral_half_width_m=LATERAL_SLICE_HALF_WIDTH_M,
+                             min_sample_fraction=MIN_ARC_SAMPLE_FRACTION, body_ext_m=0.0,
+                             sampler_mode=False):
+    """
+    Profilo di pendenza di molti archi insieme. sample(xs, ys) -> (quote, dentro) su array di
+    qualunque forma (NaN / False dove non c'e' dato).
+
+    sampler_mode=False: come compute_arc_slope_profile (griglia dal vivo).
+    sampler_mode=True:  come _slope_profile_from_sampler (mappa globale): stesse uscite
+        anticipate -- i tre punti inizio/meta'/fine senza dati, copertura della mezzeria
+        sotto min_sample_fraction -- che danno "nessun dato" con pendenze 0.
+
+    Restituisce un array (N, 6): long, lat, has, long col corpo, lat col corpo, has col corpo
+    (has come 0.0 / 1.0). Senza body_ext_m le ultime tre colonne ripetono le prime tre.
+    """
+    x1 = np.asarray(x1, dtype=np.float64); y1 = np.asarray(y1, dtype=np.float64)
+    x2 = np.asarray(x2, dtype=np.float64); y2 = np.asarray(y2, dtype=np.float64)
+    N = x1.size
+    out = np.zeros((N, 6), dtype=np.float64)
+    if N == 0:
+        return out
+    dist = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+    live = dist >= 1e-6
+    if sampler_mode:
+        h3, _ = sample(np.stack([x1, 0.5 * (x1 + x2), x2], -1), np.stack([y1, 0.5 * (y1 + y2), y2], -1))
+        live &= np.isfinite(h3).any(axis=1)
+    idx_all = np.nonzero(live)[0]
+    if idx_all.size == 0:
+        return out
+    d = dist[idx_all]
+    num_along = np.maximum(2, np.floor(d / cell_size).astype(np.int64) + 1)
+    num_slices = np.maximum(1, np.floor(d / perp_sample_spacing_m).astype(np.int64) + 1)
+    step_along = d / (num_along - 1)
+    k_along = _k_of(baseline_m, step_along)
+    num_perp = max(2, int(2 * lateral_half_width_m / cell_size) + 1)
+    step_perp = 2 * lateral_half_width_m / (num_perp - 1)
+    u = np.linspace(-lateral_half_width_m, lateral_half_width_m, num_perp)
+    if body_ext_m > 0:
+        kb = np.array([max(1, int(round(body_ext_m / float(s)))) for s in step_along], dtype=np.int64)
+        ds = np.where(num_slices > 1, d / np.maximum(num_slices - 1, 1), perp_sample_spacing_m)
+        kl = np.array([max(1, int(round(body_ext_m / float(s)))) for s in ds], dtype=np.int64)
+    else:
+        kb = kl = np.zeros(idx_all.size, dtype=np.int64)
+        ds = np.zeros(idx_all.size)
+    keys = np.stack([num_along, num_slices, k_along, kb, kl], axis=1)
+    _, group = np.unique(keys, axis=0, return_inverse=True)
+    group = np.asarray(group).ravel()
+    for g in range(int(group.max()) + 1):
+        sel = np.nonzero(group == g)[0]
+        rows = idx_all[sel]
+        n_al, n_sl = int(num_along[sel[0]]), int(num_slices[sel[0]])
+        ax1, ay1, ax2, ay2 = x1[rows], y1[rows], x2[rows], y2[rows]
+        dd = d[sel]
+        st = step_along[sel]
+        dir_x, dir_y = (ax2 - ax1) / dd, (ay2 - ay1) / dd
+        perp_x, perp_y = -dir_y, dir_x
+        # --- longitudinale
+        t = np.linspace(0.0, 1.0, n_al)
+        h_al, in_al = sample(ax1[:, None] + t[None, :] * (ax2 - ax1)[:, None],
+                             ay1[:, None] + t[None, :] * (ay2 - ay1)[:, None])
+        cov_al = in_al.mean(axis=1)
+        go = np.ones(rows.size, dtype=bool)
+        if sampler_mode:
+            go = cov_al >= min_sample_fraction
+        g_long = _baseline_gradient_rows(h_al, st, baseline_m)
+        if g_long is None:
+            lo, n_lo = np.zeros(rows.size), np.zeros(rows.size, dtype=np.int64)
+        else:
+            lo, n_lo = p90_rows(g_long)
+        # --- laterale
+        ts = np.linspace(0.0, 1.0, n_sl) if n_sl > 1 else np.array([0.5])
+        cx = ax1[:, None] + ts[None, :] * (ax2 - ax1)[:, None]
+        cy = ay1[:, None] + ts[None, :] * (ay2 - ay1)[:, None]
+        h_pp, in_pp = sample(cx[:, :, None] + u[None, None, :] * perp_x[:, None, None],
+                             cy[:, :, None] + u[None, None, :] * perp_y[:, None, None])
+        g_lat = _baseline_gradient_rows(h_pp, np.full(rows.size, step_perp), baseline_m)
+        if g_lat is None:
+            g_lat_flat = np.zeros((rows.size, 0))
+        else:
+            g_lat_flat = g_lat.reshape(rows.size, -1)
+        la, n_la = p90_rows(g_lat_flat)
+        cov_pp = in_pp.reshape(rows.size, -1).mean(axis=1)
+        has = (cov_al >= min_sample_fraction) & (cov_pp >= min_sample_fraction) & (n_lo > 0) & (n_la > 0)
+        base = np.stack([lo, la, has.astype(np.float64)], axis=1)
+        base[~go] = 0.0
+        has &= go
+        res = np.concatenate([base, base], axis=1)
+        if body_ext_m > 0 and has.any():
+            k_b, k_l = int(kb[sel[0]]), int(kl[sel[0]])
+            off = np.arange(1, k_b + 1)[None, :] * st[:, None]
+            xs = np.concatenate((ax1[:, None] - dir_x[:, None] * off[:, ::-1], ax2[:, None] + dir_x[:, None] * off), axis=1)
+            ys = np.concatenate((ay1[:, None] - dir_y[:, None] * off[:, ::-1], ay2[:, None] + dir_y[:, None] * off), axis=1)
+            h_ex, in_ex = sample(xs, ys)
+            h_full = np.concatenate((h_ex[:, :k_b], h_al, h_ex[:, k_b:]), axis=1)
+            cov_b = (in_ex.sum(axis=1).astype(np.float64) + in_al.sum(axis=1).astype(np.float64)) / (2 * k_b + n_al)
+            gb_long = _baseline_gradient_rows(h_full, st, baseline_m)
+            offl = np.arange(1, k_l + 1)[None, :] * ds[sel][:, None]
+            bx = np.concatenate((ax1[:, None] - dir_x[:, None] * offl[:, ::-1], ax2[:, None] + dir_x[:, None] * offl), axis=1)
+            by = np.concatenate((ay1[:, None] - dir_y[:, None] * offl[:, ::-1], ay2[:, None] + dir_y[:, None] * offl), axis=1)
+            h_l, in_l = sample(bx[:, :, None] + u[None, None, :] * perp_x[:, None, None],
+                               by[:, :, None] + u[None, None, :] * perp_y[:, None, None])
+            gl_ext = _baseline_gradient_rows(h_l, np.full(rows.size, step_perp), baseline_m)
+            parts = [g_lat_flat] + ([gl_ext.reshape(rows.size, -1)] if gl_ext is not None else [])
+            gb_lat = np.concatenate(parts, axis=1)
+            cov_lb = ((in_l.reshape(rows.size, -1).sum(axis=1).astype(np.float64)
+                       + in_pp.reshape(rows.size, -1).sum(axis=1).astype(np.float64))
+                      / (in_l[0].size + in_pp[0].size))
+            if gb_long is None:
+                blo, n_blo = np.zeros(rows.size), np.zeros(rows.size, dtype=np.int64)
+            else:
+                blo, n_blo = p90_rows(gb_long)
+            bla, n_bla = p90_rows(gb_lat)
+            ok = (has & (cov_b >= min_sample_fraction) & (cov_lb >= min_sample_fraction)
+                  & (n_blo > 0) & (n_bla > 0))
+            res[ok, 3] = np.maximum(lo[ok], blo[ok])
+            res[ok, 4] = np.maximum(la[ok], bla[ok])
+            res[ok, 5] = 1.0
+        out[rows] = res
+    return out
+
+
+def compute_arc_slope_profiles_batch(terrain_2d, grid_origin_x, grid_origin_y, cell_size,
+                                     x1, y1, x2, y2, valid_2d=None, body_ext_m=0.0, **kw):
+    """compute_arc_slope_profile per molti archi (array), dalla griglia dal vivo. Vedi
+    arc_slope_profiles_batch per il formato del risultato."""
+    n = np.size(x1)
+    if terrain_2d is None or grid_origin_x is None or cell_size is None:
+        return np.zeros((n, 6))
+    x1 = np.asarray(x1, dtype=np.float64); y1 = np.asarray(y1, dtype=np.float64)
+    x2 = np.asarray(x2, dtype=np.float64); y2 = np.asarray(y2, dtype=np.float64)
+    out = np.zeros((n, 6))
+    num_rows, num_cols = terrain_2d.shape
+    pad = kw.get('lateral_half_width_m', LATERAL_SLICE_HALF_WIDTH_M) + cell_size
+    near = ~((np.maximum(x1, x2) + pad < grid_origin_x) | (np.minimum(x1, x2) - pad > grid_origin_x + num_cols * cell_size)
+             | (np.maximum(y1, y2) + pad < grid_origin_y) | (np.minimum(y1, y2) - pad > grid_origin_y + num_rows * cell_size))
+    if near.any():
+        sample = lambda xs, ys: _gather_heights(terrain_2d, grid_origin_x, grid_origin_y, cell_size,
+                                               xs, ys, valid_2d=valid_2d)
+        out[near] = arc_slope_profiles_batch(sample, x1[near], y1[near], x2[near], y2[near], cell_size,
+                                             body_ext_m=body_ext_m, **kw)
+    return out
+
+
 def _no_slope_data(body_ext_m):
     """Risultato "nessun dato": 3 valori, o 6 se e' stata chiesta anche la misura col corpo."""
     return (0.0, 0.0, False) if body_ext_m <= 0 else (0.0, 0.0, False, 0.0, 0.0, False)
@@ -2301,6 +2501,33 @@ class GlobalTerrainGrid:
         if count == 0:
             return None
         return self.height_sum[key] / count
+
+    def compute_arc_slope_profiles_batch(self, x1, y1, x2, y2, perp_sample_spacing_m=0.10, body_ext_m=0.0):
+        """compute_arc_slope_profile della mappa globale per molti archi (array), stesse uscite
+        anticipate. Vedi arc_slope_profiles_batch per il formato del risultato."""
+        x1 = np.asarray(x1, dtype=np.float64); y1 = np.asarray(y1, dtype=np.float64)
+        x2 = np.asarray(x2, dtype=np.float64); y2 = np.asarray(y2, dtype=np.float64)
+        out = np.zeros((x1.size, 6))
+        rects = getattr(self, 'update_rects', None)
+        near = np.ones(x1.size, dtype=bool)
+        if rects is not None:
+            if not rects:
+                return out
+            if not hasattr(self, '_seen_bbox') or self._seen_bbox[4] != len(rects):
+                r = np.array(rects)
+                self._seen_bbox = (r[:, 0].min(), r[:, 1].max(), r[:, 2].min(), r[:, 3].max(), len(rects))
+            bxmin, bxmax, bymin, bymax, _ = self._seen_bbox
+            pad = LATERAL_SLICE_HALF_WIDTH_M + 2 * self.resolution
+            near = ~((np.maximum(x1, x2) + pad < bxmin) | (np.minimum(x1, x2) - pad > bxmax)
+                     | (np.maximum(y1, y2) + pad < bymin) | (np.minimum(y1, y2) - pad > bymax))
+        if near.any():
+            def sample(xs, ys):
+                h = self._sample_heights(xs, ys)
+                return h, np.isfinite(h)
+            out[near] = arc_slope_profiles_batch(sample, x1[near], y1[near], x2[near], y2[near],
+                                                 self.resolution, perp_sample_spacing_m,
+                                                 body_ext_m=body_ext_m, sampler_mode=True)
+        return out
 
     def compute_arc_slope_profile(self, x1, y1, x2, y2, perp_sample_spacing_m=0.10, body_ext_m=0.0):
         """

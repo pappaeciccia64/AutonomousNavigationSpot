@@ -1219,6 +1219,53 @@ class PRM:
                 n += 1
         return n
 
+    def precompute_arc_slopes(self, pairs, skip=None):
+        """
+        2026-10-14. Pendenza di molte coppie in un colpo solo, con le matrici di
+        spotGrid.arc_slope_profiles_batch: numeri IDENTICI al calcolo arco per arco
+        (verificato bit per bit su 421 mila archi delle missioni del 13-10), circa 13 volte
+        piu' in fretta.
+
+        pairs: [(idx1, idx2, dist)], nel verso in cui verranno valutate; skip: maschera delle
+        coppie da non calcolare (es. gia' scartate per occupazione).
+        Restituisce, per ogni coppia, il profilo dal vivo (6 valori, come
+        compute_arc_slope_profile(..., body=True)) o None se saltata. In piu' riempie la cache
+        della pendenza globale (_gslope_cache) per le coppie senza dati dal vivo, con lo stesso
+        valore e lo stesso verso che _global_slope calcolerebbe alla prima chiamata.
+        """
+        n = len(pairs)
+        out = [None] * n
+        if n == 0:
+            return out
+        use = np.ones(n, dtype=bool) if skip is None else ~np.asarray(skip, dtype=bool)
+        idx = np.nonzero(use)[0]
+        if idx.size == 0:
+            return out
+        xy1 = np.array([self.nodes[pairs[i][0]] for i in idx], dtype=np.float64)
+        xy2 = np.array([self.nodes[pairs[i][1]] for i in idx], dtype=np.float64)
+        ext = spotGrid.ARC_BODY_EXTENSION_M
+        live = spotGrid.compute_arc_slope_profiles_batch(
+            self.current_terrain_2d, self.grid_origin_x, self.grid_origin_y, self.cell_size,
+            xy1[:, 0], xy1[:, 1], xy2[:, 0], xy2[:, 1],
+            valid_2d=getattr(self, 'current_valid_2d', None), body_ext_m=ext)
+        for j, i in enumerate(idx):
+            r = live[j]
+            out[i] = (float(r[0]), float(r[1]), bool(r[2]), float(r[3]), float(r[4]), bool(r[5]))
+        tm = self.global_terrain_map
+        if tm is not None and hasattr(tm, 'compute_arc_slope_profiles_batch') and ext > 0:
+            need = [j for j, i in enumerate(idx) if not live[j, 2]
+                    and (min(pairs[i][0], pairs[i][1]), max(pairs[i][0], pairs[i][1])) not in self._gslope_cache]
+            if need:
+                need = np.array(need)
+                g = tm.compute_arc_slope_profiles_batch(xy1[need, 0], xy1[need, 1], xy2[need, 0], xy2[need, 1],
+                                                        body_ext_m=ext)
+                for j, r in zip(need, g):
+                    a, b = pairs[idx[j]][0], pairs[idx[j]][1]
+                    # come _global_slope._with_body: col corpo se l'arco ha dati suoi
+                    self._gslope_cache[(min(a, b), max(a, b))] = (
+                        (float(r[3]), float(r[4]), True) if r[2] else (float(r[0]), float(r[1]), False))
+        return out
+
     def _live_slope_certainly_nodata(self, pairs):
         """
         2026-10-12. Per ogni coppia: True se compute_arc_slope_profile sulla griglia dal vivo
@@ -1273,7 +1320,7 @@ class PRM:
     def _evaluate_and_add_edge(self, idx1: int, idx2: int, dist: float,
                                global_map=None, edge_safety_margin: float = 0.0,
                                force: bool = False, occ_blocked=None,
-                               fresh: bool = False) -> bool:
+                               fresh: bool = False, live_prof=None) -> bool:
         """
         Decide se l'arco idx1-idx2 e' ammesso e, se si', lo aggiunge con il suo peso.
         Estratta da build_graph() il 2026-10-06 perche' serve identica anche per collegare
@@ -1313,7 +1360,9 @@ class PRM:
             # Scartiamo l'arco se troppo ripido in AVANTI (longitudinale) o di LATO
             # (laterale, sidehill) -- vedi compute_arc_slope_profile(). Registrare
             # esplicitamente l'invalidità serve a contare correttamente i [SLOPE-FLIP].
-            prof = self.compute_arc_slope_profile(x1, y1, x2, y2, body=True)
+            # 2026-10-14: live_prof = profilo gia' calcolato in blocco (precompute_arc_slopes).
+            prof = (live_prof if live_prof is not None
+                    else self.compute_arc_slope_profile(x1, y1, x2, y2, body=True))
             long_slope, lat_slope, has_slope_data = body_slope(prof)
             if has_slope_data:
                 self.edge_slope_info[key] = (long_slope, lat_slope)  # per visualizzazione

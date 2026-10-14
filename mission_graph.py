@@ -299,6 +299,11 @@ def _lattice_pairs(spacing, ij, xy, min_edge_m, reach_m):
     return pairs[order], lengths[order], n_short
 
 
+# 2026-10-14: pendenze delle coppie calcolate in blocco con le matrici (vedi
+# PRM.precompute_arc_slopes). False = arco per arco come prima; il risultato e' identico.
+BATCH_SLOPES = True
+
+
 def _prm_dirty_margin():
     """prm_graph.DIRTY_MARGIN_M, importato solo quando serve (questo modulo gira anche senza SDK)."""
     try:
@@ -485,6 +490,13 @@ class MissionGraph:
         cache = getattr(prm, '_gslope_cache', {})
         blocked_set = prm.tracker_blocked_edges
         n_fast = 0
+        # 2026-10-14: pendenze di tutte le coppie da valutare in un colpo solo (matrici), dal
+        # vivo e -- dove dal vivo non ci sono dati -- dalla mappa globale. Stessi numeri del
+        # calcolo arco per arco, circa 13 volte piu' in fretta (vedi PRM.precompute_arc_slopes).
+        live_profs = [None] * len(todo)
+        if BATCH_SLOPES and batch and hasattr(prm, 'precompute_arc_slopes'):
+            skip = np.array([bool(o) for o in occ_flags], dtype=bool)
+            live_profs = prm.precompute_arc_slopes(todo, skip=skip)
         for i, ((a, b, d), occ) in enumerate(zip(todo, occ_flags)):
             if fast_ok and live_nd[i] and not occ:
                 key = (a, b) if a < b else (b, a)
@@ -496,7 +508,7 @@ class MissionGraph:
                     continue
             if batch:
                 ok = prm._evaluate_and_add_edge(a, b, d, global_map, edge_safety_margin,
-                                                occ_blocked=occ, fresh=fresh)
+                                                occ_blocked=occ, fresh=fresh, live_prof=live_profs[i])
             else:
                 ok = prm._evaluate_and_add_edge(a, b, d, global_map, edge_safety_margin)
             if ok:
