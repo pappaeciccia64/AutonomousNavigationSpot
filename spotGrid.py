@@ -24,8 +24,16 @@ import os
 # =========================================================================
 OBSTACLE_THRESHOLD = 0.15   # obstacle_distance (m): distance <= this -> blocked
 SLOPE_THRESHOLD = 0.6       # gradient (tan of slope): tan(28deg)=~0.53, tan(25deg)=~0.46
+# 2026-10-14: la pendenza si misura su una base di 0.48 m (vedi SLOPE_BASELINE_M), quindi un
+# GRADINO NETTO di altezza H vale H / 0.48, qualunque sia la lunghezza dell'arco, sia
+# attraversato sia di fianco al corpo (prova sintetica). Questa soglia e' quindi anche il
+# limite sui gradini: 0.6 -> circa 29 cm, cioe' il limite di Spot (~30 cm) senza margine.
+# Sul campo (13-10) il gradino piu' alto superato e' stato di ~25 cm (pendenza 0.54).
+# Una misura separata del salto di quota non serve: vedi GAIT_MODERATE_SLOPE_MAX.
 ROUGH_THRESHOLD = 0.15      # local roughness (std-dev of terrain height, m)
 STEP_THRESHOLD = 0.40       # matches Spot's own >40cm obstacle-platform convention
+# 2026-10-14: NON USATA da nessuna parte del codice. Il limite sui gradini lo da' di fatto
+# SLOPE_THRESHOLD (circa 29 cm, vedi sopra).
 
 # =========================================================================
 # VALIDITA' DEL TERRENO (2026-10-07). Il layer `terrain_valid` di Spot contiene 0 e 1,
@@ -432,6 +440,8 @@ GAIT_PLAIN_ROUGH_MAX = 0.05
 # Spostando la soglia qui: PLAIN 29%, MODERATE 60%, HARD 10% -- HARD scatta sul decimo
 # piu' ripido, che e' cio' che l'utente voleva.
 GAIT_MODERATE_SLOPE_MAX = 0.25  # below this on BOTH -> MODERATE tier; at/above -> HARD tier
+# 2026-10-14: in altezza di gradino netto (H / 0.48, vedi SLOPE_THRESHOLD): PLAIN sotto ~7 cm
+# (0.15), HARD da ~12 cm (0.25). Il gradino delle 12:47:20 del 13-10 (~17-19 cm) e' HARD.
 GAIT_MODERATE_ROUGH_MAX = 0.10
 
 # ground_mu_hint per tier (bosdyn.api.spot.TerrainParams): BD's own docs suggest 0.4-0.8,
