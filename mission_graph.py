@@ -293,6 +293,13 @@ def _lattice_pairs(spacing, ij, xy, min_edge_m, reach_m):
 BATCH_SLOPES = True
 
 
+def _special_pairs(prm):
+    """Archi percorsi dal robot e archi bloccati nel tentativo, come coppie (min, max)."""
+    out = {(min(a, b), max(a, b)) for a, b in getattr(prm, 'traversed_edges', ())}
+    out |= {(min(a, b), max(a, b)) for a, b in getattr(prm, 'tracker_blocked_edges', ())}
+    return out
+
+
 def _prm_dirty_margin():
     """prm_graph.DIRTY_MARGIN_M, importato solo quando serve (questo modulo gira anche senza SDK)."""
     try:
@@ -493,12 +500,6 @@ class MissionGraph:
             if ok:
                 added += 1
 
-        # Le zone appena rivalutate sono a posto. Resta "da rifare" la finestra dal vivo
-        # corrente: i suoi archi sono stati giudicati sui dati dal vivo, e la prossima volta,
-        # col robot altrove, la costruzione completa li giudicherebbe sulla mappa globale.
-        if hasattr(prm, 'dirty_rects'):
-            prm.dirty_rects = list(prm.live_rects())
-            prm.hazards_seen = len(getattr(global_map, 'hazards', ()) or ())
         self.last_update = (len(todo), len(todo_all), dirty is not None)
 
         # Gli archi percorsi dal robot sono liberi per costruzione e vanno rimessi comunque,
@@ -510,6 +511,13 @@ class MissionGraph:
                     continue
                 (xa, ya), (xb, yb) = prm.nodes[a], prm.nodes[b]
                 prm._evaluate_and_add_edge(a, b, float(math.hypot(xb - xa, yb - ya)), force=True)
+        # Le zone appena rivalutate sono a posto. Resta "da rifare" la finestra dal vivo
+        # corrente: i suoi archi sono stati giudicati sui dati dal vivo, e la prossima volta,
+        # col robot altrove, la costruzione completa li giudicherebbe sulla mappa globale.
+        if hasattr(prm, 'dirty_rects'):
+            prm.dirty_rects = list(prm.live_rects())
+            prm.hazards_seen = len(getattr(global_map, 'hazards', ()) or ())
+            prm.special_seen = _special_pairs(prm)
         prm.built = True
         if hasattr(prm, 'flush_slope_log'):
             prm.flush_slope_log("costruzione")
@@ -526,13 +534,17 @@ class MissionGraph:
         """
         Maschera delle coppie da rivalutare (rettangolo dell'arco, allargato di
         prm_graph.DIRTY_MARGIN_M, che tocca una zona di prm.dirty_rects), o None quando serve
-        la costruzione completa: grafo mai costruito, nodi di sosta o archi percorsi (non sono
-        coppie del reticolo), mappa del terreno ricaricata da file (zone aggiornate ignote),
-        una caduta nuova (mark_hazard non passa da una scansione).
+        la costruzione completa: grafo mai costruito, nodi di sosta (non sono nodi del
+        reticolo), mappa del terreno ricaricata da file (zone aggiornate ignote), una caduta
+        nuova (mark_hazard non passa da una scansione).
+
+        Gli archi percorsi dal robot e quelli bloccati nel tentativo si rivalutano SEMPRE,
+        insieme a quelli che lo erano all'aggiornamento precedente: il loro esito dipende da
+        quegli insiemi, non dai dati nuovi. Sono pochi.
         """
         if not getattr(prm, 'built', False) or not hasattr(prm, 'dirty_rects'):
             return None
-        if getattr(prm, 'stop_nodes', None) or getattr(prm, 'traversed_edges', None):
+        if getattr(prm, 'stop_nodes', None):
             return None
         tm = getattr(prm, 'global_terrain_map', None)
         if tm is not None and getattr(tm, 'update_rects', None) is None:
@@ -540,7 +552,7 @@ class MissionGraph:
         if len(getattr(global_map, 'hazards', ()) or ()) != getattr(prm, 'hazards_seen', 0):
             return None
         mask = np.zeros(len(todo), dtype=bool)
-        if not prm.dirty_rects or not todo:
+        if not todo:
             return mask
         ia = np.array([p[0] for p in todo]); ib = np.array([p[1] for p in todo])
         a = np.array([prm.nodes[i] for i in ia]); b = np.array([prm.nodes[i] for i in ib])
@@ -549,6 +561,9 @@ class MissionGraph:
         ymin, ymax = np.minimum(a[:, 1], b[:, 1]) - m, np.maximum(a[:, 1], b[:, 1]) + m
         for (rx0, rx1, ry0, ry1) in prm.dirty_rects:
             mask |= (xmax >= rx0) & (xmin <= rx1) & (ymax >= ry0) & (ymin <= ry1)
+        special = _special_pairs(prm) | getattr(prm, 'special_seen', set())
+        if special:
+            mask |= np.array([(min(a, b), max(a, b)) in special for a, b in zip(ia.tolist(), ib.tolist())])
         return mask
 
     def _pairs_distinct(self):

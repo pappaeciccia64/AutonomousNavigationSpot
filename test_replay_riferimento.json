@@ -67,8 +67,8 @@
      1,
      1
     ],
-    "valid_arcs": 100180,
-    "discarded_arcs": 5070,
+    "valid_arcs": 100182,
+    "discarded_arcs": 5068,
     "path_found": true,
     "path_arcs": 2,
     "path_len_m": 2.31
@@ -79,8 +79,8 @@
      1,
      0
     ],
-    "valid_arcs": 100180,
-    "discarded_arcs": 5070,
+    "valid_arcs": 100182,
+    "discarded_arcs": 5068,
     "path_found": true,
     "path_arcs": 6,
     "path_len_m": 5.91
@@ -91,8 +91,8 @@
      2,
      0
     ],
-    "valid_arcs": 95623,
-    "discarded_arcs": 9627,
+    "valid_arcs": 95625,
+    "discarded_arcs": 9625,
     "path_found": true,
     "path_arcs": 2,
     "path_len_m": 2.0
@@ -103,8 +103,8 @@
      2,
      1
     ],
-    "valid_arcs": 93933,
-    "discarded_arcs": 11317,
+    "valid_arcs": 93935,
+    "discarded_arcs": 11315,
     "path_found": true,
     "path_arcs": 4,
     "path_len_m": 4.24
@@ -115,8 +115,8 @@
      2,
      2
     ],
-    "valid_arcs": 94129,
-    "discarded_arcs": 11121,
+    "valid_arcs": 94131,
+    "discarded_arcs": 11119,
     "path_found": true,
     "path_arcs": 2,
     "path_len_m": 2.5
@@ -127,8 +127,8 @@
      2,
      2
     ],
-    "valid_arcs": 94129,
-    "discarded_arcs": 11121,
+    "valid_arcs": 94131,
+    "discarded_arcs": 11119,
     "path_found": true,
     "path_arcs": 2,
     "path_len_m": 1.79
@@ -139,8 +139,8 @@
      2,
      3
     ],
-    "valid_arcs": 92900,
-    "discarded_arcs": 12350,
+    "valid_arcs": 92902,
+    "discarded_arcs": 12348,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 4.77
@@ -151,8 +151,8 @@
      2,
      3
     ],
-    "valid_arcs": 92367,
-    "discarded_arcs": 12883,
+    "valid_arcs": 92369,
+    "discarded_arcs": 12881,
     "path_found": true,
     "path_arcs": 2,
     "path_len_m": 1.78
@@ -464,8 +464,8 @@
      1,
      0
     ],
-    "valid_arcs": 81800,
-    "discarded_arcs": 27674,
+    "valid_arcs": 81801,
+    "discarded_arcs": 27673,
     "path_found": true,
     "path_arcs": 6,
     "path_len_m": 5.74
@@ -543,8 +543,8 @@
      1,
      0
     ],
-    "valid_arcs": 80784,
-    "discarded_arcs": 28690,
+    "valid_arcs": 80783,
+    "discarded_arcs": 28691,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 5.06
@@ -654,8 +654,8 @@
      1,
      0
     ],
-    "valid_arcs": 99052,
-    "discarded_arcs": 10422,
+    "valid_arcs": 99054,
+    "discarded_arcs": 10420,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 5.0
@@ -846,8 +846,8 @@
      2,
      1
     ],
-    "valid_arcs": 122911,
-    "discarded_arcs": 9219,
+    "valid_arcs": 122912,
+    "discarded_arcs": 9218,
     "path_found": true,
     "path_arcs": 6,
     "path_len_m": 5.48
@@ -858,8 +858,8 @@
      2,
      2
     ],
-    "valid_arcs": 118455,
-    "discarded_arcs": 13675,
+    "valid_arcs": 118453,
+    "discarded_arcs": 13677,
     "path_found": true,
     "path_arcs": 2,
     "path_len_m": 1.82
@@ -870,8 +870,8 @@
      2,
      3
     ],
-    "valid_arcs": 117341,
-    "discarded_arcs": 14789,
+    "valid_arcs": 117339,
+    "discarded_arcs": 14791,
     "path_found": true,
     "path_arcs": 8,
     "path_len_m": 6.84
@@ -1117,8 +1117,8 @@
      1,
      2
     ],
-    "valid_arcs": 83839,
-    "discarded_arcs": 21411,
+    "valid_arcs": 83837,
+    "discarded_arcs": 21413,
     "path_found": true,
     "path_arcs": 6,
     "path_len_m": 5.43
@@ -1129,10 +1129,10 @@
      1,
      2
     ],
-    "valid_arcs": 80940,
-    "discarded_arcs": 24310,
+    "valid_arcs": 80937,
+    "discarded_arcs": 24313,
     "path_found": true,
-    "path_arcs": 1,
+    "path_arcs": 2,
     "path_len_m": 1.0
    }
   ],

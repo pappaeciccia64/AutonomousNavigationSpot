@@ -11,7 +11,10 @@ Due tipi di controllo:
   INVARIANTI -- devono valere sempre, qualunque modifica si faccia. Se uno fallisce c'e' un
   errore, e la prova esce con codice 1.
     1. Aggiornamento locale del grafo IDENTICO alla costruzione completa (archi e pesi), a
-       ogni inizio di cella.
+       ogni inizio di cella; e l'aggiornamento locale USATO DAVVERO a ogni inizio di cella
+       dopo il primo (senza questo secondo controllo il primo passerebbe anche se il codice
+       ricostruisse sempre tutto). Come in missione, il rigioco registra gli archi percorsi
+       (il nodo del robot cambia fra due scansioni) e i blocchi confermati.
     2. Pendenze della mappa globale del terreno uguali a quelle dal vivo sugli stessi archi
        (almeno il 99.5%): le due fonti devono misurare la stessa cosa.
     3. Andatura: ogni tratto percorso in cui il robot si e' inclinato di piu' di 18 gradi
@@ -167,7 +170,7 @@ def replay_mission(job):
         env = environmentMap.EnvironmentMap(rows=m['rows'], cols=m['cols'], cell_size=m['cell'])
         env.set_origin(m['origin'][0], m['origin'][1], math.radians(m['yaw_deg']))
         ew.MISSION_LATTICE_SPACING_M = m['spacing']
-        prm, _sampler, _mg = ew._build_mission_prm(env, verbose=False)
+        prm, _sampler, mg = ew._build_mission_prm(env, verbose=False)
         gm = sg.GlobalGrid()
         tm = sg.GlobalTerrainGrid()
         tm.update_rects = []
@@ -183,6 +186,9 @@ def replay_mission(job):
     node_cells = None
     prev_it, done_cells = None, []
     full_checks = full_same = 0
+    local_used = local_expected = 0
+    lattice_pairs = {(min(int(a), int(b)), max(int(a), int(b))) for a, b in mg.pairs}
+    prev_node = None
     gl_total = gl_same = 0
     for f in m['scans']:
         d = np.load(f)
@@ -194,11 +200,25 @@ def replay_mission(job):
             robot_node = int(d['robot_node_id']) if int(d['robot_node_id']) in prm.nodes else \
                 min(prm.nodes, key=lambda k: math.hypot(prm.nodes[k][0] - rx, prm.nodes[k][1] - ry))
             prm.set_robot_node(robot_node, 0.0)
+            # Come in missione: arco percorso quando il robot passa da un nodo al vicino
+            # (easy_walk, passo completato), arco bloccato quando il fronte conferma un blocco.
+            if prev_node is not None and prev_node != robot_node:
+                key = (min(prev_node, robot_node), max(prev_node, robot_node))
+                if key in lattice_pairs:
+                    prm.traversed_edges.add(key)
+            prev_node = robot_node
+            nxt = [int(n) for n in np.ravel(d['path_node_ids'])] if 'path_node_ids' in d.files else []
+            if str(d['decision_kind']) == 'blocked' and nxt and \
+                    (min(robot_node, nxt[0]), max(robot_node, nxt[0])) in lattice_pairs:
+                prm.mark_edge_invalid(robot_node, nxt[0])
             if it != prev_it:
                 # --- inizio di un tentativo: aggiornamento del grafo come in missione ----
                 do_full = (not fast) or it in fast_pick
                 twin = copy.deepcopy((prm, gm)) if do_full and prev_it is not None else None
                 ew._rebuild_prm_edges(prm, gm)
+                if prev_it is not None:
+                    local_expected += 1
+                    local_used += bool(mg.last_update and mg.last_update[2])
                 if twin is not None:
                     ew.INCREMENTAL_GRAPH_UPDATE = False
                     try:
@@ -250,6 +270,7 @@ def replay_mission(job):
             gl_total += 1
             gl_same += bool(glob_[2] and abs(glob_[0] - live[0]) < 0.02 and abs(glob_[1] - live[1]) < 0.02)
     out['invariants']['grafo_locale_uguale_al_completo'] = [full_same, full_checks]
+    out['invariants']['aggiornamento_locale_usato'] = [local_used, local_expected]
     out['invariants']['mappa_globale_uguale_al_vivo'] = [gl_same, gl_total]
     out['invariants']['percorso_a_ogni_inizio_cella'] = [
         sum(c['path_found'] for c in out['cell_starts']), len(out['cell_starts'])]
@@ -347,6 +368,10 @@ def check_invariants(name, out):
     print(f"  [{'OK ' if a == b else 'FAIL'}] aggiornamento locale del grafo identico al completo: {a}/{b}")
     if a != b:
         fails.append(f"{name}: grafo locale diverso dal completo ({a}/{b})")
+    a, b = out['invariants']['aggiornamento_locale_usato']
+    print(f"  [{'OK ' if a == b else 'FAIL'}] aggiornamento locale usato davvero: {a}/{b}")
+    if a != b:
+        fails.append(f"{name}: costruzione completa al posto dell'aggiornamento locale ({b - a} volte su {b})")
     a, b = out['invariants']['mappa_globale_uguale_al_vivo']
     ok = b > 0 and a / b >= GLOBAL_LIVE_MIN_MATCH
     print(f"  [{'OK ' if ok else 'FAIL'}] pendenza della mappa globale uguale al vivo: {a}/{b} "
