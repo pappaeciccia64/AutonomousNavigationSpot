@@ -29,7 +29,8 @@ Due tipi di controllo:
   aggiornato va nel commit insieme alla modifica.
 
 Uso:
-    python3 test_replay.py                       # missioni di riferimento, controllo completo
+    python3 test_replay.py                       # 2 missioni di riferimento, controllo completo
+    python3 test_replay.py --tutte               # tutte le 10 missioni rigiocabili
     python3 test_replay.py --veloce              # invariante 1 solo su 3 inizi di cella sparsi
     python3 test_replay.py --missioni 13-10-2026_12-40-38
     python3 test_replay.py --aggiorna-riferimento
@@ -66,6 +67,13 @@ sys.path.insert(0, HERE)
 
 REFERENCE_FILE = os.path.join(HERE, 'test_replay_riferimento.json')
 DEFAULT_MISSIONS = ['13-10-2026_12-14-30', '13-10-2026_12-40-38']
+# --tutte: tutte le missioni su questo PC con scansioni nel formato giusto (dal 12-10, quando
+# sono arrivati il reticolo e il fronte filtrato). Registrate con versioni vecchie del codice:
+# non importa, la prova rigioca le SCANSIONI attraverso il codice di oggi.
+ALL_MISSIONS = ['12-10-2026_14-10-32', '12-10-2026_14-23-28', '12-10-2026_14-47-06',
+                '12-10-2026_17-16-06', '12-10-2026_17-32-39', '13-10-2026_11-22-40',
+                '13-10-2026_11-56-15', '13-10-2026_12-14-30', '13-10-2026_12-27-12',
+                '13-10-2026_12-40-38']
 GLOBAL_LIVE_MIN_MATCH = 0.995      # invariante 2
 HARD_PITCH_DEG = 18.0              # invariante 3
 ARCS_PER_SCAN = 60                 # archi a caso per scansione, invariante 2
@@ -409,15 +417,19 @@ def main():
     ap = argparse.ArgumentParser(description="Rigioco delle missioni salvate (vedi docstring)")
     ap.add_argument('--missioni', nargs='+', default=DEFAULT_MISSIONS,
                     help="nomi come 13-10-2026_12-40-38 (default: le missioni di riferimento)")
+    ap.add_argument('--tutte', action='store_true',
+                    help=f"tutte le {len(ALL_MISSIONS)} missioni rigiocabili (circa 5 minuti)")
     ap.add_argument('--veloce', action='store_true',
                     help=f"confronto col grafo completo solo su {FAST_FULL_CHECKS} inizi di cella sparsi")
     ap.add_argument('--aggiorna-riferimento', action='store_true',
                     help="salva il comportamento di adesso come nuovo riferimento")
     args = ap.parse_args()
 
+    if args.tutte:
+        args.missioni = ALL_MISSIONS
     t0 = time.perf_counter()
     print(f"Rigioco di {len(args.missioni)} missioni{' (veloce)' if args.veloce else ''}, in parallelo...")
-    with Pool(len(args.missioni)) as pool:
+    with Pool(min(len(args.missioni), os.cpu_count() or 1)) as pool:
         results = dict(pool.map(replay_mission, [(n, args.veloce) for n in args.missioni]))
 
     ref_all = json.load(open(REFERENCE_FILE)) if os.path.exists(REFERENCE_FILE) else {}
