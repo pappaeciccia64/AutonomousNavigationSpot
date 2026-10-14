@@ -18,6 +18,9 @@ Due tipi di controllo:
        (beccheggio misurato) deve risultare HARD.
     4. A ogni inizio di cella esiste un percorso dal robot all'obiettivo (in missione le celle
        sono state raggiunte, quindi il grafo non deve essersi spezzato).
+    5. Ritorno a wp_0 con GraphNav (se c'e' il grafo scaricato in graph/<missione>/): con le
+       scorciatoie scelte da easy_walk.plan_graphnav_shortcuts la strada non e' piu' lunga di
+       quella di oggi, ed e' entro 1.5 volte la linea d'aria piu' 2 m.
 
   RIFERIMENTO -- i numeri del comportamento (archi validi e scartati, percorsi, andature)
   confrontati con test_replay_riferimento.json. Una differenza NON e' per forza un errore:
@@ -242,9 +245,53 @@ def replay_mission(job):
     out['invariants']['mappa_globale_uguale_al_vivo'] = [gl_same, gl_total]
     out['invariants']['percorso_a_ogni_inizio_cella'] = [
         sum(c['path_found'] for c in out['cell_starts']), len(out['cell_starts'])]
+    out['ritorno'] = return_route_check(name, gm)
     out['gait'] = gait_check(m)
     out['seconds'] = round(time.perf_counter() - t_start, 1)
     return name, out
+
+
+def return_route_check(name, gm):
+    """Strada di ritorno a wp_0 sul grafo GraphNav scaricato, oggi e con le scorciatoie."""
+    gdirs = glob.glob(os.path.join(HERE, 'graph', f'Mission_{name}', 'Grafo_*'))
+    log_path = os.path.join(HERE, 'MissionLogs', f'Mission_{name}', 'mission_log.txt')
+    if not gdirs:
+        return None
+    from bosdyn.api.graph_nav import map_pb2
+    from bosdyn.client.frame_helpers import get_a_tform_b
+    gdir = sorted(gdirs)[-1]
+    g = map_pb2.Graph()
+    g.ParseFromString(open(os.path.join(gdir, 'graph'), 'rb').read())
+    names = {w.id: w.annotations.name for w in g.waypoints}
+    by_name = {v: k for k, v in names.items()}
+    xy = {}
+    for w in g.waypoints:
+        # Come in missione (recordingInterface.waypoint_poses): posizione nota solo per i
+        # waypoint creati dal codice, wp_N; quelli automatici della registrazione no.
+        snap = os.path.join(gdir, 'waypoint_snapshots', w.snapshot_id)
+        if not re.fullmatch(r'wp_\d+', w.annotations.name) or not os.path.exists(snap):
+            continue
+        ws = map_pb2.WaypointSnapshot()
+        ws.ParseFromString(open(snap, 'rb').read())
+        t = get_a_tform_b(ws.robot_state.kinematic_state.transforms_snapshot, 'vision', 'body')
+        xy[w.id] = (t.x, t.y)
+    base = [(e.id.from_waypoint, e.id.to_waypoint,
+             math.sqrt(e.from_tform_to.position.x ** 2 + e.from_tform_to.position.y ** 2
+                       + e.from_tform_to.position.z ** 2)) for e in g.edges]
+    log = open(log_path, errors='replace').read() if os.path.exists(log_path) else ''
+    found = re.findall(r"prima di 'ritorno a wp_0': localizzato su (\S+)", log)
+    start = by_name.get(found[-1]) if found else None
+    goal = by_name.get('wp_0')
+    if start is None or goal is None or goal not in xy and start not in xy:
+        return None
+    with _quiet():
+        used, before, after = ew.plan_graphnav_shortcuts(xy, base, start, goal, gm)
+    if before is None:
+        return None
+    sx = xy.get(start)
+    straight = math.dist(sx, xy[goal]) if sx and goal in xy else None
+    return dict(start=names[start], oggi_m=round(before, 1), con_scorciatoie_m=round(after, 1),
+                scorciatoie=len(used), linea_aria_m=round(straight, 1) if straight else None)
 
 
 def gait_check(m):
@@ -282,7 +329,7 @@ def summary_for_reference(out):
     tiers = {}
     for r in out['gait'] or []:
         tiers[r['tier']] = tiers.get(r['tier'], 0) + 1
-    return dict(cell_starts=out['cell_starts'], gait_tiers=dict(sorted(tiers.items())),
+    return dict(cell_starts=out['cell_starts'], ritorno=out.get('ritorno'), gait_tiers=dict(sorted(tiers.items())),
                 gait_by_segment=[f"{r['time']} {r['tier']}" for r in out['gait'] or []])
 
 
@@ -309,6 +356,16 @@ def check_invariants(name, out):
                          + ", ".join(f"{r['time']} {r['tier']} {r['pitch']:.0f} gradi" for r in big if r['tier'] != 'HARD'))
     else:
         print("  [-- ] andatura: segments.csv mancante, controllo saltato")
+    r = out.get('ritorno')
+    if r is None:
+        print("  [-- ] ritorno a wp_0: grafo GraphNav scaricato non presente, controllo saltato")
+    else:
+        limit = 1.5 * r['linea_aria_m'] + 2.0 if r['linea_aria_m'] else float('inf')
+        ok = r['con_scorciatoie_m'] <= r['oggi_m'] + 1e-6 and r['con_scorciatoie_m'] <= limit
+        print(f"  [{'OK ' if ok else 'FAIL'}] ritorno a wp_0 da {r['start']}: {r['oggi_m']} m nel grafo della missione "
+              f"-> {r['con_scorciatoie_m']} m con {r['scorciatoie']} scorciatoie (linea d'aria {r['linea_aria_m']} m)")
+        if not ok:
+            fails.append(f"{name}: ritorno a wp_0 {r['con_scorciatoie_m']} m (oggi {r['oggi_m']}, limite {limit:.1f})")
     a, b = out['invariants']['percorso_a_ogni_inizio_cella']
     print(f"  [{'OK ' if a == b else 'FAIL'}] percorso trovato a ogni inizio di cella: {a}/{b}")
     if a != b:
@@ -329,6 +386,8 @@ def compare_reference(name, now, ref):
         for k in ('valid_arcs', 'discarded_arcs', 'path_found', 'path_arcs', 'path_len_m'):
             if r.get(k) != n.get(k):
                 diffs.append(f"tentativo {n['attempt']} cella {tuple(n['cell'])}: {k} {r.get(k)} -> {n.get(k)}")
+    if ref.get('ritorno') != now.get('ritorno'):
+        diffs.append(f"ritorno a wp_0 {ref.get('ritorno')} -> {now.get('ritorno')}")
     if ref['gait_tiers'] != now['gait_tiers']:
         diffs.append(f"andature {ref['gait_tiers']} -> {now['gait_tiers']}")
     rs, ns = dict(s.split(' ', 1) for s in ref['gait_by_segment']), dict(s.split(' ', 1) for s in now['gait_by_segment'])

@@ -158,6 +158,13 @@
     "path_len_m": 1.78
    }
   ],
+  "ritorno": {
+   "start": "wp_64",
+   "oggi_m": 18.8,
+   "con_scorciatoie_m": 17.3,
+   "scorciatoie": 7,
+   "linea_aria_m": 14.3
+  },
   "gait_tiers": {
    "HARD": 7,
    "MODERATE": 12,
@@ -347,6 +354,13 @@
     "path_len_m": 3.93
    }
   ],
+  "ritorno": {
+   "start": "wp_61",
+   "oggi_m": 46.7,
+   "con_scorciatoie_m": 18.5,
+   "scorciatoie": 8,
+   "linea_aria_m": 13.1
+  },
   "gait_tiers": {
    "HARD": 21,
    "MODERATE": 15,
