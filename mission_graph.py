@@ -148,9 +148,9 @@ DEFAULT_LATTICE_SPACING_M = 0.25
 # SPOT_MISSION_GRID restano piu' forti di questi valori.
 #   es. 4 x 4 celle da 4 m:  MISSION_ROWS = 4, MISSION_COLS = 4, MISSION_CELL_SIZE_M = 4.0
 # ----------------------------------------------------------------------------------------
-MISSION_ROWS = 4#None
-MISSION_COLS = 4#None
-MISSION_CELL_SIZE_M = 4#None
+MISSION_ROWS = 3 #None
+MISSION_COLS = 4 #None
+MISSION_CELL_SIZE_M = 4 #None
 MISSION_SPACING_M = None
 
 
@@ -299,6 +299,15 @@ def _lattice_pairs(spacing, ij, xy, min_edge_m, reach_m):
     return pairs[order], lengths[order], n_short
 
 
+def _prm_dirty_margin():
+    """prm_graph.DIRTY_MARGIN_M, importato solo quando serve (questo modulo gira anche senza SDK)."""
+    try:
+        import prm_graph
+        return prm_graph.DIRTY_MARGIN_M
+    except Exception:
+        return 1.2
+
+
 def _connected_components(n_nodes, pairs):
     """(componenti, dimensione della piu' grande, nodi isolati). Solo geometria: dice se il
     grafo CONSEGNATO e' connesso, prima che i veti del terreno lo assottiglino."""
@@ -415,7 +424,8 @@ class MissionGraph:
             prm.add_node(int(k), float(self.xy[k, 0]), float(self.xy[k, 1]))
         return self.n_nodes
 
-    def add_edges_to_prm(self, prm, global_map=None, edge_safety_margin=0.0, verbose=True):
+    def add_edges_to_prm(self, prm, global_map=None, edge_safety_margin=0.0, verbose=True,
+                         incremental=False):
         """
         Valuta le coppie GIA' CALCOLATE e aggiunge quelle ammesse, usando la stessa funzione
         di build_graph (PRM._evaluate_and_add_edge): identici veti -- archi bloccati,
@@ -423,17 +433,38 @@ class MissionGraph:
         pesi. Quello che non si rifa' e' l'appaiamento geometrico.
 
         Da chiamare al posto di prm.build_graph(...) quando i nodi vengono da qui.
+
+        incremental (2026-10-13): rivaluta SOLO le coppie vicine alle zone con dati nuovi
+        dall'ultima valutazione (prm.dirty_rects, vedi prm_graph.DIRTY_MARGIN_M); le altre
+        tengono arco e peso che hanno. Il risultato e' lo stesso della costruzione completa:
+        fuori da quelle zone nessun dato che entra nella valutazione e' cambiato. Si torna
+        alla costruzione completa quando non si puo' sapere cosa e' cambiato (vedi
+        _dirty_pairs).
         """
-        for idx in prm.nodes:
-            prm.edges[idx] = []
-        prm.edge_validity = {}
+        todo_all = [(int(a), int(b), float(d)) for (a, b), d in zip(self.pairs, self.lengths)
+                    if int(a) in prm.nodes and int(b) in prm.nodes]
+        dirty = self._dirty_pairs(prm, global_map, todo_all) if incremental else None
         prm.robot_node = None          # come build_graph: il permesso vale per il nodo attuale
+        if dirty is None:
+            for idx in prm.nodes:
+                prm.edges[idx] = []
+            prm.edge_validity = {}
+            todo = todo_all
+        else:
+            todo = [p for p, m in zip(todo_all, dirty) if m]
+            # Si tolgono gli archi da rivalutare; poi si valutano come in una costruzione da
+            # zero (adiacenze appena svuotate per queste coppie: fresh vale anche qui).
+            drop = {}
+            for a, b, _d in todo:
+                drop.setdefault(a, set()).add(b)
+                drop.setdefault(b, set()).add(a)
+                prm.edge_validity.pop((a, b) if a < b else (b, a), None)
+            for n, others in drop.items():
+                prm.edges[n] = [(m, w) for m, w in prm.edges.get(n, []) if m not in others]
         if hasattr(prm, '_sync_global_slope_cache'):
             prm._sync_global_slope_cache()
 
         added = 0
-        todo = [(int(a), int(b), float(d)) for (a, b), d in zip(self.pairs, self.lengths)
-                if int(a) in prm.nodes and int(b) in prm.nodes]
         # 2026-10-12: occupazione di tutte le coppie in un colpo solo e cache della pendenza
         # globale riempita dove certamente non ci sono dati (esiti identici, vedi
         # PRM._occupancy_blocked_many e PRM._prefill_global_slope_nodata). Le adiacenze sono
@@ -471,6 +502,14 @@ class MissionGraph:
             if ok:
                 added += 1
 
+        # Le zone appena rivalutate sono a posto. Resta "da rifare" la finestra dal vivo
+        # corrente: i suoi archi sono stati giudicati sui dati dal vivo, e la prossima volta,
+        # col robot altrove, la costruzione completa li giudicherebbe sulla mappa globale.
+        if hasattr(prm, 'dirty_rects'):
+            prm.dirty_rects = list(prm.live_rects())
+            prm.hazards_seen = len(getattr(global_map, 'hazards', ()) or ())
+        self.last_update = (len(todo), len(todo_all), dirty is not None)
+
         # Gli archi percorsi dal robot sono liberi per costruzione e vanno rimessi comunque,
         # come fa build_graph: i nodi di sosta stanno spesso sotto min_edge_length.
         for a, b in list(getattr(prm, 'traversed_edges', ())):
@@ -483,11 +522,43 @@ class MissionGraph:
         prm.built = True
         if hasattr(prm, 'flush_slope_log'):
             prm.flush_slope_log("costruzione")
-        if verbose:
+        if verbose and dirty is not None:
+            print(f"[GRAFO] Aggiornamento locale: rivalutate {len(todo)} coppie su {len(todo_all)} "
+                  f"(vicine alle zone con dati nuovi), {added} ammesse; le altre restano come erano.")
+        elif verbose:
             print(f"[GRAFO] {added} archi ammessi su {self.n_edges} coppie del reticolo "
                   f"({self.n_nodes} nodi, passo {self.spacing_m:.4f} m); {n_fast} in zona senza "
                   f"dati, con il solo costo geometrico")
         return added
+
+    def _dirty_pairs(self, prm, global_map, todo):
+        """
+        Maschera delle coppie da rivalutare (rettangolo dell'arco, allargato di
+        prm_graph.DIRTY_MARGIN_M, che tocca una zona di prm.dirty_rects), o None quando serve
+        la costruzione completa: grafo mai costruito, nodi di sosta o archi percorsi (non sono
+        coppie del reticolo), mappa del terreno ricaricata da file (zone aggiornate ignote),
+        una caduta nuova (mark_hazard non passa da una scansione).
+        """
+        if not getattr(prm, 'built', False) or not hasattr(prm, 'dirty_rects'):
+            return None
+        if getattr(prm, 'stop_nodes', None) or getattr(prm, 'traversed_edges', None):
+            return None
+        tm = getattr(prm, 'global_terrain_map', None)
+        if tm is not None and getattr(tm, 'update_rects', None) is None:
+            return None
+        if len(getattr(global_map, 'hazards', ()) or ()) != getattr(prm, 'hazards_seen', 0):
+            return None
+        mask = np.zeros(len(todo), dtype=bool)
+        if not prm.dirty_rects or not todo:
+            return mask
+        ia = np.array([p[0] for p in todo]); ib = np.array([p[1] for p in todo])
+        a = np.array([prm.nodes[i] for i in ia]); b = np.array([prm.nodes[i] for i in ib])
+        m = _prm_dirty_margin()
+        xmin, xmax = np.minimum(a[:, 0], b[:, 0]) - m, np.maximum(a[:, 0], b[:, 0]) + m
+        ymin, ymax = np.minimum(a[:, 1], b[:, 1]) - m, np.maximum(a[:, 1], b[:, 1]) + m
+        for (rx0, rx1, ry0, ry1) in prm.dirty_rects:
+            mask |= (xmax >= rx0) & (xmin <= rx1) & (ymax >= ry0) & (ymin <= ry1)
+        return mask
 
     def _pairs_distinct(self):
         """True se nessuna coppia del reticolo compare due volte (in nessun verso). Calcolato una volta."""

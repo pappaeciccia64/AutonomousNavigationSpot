@@ -296,6 +296,12 @@ def _robot_on_node(prm, node_id, x, y):
     return pos is not None and float(np.hypot(pos[0] - x, pos[1] - y)) <= ANCHOR_ON_NODE_M
 
 
+# 2026-10-13: all'inizio di ogni cella si rivalutano solo gli archi vicini alle zone con dati
+# nuovi (vedi mission_graph.MissionGraph.add_edges_to_prm, incremental). False = si rifanno
+# tutti, come prima.
+INCREMENTAL_GRAPH_UPDATE = True
+
+
 def _rebuild_prm_edges(prm, global_map):
     """
     Ricostruisce tutti gli archi del PRM sui dati correnti. Con il reticolo usa le coppie
@@ -307,7 +313,8 @@ def _rebuild_prm_edges(prm, global_map):
     if mg is not None:
         return mg.add_edges_to_prm(
             prm, global_map=global_map,
-            edge_safety_margin=spotGrid.PRM_EDGE_SAFETY_MARGIN_M)
+            edge_safety_margin=spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
+            incremental=INCREMENTAL_GRAPH_UPDATE)
     prm.build_graph(global_map=global_map,
                     edge_safety_margin=spotGrid.PRM_EDGE_SAFETY_MARGIN_M)
     return None
@@ -1657,18 +1664,16 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
     2026-10-05 13:12, che superava il bersaglio di oltre un metro per poi tornare
     indietro, finendo in una tasca stretta.
 
-    Ordine di preferenza, a parita' di vicinanza al centro:
-      1. punti OSSERVATI e liberi      -- sappiamo che si puo' stare li'
-      2. punti MAI OSSERVATI           -- non sappiamo, ma non abbiamo nulla contro
-      3. (mai scelti) punti occupati
-    Se tutti i candidati risultano occupati la cella non ha un obiettivo valido e la
-    funzione restituisce (None, None, ...): il chiamante lo tratta gia' come fallimento
-    di ingresso e passa alla logica dei lati non ancora provati.
-
-    Quando la cella non e' mai stata osservata (il caso normale: e' la cella in cui si
-    sta entrando) tutti i candidati sono "mai osservati" e viene scelto il centro, cioe'
-    esattamente il comportamento precedente. La differenza emerge solo quando abbiamo
-    davvero informazione che dice che il centro non va bene.
+    Regola (2026-10-13): il CENTRO GEOMETRICO e' l'obiettivo, libero o ignoto che sia.
+    Si cambia solo se si VEDE che e' occupato (mappa globale con safety_margin) o se il
+    ciclo di navigazione lo ha gia' scartato sui dati dal vivo (`exclude`). In quel caso:
+      1. punti OSSERVATI liberi ad almeno FRONTIER_CLEARANCE_M dagli ostacoli (scansione
+         dal vivo, spazio libero imparato, mappa globale), il piu' vicino al centro
+      2. se non ce ne sono, punti MAI OSSERVATI, il piu' vicino al centro
+      3. (mai scelti) punti occupati o troppo vicini a un ostacolo
+    Se non resta nessun punto la cella non ha un obiettivo valido e la funzione
+    restituisce (None, None, ...): il chiamante lo tratta gia' come fallimento di
+    ingresso e passa alla logica dei lati non ancora provati.
 
     exclude (2026-10-07): lista di punti gia' provati e risultati irraggiungibili, da non
     riproporre. Serve alla riscelta dentro il ciclo di navigazione (vedi
@@ -1700,50 +1705,91 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
         # Nessuna informazione di occupazione: comportamento storico invariato.
         return cell_center_x, cell_center_y, sampled, []
 
-    # Il centro geometrico resta il candidato preferito, ma ora deve passare lo stesso
-    # vaglio di tutti gli altri.
-    candidates = [(cell_center_x, cell_center_y)] + sampled
+    # 2026-10-13 -- REGOLA DEL CENTRO. Il centro geometrico e' l'obiettivo e si cambia SOLO
+    # se si VEDE che e' occupato: nella mappa globale, o perche' il ciclo di navigazione lo
+    # ha gia' scartato sui dati dal vivo (e' in `exclude`). Se e' ignoto ci si va vicino e
+    # si guarda; se e' libero resta lui.
+    # Prima bastava UN punto gia' visto libero per battere il centro ignoto
+    # (`pool = free if free else unknown`): quel punto era l'ultimo lembo scansionato dalla
+    # cella precedente, cioe' sul bordo, a ~2 m dal centro. Nelle missioni del 13-10 (12:14,
+    # 12:27, 12:40) e' successo in 20 ingressi su 38, con tre arrivi FUORI dalla cella.
+    def _near_tried(p):
+        return bool(exclude) and any(np.hypot(p[0] - ex, p[1] - ey) < 0.30 for ex, ey in exclude)
 
-    # Punti gia' provati e falliti: fuori dai giochi (vedi `exclude`).
-    if exclude:
-        def _too_close(p):
-            return any(np.hypot(p[0] - ex, p[1] - ey) < 0.30 for ex, ey in exclude)
-        candidates = [p for p in candidates if not _too_close(p)]
-        if not candidates:
-            print(f"[TARGET] Cella ({cell_row},{cell_col}): tutti i punti candidati sono gia' "
-                  f"stati provati senza riuscirci.")
-            return None, None, [], []
+    center = (cell_center_x, cell_center_y)
+    center_tried = _near_tried(center)
+    center_occupied = global_map.is_occupied(cell_center_x, cell_center_y,
+                                             safety_margin=safety_margin)
+    if not center_tried and not center_occupied:
+        state = "libero" if global_map.is_known(cell_center_x, cell_center_y) else "ignoto"
+        print(f"[TARGET] Cella ({cell_row},{cell_col}): uso il centro geometrico "
+              f"({cell_center_x:.2f}, {cell_center_y:.2f}), {state}.")
+        return cell_center_x, cell_center_y, sampled, []
+
+    # Il centro e' occupato: si cerca il punto piu' vicino al centro dove il robot CI STA,
+    # cioe' ad almeno FRONTIER_CLEARANCE_M (0.30 m) dagli ostacoli, la stessa distanza che
+    # pretende il fronte. Alle 12:40 del 13-10 le riscelte cadevano a 0.35-0.50 m dal punto
+    # scartato, ancora dentro la siepe (obstacle_distance -0.04, 0.06, 0.27): la mappa
+    # globale non l'aveva ancora vista tutta. Per questo si guarda anche la scansione dal
+    # vivo (pts, cells_obstacle_dist) e lo spazio libero imparato (global_map.clearance).
+    min_clear = spotGrid.FRONTIER_CLEARANCE_M
+    live_od = None
+    if pts is not None and cells_obstacle_dist is not None:
+        try:
+            from scipy.spatial import cKDTree
+            p2 = np.asarray(pts, dtype=np.float64).reshape(-1, np.shape(pts)[-1])[:, :2]
+            od = np.asarray(cells_obstacle_dist, dtype=np.float64).ravel()
+            if len(p2) == len(od) and len(p2):
+                live_od = (cKDTree(p2), od)
+        except Exception:
+            live_od = None
+
+    def _live_clearance(px, py):
+        """obstacle_distance dal vivo nel punto, o None se fuori dalla scansione."""
+        if live_od is None:
+            return None
+        d, i = live_od[0].query((px, py))
+        return float(live_od[1][i]) if d <= 0.05 else None
 
     free, unknown, blocked = [], [], []
-    for (px, py) in candidates:
-        if global_map.is_occupied(px, py, safety_margin=safety_margin):
+    for (px, py) in sampled:
+        if _near_tried((px, py)) or global_map.is_occupied(px, py, safety_margin=safety_margin):
             blocked.append((px, py))
-        elif global_map.is_known(px, py):
+            continue
+        c_live = _live_clearance(px, py)
+        c_mem = global_map.clearance(px, py) if hasattr(global_map, 'clearance') else None
+        if (c_live is not None and c_live < min_clear) or (c_mem is not None and c_mem < min_clear):
+            blocked.append((px, py))
+        elif c_live is not None or global_map.is_known(px, py):
             free.append((px, py))
         else:
             unknown.append((px, py))
 
+    # Prima i punti VISTI liberi con spazio sufficiente: il centro e' gia' risultato
+    # occupato, quindi la zona e' nota e tornare a "guardare" un ignoto accanto all'ostacolo
+    # e' proprio il giro a vuoto delle 12:40. Solo se non ce n'e' nessuno, l'ignoto.
     pool = free if free else unknown
+    reason = "gia' scartato dal vivo" if center_tried else "occupato nella mappa"
     if not pool:
-        print(f"[TARGET] Cella ({cell_row},{cell_col}): tutti i {len(candidates)} punti "
-              f"candidati risultano occupati. Nessun obiettivo valido in questa cella.")
+        print(f"[TARGET] Cella ({cell_row},{cell_col}): centro {reason} e nessun punto della "
+              f"cella ad almeno {min_clear:.2f} m dagli ostacoli. Nessun obiettivo valido.")
         return None, None, [], blocked
 
     def _d2_from_center(p):
         return (p[0] - cell_center_x) ** 2 + (p[1] - cell_center_y) ** 2
 
-    best_x, best_y = min(pool, key=_d2_from_center)
+    # A parita' di distanza dal centro (a meno di un passo di reticolo) vince il punto piu'
+    # vicino al ROBOT: e' quello dalla sua parte dell'ostacolo. Alle 12:40 del 13-10, cella
+    # (2,0), c'erano due punti a 0.50 m dal centro: uno oltre la siepe, l'altro dal lato del
+    # robot, che e' quello su cui poi il robot e' entrato.
+    step = 0.25
+    best_x, best_y = min(pool, key=lambda p: (round(np.sqrt(_d2_from_center(p)) / step),
+                                              np.hypot(p[0] - robot_x, p[1] - robot_y)))
     dist_from_center = float(np.sqrt(_d2_from_center((best_x, best_y))))
-
-    if dist_from_center < 1e-6:
-        print(f"[TARGET] Cella ({cell_row},{cell_col}): uso il centro geometrico "
-              f"({best_x:.2f}, {best_y:.2f})  [liberi={len(free)} ignoti={len(unknown)} "
-              f"occupati={len(blocked)}]")
-    else:
-        print(f"[TARGET] Cella ({cell_row},{cell_col}): centro geometrico non utilizzabile, "
-              f"ripiego sul punto libero piu' vicino al centro ({best_x:.2f}, {best_y:.2f}), "
-              f"a {dist_from_center:.2f} m da esso  [liberi={len(free)} ignoti={len(unknown)} "
-              f"occupati={len(blocked)}]")
+    print(f"[TARGET] Cella ({cell_row},{cell_col}): centro {reason}, uso il punto "
+          f"{'libero' if free else 'ignoto'} piu' vicino al centro ad almeno {min_clear:.2f} m "
+          f"dagli ostacoli ({best_x:.2f}, {best_y:.2f}), a {dist_from_center:.2f} m dal centro  "
+          f"[liberi={len(free)} ignoti={len(unknown)} scartati={len(blocked)}]")
 
     return best_x, best_y, free + unknown, blocked
 
@@ -3136,8 +3182,13 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
     _gm_mask, _gm_core = _mask_for_global_map(obstacle_mask, is_valid, pts,
                                               (robot_x, robot_y, robot_yaw), return_core=True)
     global_map.update(pts, _gm_mask, walked=_gm_core)
-    # Aggiorna anche la mappa globale del terreno -- solo altezze già corrette e valide
-    global_terrain_map.update(pts, terrain_real, is_valid)
+    # Aggiorna anche la mappa globale del terreno -- solo altezze già corrette e valide.
+    # 2026-10-14: con la STESSA maschera del calcolo dal vivo (slope_usable_mask: attendibili
+    # E non ostacolo). Prima la mappa salvava anche le quote delle celle ostacolo, e tronchi
+    # e muri diventavano "pendenze": rigiocando le scansioni del 13-10 12:40, sulle stesse
+    # 1885 coppie, archi oltre 0.6 0.0% dal vivo contro 10.9% dalla mappa globale.
+    global_terrain_map.update(pts, terrain_real,
+                              slope_usable_mask(is_valid, cells_obstacle_dist, (num_y, num_x)))
 
     # Rendiamo la mappa terreno disponibile al PRM come fallback per la pendenza
     prm_graph.set_global_terrain_map(global_terrain_map)
@@ -3247,7 +3298,9 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
     # sono gli stessi, li calcola lo stesso PRM._evaluate_and_add_edge di build_graph.
     _rebuild_prm_edges(prm_graph, global_map)
     _timing_add('costruzione grafo', time.perf_counter() - t_build)
-    print(f"[TEMPO] costruzione completa del grafo: {time.perf_counter() - t_build:.2f} s")
+    _upd = getattr(getattr(prm_graph, 'mission_graph', None), 'last_update', None)
+    print(f"[TEMPO] {'aggiornamento locale' if _upd and _upd[2] else 'costruzione completa'} "
+          f"del grafo: {time.perf_counter() - t_build:.2f} s")
     if getattr(prm_graph, 'live_veto_last', 0):
         print(f"[ARCHI] {prm_graph.live_veto_last} archi scartati subito dalla scansione dal "
               f"vivo (passano a meno di {prm_graph_module.LIVE_PREFILTER_OD_M:.2f} m da un "
@@ -3486,7 +3539,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             obstacle_mask_updated, is_valid_up, pts_up, (robot_x, robot_y, robot_yaw),
             return_core=True)
         global_map.update(pts_up, _gm_mask_up, walked=_gm_core_up)
-        global_terrain_map.update(pts_up, terrain_real_up, is_valid_up)
+        global_terrain_map.update(pts_up, terrain_real_up,   # stessa maschera del vivo, vedi sopra
+                                  slope_usable_mask(is_valid_up, cells_obs_up, (num_y_up, num_x_up)))
         t_maps = time.perf_counter()
 
         # 2. iniettiamo i dati locali freschi nel PRM e ripianifichiamo dal nodo attuale
@@ -5478,7 +5532,9 @@ def easy_walk(options):
                 obstacle_mask_final, is_valid_final, pts_final,
                 (x_final, y_final, final_yaw), return_core=True)
             global_grid.global_occupancy_map.update(pts_final, _gm_mask_f, walked=_gm_core_f)
-            global_grid.global_terrain_map.update(pts_final, terrain_real_final, is_valid_final)
+            global_grid.global_terrain_map.update(
+                pts_final, terrain_real_final,
+                slope_usable_mask(is_valid_final, cells_obs_final, (num_y_final, num_x_final)))
 
             final_save_path = os.path.join(
                 mission_folder, f"iteration_{visualization_counter}_FINAL_SCAN.png"

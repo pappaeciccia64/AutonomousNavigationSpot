@@ -523,6 +523,20 @@ SLOPE_BASELINE_M = 0.25
 LATERAL_SLICE_HALF_WIDTH_M = 0.30
 MIN_ARC_SAMPLE_FRACTION = 0.5
 
+# ARC_BODY_EXTENSION_M (2026-10-13): di quanto si allunga l'arco, a OGNI estremo, quando se
+# ne misura la pendenza per il VETO e il COSTO del PRM e per la scelta dell'andatura. Mezzo corpo:
+# il robot fermo su un nodo ha le zampe 0.55 m davanti e 0.55 m dietro, quindi il terreno
+# che "sente" su un tratto va oltre i due nodi. Missione del 13-10 12:40, 12:47:20: un
+# gradino di ~17 cm stava 20 cm oltre la fine dell'arco; l'arco misurava 0.17 (MODERATE)
+# e il robot e' rimasto fermo 9 s col muso a 27 gradi, zampe anteriori sul gradino.
+# 2026-10-14: vale anche per il VETO del PRM (un solo valore, prm_graph.body_slope): il
+# robot non deve potersi fermare su un nodo con le zampe su un pendio oltre soglia. Misurato
+# sulle mappe delle 12:40: archi scartati 0.77% -> 1.19%, nodi isolati 1 -> 5. Il fronte
+# (arcVerification) resta invece sull'arco fra i nodi: e' piu' permissivo del PRM, quindi
+# non puo' mai bloccare un arco che il PRM ha accettato per pendenza. 0 = solo l'arco.
+ARC_BODY_EXTENSION_M = ROBOT_HALF_LENGTH_M
+# Calcolo: compute_arc_slope_profile(..., body_ext_m=...) -> spotGrid._body_slope.
+
 
 def fill_invalid_nearest(values_2d, invalid_mask):
     """
@@ -583,6 +597,27 @@ def _gather_heights(terrain_2d, grid_origin_x, grid_origin_y, cell_size, xs, ys,
     return out, inside
 
 
+def p90(values):
+    """
+    90 percentile, IDENTICO a float(np.percentile(values, 90)) (metodo 'linear', stessa
+    interpolazione di numpy 1.24, verificato bit per bit su 200 mila array casuali), per
+    valori finiti. 2026-10-13: np.percentile costa ~130 microsecondi di solo contorno per
+    chiamata; nella costruzione del grafo era chiamata 121 mila volte, 15.7 s su 35.
+    """
+    a = np.asarray(values, dtype=np.float64).ravel()
+    n = a.size
+    if n == 1:
+        return float(a[0])
+    v = (n - 1) * 0.9
+    lo = int(np.floor(v))
+    hi = min(lo + 1, n - 1)
+    part = np.partition(a, (lo, hi)) if hi != lo else np.partition(a, lo)
+    x0, x1 = float(part[lo]), float(part[hi])
+    t = v - lo
+    d = x1 - x0
+    return x1 - d * (1.0 - t) if t >= 0.5 else x0 + d * t
+
+
 def _baseline_gradient(heights, step, baseline_m):
     """
     Differenza centrata su una base FISICA (baseline_m metri) invece che sul passo
@@ -611,7 +646,7 @@ def compute_arc_slope_profile(terrain_2d, grid_origin_x, grid_origin_y, cell_siz
                               baseline_m=SLOPE_BASELINE_M,
                               lateral_half_width_m=LATERAL_SLICE_HALF_WIDTH_M,
                               min_sample_fraction=MIN_ARC_SAMPLE_FRACTION, valid_2d=None,
-                              obstacle_2d=None):
+                              obstacle_2d=None, body_ext_m=0.0):
     """
     Compute the slope Spot would actually experience walking a specific arc, in BOTH
     directions, sampled directly from real terrain heights (not a precomputed gradient
@@ -678,11 +713,11 @@ def compute_arc_slope_profile(terrain_2d, grid_origin_x, grid_origin_y, cell_siz
         (longitudinal_slope, lateral_slope, has_data)
     """
     if terrain_2d is None or grid_origin_x is None or cell_size is None:
-        return 0.0, 0.0, False
+        return _no_slope_data(body_ext_m)
 
     dist = float(np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2))
     if dist < 1e-6:
-        return 0.0, 0.0, False
+        return _no_slope_data(body_ext_m)
 
     # Uscita rapida (2026-10-06 sera): se l'arco, allargato della fetta laterale, non tocca
     # nemmeno la griglia, nessun campione vi cade dentro -> has_data False con pendenze 0,
@@ -693,7 +728,7 @@ def compute_arc_slope_profile(terrain_2d, grid_origin_x, grid_origin_y, cell_siz
     pad = lateral_half_width_m + cell_size
     if (max(x1, x2) + pad < grid_origin_x or min(x1, x2) - pad > grid_origin_x + num_cols * cell_size or
             max(y1, y2) + pad < grid_origin_y or min(y1, y2) - pad > grid_origin_y + num_rows * cell_size):
-        return 0.0, 0.0, False
+        return _no_slope_data(body_ext_m)
 
     dir_x, dir_y = (x2 - x1) / dist, (y2 - y1) / dist   # along-arc unit vector
     perp_x, perp_y = -dir_y, dir_x                      # across-arc unit vector
@@ -715,7 +750,7 @@ def compute_arc_slope_profile(terrain_2d, grid_origin_x, grid_origin_y, cell_siz
         x1 + t * (x2 - x1), y1 + t * (y2 - y1), valid_2d=usable_2d
     )
     grad_long = _baseline_gradient(h_along, step_along, baseline_m)
-    longitudinal_slope = float(np.percentile(grad_long, 90)) if grad_long.size else 0.0
+    longitudinal_slope = p90(grad_long) if grad_long.size else 0.0
 
     # --- LATERAL: perpendicular slices as wide as the ROBOT, not as the arc ---
     num_slices = max(1, int(dist / perp_sample_spacing_m) + 1)
@@ -729,13 +764,69 @@ def compute_arc_slope_profile(terrain_2d, grid_origin_x, grid_origin_y, cell_siz
         terrain_2d, grid_origin_x, grid_origin_y, cell_size, xs_perp, ys_perp, valid_2d=usable_2d
     )
     grad_lat = _baseline_gradient(h_perp, step_perp, baseline_m)
-    lateral_slope = float(np.percentile(grad_lat, 90)) if grad_lat.size else 0.0
+    lateral_slope = p90(grad_lat) if grad_lat.size else 0.0
 
     has_data = (float(inside_along.mean()) >= min_sample_fraction
                 and float(inside_perp.mean()) >= min_sample_fraction
                 and grad_long.size > 0 and grad_lat.size > 0)
 
-    return longitudinal_slope, lateral_slope, has_data
+    base = (longitudinal_slope, lateral_slope, has_data)
+    if body_ext_m <= 0:
+        return base
+    gather = lambda xs, ys: _gather_heights(terrain_2d, grid_origin_x, grid_origin_y, cell_size,
+                                            xs, ys, valid_2d=usable_2d)
+    return base + _body_slope(gather, base, x1, y1, x2, y2, dir_x, dir_y, perp_x, perp_y,
+                              h_along, inside_along, step_along, grad_lat, inside_perp, u,
+                              step_perp, num_slices, dist, perp_sample_spacing_m, baseline_m,
+                              min_sample_fraction, body_ext_m)
+
+
+def _no_slope_data(body_ext_m):
+    """Risultato "nessun dato": 3 valori, o 6 se e' stata chiesta anche la misura col corpo."""
+    return (0.0, 0.0, False) if body_ext_m <= 0 else (0.0, 0.0, False, 0.0, 0.0, False)
+
+
+def _body_slope(gather, base, x1, y1, x2, y2, dir_x, dir_y, perp_x, perp_y,
+                h_along, inside_along, step_along, grad_lat, inside_perp, u, step_perp,
+                num_slices, dist, perp_spacing, baseline_m, min_sample_fraction, ext_m):
+    """
+    2026-10-13. Pendenza "col corpo": come quella dell'arco, ma sul tratto allungato di ext_m
+    a entrambi gli estremi (vedi ARC_BODY_EXTENSION_M). Riusa i campioni gia' letti per
+    l'arco e legge SOLO i pezzi aggiunti: prima si ricampionava tutto l'arco allungato da
+    capo, e la costruzione del grafo raddoppiava. I campioni aggiunti stanno allo stesso
+    passo di quelli dell'arco (ext arrotondato a un multiplo del passo: +/- 1.5 cm lungo
+    l'arco, +/- 5 cm per le fette laterali).
+
+    Restituisce (long, lat, has) gia' presi come il PEGGIORE fra arco e arco allungato, cosi'
+    il tratto aggiunto non puo' diluire una salita che sta dentro l'arco. Se l'arco non ha
+    dati, o il tratto allungato non ne ha abbastanza, restituisce i valori dell'arco.
+    """
+    lo, la, has = base
+    if not has:
+        return base
+    # Longitudinale: profilo continuo pezzo prima + arco + pezzo dopo.
+    k = max(1, int(round(ext_m / step_along)))
+    off = np.arange(1, k + 1) * step_along
+    xs = np.concatenate((x1 - dir_x * off[::-1], x2 + dir_x * off))
+    ys = np.concatenate((y1 - dir_y * off[::-1], y2 + dir_y * off))
+    h_ext, in_ext = gather(xs, ys)
+    h_full = np.concatenate((h_ext[:k], h_along, h_ext[k:]))
+    cov_along = (float(np.count_nonzero(in_ext)) + float(np.count_nonzero(inside_along))) / (2 * k + h_along.size)
+    g_long = _baseline_gradient(h_full, step_along, baseline_m)
+    # Laterale: fette aggiunte allo stesso passo delle fette dell'arco.
+    ds = dist / (num_slices - 1) if num_slices > 1 else perp_spacing
+    kl = max(1, int(round(ext_m / ds)))
+    offl = np.arange(1, kl + 1) * ds
+    cx = np.concatenate((x1 - dir_x * offl[::-1], x2 + dir_x * offl))
+    cy = np.concatenate((y1 - dir_y * offl[::-1], y2 + dir_y * offl))
+    h_l, in_l = gather(cx[:, None] + u[None, :] * perp_x, cy[:, None] + u[None, :] * perp_y)
+    g_lat = np.concatenate((grad_lat, _baseline_gradient(h_l, step_perp, baseline_m)))
+    cov_lat = ((float(np.count_nonzero(in_l)) + float(np.count_nonzero(inside_perp)))
+               / (in_l.size + np.size(inside_perp)))
+    if (cov_along < min_sample_fraction or cov_lat < min_sample_fraction
+            or g_long.size == 0 or g_lat.size == 0):
+        return base
+    return max(lo, p90(g_long)), max(la, p90(g_lat)), True
 
 
 def _bilinear_height(terrain_2d, grid_origin_x, grid_origin_y, cell_size, px, py):
@@ -2014,7 +2105,7 @@ def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
                                 baseline_m=SLOPE_BASELINE_M,
                                 lateral_half_width_m=LATERAL_SLICE_HALF_WIDTH_M,
                                 min_sample_fraction=MIN_ARC_SAMPLE_FRACTION,
-                                sample_array=None):
+                                sample_array=None, body_ext_m=0.0):
     """
     Nucleo di calcolo condiviso della pendenza longitudinale/laterale, indipendente
     dalla FONTE dei dati di altezza -- qui usato dalla mappa globale sparsa (vedi
@@ -2037,7 +2128,7 @@ def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
     """
     dist = float(np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2))
     if dist < 1e-6:
-        return 0.0, 0.0, False
+        return _no_slope_data(body_ext_m)
 
     dir_x, dir_y = (x2 - x1) / dist, (y2 - y1) / dist
     perp_x, perp_y = -dir_y, dir_x
@@ -2059,11 +2150,11 @@ def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
     if sample_array is not None:
         h3 = sample_array(np.array([x1, 0.5 * (x1 + x2), x2]), np.array([y1, 0.5 * (y1 + y2), y2]))
         if not np.isfinite(h3).any():
-            return 0.0, 0.0, False
+            return _no_slope_data(body_ext_m)
     elif (sample_height(x1, y1) is None
             and sample_height(0.5 * (x1 + x2), 0.5 * (y1 + y2)) is None
             and sample_height(x2, y2) is None):
-        return 0.0, 0.0, False
+        return _no_slope_data(body_ext_m)
 
     def _sample_array(xs, ys):
         """Campiona un array di posizioni, NaN dove la mappa non ha dati."""
@@ -2088,10 +2179,10 @@ def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
     # larga quanto il robot). Se la copertura longitudinale e' gia' insufficiente,
     # has_data sarebbe False comunque: inutile pagarlo.
     if cov_along < min_sample_fraction:
-        return 0.0, 0.0, False
+        return _no_slope_data(body_ext_m)
 
     grad_long = _baseline_gradient(h_along, step_along, baseline_m)
-    longitudinal_slope = float(np.percentile(grad_long, 90)) if grad_long.size else 0.0
+    longitudinal_slope = p90(grad_long) if grad_long.size else 0.0
 
     # --- LATERALE ---
     num_slices = max(1, int(dist / perp_sample_spacing_m) + 1)
@@ -2104,12 +2195,22 @@ def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
     h_perp = _sample_array(xs_perp, ys_perp)
     cov_lat = float(np.isfinite(h_perp).mean())
     grad_lat = _baseline_gradient(h_perp, step_perp, baseline_m)
-    lateral_slope = float(np.percentile(grad_lat, 90)) if grad_lat.size else 0.0
+    lateral_slope = p90(grad_lat) if grad_lat.size else 0.0
 
     has_data = (cov_along >= min_sample_fraction and cov_lat >= min_sample_fraction
                 and grad_long.size > 0 and grad_lat.size > 0)
 
-    return longitudinal_slope, lateral_slope, has_data
+    base = (longitudinal_slope, lateral_slope, has_data)
+    if body_ext_m <= 0:
+        return base
+
+    def gather(xs, ys):
+        h = _sample_array(xs, ys)
+        return h, np.isfinite(h)
+    return base + _body_slope(gather, base, x1, y1, x2, y2, dir_x, dir_y, perp_x, perp_y,
+                              h_along, np.isfinite(h_along), step_along, grad_lat,
+                              np.isfinite(h_perp), u, step_perp, num_slices, dist,
+                              perp_sample_spacing_m, baseline_m, min_sample_fraction, body_ext_m)
 
 
 class GlobalTerrainGrid:
@@ -2191,7 +2292,7 @@ class GlobalTerrainGrid:
             return None
         return self.height_sum[key] / count
 
-    def compute_arc_slope_profile(self, x1, y1, x2, y2, perp_sample_spacing_m=0.10):
+    def compute_arc_slope_profile(self, x1, y1, x2, y2, perp_sample_spacing_m=0.10, body_ext_m=0.0):
         """
         Come spotGrid.compute_arc_slope_profile, ma campionando dalla mappa globale
         accumulata invece che dalla griglia locale live -- usata come fallback quando
@@ -2206,7 +2307,7 @@ class GlobalTerrainGrid:
         rects = getattr(self, 'update_rects', None)
         if rects is not None:
             if not rects:
-                return 0.0, 0.0, False
+                return _no_slope_data(body_ext_m)
             # Uscita rapida: arco tutto fuori dal rettangolo che contiene tutto cio' che e'
             # stato visto -> nessun campione puo' avere dati (stesso risultato, senza leggere).
             if not hasattr(self, '_seen_bbox') or self._seen_bbox[4] != len(rects):
@@ -2216,10 +2317,10 @@ class GlobalTerrainGrid:
             pad = LATERAL_SLICE_HALF_WIDTH_M + 2 * self.resolution
             if (max(x1, x2) + pad < bxmin or min(x1, x2) - pad > bxmax or
                     max(y1, y2) + pad < bymin or min(y1, y2) - pad > bymax):
-                return 0.0, 0.0, False
+                return _no_slope_data(body_ext_m)
         return _slope_profile_from_sampler(
             self.get_height, x1, y1, x2, y2, self.resolution, perp_sample_spacing_m,
-            sample_array=self._sample_heights
+            sample_array=self._sample_heights, body_ext_m=body_ext_m
         )
 
     def _mean_height_raster(self):

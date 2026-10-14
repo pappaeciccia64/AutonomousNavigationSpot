@@ -124,6 +124,30 @@ STOP_NODE_MAP_IGNORE_M = 0.70
 REFRESH_RADIUS_M = 1.25
 
 
+def body_slope(prof):
+    """
+    (long, lat, has) da usare per veto, costo e andatura, dato il risultato di
+    compute_arc_slope_profile: con 6 valori (body=True) quelli col corpo, cioe' il peggiore
+    fra arco e arco allungato di mezzo corpo (spotGrid._body_slope); con 3 valori (vecchio
+    formato, senza corpo) quelli dell'arco. Se l'arco non ha dati suoi restano quelli
+    dell'arco: l'allungamento non trasforma un arco mai visto in uno misurato.
+    """
+    if prof[2] and len(prof) == 6:
+        return prof[3], prof[4], True
+    return prof[0], prof[1], prof[2]
+
+
+# 2026-10-13 -- AGGIORNAMENTO LOCALE DEL GRAFO. All'inizio di ogni cella non si rifanno piu'
+# tutti i ~94 mila archi: si rivalutano solo quelli vicini alle zone in cui sono arrivati
+# dati nuovi dall'ultima valutazione (dirty_rects: le finestre delle scansioni, che sono
+# l'unico posto in cui cambiano le mappe globali e i dati dal vivo). DIRTY_MARGIN_M e' fin
+# dove la valutazione di un arco legge i dati oltre il suo rettangolo: mezzo corpo oltre gli
+# estremi (ARC_BODY_EXTENSION_M), la fetta laterale della pendenza, il margine
+# d'occupazione, piu' un decimetro di sicurezza.
+DIRTY_MARGIN_M = (spotGrid.ARC_BODY_EXTENSION_M + spotGrid.LATERAL_SLICE_HALF_WIDTH_M
+                  + spotGrid.PRM_EDGE_SAFETY_MARGIN_M + 0.10)
+
+
 class PRM:
     """
     Probabilistic Road Map for local path planning.
@@ -191,6 +215,10 @@ class PRM:
         self._gslope_seen_updates = 0
 
         self.built = False
+        # Zone (xmin, xmax, ymin, ymax) con dati nuovi dall'ultima valutazione degli archi:
+        # vedi DIRTY_MARGIN_M e mission_graph.MissionGraph.add_edges_to_prm(incremental=True).
+        self.dirty_rects = []
+        self.hazards_seen = 0
 
         self.tracker_blocked_edges = set()   # <-- ADD, alongside self.edge_validity = {}
         # Nodi creati durante la missione nella posizione reale del robot (o dell'obiettivo),
@@ -413,6 +441,20 @@ class PRM:
         self.grid_origin_x = grid_origin_x
         self.grid_origin_y = grid_origin_y
         self.cell_size = cell_size
+        self.dirty_rects.extend(self.live_rects())
+
+    def live_rects(self):
+        """Rettangoli coperti dai dati dal vivo correnti (griglia locale e scansione degli ostacoli)."""
+        out = []
+        if self.current_grad_2d is not None and self.grid_origin_x is not None and self.cell_size:
+            nr, nc = np.shape(self.current_grad_2d)[:2]
+            out.append((float(self.grid_origin_x), float(self.grid_origin_x + nc * self.cell_size),
+                        float(self.grid_origin_y), float(self.grid_origin_y + nr * self.cell_size)))
+        lo = getattr(self, 'live_obstacles', None)
+        if lo is not None:
+            nr, nc = lo['od'].shape[:2]
+            out.append((lo['ox'], lo['ox'] + nc * lo['cs'], lo['oy'], lo['oy'] + nr * lo['cs']))
+        return out
 
     def set_live_obstacles(self, obstacle_dist_2d, seen_2d, origin_x, origin_y, cell_size,
                            robot_x, robot_y, robot_yaw=None):
@@ -432,6 +474,9 @@ class PRM:
             'od': od, 'seen': seen, 'ox': float(origin_x), 'oy': float(origin_y),
             'cs': float(cell_size), 'rx': float(robot_x), 'ry': float(robot_y),
             'yaw': None if robot_yaw is None else float(robot_yaw)}
+        nr, nc = od.shape[:2]
+        self.dirty_rects.append((float(origin_x), float(origin_x + nc * cell_size),
+                                 float(origin_y), float(origin_y + nr * cell_size)))
 
     def _live_blocked_samples(self, sx, sy):
         """
@@ -609,6 +654,7 @@ class PRM:
             # rilette piu' sotto per passare il profilo gia' calcolato a
             # _compute_edge_weight (vedi sample_terrain_between_points).
             long_slope, lat_slope, has_slope_data = 0.0, 0.0, False
+            prof = (long_slope, lat_slope, has_slope_data)
 
             blocked = False
             if use_occ:
@@ -617,7 +663,10 @@ class PRM:
                     self._record_occupancy_veto(key)
 
             if not blocked:
-                long_slope, lat_slope, has_slope_data = self.compute_arc_slope_profile(x1, y1, x2, y2)
+                # Una sola lettura del terreno; veto e costo usano lo stesso valore, quello
+                # col corpo (vedi body_slope e spotGrid.ARC_BODY_EXTENSION_M).
+                prof = self.compute_arc_slope_profile(x1, y1, x2, y2, body=True)
+                long_slope, lat_slope, has_slope_data = body_slope(prof)
                 if has_slope_data:
                     self.edge_slope_info[key] = (long_slope, lat_slope)  # per visualizzazione, no ricalcolo
                     if self._record_slope_veto(key, long_slope, lat_slope):
@@ -650,7 +699,7 @@ class PRM:
                 # non lo si rifa' dentro il calcolo del peso. Prima con has_slope_data False
                 # si passava None e il profilo veniva ricalcolato da capo.
                 weight = self._compute_edge_weight(
-                    idx1, idx2, dist, precomputed_slope=(long_slope, lat_slope, has_slope_data))
+                    idx1, idx2, dist, precomputed_slope=prof)
                 self.edges[idx1].append((idx2, weight))
                 self.edges[idx2].append((idx1, weight))
                 self.edge_validity[key] = True
@@ -665,7 +714,7 @@ class PRM:
         return set(local_nodes)
 
     def compute_arc_slope_profile(self, x1: float, y1: float, x2: float, y2: float,
-                                   perp_sample_spacing_m: float = 0.10):
+                                   perp_sample_spacing_m: float = 0.10, body: bool = False):
         """
         Thin wrapper around spotGrid.compute_arc_slope_profile() using this PRM's own
         currently-stored live terrain grid (see update_local_grid_data). See that
@@ -675,7 +724,8 @@ class PRM:
         return spotGrid.compute_arc_slope_profile(
             self.current_terrain_2d, self.grid_origin_x, self.grid_origin_y, self.cell_size,
             x1, y1, x2, y2, perp_sample_spacing_m=perp_sample_spacing_m,
-            valid_2d=getattr(self, 'current_valid_2d', None)
+            valid_2d=getattr(self, 'current_valid_2d', None),
+            body_ext_m=(spotGrid.ARC_BODY_EXTENSION_M if body else 0.0)
         )
 
     def sample_terrain_between_points(self, x1: float, y1: float, x2: float, y2: float,
@@ -742,17 +792,22 @@ class PRM:
                     sampled_roughness.append(self.current_rough_2d[row_idx, col_idx])
 
         if sampled_roughness:
-            actual_roughness = float(np.percentile(sampled_roughness, 90))
+            actual_roughness = spotGrid.p90(sampled_roughness)
         else:
             r1 = self.node_roughness.get(node_idx1, 0.0)
             r2 = self.node_roughness.get(node_idx2, 0.0)
             actual_roughness = float((r1 + r2) / 2.0)
 
         # --- Pendenza: direzionale, via compute_arc_slope_profile sul terreno reale ---
-        if precomputed_slope is not None:
-            longitudinal_slope, lateral_slope, has_slope_data = precomputed_slope
-        else:
-            longitudinal_slope, lateral_slope, has_slope_data = self.compute_arc_slope_profile(x1, y1, x2, y2)
+        # 2026-10-13: per il costo e l'andatura conta anche il terreno sotto il corpo oltre i
+        # due estremi (spotGrid.ARC_BODY_EXTENSION_M): si usano i valori "col corpo", gia'
+        # presi come il PEGGIORE fra arco e arco allungato (spotGrid._body_slope). Solo se
+        # l'arco ha dati suoi: l'allungamento non trasforma un arco mai visto in uno
+        # misurato (resta la catena di fallback qui sotto). precomputed_slope puo' essere
+        # (long, lat, has) -- vecchio formato, senza corpo -- o i 6 valori con il corpo.
+        if precomputed_slope is None:
+            precomputed_slope = self.compute_arc_slope_profile(x1, y1, x2, y2, body=True)
+        longitudinal_slope, lateral_slope, has_slope_data = body_slope(precomputed_slope)
         source = 'live'
 
         if not has_slope_data and self.global_terrain_map is not None:
@@ -935,14 +990,24 @@ class PRM:
         sono davvero i due nodi (non per un tratto parziale verso un punto intermedio).
         """
         tm = self.global_terrain_map
+
+        def _with_body(x1, y1, x2, y2):
+            # Come per il dal vivo (sample_terrain_between_points): il peggiore fra arco e
+            # arco allungato di mezzo corpo, solo se l'arco ha dati suoi.
+            ext = spotGrid.ARC_BODY_EXTENSION_M
+            if ext <= 0:
+                return tm.compute_arc_slope_profile(x1, y1, x2, y2)
+            r = tm.compute_arc_slope_profile(x1, y1, x2, y2, body_ext_m=ext)
+            return (r[3], r[4], True) if r[2] else r[:3]
+
         cacheable = (idx1 is not None and idx2 is not None and idx1 in self.nodes and idx2 in self.nodes
                      and self.nodes[idx1] == (x1, y1) and self.nodes[idx2] == (x2, y2))
         if not cacheable:
-            return tm.compute_arc_slope_profile(x1, y1, x2, y2)
+            return _with_body(x1, y1, x2, y2)
         key = (min(idx1, idx2), max(idx1, idx2))
         hit = self._gslope_cache.get(key)
         if hit is None:
-            hit = tm.compute_arc_slope_profile(x1, y1, x2, y2)
+            hit = _with_body(x1, y1, x2, y2)
             self._gslope_cache[key] = hit
         return hit
 
@@ -975,7 +1040,8 @@ class PRM:
         if not keys:
             return
         a = np.array([self.nodes[k[0]] for k in keys]); b = np.array([self.nodes[k[1]] for k in keys])
-        m = spotGrid.LATERAL_SLICE_HALF_WIDTH_M + 2 * tm.resolution
+        # + ARC_BODY_EXTENSION_M: il valore in cache guarda anche oltre gli estremi.
+        m = spotGrid.LATERAL_SLICE_HALF_WIDTH_M + 2 * tm.resolution + spotGrid.ARC_BODY_EXTENSION_M
         exmin, exmax = np.minimum(a[:, 0], b[:, 0]) - m, np.maximum(a[:, 0], b[:, 0]) + m
         eymin, eymax = np.minimum(a[:, 1], b[:, 1]) - m, np.maximum(a[:, 1], b[:, 1]) + m
         stale = np.zeros(len(keys), dtype=bool)
@@ -1229,6 +1295,7 @@ class PRM:
         key = (min(idx1, idx2), max(idx1, idx2))
 
         long_slope, lat_slope, has_slope_data = 0.0, 0.0, False
+        prof = (long_slope, lat_slope, has_slope_data)
         if not force:
             if key in self.tracker_blocked_edges:
                 self.edge_validity[key] = False
@@ -1246,7 +1313,8 @@ class PRM:
             # Scartiamo l'arco se troppo ripido in AVANTI (longitudinale) o di LATO
             # (laterale, sidehill) -- vedi compute_arc_slope_profile(). Registrare
             # esplicitamente l'invalidità serve a contare correttamente i [SLOPE-FLIP].
-            long_slope, lat_slope, has_slope_data = self.compute_arc_slope_profile(x1, y1, x2, y2)
+            prof = self.compute_arc_slope_profile(x1, y1, x2, y2, body=True)
+            long_slope, lat_slope, has_slope_data = body_slope(prof)
             if has_slope_data:
                 self.edge_slope_info[key] = (long_slope, lat_slope)  # per visualizzazione
                 if self._record_slope_veto(key, long_slope, lat_slope):
@@ -1255,7 +1323,7 @@ class PRM:
 
         weight = self._compute_edge_weight(
             idx1, idx2, dist,
-            precomputed_slope=(None if force else (long_slope, lat_slope, has_slope_data)))
+            precomputed_slope=(None if force else prof))
 
         if fresh:
             self.edges.setdefault(idx1, []).append((idx2, weight))
