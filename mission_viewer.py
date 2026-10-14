@@ -3,7 +3,7 @@
 Visualizzatore dei dati di missione (2026-10-06). Gira su qualunque computer: servono solo
 numpy e matplotlib, NON l'SDK di Spot.
 
-Durante la missione il robot non disegna piu' figure (SAVE_FIGURES_DURING_MISSION = False in
+Durante la missione il robot non disegna figure (vedi visualize_grid_with_candidates in
 easy_walk.py): salva i dati grezzi, e le figure si fanno qui, dopo.
 
     python3 mission_viewer.py                                  # (o tasto Run) l'ultima missione in MissionMap/
@@ -165,7 +165,8 @@ def draw_vis_bundle(ax, d):
     trav = [(xy[a], xy[b]) for a, b in d['prm_traversed_edges'] if a in xy and b in xy]
     if trav:
         ax.add_collection(LineCollection(trav, colors='tab:blue', linewidths=2))
-    stops = np.array([xy[int(i)] for i in d['prm_stop_nodes'] if int(i) in xy]).reshape(-1, 2)
+    # nodi di sosta: solo nelle missioni fino al 08-10, prima che il grafo restasse fisso
+    stops = np.array([xy[int(i)] for i in _arr(d, 'prm_stop_nodes', ()) if int(i) in xy]).reshape(-1, 2)
     if len(stops):
         ax.plot(stops[:, 0], stops[:, 1], 'o', color='tab:orange', ms=5, label='nodi di sosta')
     cp = d['chosen_path']

@@ -85,7 +85,6 @@ REQUIRED = {
             ("MissionGraph", "save_npz"),
             ("MissionGraph", "report"),
             ("LatticeSampler", "get_point_in_cell"),
-            ("LatticeSampler", "get_all_points"),
         ],
     },
     # 2026-10-08: easy_walk chiama questi metodi per le scorciatoie GraphNav.
@@ -100,19 +99,17 @@ REQUIRED = {
         ],
     },
     "prm_graph.py": {
-        "costanti": ["ALLOW_NEW_STOP_NODES", "ANCHOR_SEARCH_M", "ANCHOR_ON_NODE_M",   # 2026-10-08
+        "costanti": ["ANCHOR_SEARCH_M", "ANCHOR_ON_NODE_M",   # 2026-10-08
                      "ANCHOR_IGNORE_NEAR_M",
-                     "OCCUPANCY_SAMPLES_PER_M", "OCCUPANCY_SAMPLES_MIN", "STOP_NODE_MIN_EDGE_M",
+                     "OCCUPANCY_SAMPLES_PER_M", "OCCUPANCY_SAMPLES_MIN",
                      "STOP_NODE_MAP_IGNORE_M"],
         "funzioni": [],
         "metodi": [
-            ("PRM", "build_graph"),
             ("PRM", "refresh_local_edge_weights"),
             ("PRM", "sample_terrain_between_points"),
             ("PRM", "_compute_edge_weight"),
             ("PRM", "set_global_terrain_map"),
             ("PRM", "add_stop_node"),             # passo 5
-            ("PRM", "connect_node"),
             ("PRM", "_evaluate_and_add_edge"),
             ("PRM", "set_robot_node"),            # cadute
             ("PRM", "_occupancy_blocked"),
@@ -149,7 +146,7 @@ REQUIRED = {
         "costanti": ["MIN_PARTIAL_STEP_M", "FRONTIER_BLOCK_CONFIRM_SCANS", "FRONTIER_RESCAN_WAIT_S",
                      "MAX_BLOCK_REPLANS", "FRONTIER_ABORT_CONFIRM", "FRONTIER_ABORT_TOLERANCE_M",
                      "GOAL_REACHED_TOLERANCE_M", "MAX_LOOP_ITERATIONS",
-                     "SAVE_FIGURES_DURING_MISSION", "SAVE_SCAN_BUNDLES",                 # passi 7-8
+                     "SAVE_SCAN_BUNDLES",                 # passi 7-8
                      "ROTATION_ROOM_SEARCH_M", "ROTATION_ROOM_DIRECTIONS_DEG",           # passo 4
                      # 2026-10-08: MAX_MANEUVERS_SAME_EDGE non esiste piu' da quando la marcia
                      # di traverso e' stata eliminata (2026-10-07): al suo posto ci sono il
@@ -158,7 +155,7 @@ REQUIRED = {
                      "SHORTCUT_MAX_DIST_M", "MAX_ROTATION_FAILS_SAME_EDGE",
                      "MAX_STRAIGHT_RETREATS_IN_A_ROW",
                      # Grafo di missione regolare (2026-10-08, mission_graph.py)
-                     "USE_MISSION_LATTICE", "MISSION_LATTICE_SPACING_M", "MISSION_LATTICE_RINGS",
+                     "MISSION_LATTICE_SPACING_M", "MISSION_LATTICE_RINGS",
                      "PRM_MIN_EDGE_M", "PRM_MAX_EDGE_M", "PRM_CONNECTION_RADIUS_M",
                      # guardie anti-stallo e avanzamento multinodo (2026-10-08)
                      "MAX_ROTATION_DISCARDS", "MAX_IDLE_LOOPS", "IDLE_MOVE_M",

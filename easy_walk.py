@@ -26,27 +26,14 @@ import environmentMap
 import spotUtils
 import arcVerification
 
-import global_sampler
 import prm_graph
 import prm_graph as prm_graph_module   # dentro le funzioni `prm_graph` e' spesso il parametro (istanza)
-# 2026-10-08: grafo di missione REGOLARE (reticolo rettangolare deterministico) al posto del
-# campionamento casuale di global_sampler. Vedi mission_graph.py per il perche'. L'import di
-# global_sampler resta: e' il ripiego se mission_graph non c'e' (vedi _build_mission_prm).
-import mission_graph
+import mission_graph                   # reticolo dei nodi della missione
 
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-import matplotlib
-# CRUCIALE: Impostare il backend 'Agg' PRIMA di importare pyplot!
-# Questo disabilita Tkinter ed evita qualsiasi crash multithread/SIGABRT.
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from matplotlib.collections import LineCollection
-
-# Thread safety and background execution setup
-_VIS_LOCK = threading.Lock()
+# Un thread di appoggio per salvare i dati su disco senza fermare il ciclo di navigazione.
 _VIS_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vis_worker")
 
 # ==================================================================
@@ -131,7 +118,7 @@ def _timing_add(phase, seconds):
 # ==================================================================
 # GRAFO DI MISSIONE REGOLARE (2026-10-08) -- vedi mission_graph.py.
 #
-# I nodi non vengono piu' campionati a caso (global_sampler: np.random.uniform, nessun
+# I nodi non vengono piu' campionati a caso (sampler: np.random.uniform, nessun
 # seed, ~3125 nodi su 25x25 m, grafo diverso a ogni missione e ~85600 archi da valutare a
 # ogni ricostruzione) ma da un reticolo rettangolare con passo cell_size/n. Conseguenze:
 #   - grafo DETERMINISTICO: stessi parametri, stesso grafo, quindi mission_replay puo'
@@ -142,9 +129,6 @@ def _timing_add(phase, seconds):
 #     non serve piu' aggiungere il "boot node" a mano;
 #   - archi di due sole lunghezze e 4-8 volte meno archi da valutare.
 #
-#   USE_MISSION_LATTICE        False torna al campionamento casuale di prima, senza
-#                              toccare altro: serve per confrontare le due versioni sulla
-#                              stessa missione.
 #   MISSION_LATTICE_SPACING_M  passo fra i nodi, da mission_graph.MISSION_SPACING_M (None =
 #                              0.25 m). Puo' stare sotto PRM_MIN_EDGE_M: i vicini piu'
 #                              corti di PRM_MIN_EDGE_M non si collegano (vedi mission_graph,
@@ -176,7 +160,6 @@ def _timing_add(phase, seconds):
 #   archi 0.5-1.25  (ora)  : 109 474 coppie, 79 229 ammessi, costruzione 4.72 s, refresh 0.43 s
 # Sulla missione delle 16:35 (4 costruzioni, 47 scansioni) sono ~39 s invece di ~9 s: il
 # prezzo e' noto e accettato, ed e' in parte restituito dal refresh a eventi qui sotto.
-USE_MISSION_LATTICE = True
 # Righe, colonne, lato cella e passo vengono da mission_graph.mission_settings(): si
 # scelgono la' (MISSION_ROWS, MISSION_COLS, MISSION_CELL_SIZE_M, MISSION_SPACING_M; None =
 # default). Da qui si costruiscono sia la mappa delle celle sia il grafo.
@@ -209,51 +192,30 @@ ANCHOR_ON_NODE_M = prm_graph.ANCHOR_ON_NODE_M
 
 def _build_mission_prm(env, verbose=True):
     """
-    Crea il campionatore di punti e il PRM con i suoi nodi, dalla dimensione della missione
+    Crea il reticolo della missione e il PRM con i suoi nodi, dalla dimensione della missione
     e dalla posa di partenza che `env` ha gia' dentro (set_origin va fatto PRIMA).
 
-    Restituisce (prm, sampler, mission_lattice): `sampler` ha l'interfaccia di
-    global_sampler.GlobalSampler in entrambi i casi, quindi find_best_point_in_cell e
-    compagnia non cambiano; `mission_lattice` e' il MissionGraph, o None col ripiego casuale.
+    Restituisce (prm, sampler, mission_lattice): `sampler` da' i punti del reticolo cella per
+    cella (vedi mission_graph.LatticeSampler), `mission_lattice` e' il MissionGraph.
     Gli ARCHI non vengono creati qui: servono i dati di terreno, vedi _rebuild_prm_edges.
     """
-    if USE_MISSION_LATTICE:
-        mg = mission_graph.build_mission_graph(
-            env=env, spacing_m=MISSION_LATTICE_SPACING_M, rings=MISSION_LATTICE_RINGS,
-            min_edge_length=PRM_MIN_EDGE_M, max_edge_length=PRM_MAX_EDGE_M,
-            connection_radius=PRM_CONNECTION_RADIUS_M, verbose=verbose)
-        prm = prm_graph.PRM(min_edge_length=PRM_MIN_EDGE_M, max_edge_length=mg.reach_m,
-                            connection_radius=PRM_CONNECTION_RADIUS_M)
-        prm.mission_graph = mg          # lo rilegge _rebuild_prm_edges
-        prm.set_detour_limit(PLAN_MAX_DETOUR_RATIO, PLAN_DETOUR_SLACK_M)
-        mg.into_prm(prm)
-        return prm, mg.as_sampler(), mg
-
-    # --- Ripiego: il campionamento casuale di prima, invariato.
-    sampler = global_sampler.GlobalSampler(env, 5)
-    sampler.sample_global_grid()
-    prm = prm_graph.PRM(min_edge_length=PRM_MIN_EDGE_M, max_edge_length=PRM_MAX_EDGE_M,
+    mg = mission_graph.build_mission_graph(
+        env=env, spacing_m=MISSION_LATTICE_SPACING_M, rings=MISSION_LATTICE_RINGS,
+        min_edge_length=PRM_MIN_EDGE_M, max_edge_length=PRM_MAX_EDGE_M,
+        connection_radius=PRM_CONNECTION_RADIUS_M, verbose=verbose)
+    prm = prm_graph.PRM(min_edge_length=PRM_MIN_EDGE_M, max_edge_length=mg.reach_m,
                         connection_radius=PRM_CONNECTION_RADIUS_M)
-    prm.mission_graph = None
+    prm.mission_graph = mg          # lo rilegge _rebuild_prm_edges
     prm.set_detour_limit(PLAN_MAX_DETOUR_RATIO, PLAN_DETOUR_SLACK_M)
-    prm.add_nodes_from_sampler(sampler)
-    node_id = max(prm.nodes.keys(), default=-1) + 1
-    prm.add_node(node_id, env.origin_x, env.origin_y)       # boot node
-    for r in range(env.rows):                               # centri cella
-        for c in range(env.cols):
-            world_pos = env.get_world_position_from_cell(r, c)
-            if world_pos is not None:
-                node_id += 1
-                prm.add_node(node_id, world_pos[0], world_pos[1])
-    print(f"[GRAFO] Campionamento CASUALE (USE_MISSION_LATTICE=False): {len(prm.nodes)} nodi")
-    return prm, sampler, None
+    mg.into_prm(prm)
+    return prm, mg.as_sampler(), mg
 
 
 def _node_cells(prm, env):
     """
     {id nodo: (riga, colonna)}. Dal reticolo quando c'e' (mission_graph.node_cell, stessa
-    regola di env.get_cell_from_world), altrimenti da env. In cache sul PRM: dal 2026-10-08 i
-    nodi non cambiano piu' durante la missione (prm_graph.ALLOW_NEW_STOP_NODES).
+    regola di env.get_cell_from_world), altrimenti da env. In cache sul PRM: i nodi non
+    cambiano durante la missione.
     """
     cache = getattr(prm, '_node_cell_cache', None)
     if cache is None:
@@ -304,20 +266,14 @@ INCREMENTAL_GRAPH_UPDATE = True
 
 def _rebuild_prm_edges(prm, global_map):
     """
-    Ricostruisce tutti gli archi del PRM sui dati correnti. Con il reticolo usa le coppie
-    gia' calcolate (nessun appaiamento geometrico da rifare); senza, chiama build_graph come
-    prima. In entrambi i casi i veti e i pesi li calcola PRM._evaluate_and_add_edge, quindi
-    il comportamento di navigazione non cambia.
+    Rivaluta gli archi del PRM sui dati correnti, sulle coppie del reticolo gia' calcolate
+    (vedi mission_graph.MissionGraph.add_edges_to_prm). Veti e pesi li calcola
+    PRM._evaluate_and_add_edge.
     """
-    mg = getattr(prm, 'mission_graph', None)
-    if mg is not None:
-        return mg.add_edges_to_prm(
-            prm, global_map=global_map,
-            edge_safety_margin=spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
-            incremental=INCREMENTAL_GRAPH_UPDATE)
-    prm.build_graph(global_map=global_map,
-                    edge_safety_margin=spotGrid.PRM_EDGE_SAFETY_MARGIN_M)
-    return None
+    return prm.mission_graph.add_edges_to_prm(
+        prm, global_map=global_map,
+        edge_safety_margin=spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
+        incremental=INCREMENTAL_GRAPH_UPDATE)
 
 
 def _save_npz_async(path, **arrays):
@@ -567,22 +523,16 @@ MAX_BACKTRACKS_PER_ATTEMPT = 2
 RECOVERY_SAME_GOAL_M = 0.30
 
 # ==================================================================
-# DATI DI MISSIONE (2026-10-06, passi 7-8).
-#   SAVE_FIGURES_DURING_MISSION -- False: durante la missione NON si disegna nulla. Ogni
-#       chiamata a visualize_grid_with_candidates salva invece gli stessi dati in un .npz
-#       (grafo PRM compreso), e le figure si producono DOPO con mission_viewer.py. Le figure
-#       erano "asincrone" ma in un thread Python: disegnare decine di migliaia di archi in
-#       matplotlib si contende il GIL con il ciclo principale e lo rallenta comunque. Nella
-#       missione del 2026-10-05 16:05 su 15 minuti solo ~2 erano di movimento.
-#       True: comportamento di prima.
+# DATI DI MISSIONE.
+#   Durante la missione non si disegna nulla: ogni figura viene salvata come dati in un
+#   <nome>_vis.npz (vedi visualize_grid_with_candidates) e le figure si fanno dopo con
+#   mission_viewer.py.
 #   SAVE_SCAN_BUNDLES -- un .npz per ogni scansione del ciclo di navigazione, nella
 #       sottocartella scans/: layer GREZZI come arrivano da Spot (terrain, terrain_valid,
 #       obstacle_distance), i derivati usati per decidere, la georeferenziazione (origine,
-#       cella, posa del robot, suolo stimato), percorso, fronte e decisione. E' cio' che usa
-#       mission_replay.py per rifare i calcoli con il codice nuovo sui dati di una missione
-#       vecchia. ~0.3 MB a scansione.
+#       cella, posa del robot, suolo stimato), percorso, fronte e decisione. E' cio' che usano
+#       mission_viewer.py, mission_report.py e test_replay.py. ~0.3 MB a scansione.
 # ==================================================================
-SAVE_FIGURES_DURING_MISSION = False
 SAVE_SCAN_BUNDLES = True
 
 # Raggio del disco segnato come pericoloso nella mappa globale attorno al punto di una
@@ -610,35 +560,6 @@ RETREAT_AFTER_ABORT_M = 0.40
 #   RETREAT_MAX_SEGMENT_M -- tratto piu' lungo di cosi': non lo si ripercorre all'indietro.
 RETREAT_CONTINUITY_M = 0.50
 RETREAT_MAX_SEGMENT_M = 2.50
-
-
-def _slope_edge_color(node_id, neighbor_id, edge_slope_info):
-    """
-    Colore di un arco del grafo PRM in base a quanto la sua pendenza sia LATERALE
-    (sidehill/rollio, più rischioso -- vedi beta_lateral in prm_graph.PRM) rispetto a
-    LONGITUDINALE (beccheggio). Verde = soprattutto longitudinale o poco ripido,
-    arancione/rosso = pendenza soprattutto laterale e vicina alla soglia di veto.
-    Grigio = arco senza dato di pendenza registrato (mai valutato, o scartato solo per
-    occupazione) -- stesso colore neutro usato prima di questa modifica, nessun dato
-    inventato. Riusa self.edge_slope_info già calcolato dal veto -- zero ricalcolo qui.
-    """
-    key = (min(node_id, neighbor_id), max(node_id, neighbor_id))
-    info = edge_slope_info.get(key)
-    if info is None:
-        return (0.5, 0.5, 0.5, 0.3)  # grigio neutro, comportamento invariato
-
-    long_s, lat_s = info
-    total = long_s + lat_s
-    if total < 1e-6:
-        return (0.6, 0.6, 0.6, 0.25)  # terreno piatto, niente da evidenziare
-
-    lateral_share = lat_s / total
-    severity = min(1.0, max(long_s, lat_s) / spotGrid.SLOPE_THRESHOLD) if spotGrid.SLOPE_THRESHOLD > 0 else 0.0
-
-    cmap = matplotlib.colormaps.get_cmap('RdYlGn_r')  # rosso = alto valore, verde = basso
-    r, g, b, _ = cmap(lateral_share)
-    alpha = 0.3 + 0.5 * severity  # più ripido -> più visibile, meno ripido -> discreto
-    return (r, g, b, alpha)
 
 
 # =========================================================================
@@ -1715,7 +1636,7 @@ def _emit_mission_summary_once():
 # TODO: change the folder destination of the name download of graph
 
 def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cells_obstacle_dist,
-                            global_sampler, global_map=None, safety_margin=None, exclude=None):
+                            sampler, global_map=None, safety_margin=None, exclude=None):
     """
     Sceglie il punto obiettivo dentro la cella: il piu' CENTRALE fra quelli non occupati.
 
@@ -1763,7 +1684,7 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
         return None, None, [], []
 
     cell_center_x, cell_center_y = cell_center
-    sampled = list(global_sampler.get_point_in_cell(cell_row, cell_col))
+    sampled = list(sampler.get_point_in_cell(cell_row, cell_col))
 
     if global_map is None:
         # Nessuna informazione di occupazione: comportamento storico invariato.
@@ -1892,113 +1813,15 @@ def visualize_grid_with_candidates(pts, terrain_real, obstacle_mask, robot_x, ro
                                    valid_values=None, grad_values=None, rough_values=None,
                                    include_diagnostics=True):
     """
-    Non-blocking async wrapper. Snapshots current data and offloads heavy Matplotlib
-    rendering to a background thread executor so robot navigation is not delayed.
-
-    Con SAVE_FIGURES_DURING_MISSION = False (default dal 2026-10-06) non disegna: salva gli
-    stessi dati in <nome>_vis.npz, da cui mission_viewer.py rigenera le figure dopo.
+    Dati di una figura (scansione, candidati, punto scelto, grafo PRM, percorso) salvati in
+    <nome>_vis.npz. Durante la missione non si disegna: le figure le fa mission_viewer.py
+    dopo, da questi file.
     """
     if save_path is None:
         return
-    if not SAVE_FIGURES_DURING_MISSION:
-        _save_visualization_bundle(save_path, pts, terrain_real, obstacle_mask, robot_x, robot_y,
-                                   candidates, chosen_point, iteration, env, prm_graph, chosen_path,
-                                   cells_obstacle_dist, valid_values, grad_values, rough_values)
-        return
-
-    # 1. Fast snapshot of NumPy arrays to prevent thread race conditions
-    pts_snap = pts.copy() if pts is not None else None
-    terrain_snap = terrain_real.copy() if terrain_real is not None else None
-    obs_snap = obstacle_mask.copy() if obstacle_mask is not None else None
-    dist_snap = cells_obstacle_dist.copy() if cells_obstacle_dist is not None else None
-    valid_snap = valid_values.copy() if valid_values is not None else None
-    grad_snap = grad_values.copy() if grad_values is not None else None
-    rough_snap = rough_values.copy() if rough_values is not None else None
-
-    # 2. Extract graph snapshots safely
-    prm_nodes = dict(prm_graph.nodes) if (prm_graph and hasattr(prm_graph, 'nodes')) else {}
-    prm_edges = dict(prm_graph.edges) if (prm_graph and hasattr(prm_graph, 'edges')) else {}
-    # Longitudinale/laterale per arco (vedi PRM.edge_slope_info) -- solo per colorare il
-    # grafo nella visualizzazione, nessun ricalcolo: riusa quanto già calcolato dal veto.
-    edge_slope_snap = dict(prm_graph.edge_slope_info) if (prm_graph and hasattr(prm_graph, 'edge_slope_info')) else {}
-
-    # 3. Snapshot environment structures safely
-    env_info = None
-    if env is not None:
-        # Pre-compute vectorized global accumulation on main thread (takes < 1ms)
-        ACCUM_RES = 0.05
-        if not hasattr(env, '_accumulated_pts'):
-            env._accumulated_pts = {}
-
-        # Compute colors for accumulation
-        fused_colors_temp = np.zeros((len(obs_snap), 3), dtype=np.float32) if obs_snap is not None else np.zeros((0, 3))
-        if terrain_snap is not None:
-            z_terrain = terrain_snap.ravel()
-            z_min, z_max = z_terrain.min(), z_terrain.max()
-            z_norm = (z_terrain - z_min) / (z_max - z_min) if (z_max - z_min) > 0.001 else np.zeros_like(z_terrain)
-            cmap_walkable = matplotlib.colormaps.get_cmap('YlGn')
-            fused_colors_temp[:] = cmap_walkable(z_norm)[:, :3]
-        else:
-            fused_colors_temp[:] = [0.9, 0.9, 0.9]
-
-        if obs_snap is not None:
-            fused_colors_temp[obs_snap.ravel() == -1] = [1.0, 0.0, 0.0]
-
-        # Vectorized key computation
-        keys = (np.round(pts_snap[:, :2] / ACCUM_RES)).astype(np.int32)
-        colors_uint8 = (fused_colors_temp * 255).astype(np.uint8)
-        for k, col in zip(keys, colors_uint8):
-            env._accumulated_pts[tuple(k)] = col
-
-        # Extract accumulated points array snapshot
-        if env._accumulated_pts:
-            accum_keys = np.array(list(env._accumulated_pts.keys()), dtype=np.float32)
-            accum_wx = accum_keys[:, 0] * ACCUM_RES
-            accum_wy = accum_keys[:, 1] * ACCUM_RES
-            accum_colors = np.array(list(env._accumulated_pts.values()), dtype=np.float32) / 255.0
-        else:
-            accum_wx = np.array([robot_x], dtype=np.float32)
-            accum_wy = np.array([robot_y], dtype=np.float32)
-            accum_colors = np.array([[0.0, 0.0, 1.0]], dtype=np.float32)
-
-        traveled_arcs = list(getattr(env, '_traveled_arcs', []))
-
-        # Snapshot grid cell parameters
-        grid_cells = []
-        cos_yaw, sin_yaw = np.cos(env.origin_yaw), np.sin(env.origin_yaw)
-        half_size = env.cell_size / 2.0
-        base_corners = np.array([[-half_size, -half_size], [half_size, -half_size],
-                                 [half_size, half_size], [-half_size, half_size]])
-        rot_matrix = np.array([[cos_yaw, -sin_yaw], [sin_yaw, cos_yaw]])
-
-        for row in range(env.rows):
-            for col in range(env.cols):
-                world_pos = env.get_world_position_from_cell(row, col)
-                if world_pos is None:
-                    continue
-                cell_x, cell_y = world_pos
-                world_corners = np.dot(base_corners, rot_matrix.T) + [cell_x, cell_y]
-                status_res = env.get_cell_status(row, col)
-                cell_status = status_res[0] if isinstance(status_res, (tuple, list)) else status_res
-                grid_cells.append((cell_x, cell_y, row, col, world_corners, cell_status))
-
-        env_info = {
-            'cell_size': env.cell_size,
-            'accum_wx': accum_wx,
-            'accum_wy': accum_wy,
-            'accum_colors': accum_colors,
-            'traveled_arcs': traveled_arcs,
-            'grid_cells': grid_cells
-        }
-
-    # 4. Dispatch rendering asynchronously to worker queue
-    _VIS_EXECUTOR.submit(
-        _async_render_worker,
-        pts_snap, terrain_snap, obs_snap, robot_x, robot_y, candidates,
-        chosen_point, iteration, env_info, save_path, prm_nodes, prm_edges,
-        chosen_path, dist_snap, valid_snap, grad_snap, rough_snap, include_diagnostics,
-        edge_slope_snap
-    )
+    _save_visualization_bundle(save_path, pts, terrain_real, obstacle_mask, robot_x, robot_y,
+                               candidates, chosen_point, iteration, env, prm_graph, chosen_path,
+                               cells_obstacle_dist, valid_values, grad_values, rough_values)
 
 
 def _save_visualization_bundle(save_path, pts, terrain_real, obstacle_mask, robot_x, robot_y,
@@ -2025,7 +1848,6 @@ def _save_visualization_bundle(save_path, pts, terrain_real, obstacle_mask, robo
                         pairs.append((a, b)); weights.append(w)
         slope_keys = list(prm_graph.edge_slope_info.keys()) if prm_graph else []
         slope_vals = [prm_graph.edge_slope_info[k] for k in slope_keys] if prm_graph else []
-        stop_ids = np.array(list(getattr(prm_graph, 'stop_nodes', {}).keys()), dtype=np.int64)
         traversed = np.array(sorted(getattr(prm_graph, 'traversed_edges', set())), dtype=np.int64)
 
         cells = []
@@ -2063,7 +1885,7 @@ def _save_visualization_bundle(save_path, pts, terrain_real, obstacle_mask, robo
             prm_edge_weights=np.array(weights, dtype=np.float64),
             prm_slope_keys=np.array(slope_keys, dtype=np.int64).reshape(-1, 2),
             prm_slope_values=np.array(slope_vals, dtype=np.float64).reshape(-1, 2),
-            prm_stop_nodes=stop_ids, prm_traversed_edges=traversed.reshape(-1, 2),
+            prm_traversed_edges=traversed.reshape(-1, 2),
             env_cells=np.array([c[:4] for c in cells], dtype=np.float64).reshape(-1, 4),
             env_cell_status=np.array([c[4] for c in cells]),
             env_cell_size=np.nan if env is None else float(env.cell_size),
@@ -2073,260 +1895,6 @@ def _save_visualization_bundle(save_path, pts, terrain_real, obstacle_mask, robo
     except Exception as e:
         print(f"[DATA SAVE] Impossibile preparare i dati della figura: {e}")
     _timing_add('dati figure', time.perf_counter() - t0)
-
-
-def _async_render_worker(pts, terrain_real, obstacle_mask, robot_x, robot_y,
-                         candidates, chosen_point, iteration, env_info, save_path,
-                         prm_nodes, prm_edges, chosen_path, cells_obstacle_dist,
-                         valid_values, grad_values, rough_values, include_diagnostics,
-                         edge_slope_info=None):
-    """Background thread worker handling figure creation and file I/O."""
-    edge_slope_info = edge_slope_info or {}
-    with _VIS_LOCK:
-        try:
-            x = pts[:, 0]
-            y = pts[:, 1]
-
-            ZOOM_RADIUS = 3.0
-            local_xmin_zoom, local_xmax_zoom = robot_x - ZOOM_RADIUS, robot_x + ZOOM_RADIUS
-            local_ymin_zoom, local_ymax_zoom = robot_y - ZOOM_RADIUS, robot_y + ZOOM_RADIUS
-            local_x_min, local_x_max = x.min(), x.max()
-            local_y_min, local_y_max = y.min(), y.max()
-
-            def _apply_common_axis_settings(target_ax, title_text):
-                target_ax.set_xlim(local_xmin_zoom, local_xmax_zoom)
-                target_ax.set_ylim(local_ymin_zoom, local_ymax_zoom)
-                target_ax.set_aspect('equal', adjustable='box')
-                target_ax.set_xlabel('X [m] (VISION)', fontsize=11, fontweight='bold')
-                target_ax.set_ylabel('Y [m] (VISION)', fontsize=11, fontweight='bold')
-                target_ax.set_title(title_text, fontsize=12, fontweight='bold')
-                target_ax.grid(True, alpha=0.3)
-
-            def _draw_prm_and_robot(target_ax):
-                # High-speed LineCollection rendering for PRM graph
-                if prm_nodes and prm_edges:
-                    edge_segments = []
-                    edge_colors = []
-                    for node_id, edges in prm_edges.items():
-                        if node_id in prm_nodes:
-                            nx1, ny1 = prm_nodes[node_id]
-                            if local_xmin_zoom <= nx1 <= local_xmax_zoom and local_ymin_zoom <= ny1 <= local_ymax_zoom:
-                                for neighbor_id, _ in edges:
-                                    if neighbor_id in prm_nodes:
-                                        nx2, ny2 = prm_nodes[neighbor_id]
-                                        edge_segments.append([(nx1, ny1), (nx2, ny2)])
-                                        edge_colors.append(_slope_edge_color(node_id, neighbor_id, edge_slope_info))
-
-                    if edge_segments:
-                        lc = LineCollection(edge_segments, colors=edge_colors, linewidths=0.7, alpha=0.5, zorder=2)
-                        target_ax.add_collection(lc)
-                        target_ax.text(0.01, 0.01,
-                                       "Archi PRM: verde = pendenza in avanti, rosso = traverso (laterale),\n"
-                                       "piu' marcato = piu' vicino alla soglia di veto, grigio = nessun dato",
-                                       transform=target_ax.transAxes, fontsize=8, va='bottom', ha='left',
-                                       bbox=dict(boxstyle='round', facecolor='white', alpha=0.75),
-                                       zorder=10, clip_on=True)
-
-                    # Plot visible PRM nodes
-                    visible_nodes = np.array([pos for pos in prm_nodes.values()
-                                              if local_xmin_zoom <= pos[0] <= local_xmax_zoom and
-                                              local_ymin_zoom <= pos[1] <= local_ymax_zoom])
-                    if visible_nodes.size > 0:
-                        target_ax.plot(visible_nodes[:, 0], visible_nodes[:, 1], 'k.', markersize=3, alpha=0.5, zorder=3)
-
-                # Path
-                if chosen_path and len(chosen_path) > 1:
-                    path_x = [p[0] for p in chosen_path if p is not None]
-                    path_y = [p[1] for p in chosen_path if p is not None]
-                    target_ax.plot(path_x, path_y, color='magenta', linewidth=3.0, linestyle='-', zorder=4)
-                    target_ax.plot(path_x, path_y, 'mo', markersize=6, markeredgecolor='white', zorder=5)
-
-                # Target
-                if chosen_point is not None:
-                    target_ax.plot(chosen_point[0], chosen_point[1], 'g*', markersize=18, markeredgewidth=1.5, zorder=6)
-                    target_ax.plot([robot_x, chosen_point[0]], [robot_y, chosen_point[1]], 'g--', linewidth=1.8, alpha=0.6, zorder=3)
-
-                # Robot
-                target_ax.plot(robot_x, robot_y, 'bo', markersize=12, zorder=7)
-                for r in [1.0, 2.0]:
-                    circle = patches.Circle((robot_x, robot_y), r, fill=False, linestyle=':', linewidth=1, edgecolor='blue', alpha=0.3, zorder=2)
-                    target_ax.add_patch(circle)
-
-            base_save_path, ext = os.path.splitext(save_path)
-
-            # Colors matrix
-            fused_colors = np.zeros((len(obstacle_mask), 3), dtype=np.float32)
-            if terrain_real is not None:
-                z_terrain = terrain_real.ravel()
-                z_min, z_max = z_terrain.min(), z_terrain.max()
-                z_norm = (z_terrain - z_min) / (z_max - z_min) if (z_max - z_min) > 0.001 else np.zeros_like(z_terrain)
-                cmap_walkable = matplotlib.colormaps.get_cmap('YlGn')
-                fused_colors[:] = cmap_walkable(z_norm)[:, :3]
-            else:
-                fused_colors[:] = [0.9, 0.9, 0.9]
-
-            fused_colors[obstacle_mask.ravel() == -1] = [1.0, 0.0, 0.0]
-
-            # ------------------------------------------------------------------ #
-            # FIGURE 1: MAIN LOCAL VIEW
-            # ------------------------------------------------------------------ #
-            fig, ax = plt.subplots(figsize=(8, 8))
-            try:
-                ax.scatter(x, y, c=fused_colors, s=8, alpha=0.7, zorder=1, label='Terreno / Ostacoli')
-
-                if env_info:
-                    margin = env_info['cell_size']
-                    for cell_x, cell_y, row, col, world_corners, cell_status in env_info['grid_cells']:
-                        # Filter against the ZOOM window (what's actually visible), not the full
-                        # local-scan extent -- otherwise cells far outside the zoomed view still
-                        # get drawn/labeled off-canvas, and since Text defaults to clip_on=False,
-                        # bbox_inches='tight' expands the saved figure to include them, crushing
-                        # the real (visible) plot into a tiny corner.
-                        if not (local_xmin_zoom - margin <= cell_x <= local_xmax_zoom + margin and
-                                local_ymin_zoom - margin <= cell_y <= local_ymax_zoom + margin):
-                            continue
-
-                        if cell_status == 1:
-                            rect = patches.Polygon(world_corners, linewidth=1.5, edgecolor='darkgreen', facecolor='lightgreen', alpha=0.3, zorder=2, clip_on=True)
-                        elif cell_status == -1:
-                            rect = patches.Polygon(world_corners, linewidth=1.5, edgecolor='darkred', facecolor='lightcoral', alpha=0.4, zorder=2, clip_on=True)
-                        else:
-                            rect = patches.Polygon(world_corners, linewidth=1.0, edgecolor='gray', facecolor='none', alpha=0.5, linestyle='--', zorder=2, clip_on=True)
-
-                        ax.add_patch(rect)
-                        ax.text(cell_x, cell_y, f'{row},{col}', ha='center', va='center', fontsize=7, color='black', weight='bold', zorder=3, clip_on=True)
-
-                if candidates:
-                    if 'rejected' in candidates:
-                        for point in candidates['rejected']:
-                            ax.plot(point[0], point[1], 'rx', markersize=8, markeredgewidth=2, zorder=5)
-                    if 'valid' in candidates:
-                        for point in candidates['valid']:
-                            ax.plot(point[0], point[1], 'yo', markersize=8, markerfacecolor='yellow', markeredgewidth=1.5, markeredgecolor='orange', zorder=5)
-
-                _draw_prm_and_robot(ax)
-                _apply_common_axis_settings(ax, f'Iterazione {iteration}: Path Visualization & Local Scan')
-                ax.legend(loc='upper right', fontsize=8)
-                plt.tight_layout()
-                fig.savefig(save_path, dpi=120, bbox_inches='tight')
-            finally:
-                plt.close(fig)
-
-            # ------------------------------------------------------------------ #
-            # DIAGNOSTICS (Off by default during navigation)
-            # ------------------------------------------------------------------ #
-            if include_diagnostics:
-                # Fixed, physically-meaningful color ranges instead of per-frame min/max.
-                # Per-frame auto-scaling lets a single tall/rough/steep tree pixel stretch the
-                # whole colorbar, flattening all the ground-level detail into one color band.
-                # Values beyond vmax simply clip to the top color (still reads as "extreme")
-                # instead of dragging the scale.
-                robot_z_ref = float(np.nanmedian(terrain_real)) if terrain_real is not None and terrain_real.size > 0 else 0.0
-                terrain_relative = (terrain_real - robot_z_ref) if terrain_real is not None else None
-
-                diagnostic_layers = {
-                    'terrain': (terrain_relative, 'YlGn', 'Quota relativa al suolo (m)', 'Layer: TERRAIN', -0.3, 0.3),
-                    'obstacle_dist': (cells_obstacle_dist, 'plasma', 'Distanza (m)', 'Layer: OBSTACLE DISTANCE', 0.0, 2.0),
-                    'valid': (valid_values, 'binary', '1=Valido, 0=Cieco', 'Layer: VALID MAP', 0.0, 1.0),
-                    'gradient': (grad_values, 'YlOrRd', 'Gradiente / Pendenza', 'Diagnostica: PENDENZA', 0.0, 1.2),
-                    'roughness': (rough_values, 'coolwarm', 'Indice di Rugosità', 'Diagnostica: RUGOSITÀ', 0.0, 0.3)
-                }
-
-                for layer_key, (data_matrix, cmap, label_cb, title_suffix, vmin, vmax) in diagnostic_layers.items():
-                    if data_matrix is not None and data_matrix.size > 0:
-                        fig_diag, ax_diag = plt.subplots(figsize=(8, 8))
-                        try:
-                            z_data = data_matrix.flatten() if data_matrix.shape != x.shape else data_matrix
-                            sc = ax_diag.scatter(x, y, c=z_data, cmap=cmap, s=6, alpha=0.6, zorder=1,
-                                                 vmin=vmin, vmax=vmax)
-                            cbar_extend = 'neither' if layer_key == 'valid' else 'both'
-                            cbar = fig_diag.colorbar(sc, ax=ax_diag, label=label_cb, shrink=0.8, extend=cbar_extend)
-                            _draw_prm_and_robot(ax_diag)
-                            _apply_common_axis_settings(ax_diag, f'Iterazione {iteration} - {title_suffix}')
-                            plt.tight_layout()
-                            diag_save_path = f"{base_save_path}_{layer_key}{ext}"
-                            fig_diag.savefig(diag_save_path, dpi=100, bbox_inches='tight')
-                        finally:
-                            plt.close(fig_diag)
-
-            # ------------------------------------------------------------------ #
-            # FIGURE 2: GLOBAL MAP
-            # ------------------------------------------------------------------ #
-            if env_info:
-                fig2, ax2 = plt.subplots(figsize=(12, 10))
-                try:
-                    ax2.scatter(env_info['accum_wx'], env_info['accum_wy'], c=env_info['accum_colors'], s=2, alpha=0.6, label='Accumulated Local Scan')
-
-                    # Vectorized global PRM edges
-                    if prm_nodes and prm_edges:
-                        global_segments = []
-                        global_colors = []
-                        for node_id, edges in prm_edges.items():
-                            if node_id in prm_nodes:
-                                nx1, ny1 = prm_nodes[node_id]
-                                for neighbor_id, _ in edges:
-                                    if neighbor_id in prm_nodes:
-                                        nx2, ny2 = prm_nodes[neighbor_id]
-                                        global_segments.append([(nx1, ny1), (nx2, ny2)])
-                                        global_colors.append(_slope_edge_color(node_id, neighbor_id, edge_slope_info))
-                        if global_segments:
-                            lc_glob = LineCollection(global_segments, colors=global_colors, linewidths=0.6, alpha=0.5, zorder=2)
-                            ax2.add_collection(lc_glob)
-                            ax2.text(0.01, 0.01,
-                                     "Archi PRM: verde = pendenza in avanti, rosso = traverso (laterale),\n"
-                                     "piu' marcato = piu' vicino alla soglia di veto, grigio = nessun dato",
-                                     transform=ax2.transAxes, fontsize=8, va='bottom', ha='left',
-                                     bbox=dict(boxstyle='round', facecolor='white', alpha=0.75),
-                                     zorder=10, clip_on=True)
-
-                        node_coords = np.array(list(prm_nodes.values()))
-                        if node_coords.size > 0:
-                            ax2.plot(node_coords[:, 0], node_coords[:, 1], 'k.', markersize=4, alpha=0.5, zorder=3)
-
-                    if chosen_path and len(chosen_path) > 1:
-                        path_x = [p[0] for p in chosen_path if p is not None]
-                        path_y = [p[1] for p in chosen_path if p is not None]
-                        ax2.plot(path_x, path_y, color='magenta', linewidth=3.5, linestyle='-', zorder=6, label='Chosen Path')
-
-                    if env_info['traveled_arcs']:
-                        segments = [[(x1, y1), (x2, y2)] for (x1, y1, x2, y2) in env_info['traveled_arcs']]
-                        traveled_lc = LineCollection(segments, colors='blue', linewidths=2.0, alpha=0.6, zorder=5)
-                        ax2.add_collection(traveled_lc)
-                        ax2.plot([], [], color='blue', linewidth=2.0, alpha=0.6, label='Traveled Path')
-
-                    rect_local = patches.Rectangle((local_x_min, local_y_min), local_x_max - local_x_min, local_y_max - local_y_min,
-                                                   linewidth=2, edgecolor='cyan', facecolor='none', alpha=0.8, zorder=6, label='Current scan')
-                    ax2.add_patch(rect_local)
-
-                    for cell_x, cell_y, row, col, world_corners, cell_status in env_info['grid_cells']:
-                        if cell_status == 1:
-                            rect = patches.Polygon(world_corners, linewidth=1.5, edgecolor='darkgreen', facecolor='lightgreen', alpha=0.3, zorder=2)
-                        elif cell_status == -1:
-                            rect = patches.Polygon(world_corners, linewidth=1.5, edgecolor='darkred', facecolor='lightcoral', alpha=0.4, zorder=2)
-                        else:
-                            rect = patches.Polygon(world_corners, linewidth=1.0, edgecolor='gray', facecolor='none', alpha=0.5, linestyle='--', zorder=2)
-
-                        ax2.add_patch(rect)
-                        ax2.text(cell_x, cell_y, f'{row},{col}', ha='center', va='center', fontsize=7, color='black', weight='bold', zorder=3)
-
-                    if chosen_point is not None:
-                        ax2.plot(chosen_point[0], chosen_point[1], 'g*', markersize=20, markeredgewidth=2, label='Target', zorder=6)
-
-                    ax2.set_xlabel('X [m] (VISION)', fontsize=12, fontweight='bold')
-                    ax2.set_ylabel('Y [m] (VISION)', fontsize=12, fontweight='bold')
-                    ax2.set_title(f'Iteration {iteration}: Global Map View', fontsize=13, fontweight='bold')
-                    ax2.set_aspect('equal', adjustable='box')
-                    ax2.grid(True, alpha=0.3)
-                    ax2.legend(loc='upper right', fontsize=9)
-                    plt.tight_layout()
-
-                    global_save_path = f"{base_save_path}_global{ext}"
-                    fig2.savefig(global_save_path, dpi=120, bbox_inches='tight')
-                finally:
-                    plt.close(fig2)
-
-        except Exception as err:
-            print(f"[VISUALIZATION ERROR] Async rendering failed: {err}")
 
 
 def decide_next_move(robot_xy, path_waypoints, frontier, no_progress_count):
@@ -3111,7 +2679,7 @@ def retreat_would_help(snap, back_xy, robot_yaw, dyaw_deg):
 
 
 def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client, command_client,
-                                     env, target_row, target_col, global_sampler, prm_graph, mission_folder=None,
+                                     env, target_row, target_col, sampler, prm_graph, mission_folder=None,
                                      iteration=0,
                                      recordingInterface=None, verification_tracker=None, mobility_kwargs=None):
 
@@ -3344,7 +2912,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
 
     # Ricerca del punto target e pianificazione
     target_x, target_y, valid_samples, rejected_samples = find_best_point_in_cell(
-        robot_x, robot_y, env, target_row, target_col, pts, cells_obstacle_dist, global_sampler,
+        robot_x, robot_y, env, target_row, target_col, pts, cells_obstacle_dist, sampler,
         global_map=global_map)
 
     # 2026-10-13: l'obiettivo di questo tentativo, per il recupero subito dopo un fallimento
@@ -3843,8 +3411,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                         ax_c, ay_c, _, _ = spotUtils.getPosition(robot_state_client)
                         env._traveled_arcs.append((robot_x, robot_y, ax_c, ay_c))
                         robot_node_id = prm_graph.add_stop_node(
-                            ax_c, ay_c, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
-                            came_from=robot_node_id, label="sosta (avanzamento nel cono)")
+                            ax_c, ay_c, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M, label="sosta (avanzamento nel cono)")
                         prm_graph.set_robot_node(robot_node_id, 0.0)
                         retreats_in_a_row = 0      # ha fatto strada vera: la catena si rompe
                     else:
@@ -3884,8 +3451,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                         ax_b, ay_b, _, _ = spotUtils.getPosition(robot_state_client)
                         env._traveled_arcs.append((robot_x, robot_y, ax_b, ay_b))
                         robot_node_id = prm_graph.add_stop_node(
-                            ax_b, ay_b, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
-                            came_from=robot_node_id, label="sosta (arretramento per ruotare)")
+                            ax_b, ay_b, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M, label="sosta (arretramento per ruotare)")
                         prm_graph.set_robot_node(robot_node_id, 0.0)
                     else:
                         print(f"[ARRETRAMENTO] Non sono riuscito ad arretrare "
@@ -4046,7 +3612,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 tried_goals.append((float(target_x), float(target_y)))
                 new_tx, new_ty, _vs, _rs = find_best_point_in_cell(
                     robot_x, robot_y, env, target_row, target_col, pts_up, cells_obs_up,
-                    global_sampler, global_map=global_map, exclude=tried_goals)
+                    sampler, global_map=global_map, exclude=tried_goals)
                 if new_tx is not None and new_ty is not None:
                     target_x, target_y = new_tx, new_ty
                     best_goal_dist = float('inf')    # nuovo obiettivo: progressi da capo
@@ -4591,8 +4157,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 if is_partial_step:
                     ax, ay, _, _ = spotUtils.getPosition(robot_state_client)
                     robot_node_id = prm_graph.add_stop_node(
-                        ax, ay, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
-                        came_from=robot_node_id, label="sosta (passo parziale)")
+                        ax, ay, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M, label="sosta (passo parziale)")
                     prm_graph.set_robot_node(robot_node_id, 0.0)
                 else:
                     # Arco "percorso" solo se il robot e' partito dal nodo: altrimenti il tratto
@@ -4619,8 +4184,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                     ax, ay, _, _ = spotUtils.getPosition(robot_state_client)
                     env._traveled_arcs.append((robot_x, robot_y, ax, ay))
                     robot_node_id = prm_graph.add_stop_node(
-                        ax, ay, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
-                        came_from=robot_node_id, label="sosta (arresto)")
+                        ax, ay, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M, label="sosta (arresto)")
                     prm_graph.set_robot_node(robot_node_id, 0.0)
                 leg_exit = 'arresto'
                 break
@@ -5151,8 +4715,7 @@ def easy_walk(options):
               f"fonte: {_grid_source})")
         print(f"[CONFIG] Reticolo: passo richiesto "
               f"{'suggerito' if MISSION_LATTICE_SPACING_M is None else '%.3f m' % MISSION_LATTICE_SPACING_M}, "
-              f"anelli {MISSION_LATTICE_RINGS if MISSION_LATTICE_RINGS is not None else 'tutti'}"
-              f"{'' if USE_MISSION_LATTICE else ' (NON usato: USE_MISSION_LATTICE=False)'}")
+              f"anelli {MISSION_LATTICE_RINGS if MISSION_LATTICE_RINGS is not None else 'tutti'}")
         env = environmentMap.EnvironmentMap(rows=grid_rows, cols=grid_cols, cell_size=grid_cell)  # cols in front, rows on the left
 
         # --- Mission-wide movement/gait parameters ---
@@ -5176,10 +4739,8 @@ def easy_walk(options):
         env.set_origin(x_boot, y_boot, yaw_boot, start_row=start_row, start_col=start_col)
         _set_mission_z0(robot_state_client, z_boot)
 
-        # Campionatore e nodi del PRM: reticolo regolare (vedi _build_mission_prm e
-        # mission_graph.py) oppure, con USE_MISSION_LATTICE=False, il campionamento casuale
-        # di prima. Con il reticolo il punto di accensione e i centri cella sono gia' nodi,
-        # quindi il "boot node" e il ciclo sui centri cella non servono piu'.
+        # Nodi del PRM: il reticolo della missione (vedi _build_mission_prm e mission_graph.py).
+        # Il punto di accensione e i centri cella sono nodi del reticolo.
         prm, gb_sampler, mission_lattice = _build_mission_prm(env)
         _MISSION_CTX['prm'] = prm  # per il riepilogo di fine missione (anche se interrotta)
 

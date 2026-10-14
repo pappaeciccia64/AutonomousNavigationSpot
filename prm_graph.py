@@ -6,7 +6,7 @@ Edges are weighted with costs based on distance and terrain slope/gradient.
 """
 
 import numpy as np
-from typing import List, Tuple, Dict, Set, Optional
+from typing import List, Tuple, Optional
 import heapq
 import threading
 import spotGrid
@@ -64,18 +64,9 @@ LIVE_PREFILTER_OD_M = spotGrid.ROBOT_HALF_WIDTH_M - 0.05     # = 0.20
 # _vis.npz (prm_slope_keys / prm_slope_values) e i totali nel riepilogo di fine missione.
 VERBOSE_SLOPE_LOG = False
 
-# Lunghezza minima degli archi che collegano un nodo di sosta ai vicini (vedi add_stop_node).
-STOP_NODE_MIN_EDGE_M = 0.20
-# Entro questa distanza una sosta non si ricrea: si riusa quella che c'e' gia'
-# (2026-10-08, vedi add_stop_node). Vale solo con ALLOW_NEW_STOP_NODES = True.
-STOP_NODE_REUSE_M = 0.20
-
-# --- Niente nodi nuovi durante la missione (2026-10-08, decisione dell'utente) -----------
+# --- Niente nodi nuovi durante la missione (decisione dell'utente) -----------------------
 # Il grafo resta quello costruito all'inizio (il reticolo di mission_graph): add_stop_node
-# NON crea piu' nodi, aggancia la posizione al nodo ESISTENTE adatto (vedi anchor_node).
-# Nella missione del 08-10 15:09 ne erano nati 14 (861..874) in 4 tentativi.
-# True rimette il comportamento di prima (un nodo nuovo a ogni sosta), per confronto.
-ALLOW_NEW_STOP_NODES = False
+# aggancia la posizione del robot al nodo ESISTENTE adatto (vedi anchor_node).
 # Raggio in cui cercare il nodo a cui agganciarsi. Con il reticolo a passo 0.5 m ogni punto
 # ha un nodo entro 0.35 m; 1.0 m lascia spazio per scartare quelli dietro un ostacolo.
 ANCHOR_SEARCH_M = 1.0
@@ -223,7 +214,6 @@ class PRM:
         self.tracker_blocked_edges = set()   # <-- ADD, alongside self.edge_validity = {}
         # Nodi creati durante la missione nella posizione reale del robot (o dell'obiettivo),
         # vedi add_stop_node(). id -> etichetta.
-        self.stop_nodes = {}
         # Archi effettivamente percorsi dal robot (liberi per costruzione).
         self.traversed_edges = set()
         # Nodo in cui si trova il robot adesso, e raggio entro cui la mappa globale non si usa
@@ -336,52 +326,6 @@ class PRM:
         self.node_gradients[point_idx] = gradient
         self.node_roughness[point_idx] = roughness
         self.edges[point_idx] = []
-
-    def add_nodes_from_sampler(self, global_sampler, env=None, grad_values=None, rough_values=None):
-        """
-        Populate PRM with nodes from global sampler and map their gradients.
-
-        Args:
-            global_sampler: GlobalSampler instance with sampled points
-            env: L'istanza dell'ambiente (EnvironmentMap) per convertire le coordinate in celle della griglia
-            grad_values: La griglia 2D o array flat contenente i gradienti calcolati da spotGrid
-            rough_values: La griglia 2D o array flat contenente la rugosità calcolata da spotGrid
-        """
-
-        # 1. Check della forma degli array PRIMA del loop
-        is_grad_2d = grad_values is not None and len(grad_values.shape) == 2
-        is_rough_2d = rough_values is not None and len(rough_values.shape) == 2
-
-        points = global_sampler.get_all_points()
-        for idx, (x, y) in enumerate(points):
-            node_grad = 0.0
-            node_rough = 0.0
-
-            if env is not None:
-                cell = env.get_cell_from_world(x, y)
-                if cell is not None:
-                    r, c = cell
-
-                    # 2. Estrazione ottimizzata
-                    if grad_values is not None:
-                        if is_grad_2d:
-                            node_grad = grad_values[r, c]
-                        else:
-                            idx_flat = r * env.cols + c
-                            if idx_flat < grad_values.size:
-                                node_grad = grad_values[idx_flat]
-
-                    if rough_values is not None:
-                        if is_rough_2d:
-                            node_rough = rough_values[r, c]
-                        else:
-                            idx_flat = r * env.cols + c
-                            if idx_flat < rough_values.size:
-                                node_rough = rough_values[idx_flat]
-
-            self.add_node(idx, x, y, gradient=node_grad, roughness=node_rough)
-
-        print(f"[PRM] Added {len(self.nodes)} nodes from global sampler with gradient and roughness mapping")
 
     def set_global_terrain_map(self, global_terrain_map):
         """
@@ -580,18 +524,13 @@ class PRM:
         all_ids = list(self.nodes.keys())
         all_xy = np.array([self.nodes[i] for i in all_ids], dtype=np.float64) if all_ids else np.empty((0, 2))
         reach = min(self.connection_radius, self.max_edge_length)
-        # Gli archi dei nodi di sosta partono da STOP_NODE_MIN_EDGE_M (vedi add_stop_node):
-        # vanno rivalutati anche loro, altrimenti un arco corto di una sosta resta valido anche
-        # dopo che un ostacolo e' comparso sopra.
-        is_stop = np.array([i in self.stop_nodes for i in all_ids], dtype=bool)
         self._sync_global_slope_cache()
 
         pairs = []
         for idx1 in local_nodes:
             x1, y1 = self.nodes[idx1]
             d_all = np.hypot(all_xy[:, 0] - x1, all_xy[:, 1] - y1)
-            dmin = np.where(is_stop | (idx1 in self.stop_nodes), STOP_NODE_MIN_EDGE_M, self.min_edge_length)
-            for j in np.nonzero((d_all >= dmin) & (d_all <= reach))[0]:
+            for j in np.nonzero((d_all >= self.min_edge_length) & (d_all <= reach))[0]:
                 idx2 = all_ids[j]
                 if idx2 == idx1 or (idx2 in local_set and idx2 < idx1):
                     continue           # coppia locale-locale gia' considerata dall'altro estremo
@@ -1340,27 +1279,6 @@ class PRM:
         self.edge_validity[key] = True
         return True
 
-    def connect_node(self, idx: int, global_map=None, edge_safety_margin: float = 0.0,
-                     min_edge_length: Optional[float] = None) -> int:
-        """
-        Collega UN nodo ai vicini entro connection_radius / max_edge_length, con gli stessi
-        controlli di build_graph(). Lineare nel numero di nodi, invece che quadratico: si
-        puo' chiamare a ogni sosta senza ricostruire il grafo. Restituisce quanti archi ha
-        aggiunto.
-        """
-        if min_edge_length is None:
-            min_edge_length = self.min_edge_length
-        x, y = self.nodes[idx]
-        added = 0
-        for other, (ox, oy) in list(self.nodes.items()):
-            if other == idx:
-                continue
-            dist = float(np.hypot(ox - x, oy - y))
-            if min_edge_length <= dist <= min(self.connection_radius, self.max_edge_length):
-                if self._evaluate_and_add_edge(idx, other, dist, global_map, edge_safety_margin):
-                    added += 1
-        return added
-
     def set_allowed_nodes(self, node_ids=None):
         """
         Limita la ricerca del percorso a questi nodi (None = nessun limite). Partenza e arrivo
@@ -1424,144 +1342,21 @@ class PRM:
         return int(ids[order[0]])
 
     def add_stop_node(self, x: float, y: float, global_map=None, edge_safety_margin: float = 0.0,
-                      came_from: Optional[int] = None, label: str = "sosta",
-                      is_robot: bool = True) -> int:
+                      label: str = "sosta", is_robot: bool = True) -> int:
         """
-        Dal 2026-10-08 (ALLOW_NEW_STOP_NODES = False) NON crea nodi: restituisce il nodo
-        esistente a cui agganciare la posizione (anchor_node). Il grafo resta quello iniziale.
-        came_from non aggiunge piu' archi: il tratto percorso e' libero nella mappa globale
-        (zona attorno al corpo, vedi easy_walk._mask_for_global_map) e gli archi del reticolo
-        che lo seguono vengono rivalutati normalmente.
-
-        Comportamento precedente (ALLOW_NEW_STOP_NODES = True), invariato:
-        Crea SEMPRE un nodo nuovo nella posizione indicata e lo collega ai vicini.
-
-        Decisione dell'utente (2026-10-06): il robot non viene MAI agganciato al nodo
-        esistente piu' vicino. Dopo un arresto a meta' arco il nodo piu' vicino puo' essere
-        quello alle sue spalle, o uno raggiungibile solo attraversando cio' che lo ha fatto
-        fermare: pianificare da li' vuol dire pianificare da un punto in cui il robot non e'.
-
-        came_from: il nodo da cui il robot e' appena arrivato camminando. Quell'arco viene
-        aggiunto comunque (force=True), a qualunque lunghezza: e' stato appena percorso,
-        quindi e' libero per costruzione -- l'unico arco del grafo verificato con le zampe.
-
-        I collegamenti agli altri vicini partono da STOP_NODE_MIN_EDGE_M invece che da
-        min_edge_length: una sosta cade spesso a pochi decimetri da un nodo campionato, ed
-        escluderlo lascerebbe la sosta poco collegata proprio verso dove si trova.
+        Il nodo ESISTENTE a cui agganciare la posizione (x, y) (vedi anchor_node): il grafo
+        non cresce durante la missione. Se is_robot, diventa anche il nodo del robot.
         """
-        if not ALLOW_NEW_STOP_NODES:
-            nid = self.anchor_node(x, y, global_map, edge_safety_margin,
-                                   ignore_near_m=(ANCHOR_IGNORE_NEAR_M if is_robot else 0.0))
-            if nid is None:
-                raise RuntimeError("add_stop_node: il grafo non ha nodi")
-            if is_robot:
-                self.set_robot_node(nid)
-            nx, ny = self.nodes[nid]
-            print(f"[NODO] {label}: agganciato al nodo {nid} in ({nx:.2f}, {ny:.2f}), a "
-                  f"{float(np.hypot(nx - x, ny - y)):.2f} m da ({x:.2f}, {y:.2f}) -- nessun nodo nuovo")
-            return nid
-
-        # Riuso di una sosta vicina (2026-10-08). Nella missione del 08-10 10:47 il robot ha
-        # creato un nodo nuovo a ogni ritorno nello stesso punto -- 3170, 3171, 3172, 3173,
-        # 3174, 3175 entro 2 cm l'uno dall'altro -- e ogni creazione ricollega girando su
-        # ~3200 nodi: 38 s su 212 di missione finivano li'. Coerente anche con la decisione
-        # di non far crescere il grafo a livello di nodi: se una sosta c'e' gia' a meno di
-        # STOP_NODE_REUSE_M, si riusa quella e si aggiunge solo l'arco percorso.
-        reuse = None
-        for nid in self.stop_nodes:
-            if nid in self.nodes and float(np.hypot(self.nodes[nid][0] - x,
-                                                    self.nodes[nid][1] - y)) <= STOP_NODE_REUSE_M:
-                reuse = nid
-                break
-        if reuse is not None:
-            if is_robot:
-                self.set_robot_node(reuse)
-            if came_from is not None and came_from in self.nodes and came_from != reuse:
-                fx, fy = self.nodes[came_from]
-                self._evaluate_and_add_edge(reuse, came_from,
-                                            float(np.hypot(fx - self.nodes[reuse][0],
-                                                           fy - self.nodes[reuse][1])), force=True)
-                self.traversed_edges.add((min(reuse, came_from), max(reuse, came_from)))
-            print(f"[NODO] {label}: riuso il nodo di sosta {reuse} in "
-                  f"({self.nodes[reuse][0]:.2f}, {self.nodes[reuse][1]:.2f}), a "
-                  f"{float(np.hypot(self.nodes[reuse][0] - x, self.nodes[reuse][1] - y)):.2f} m da qui"
-                  + (f" (con l'arco appena percorso da {came_from})" if came_from is not None else ""))
-            return reuse
-
-        new_id = max(self.nodes.keys(), default=-1) + 1
-        self.add_node(new_id, x, y)
-        self.stop_nodes[new_id] = label
+        nid = self.anchor_node(x, y, global_map, edge_safety_margin,
+                               ignore_near_m=(ANCHOR_IGNORE_NEAR_M if is_robot else 0.0))
+        if nid is None:
+            raise RuntimeError("add_stop_node: il grafo non ha nodi")
         if is_robot:
-            # il robot e' qui: i primi metri li giudica il fronte, non la mappa
-            self.set_robot_node(new_id)
-        n = self.connect_node(new_id, global_map, edge_safety_margin,
-                              min_edge_length=STOP_NODE_MIN_EDGE_M)
-        if came_from is not None and came_from in self.nodes and came_from != new_id:
-            fx, fy = self.nodes[came_from]
-            already = any(nb == came_from for nb, _ in self.edges[new_id])
-            self._evaluate_and_add_edge(new_id, came_from, float(np.hypot(fx - x, fy - y)), force=True)
-            self.traversed_edges.add((min(new_id, came_from), max(new_id, came_from)))
-            n += 0 if already else 1
-        print(f"[NODO] {label}: nuovo nodo {new_id} in ({x:.2f}, {y:.2f}), {n} collegamenti"
-              + (f" (incluso l'arco appena percorso da {came_from})" if came_from is not None else ""))
-        return new_id
-
-    def build_graph(self, global_map=None, edge_safety_margin: float = 0.0):
-        """
-        Build the PRM graph by connecting nearby nodes using custom edge weights.
-        Se global_map è fornita, scarta gli archi che attraversano celle globalmente occupate.
-        """
-        print(f"[PRM] Building graph with {len(self.nodes)} nodes...")
-
-        # Reset archi
-        for idx in self.nodes.keys():
-            self.edges[idx] = []
-        self.edge_validity = {}
-        # Il permesso di ignorare la mappa vicino al robot vale per il nodo in cui il robot si
-        # trova ADESSO: quello del tentativo precedente non c'entra piu' (lo reimposta
-        # add_stop_node subito dopo).
-        self.robot_node = None
-        self._sync_global_slope_cache()
-
-        node_ids = list(self.nodes.keys())
-        reach = min(self.connection_radius, self.max_edge_length)
-
-        # Coppie candidate. Prima un doppio ciclo Python su tutte le coppie (~5 milioni con
-        # 3150 nodi, ~4.6 s solo per le distanze); ora un albero k-d, stesse coppie. Ordinate,
-        # cosi' l'ordine di valutazione e' deterministico come prima.
-        if cKDTree is not None and len(node_ids) > 1:
-            xy = np.array([self.nodes[i] for i in node_ids], dtype=np.float64)
-            pairs = sorted(cKDTree(xy).query_pairs(r=reach + 1e-9))
-            for i, j in pairs:
-                dist = float(np.hypot(xy[j, 0] - xy[i, 0], xy[j, 1] - xy[i, 1]))
-                if self.connection_radius >= dist >= self.min_edge_length and dist <= self.max_edge_length:
-                    self._evaluate_and_add_edge(node_ids[i], node_ids[j], dist, global_map, edge_safety_margin)
-        else:
-            for i, idx1 in enumerate(node_ids):
-                x1, y1 = self.nodes[idx1]
-                for idx2 in node_ids[i + 1:]:
-                    x2, y2 = self.nodes[idx2]
-                    dist = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
-                    if self.connection_radius >= dist >= self.min_edge_length and dist <= self.max_edge_length:
-                        self._evaluate_and_add_edge(idx1, idx2, dist, global_map, edge_safety_margin)
-
-        # Gli archi percorsi dal robot sono liberi per costruzione: la ricostruzione li ha
-        # azzerati insieme a tutti gli altri, e i nodi di sosta spesso stanno a meno di
-        # min_edge_length dal nodo precedente, quindi il ciclo sopra non li ricreerebbe.
-        # Eccezioni: bloccati dopo, o sopra il punto di una caduta (_traversed_edge_ok).
-        for a, b in list(self.traversed_edges):
-            if a in self.nodes and b in self.nodes:
-                if not self._traversed_edge_ok(a, b, global_map):
-                    self.traversed_edges.discard((a, b))
-                    continue
-                (xa, ya), (xb, yb) = self.nodes[a], self.nodes[b]
-                self._evaluate_and_add_edge(a, b, float(np.hypot(xb - xa, yb - ya)), force=True)
-
-        self.built = True
-
-        total_edges = sum(len(neighbors) for neighbors in self.edges.values()) // 2
-        print(f"[PRM] Built graph with {total_edges} edges using Slope-Distance cost function")
-        self.flush_slope_log("costruzione")
+            self.set_robot_node(nid)
+        nx, ny = self.nodes[nid]
+        print(f"[NODO] {label}: agganciato al nodo {nid} in ({nx:.2f}, {ny:.2f}), a "
+              f"{float(np.hypot(nx - x, ny - y)):.2f} m da ({x:.2f}, {y:.2f}) -- nessun nodo nuovo")
+        return nid
 
     def mark_edge_invalid(self, idx1: int, idx2: int):
         """

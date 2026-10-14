@@ -534,17 +534,14 @@ class MissionGraph:
         """
         Maschera delle coppie da rivalutare (rettangolo dell'arco, allargato di
         prm_graph.DIRTY_MARGIN_M, che tocca una zona di prm.dirty_rects), o None quando serve
-        la costruzione completa: grafo mai costruito, nodi di sosta (non sono nodi del
-        reticolo), mappa del terreno ricaricata da file (zone aggiornate ignote), una caduta
-        nuova (mark_hazard non passa da una scansione).
+        la costruzione completa: grafo mai costruito, mappa del terreno ricaricata da file
+        (zone aggiornate ignote), una caduta nuova (mark_hazard non passa da una scansione).
 
         Gli archi percorsi dal robot e quelli bloccati nel tentativo si rivalutano SEMPRE,
         insieme a quelli che lo erano all'aggiornamento precedente: il loro esito dipende da
         quegli insiemi, non dai dati nuovi. Sono pochi.
         """
         if not getattr(prm, 'built', False) or not hasattr(prm, 'dirty_rects'):
-            return None
-        if getattr(prm, 'stop_nodes', None):
             return None
         tm = getattr(prm, 'global_terrain_map', None)
         if tm is not None and getattr(tm, 'update_rects', None) is None:
@@ -576,12 +573,7 @@ class MissionGraph:
         return cached
 
     def as_sampler(self):
-        """
-        Oggetto con la stessa interfaccia di global_sampler.GlobalSampler, da passare a
-        find_best_point_in_cell senza toccarla: get_all_points, get_point_in_cell,
-        get_points_in_cell, get_nearest_points, global_points, point_cell_map. La ricerca
-        per cella e' a indice (O(1)) invece di scorrere tutti i punti a ogni chiamata.
-        """
+        """I punti del reticolo cella per cella (get_point_in_cell), per find_best_point_in_cell."""
         return LatticeSampler(self)
 
     # -- persistenza e diagnostica -----------------------------------------------------
@@ -694,27 +686,16 @@ class MissionGraph:
 
 
 class LatticeSampler:
-    """Interfaccia GlobalSampler sopra un MissionGraph (vedi MissionGraph.as_sampler)."""
+    """I punti del reticolo cella per cella (vedi MissionGraph.as_sampler)."""
 
     def __init__(self, mg):
-        self._mg = mg
-        self.global_points = [(float(x), float(y)) for x, y in mg.xy]
-        self.point_cell_map = {k: (int(r), int(c)) for k, (r, c) in enumerate(mg.node_cell)}
-        self.point_density = node_density(mg.spacing_m)
-        self.sampled = True
+        self._points = [(float(x), float(y)) for x, y in mg.xy]
         self._by_cell = {}
-        for k, cell in self.point_cell_map.items():
-            self._by_cell.setdefault(cell, []).append(k)
-
-    def sample_global_grid(self):
-        """Il reticolo e' gia' costruito: non c'e' nulla da campionare."""
-        return self.global_points
-
-    def get_all_points(self):
-        return self.global_points
+        for k, (r, c) in enumerate(mg.node_cell):
+            self._by_cell.setdefault((int(r), int(c)), []).append(k)
 
     def get_point_in_cell(self, row, col):
-        return [self.global_points[k] for k in self._by_cell.get((int(row), int(col)), ())]
+        return [self._points[k] for k in self._by_cell.get((int(row), int(col)), ())]
 
 # ========================================================================================
 # LA FUNZIONE DA CHIAMARE

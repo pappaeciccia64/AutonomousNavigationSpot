@@ -26,7 +26,7 @@ from scipy.ndimage import distance_transform_edt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STUBS = tempfile.mkdtemp(prefix="stub_moduli_")
-for name in ("navGraphUtils", "spotLogInUtils", "environmentMap", "global_sampler"):
+for name in ("navGraphUtils", "spotLogInUtils", "environmentMap"):
     open(os.path.join(STUBS, name + ".py"), "w").write("# vuoto: usato solo a runtime sul robot\n")
 sys.path.insert(0, HERE)
 sys.path.insert(1, STUBS)
@@ -323,8 +323,7 @@ class _NoTilt:
 easy_walk.BodyTiltRecorder = _NoTilt
 
 
-def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, second_attempt=False,
-        nodes='random'):
+def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, second_attempt=False):
     global WORLD, ROBOT
     WORLD, ROBOT = World(rects, ghosts), Robot(*start)
     # Il filtro temporale degli ostacoli (arcVerification.OBSTACLE_HISTORY) e' allineato al
@@ -336,25 +335,19 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
     DYNAMIC_TRIGGER.update(armed=dynamic is not None, rect=dynamic)
     FALL.update(armed=fall is not None, fallen=False, recoverable=(fall == 'recuperabile'), where=None)
     easy_walk.MISSION_STATS['falls'] = easy_walk.MISSION_STATS['self_rights'] = 0
-    if nodes == 'lattice':
-        # Il reticolo vero: passo 0.25 m, archi 0.5-1.25 m (come in missione).
-        import mission_graph
-        mg = mission_graph.build_mission_graph(
-            rows=2, cols=2, cell_size_m=5.0, spacing_m=0.25, rings=None,
-            origin_xy=(3.5, 3.5), origin_yaw=0.0, min_edge_length=easy_walk.PRM_MIN_EDGE_M,
-            max_edge_length=easy_walk.PRM_MAX_EDGE_M,
-            connection_radius=easy_walk.PRM_CONNECTION_RADIUS_M, verbose=False)
-        prm = prm_graph.PRM(min_edge_length=easy_walk.PRM_MIN_EDGE_M,
-                            max_edge_length=easy_walk.PRM_MAX_EDGE_M,
-                            connection_radius=easy_walk.PRM_CONNECTION_RADIUS_M)
-        prm.mission_graph = mg
-        mg.into_prm(prm)
-    else:
-        prm = prm_graph.PRM(min_edge_length=0.5, max_edge_length=easy_walk.PRM_MAX_EDGE_M,
-                            connection_radius=3)
-        rng = np.random.default_rng(3)
-        for i in range(260):
-            prm.add_node(i, rng.uniform(0.5, 11.5), rng.uniform(0.5, 11.5))
+    # Il reticolo vero della missione: passo 0.25 m, archi 0.5-1.25 m, sulle 2 x 2 celle da
+    # 5 m di FakeEnv (dal 2026-10-14 tutti gli scenari: il campionamento a caso non esiste piu').
+    import mission_graph
+    mg = mission_graph.build_mission_graph(
+        rows=2, cols=2, cell_size_m=5.0, spacing_m=0.25, rings=None,
+        origin_xy=(3.5, 3.5), origin_yaw=0.0, min_edge_length=easy_walk.PRM_MIN_EDGE_M,
+        max_edge_length=easy_walk.PRM_MAX_EDGE_M,
+        connection_radius=easy_walk.PRM_CONNECTION_RADIUS_M, verbose=False)
+    prm = prm_graph.PRM(min_edge_length=easy_walk.PRM_MIN_EDGE_M,
+                        max_edge_length=easy_walk.PRM_MAX_EDGE_M,
+                        connection_radius=easy_walk.PRM_CONNECTION_RADIUS_M)
+    prm.mission_graph = mg
+    mg.into_prm(prm)
     folder = tempfile.mkdtemp(prefix="missione_e2e_")
     for k in list(easy_walk.MISSION_STATS['time_s']):
         easy_walk.MISSION_STATS['time_s'][k] = 0.0
@@ -476,14 +469,14 @@ if __name__ == '__main__':
     check("[RITIRATA]" not in r['log'], "nessun tentativo di muoversi da terra")
 
     r = run("S8. reticolo VERO (passo 0.25, archi 0.5-1.25) su campo libero",
-            [], (3.5, 3.5, 0.0), (0, 1), nodes='lattice')
+            [], (3.5, 3.5, 0.0), (0, 1))
     check(r['err'] is None, "nessuna eccezione con il grafo di missione vero")
     check(r['ok'] is True, f"entrato nella cella ({r['final'][0]:.2f}, {r['final'][1]:.2f})")
     check(r['walked'] > 0 and r['commands'] > 0,
           f"{r['commands']} comandi per {r['walked']:.1f} m = {r['walked'] / max(1, r['commands']):.2f} m per comando")
 
     r = run("S10. reticolo VERO + muro con varco: il percorso CURVA (qui serve il multinodo)",
-            [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)], (3.5, 3.5, 0.0), (0, 1), nodes="lattice")
+            [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)], (3.5, 3.5, 0.0), (0, 1))
     check(r['err'] is None, "nessuna eccezione")
     check(r['min_clear'] >= spotGrid.FRONTIER_CLEARANCE_M - 0.10,
           f"non sfiora il muro passando dal varco (distanza minima {r['min_clear']:.2f} m)")
@@ -496,8 +489,7 @@ if __name__ == '__main__':
     # corridoio era 0.90 m (non 0.80 come diceva il titolo) e il robot partiva GIA' dentro
     # la cella obiettivo, quindi lo scenario passava senza provare niente.
     r = run("S11. corridoio da 0.80 m, obiettivo dietro: rotazione impossibile (caso 16:35)",
-            [(0.0, 12.0, 0.0, 3.10), (0.0, 12.0, 3.90, 12.0)], (7.0, 3.5, 0.0), (0, 0),
-            nodes='lattice')
+            [(0.0, 12.0, 0.0, 3.10), (0.0, 12.0, 3.90, 12.0)], (7.0, 3.5, 0.0), (0, 0))
     check(r['err'] is None, "nessuna eccezione")
     giri = r['log'].count('[FRONTE]')
     rifiuti = r['log'].count('[ROTAZIONE] Servono')
@@ -516,8 +508,7 @@ if __name__ == '__main__':
     # che curva un orientamento vecchio di una gamba manda il robot fuori dal percorso.
     easy_walk.PRM_MAX_EDGE_M = 0.70711
     r = run("S12. multinodo su percorso che curva: ogni gamba va dove e' stata comandata",
-            [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)], (3.5, 3.5, 0.0), (0, 1),
-            nodes='lattice')
+            [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)], (3.5, 3.5, 0.0), (0, 1))
     easy_walk.PRM_MAX_EDGE_M = 1.25
     check(r['err'] is None, "nessuna eccezione")
     check(r['stats'].get('multinode_moves', 0) >= 1,
@@ -534,7 +525,7 @@ if __name__ == '__main__':
                             ("archi 0.5-1.25 (nuovo)", 1.25)):
         easy_walk.PRM_MAX_EDGE_M = maxe
         r = run(f"S9. {etichetta}", [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)],
-                (3.5, 3.5, 0.0), (0, 1), nodes='lattice')
+                (3.5, 3.5, 0.0), (0, 1))
         confronto[etichetta] = (r['commands'], r['walked'], r['stats'].get('multinode_moves', 0),
                                 r['stats'].get('multinode_nodes', 0), r['scans'], r['ok'],
                                 r['turns'], r['turn_deg'])
