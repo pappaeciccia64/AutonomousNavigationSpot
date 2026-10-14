@@ -1384,6 +1384,28 @@ def _mask_for_global_map(obstacle_mask, is_valid, pts=None, robot_pose=None,
     return (out, core) if return_core else out
 
 
+def fold_scan_into_global_maps(global_map, global_terrain_map, pts, terrain, obstacle_mask, is_valid,
+                               cells_obstacle_dist, shape, robot_pose):
+    """
+    2026-10-14. Una scansione nelle due mappe globali: occupazione (con la zona attorno al
+    corpo, vedi _mask_for_global_map) e terreno. Unico punto usato dalla missione (inizio
+    tentativo, ogni giro, scansione finale) e da test_replay.py, cosi' la prova di rigioco
+    verifica il codice vero e non una sua copia.
+
+    La mappa del terreno riceve la STESSA maschera del calcolo dal vivo (slope_usable_mask:
+    attendibili E non ostacolo). Prima salvava anche le quote delle celle ostacolo, e tronchi
+    e muri diventavano "pendenze": rigiocando le scansioni del 13-10 12:40, sulle stesse 1885
+    coppie, archi oltre 0.6 0.0% dal vivo contro 10.9% dalla mappa globale.
+
+    Restituisce la maschera del nucleo (celle sotto il corpo), che serve alla mappa dello
+    spazio libero.
+    """
+    gm_mask, gm_core = _mask_for_global_map(obstacle_mask, is_valid, pts, robot_pose, return_core=True)
+    global_map.update(pts, gm_mask, walked=gm_core)
+    global_terrain_map.update(pts, terrain, slope_usable_mask(is_valid, cells_obstacle_dist, shape))
+    return gm_core
+
+
 def _update_clearance_map(global_map, pts, snap, is_valid, unwritten, core, robot_xy):
     """
     2026-10-12. Alimenta la mappa dello spazio libero con la scansione corrente.
@@ -3178,17 +3200,10 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                               cells_obstacle_dist=cells_obstacle_dist,
                               rough_values=rough_values, is_valid=is_valid)
 
-    # Aggiorna la mappa di occupazione globale con i dati appena processati
-    _gm_mask, _gm_core = _mask_for_global_map(obstacle_mask, is_valid, pts,
-                                              (robot_x, robot_y, robot_yaw), return_core=True)
-    global_map.update(pts, _gm_mask, walked=_gm_core)
-    # Aggiorna anche la mappa globale del terreno -- solo altezze già corrette e valide.
-    # 2026-10-14: con la STESSA maschera del calcolo dal vivo (slope_usable_mask: attendibili
-    # E non ostacolo). Prima la mappa salvava anche le quote delle celle ostacolo, e tronchi
-    # e muri diventavano "pendenze": rigiocando le scansioni del 13-10 12:40, sulle stesse
-    # 1885 coppie, archi oltre 0.6 0.0% dal vivo contro 10.9% dalla mappa globale.
-    global_terrain_map.update(pts, terrain_real,
-                              slope_usable_mask(is_valid, cells_obstacle_dist, (num_y, num_x)))
+    # Aggiorna le mappe globali (occupazione e terreno) con i dati appena processati
+    fold_scan_into_global_maps(global_map, global_terrain_map, pts, terrain_real, obstacle_mask,
+                               is_valid, cells_obstacle_dist, (num_y, num_x),
+                               (robot_x, robot_y, robot_yaw))
 
     # Rendiamo la mappa terreno disponibile al PRM come fallback per la pendenza
     prm_graph.set_global_terrain_map(global_terrain_map)
@@ -3535,12 +3550,9 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                                   rough_values=rough_up, is_valid=is_valid_up)
 
         t_proc = time.perf_counter()
-        _gm_mask_up, _gm_core_up = _mask_for_global_map(
-            obstacle_mask_updated, is_valid_up, pts_up, (robot_x, robot_y, robot_yaw),
-            return_core=True)
-        global_map.update(pts_up, _gm_mask_up, walked=_gm_core_up)
-        global_terrain_map.update(pts_up, terrain_real_up,   # stessa maschera del vivo, vedi sopra
-                                  slope_usable_mask(is_valid_up, cells_obs_up, (num_y_up, num_x_up)))
+        _gm_core_up = fold_scan_into_global_maps(
+            global_map, global_terrain_map, pts_up, terrain_real_up, obstacle_mask_updated,
+            is_valid_up, cells_obs_up, (num_y_up, num_x_up), (robot_x, robot_y, robot_yaw))
         t_maps = time.perf_counter()
 
         # 2. iniettiamo i dati locali freschi nel PRM e ripianifichiamo dal nodo attuale
@@ -5528,13 +5540,10 @@ def easy_walk(options):
             )
 
             # Fold this last scan into the persistent global maps, same as every other iteration
-            _gm_mask_f, _gm_core_f = _mask_for_global_map(
-                obstacle_mask_final, is_valid_final, pts_final,
-                (x_final, y_final, final_yaw), return_core=True)
-            global_grid.global_occupancy_map.update(pts_final, _gm_mask_f, walked=_gm_core_f)
-            global_grid.global_terrain_map.update(
-                pts_final, terrain_real_final,
-                slope_usable_mask(is_valid_final, cells_obs_final, (num_y_final, num_x_final)))
+            fold_scan_into_global_maps(
+                global_grid.global_occupancy_map, global_grid.global_terrain_map, pts_final,
+                terrain_real_final, obstacle_mask_final, is_valid_final, cells_obs_final,
+                (num_y_final, num_x_final), (x_final, y_final, final_yaw))
 
             final_save_path = os.path.join(
                 mission_folder, f"iteration_{visualization_counter}_FINAL_SCAN.png"
