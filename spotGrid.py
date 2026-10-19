@@ -1,4 +1,9 @@
-#spotSDK/spotGrid.py
+"""
+Griglia locale di Spot e mappe globali: lettura delle griglie, correzione del terreno, pendenza
+degli archi, maschera degli ostacoli, controllo di rotazione, mappe di occupazione, di spazio
+libero e del terreno. Qui stanno anche tutte le soglie condivise da pianificatore, fronte e
+scelta dell'andatura: si cambiano SOLO qui.
+"""
 
 
 import numpy as np
@@ -14,73 +19,36 @@ import time
 import os
 
 # =========================================================================
-# TERRAIN / OBSTACLE FUSION THRESHOLDS -- single source of truth.
-# These are used to decide whether a terrain cell counts as an obstacle in
-# fuse_obstacle_mask() below, in arcVerification.py's background arc checker,
-# and in every attempt_enter_cell_from_position() call in easy_walk.py.
-# Change the values ONLY here -- every caller imports spotGrid and reads
-# these directly, so the cell-entry check, the mid-motion arc verifier, and
-# the final-scan pass can never drift out of sync with each other again.
+# SOGLIE DI OSTACOLO, PENDENZA E RUGOSITA'
+#   OBSTACLE_THRESHOLD  una cella e' ostacolo se obstacle_distance <= questo (m)
+#   SLOPE_THRESHOLD     pendenza oltre cui un arco si scarta (tangente). La pendenza si misura
+#                       su una base di 0.48 m (vedi SLOPE_BASELINE_M), quindi un GRADINO NETTO
+#                       di altezza H vale H / 0.48: 0.6 corrisponde a un gradino di ~29 cm,
+#                       il limite di Spot (~30 cm). Per questo non serve una misura separata
+#                       dei gradini.
+#   ROUGH_THRESHOLD     rugosita' (deviazione standard della quota, m) oltre cui una cella e'
+#                       ostacolo
 # =========================================================================
 OBSTACLE_THRESHOLD = 0.15   # obstacle_distance (m): distance <= this -> blocked
 SLOPE_THRESHOLD = 0.6       # gradient (tan of slope): tan(28deg)=~0.53, tan(25deg)=~0.46
-# 2026-10-14: la pendenza si misura su una base di 0.48 m (vedi SLOPE_BASELINE_M), quindi un
-# GRADINO NETTO di altezza H vale H / 0.48, qualunque sia la lunghezza dell'arco, sia
-# attraversato sia di fianco al corpo (prova sintetica). Questa soglia e' quindi anche il
-# limite sui gradini: 0.6 -> circa 29 cm, cioe' il limite di Spot (~30 cm) senza margine.
-# Sul campo (13-10) il gradino piu' alto superato e' stato di ~25 cm (pendenza 0.54).
-# Una misura separata del salto di quota non serve: vedi GAIT_MODERATE_SLOPE_MAX.
 ROUGH_THRESHOLD = 0.15      # local roughness (std-dev of terrain height, m)
 
-# =========================================================================
-# VALIDITA' DEL TERRENO (2026-10-07). Il layer `terrain_valid` di Spot contiene 0 e 1,
-# ma unpack_grid gli applica cell_value_scale e cell_value_offset come a qualunque altro
-# layer: lo 0 diventa +/-5.5e-17 e IL SEGNO CAMBIA da una scansione all'altra. Il test
-# `> 0.0` risultava quindi vero o falso a caso. Misurato sulle 16 scansioni registrate il
-# 2026-10-07: in 10 OGNI cella risultava valida (100%), nelle altre 6 il conteggio era
-# corretto (82-87%). Conseguenza: le celle che Spot dichiara NON attendibili -- comprese
-# quelle che i sensori non hanno mai scritto -- entravano nel terreno come dati buoni, e
-# la loro deviazione standard produceva falsi ostacoli: in media 276 veti di sola
-# rugosita' per scansione, fino a 1138. In una scansione il robot risultava in piedi su
-# una cella marcata ostacolo.
-#
-# Si confronta con 0.5: i valori veri sono 0 e 1, qualunque soglia in mezzo va bene, e
-# 0.5 e' insensibile al residuo numerico in entrambi i segni.
-# =========================================================================
+# Il layer `terrain_valid` di Spot contiene 0 e 1, ma dopo scala e offset lo 0 diventa
+# +/-5.5e-17 con segno variabile: si confronta con 0.5, insensibile al residuo.
 TERRAIN_VALID_MIN = 0.5
 
 # =========================================================================
-# FILTRO SULL'ALTEZZA DEL SUOLO (2026-10-06) -- vedi LocalGrid.correct_terrain().
+# FILTRO SULL'ALTEZZA DEL SUOLO (vedi LocalGrid.correct_terrain)
 #
-# Il layer `terrain` di Spot e' espresso rispetto al riferimento fissato
-# all'ACCENSIONE. Le celle che i sensori non scrivono restano al valore iniziale
-# (~0) e Spot le dichiara comunque valide. Nella missione del 2026-10-05 16:05 il
-# robot era stato acceso un piano piu' su: quelle celle stavano 3.226 m sopra il
-# suolo reale, e la loro rugosita' (1.585 contro soglia 0.15) ha prodotto il 100%
-# degli ostacoli che hanno fatto scattare i blocchi.
-#
-# La regola non guarda lo zero (fragile) ma la distanza dal suolo SU CUI IL ROBOT
-# STA IN PIEDI, stimato come mediana delle celle valide entro GROUND_REF_RADIUS_M
-# dal robot. Cosi' non importa piu' dove il robot e' stato acceso.
-#
-# ASIMMETRICA, di proposito:
-#   - SOPRA il suolo oltre la soglia: non e' superficie calpestabile (muro, albero,
-#     cella mai scritta). Esclusa da pendenza e rugosita' e riempita con il suolo
-#     vicino. L'eventuale ostacolo resta rilevato da obstacle_distance, che e' un
-#     layer separato e non viene toccato.
-#   - SOTTO il suolo oltre la soglia: puo' essere un VUOTO VERO (muretto su una
-#     strada, scala che scende, fosso). NON viene toccata: continua a generare veti
-#     come prima. Riempirla con la quota del suolo nasconderebbe un dirupo.
-#
-# 1.2 m: la finestra arriva a ~1.9 m dal robot; 1.2 m di dislivello a quella
-# distanza sono gia' ~32 gradi, oltre il limite di Spot. Nessuna salita che il
-# robot potrebbe davvero affrontare viene scartata.
-#
-# NOTA (2026-10-07): questo filtro NON copre le celle mai scritte nel caso normale.
-# Quelle stanno allo zero verticale della griglia locale, che con il robot in piedi
-# cade ~0.93 m sopra il pavimento -- sotto 1.2 m, quindi il filtro non le vede. Il
-# caso del 2026-10-05 (3.226 m) era l'eccezione, non la regola. Se ne occupa
-# _cells_never_written, che dal 2026-10-07 funziona davvero.
+# Le quote di `terrain` sono rispetto al riferimento fissato all'accensione. Il suolo su cui
+# il robot sta in piedi si stima come mediana delle celle valide entro GROUND_REF_RADIUS_M;
+# le celle oltre GROUND_HEIGHT_TOLERANCE_M dal suolo si trattano in modo ASIMMETRICO:
+#   - SOPRA: non e' superficie calpestabile (muro, albero, cella mai scritta). Esclusa da
+#     pendenza e rugosita' e riempita col suolo vicino; l'ostacolo resta in obstacle_distance.
+#   - SOTTO: puo' essere un vuoto vero (muretto, scala che scende, fosso): non si tocca,
+#     riempirla nasconderebbe un dirupo.
+# 1.2 m: a ~1.9 m dal robot (bordo della finestra) sono gia' ~32 gradi, oltre il limite di
+# Spot, quindi nessuna salita affrontabile viene scartata.
 # =========================================================================
 GROUND_HEIGHT_TOLERANCE_M = 1.2
 GROUND_REF_RADIUS_M = 0.7            # celle sotto/attorno al robot usate per stimare il suolo
@@ -88,18 +56,9 @@ GROUND_REF_FALLBACK_RADIUS_M = 1.2   # se sotto il robot ci sono troppe poche ce
 GROUND_REF_MIN_CELLS = 50
 
 # -------------------------------------------------------------------------
-# CELLE MAI SCRITTE -- vedi LocalGrid._cells_never_written().
-#
-# Le celle che i sensori non hanno mai scritto restano tutte alla STESSA quota
-# esatta. Spot le dichiara quasi sempre non valide (misurato il 2026-10-07:
-# 98.2-100%), quindi con TERRAIN_VALID_MIN corretto sono gia' in gran parte
-# gestite; questa regola e' la rete per il resto.
-#
-# RISCRITTA il 2026-10-07. La versione precedente PREVEDEVA la quota, uguale a
-# cell_value_offset ("il valore grezzo 0"), e non e' mai scattata: zero celle in
-# tutte e 16 le scansioni registrate, mentre il plateau era di 1845-3710 celle
-# (11-23% della griglia). Due errori indipendenti, entrambi fatali -- vedi la
-# docstring di _cells_never_written. Ora la quota si ricava dai dati.
+# CELLE MAI SCRITTE (vedi LocalGrid._cells_never_written)
+# Le celle che i sensori non hanno mai scritto restano tutte alla stessa quota esatta (un
+# "plateau"). Spot le dichiara quasi sempre non valide; questa regola cattura il resto.
 # -------------------------------------------------------------------------
 UNWRITTEN_MATCH_FRACTION = 0.25    # tolleranza: 0.25 * passo di quantizzazione
 UNWRITTEN_MATCH_FALLBACK_M = 1e-4  # se il passo non e' noto
@@ -107,32 +66,19 @@ UNWRITTEN_MIN_CELLS = 100          # celle che devono condividere la quota perch
 UNWRITTEN_MIN_SPOT_INVALID = 0.80  # frazione del plateau che Spot deve marcare non valida
 
 # =========================================================================
-# FRONTE SICURO (2026-10-06) -- vedi arcVerification.compute_safe_frontier().
-#
-# Sostituisce la verifica "arco per arco". A ogni scansione si percorre il
-# cammino pianificato a partire dal robot e ci si ferma al primo punto non
-# confermato libero: ostacolo, rugosita', pendenza, oppure fine dei dati. Il
-# robot non supera mai quel punto. Niente verdetti ricordati: si ricalcola
-# tutto da zero a ogni scansione.
-#
-# Il robot NON e' piu' un punto:
-#   FRONTIER_CLEARANCE_M: distanza minima da un ostacolo per la LINEA CENTRALE
-#     del percorso. Spot e' largo 0.50 m: con la vecchia soglia di 0.15 m il
-#     fianco (a 0.25 m dal centro) poteva sovrapporsi a un ostacolo di 10 cm.
-#     0.25 di meta' larghezza + 0.05 di aria. Si legge direttamente da
-#     obstacle_distance, che e' gia' "distanza dall'ostacolo piu' vicino".
-#   FRONTIER_BODY_HALF_LENGTH_M: il muso sta 0.55 m davanti al centro. Il
-#     centro si ferma quindi a meta' lunghezza + FRONTIER_MARGIN_M prima del
-#     primo punto non libero, cosi' anche il muso resta su terreno confermato.
-#   FRONTIER_MIN_CLEARANCE_M / FRONTIER_ESCAPE_DIST_M: se il robot si trova GIA'
-#     piu' vicino di FRONTIER_CLEARANCE_M a qualcosa (spazio stretto), nel primo
-#     metro si accetta di non avvicinarsi piu' di quanto gia' sia, cosi' puo'
-#     uscirne. Mai sotto FRONTIER_MIN_CLEARANCE_M. E' esattamente la situazione
-#     della missione del 2026-10-05 13:12, in cui il robot non riusciva piu' a
-#     uscire da uno spazio stretto.
-#   FRONTIER_ROBOT_RADIUS_M: dentro questo raggio dal robot le celle "non viste"
-#     non fermano il fronte -- e' il terreno su cui il robot sta in piedi, e al
-#     primo scan risulta non valido perche' coperto dal corpo.
+# INGOMBRO DEL ROBOT E FRONTE SICURO (vedi arcVerification.compute_safe_frontier)
+#   FRONTIER_CLEARANCE_M: distanza minima da un ostacolo per la LINEA CENTRALE del percorso:
+#     mezza larghezza (0.25) + aria (0.05). Si legge direttamente da obstacle_distance.
+#   FRONTIER_BODY_HALF_LENGTH_M: il muso sta 0.55 m davanti al centro; il centro si ferma a
+#     meta' lunghezza + FRONTIER_MARGIN_M prima del primo punto non libero.
+#   FRONTIER_MIN_CLEARANCE_M / FRONTIER_ESCAPE_DIST_M: se il robot e' GIA' piu' vicino di
+#     FRONTIER_CLEARANCE_M a qualcosa (spazio stretto), nel primo metro basta non
+#     avvicinarsi di piu', mai sotto FRONTIER_MIN_CLEARANCE_M: cosi' puo' uscirne.
+#   FRONTIER_ROBOT_RADIUS_M: entro questo raggio le celle "non viste" non fermano il fronte
+#     (e' il terreno sotto il robot, coperto dal corpo).
+#   FRONTIER_ABORT_AIR_M: si PARTE con FRONTIER_CLEARANCE_M (0.30) ai lati; a movimento in
+#     corso ci si ferma solo sotto ROBOT_HALF_WIDTH_M + FRONTIER_ABORT_AIR_M (0.25), cioe' se
+#     qualcosa entra davvero nell'ingombro (decisione dell'utente: "se lo vede libero va").
 # =========================================================================
 ROBOT_HALF_LENGTH_M = 0.55          # Spot: 1.10 x 0.50 m
 ROBOT_HALF_WIDTH_M = 0.25
@@ -142,99 +88,33 @@ FRONTIER_MIN_CLEARANCE_M = 0.05
 FRONTIER_ESCAPE_DIST_M = 1.0
 FRONTIER_BODY_HALF_LENGTH_M = ROBOT_HALF_LENGTH_M                       # = 0.55
 FRONTIER_MARGIN_M = 0.10
-# 2026-10-12, decisione dell'utente: "se lo vede libero va; non voglio che si fermi mentre
-# sta andando". Si PARTE solo se il percorso ha FRONTIER_CLEARANCE_M (0.30) dai lati; a
-# movimento in corso il thread del fronte ferma il robot solo se il percorso davanti scende
-# sotto ROBOT_HALF_WIDTH_M + FRONTIER_ABORT_AIR_M (0.25), cioe' se qualcosa entra davvero
-# nell'ingombro. 5 cm di isteresi fra decisione e arresto. Vedi compute_safe_frontier(air_m).
 FRONTIER_ABORT_AIR_M = 0.0
 
 # =========================================================================
-# ROTAZIONE SUL POSTO (2026-10-06, passo 4) -- vedi easy_walk.attempt_enter_cell...
-# Ruotando sul posto gli spigoli del corpo descrivono un cerchio di raggio pari
-# alla semidiagonale, sqrt(0.55^2 + 0.25^2) = 0.60 m. Prima nessuno controllava
-# che quel cerchio fosse libero. Se attorno al robot c'e' meno di questo spazio,
-# il robot NON ruota: raggiunge il punto camminando con l'orientamento che ha,
-# e il fronte viene ricalcolato con l'ingombro vero del corpo rispetto alla
-# direzione di marcia (di traverso Spot occupa 0.55 m per lato, non 0.25).
-# Sotto ROTATION_CHECK_MIN_DYAW_DEG la rotazione e' cosi' piccola che lo spazio
-# spazzato e' trascurabile e non si controlla.
+# ROTAZIONE SUL POSTO (vedi rotation_is_clear)
+# Ruotando sul posto gli spigoli del corpo descrivono un cerchio di raggio pari alla
+# semidiagonale, ~0.60 m. Si controllano le celle che il corpo spazza davvero.
+#   ROTATION_CLEARANCE_AIR_M: aria sulla rotazione, 0: si rifiuta solo se il corpo compenetra
+#     davvero (un falso "non posso ruotare" costa caro: arretramenti in catena).
+#   ROTATION_CLEARANCE_M: raggio del prefiltro (semidiagonale + aria).
+#   ROTATION_CHECK_MIN_DYAW_DEG: sotto questa rotazione lo spazio spazzato e' trascurabile.
 # =========================================================================
-# Aria sulla ROTAZIONE, separata da quella sull'avanzamento (2026-10-07, scelta esplicita).
-# Il costo dell'errore non e' simmetrico: un falso "non posso avanzare" costa una scansione
-# persa, un falso "non posso ruotare" e' costato 3.5 m di arretramento in catena nella
-# missione del 2026-10-07. Inoltre il margine di 0.05 m e' PIU' PICCOLO del rumore misurato
-# su obstacle_distance (1.5 cm tipici, 7.3 cm di punta), quindi su quella soglia non stava
-# proteggendo niente: stava decidendo il rumore. A zero, la rotazione si rifiuta solo se il
-# corpo compenetra davvero, e chi avanza dopo la rotazione lo verifica col fronte sicuro.
-#
-# Misurato sugli 11 momenti di rifiuto reali della missione del 2026-10-07 14:0x:
-# aria 0.05 -> 2 rotazioni concesse, aria 0.02 -> 2, aria 0.00 -> 3. Cioe' questo cambio
-# da solo sblocca UN caso su undici: gli altri rifiuti sono veri (il corpo compenetra da
-# 4 a 19 cm anche senza margine, in corridoi da ~60 cm di corsia libera). Sta scritto qui
-# perche' non venga ricordato come la correzione del problema: non lo e'.
 ROTATION_CLEARANCE_AIR_M = 0.0
 ROTATION_CLEARANCE_M = float(np.hypot(ROBOT_HALF_LENGTH_M, ROBOT_HALF_WIDTH_M)) + ROTATION_CLEARANCE_AIR_M  # ~0.604
 ROTATION_CHECK_MIN_DYAW_DEG = 10.0
 
-# Tolleranza sul settore spazzato (2026-10-07, missione 16:50). rotation_is_clear accetta un
-# margine fino a -ROTATION_NOISE_TOLERANCE_M invece di pretendere >= 0. Misurato sugli scan
-# di quella missione: dalla STESSA posa, in cinque scansioni consecutive, obstacle_distance
-# in un punto a 50 cm dal robot oscilla fra -0.03 e +0.15 m; lo stesso punto visto da 2 m
-# risultava a +0.45. Un rifiuto a -0.03/-0.04 m (5 dei 17 della missione) sta dentro quel
-# rumore. I rifiuti veri restano: nei passaggi stretti fra i tavoli il margine e' -0.16/-0.19.
-# Rete sotto: l'anticollisione del CORPO di Spot e' attiva (movements.py spegne solo quella
-# dei piedi). Il prefiltro ROTATION_CLEARANCE_M non cambia. 0.0 = comportamento precedente.
-#
-# 2026-10-08, da 0.05 a 0.15 su richiesta dell'utente ("il padding dall'ostacolo non deve
-# bloccarlo nella rotazione, a volte lo spazio ci sarebbe, con GraphNav riesce").
-# Misurato sulle 46 scansioni della missione 08-10 10:47, contando per ogni scansione quante
-# delle 24 direzioni del giro sono insieme libere (fronte >= 0.30 m) e raggiungibili girandosi:
-#
-#     tolleranza   direzioni utilizzabili (mediana)   scansioni con ZERO   compenetrazione
-#        0.00                  3                            7/46              +0.00 m
-#        0.05                  6                            6/46              -0.04 m
-#        0.10                  6                            6/46              -0.10 m
-#        0.15                  6                            0/46              -0.15 m
-#
-# C'e' uno scalino netto: le sei scansioni in trappola avevano le direzioni libere rifiutate
-# per esattamente -0.12/-0.15 m, e fra 0.05 e 0.12 non cambia NIENTE. 0.15 le sblocca tutte.
-#
-# Va detto chiaro che a 0.15 questo non e' piu' solo "rumore": e' accettare che il corpo
-# compenetri la NOSTRA MAPPA di 15 cm. Lo regge un fatto misurato e uno osservato: l'errore
-# di registrazione della griglia e' 5-10 cm (celle chiamate ostacolo a 9-21 cm dall'asse del
-# corpo mentre il robot stava fermo li'), quindi una parte di quei 15 cm e' errore nostro e
-# non spazio reale; e GraphNav, che usa l'anticollisione di Spot invece della nostra mappa,
-# in quei punti ruota e passa. Se in prova si vedono sfioramenti dei muri durante le
-# rotazioni, questo e' il primo numero da riportare a 0.10.
+# Compenetrazione tollerata nella rotazione, contro i MURI (vedi ROTATION_CHECK_PENETRATION per
+# gli ostacoli sottili). 0.15 m: assorbe l'errore di registrazione della griglia (5-10 cm) e il
+# rumore di obstacle_distance; con meno, in 6 scansioni su 46 di una missione il robot non
+# trovava nessuna direzione in cui girarsi, mentre GraphNav in quei punti ruotava e passava.
+# Se in prova si vedono sfioramenti dei muri durante le rotazioni, va riportato a 0.10.
 ROTATION_NOISE_TOLERANCE_M = 0.15
 
-# --- METRICA DEL CONTROLLO DI ROTAZIONE (revisione 2026-10-08 sera) -----------------------
-# Prima rotation_is_clear confrontava con -ROTATION_NOISE_TOLERANCE_M il MINIMO di
-# obstacle_distance sulle celle spazzate dal corpo. Per un muro spesso quel minimo misura
-# davvero di quanto il corpo ci entra. Ma obstacle_distance dentro un ostacolo non scende
-# sotto meta' del suo spessore: un palo da 10 cm non va sotto -0.05, una gamba di tavolo da
-# 4 cm sotto -0.02. Con la tolleranza a 0.15 qualunque ostacolo piu' sottile di ~30 cm che
-# entra nel corpo durante la rotazione veniva APPROVATO. Misurato con distanze col segno
-# realistiche, palo in (0.15, 0.45) e rotazione di 90 gradi (il palo finisce dentro il
-# corpo): pali da 6, 10, 20 e 30 cm tutti approvati; solo da 40 cm rifiutato.
-# Il fronte sicuro non ha questo problema (soglia positiva sulla linea centrale, vale a
-# qualunque spessore): il buco era solo nelle rotazioni.
-#
-# Ora si misura la PENETRAZIONE: per ogni cella del corpo, la sua profondita' dentro il
-# corpo meno obstacle_distance. Per un muro che entra di p dal bordo da' esattamente p, come
-# prima (lungo il bordo la profondita' e' 0 e obstacle_distance vale -p); per un ostacolo
-# sottile da' quanto sta in fondo dentro il corpo. Non e' mai piu' permissiva della metrica
-# vecchia (profondita' >= 0), e coincide con essa quando gli ostacoli sono fuori dal corpo.
-# Le celle sotto il corpo ADESSO si escludono: il robot ci sta sopra, quindi sono libere per
-# definizione -- e' l'errore di registrazione che la tolleranza da 0.15 doveva assorbire, e
-# cosi' non serve tollerarlo. La tolleranza resta 0.15 per i muri, come deciso.
-#
-# Verificata sui 47 scan veri della missione 2026-10-08 16:35, 24 rotazioni per scan (1081):
-# stesso verdetto nel 97.8%; 24 verdetti cambiano, TUTTI da approvata a rifiutata, quasi
-# tutti al limite della tolleranza (-0.150 -> -0.151). L'eccezione e' lo scan 12 della
-# cella (0,2), in un punto strettissimo: vecchia metrica -0.085, nuova -0.17.
-# False = metrica vecchia, comportamento identico a prima.
+# Metrica del controllo di rotazione: PENETRAZIONE = profondita' della cella dentro il corpo
+# meno obstacle_distance. Il minimo di obstacle_distance da solo non basta: dentro un ostacolo
+# sottile non scende sotto meta' del suo spessore (un palo da 10 cm non va sotto -0.05), e con
+# la tolleranza a 0.15 un palo che entra nel corpo verrebbe approvato. Per un muro le due
+# metriche coincidono. Le celle sotto il corpo ADESSO si escludono: il robot ci sta sopra.
 ROTATION_CHECK_PENETRATION = True
 
 
@@ -266,22 +146,12 @@ def rotation_is_clear(obstacle_dist, origin_x, origin_y, cell_size, robot_x, rob
     """
     Il robot puo' ruotare sul posto di `dyaw` radianti senza toccare niente?
 
-    Controlla le celle che il corpo spazza DAVVERO, invece di chiedere che sia libero
-    tutto il cerchio circoscritto. ROTATION_CLEARANCE_M = 0.65 risponde alla domanda
-    "e' libero il cerchio di raggio 0.60 attorno al robot?", cioe' il caso peggiore su
-    TUTTE le direzioni e TUTTI gli angoli; ruotando di 39 gradi il corpo spazza invece
-    un settore, e gli ostacoli stanno dove stanno.
+    Controlla le celle che il corpo spazza DAVVERO durante la rotazione (un settore), invece
+    di chiedere che sia libero tutto il cerchio circoscritto: gli ostacoli stanno dove stanno,
+    e il cerchio intero rifiuterebbe molte rotazioni sicure.
 
-    Misurato sulla missione del 2026-10-07 (iterazione 2, cella (1,0)): il controllo
-    scalare ha rifiutato 9 rotazioni su 10, e di quelle 9 il controllo sul settore dice
-    che 8 erano sicure. In tre casi (scansioni 8, 9, 10) il rifiuto ha prodotto un blocco
-    su un percorso che col muso in avanti era libero per 1.39 m: serviva ruotare di 39
-    gradi e li' se ne potevano fare 68.
-
-    Il rettangolo e' GIA' gonfiato dell'aria (`air`), quindi "margine >= 0" significa che
-    il corpo vero passa con almeno `air` metri di gioco. Si lavora su una finestra
-    ritagliata attorno al robot: costo misurato 0.26 ms per un controllo normale,
-    0.90 ms per una rotazione di 180 gradi.
+    Il rettangolo e' gia' gonfiato dell'aria (`air`). Si lavora su una finestra ritagliata
+    attorno al robot (~0.3 ms per un controllo normale, ~0.9 ms per 180 gradi).
 
     Args:
         obstacle_dist: griglia 2D (num_y, num_x) di obstacle_distance, in metri.
@@ -293,10 +163,9 @@ def rotation_is_clear(obstacle_dist, origin_x, origin_y, cell_size, robot_x, rob
         step_deg: passo angolare di campionamento.
 
     Returns:
-        (libero: bool, margine: float) -- margine e' il minimo di obstacle_distance sulle
-        celle spazzate, oppure +inf se la finestra cade fuori dalla griglia (nel qual caso
-        non sappiamo nulla e si risponde True, come fa il resto del codice per i dati
-        mancanti: a decidere restera' il fronte sicuro).
+        (libero: bool, margine: float) -- margine e' la peggiore penetrazione (col segno
+        cambiato) sulle celle spazzate, oppure +inf se la finestra cade fuori dalla griglia:
+        in quel caso non si sa nulla e si risponde True (decidera' il fronte sicuro).
     """
     if obstacle_dist is None or cell_size is None:
         return True, float('inf')
@@ -317,9 +186,7 @@ def rotation_is_clear(obstacle_dist, origin_x, origin_y, cell_size, robot_x, rob
     num_steps = max(2, int(abs(np.degrees(dyaw)) / step_deg) + 2)
     worst = float('inf')
     if ROTATION_CHECK_PENETRATION:
-        # Celle sotto il corpo ADESSO: il robot ci sta in piedi sopra, quindi sono libere per
-        # definizione qualunque cosa dica la mappa (e' l'errore di registrazione per cui la
-        # tolleranza e' a 0.15). Si escludono invece di tollerarle.
+        # Celle sotto il corpo ADESSO: il robot ci sta sopra, sono libere per definizione.
         c_now, s_now = np.cos(robot_yaw), np.sin(robot_yaw)
         under_now = ((np.abs(dx * c_now + dy * s_now) <= half_along) &
                      (np.abs(-dx * s_now + dy * c_now) <= half_across))
@@ -333,125 +200,67 @@ def rotation_is_clear(obstacle_dist, origin_x, origin_y, cell_size, robot_x, rob
             in_body &= ~under_now
             if in_body.any():
                 # PENETRAZIONE = profondita' della cella dentro il corpo - obstacle_distance.
-                # Vedi ROTATION_CHECK_PENETRATION per il perche'.
                 depth = np.minimum(half_along + air - along, half_across + air - across)[in_body]
                 worst = min(worst, float((window[in_body] - depth).min()))
         elif in_body.any():
             worst = min(worst, float(window[in_body].min()))
     return worst >= -ROTATION_NOISE_TOLERANCE_M, worst
 
-# Margine con cui il PRM scarta gli archi che passano vicino a celle occupate nella mappa
-# globale. Le celle occupate sono quelle con obstacle_distance <= OBSTACLE_THRESHOLD,
-# quindi un arco ammesso passa ad almeno OBSTACLE_THRESHOLD + margine dall'ostacolo.
-# Deve dare la STESSA distanza che pretende il fronte, altrimenti il pianificatore
-# disegna percorsi che il fronte poi rifiuta, e il robot si blocca su piani "validi".
-# Era 0.05 (cioe' 0.20 m dall'ostacolo).
+# Margine con cui il PRM scarta gli archi vicini a celle occupate della mappa globale. Le
+# celle occupate hanno obstacle_distance <= OBSTACLE_THRESHOLD, quindi un arco ammesso passa
+# ad almeno OBSTACLE_THRESHOLD + margine = FRONTIER_CLEARANCE_M dall'ostacolo: la stessa
+# distanza che pretende il fronte, cosi' il pianificatore non disegna percorsi che il fronte
+# poi rifiuta.
 PRM_EDGE_SAFETY_MARGIN_M = FRONTIER_CLEARANCE_M - OBSTACLE_THRESHOLD   # = 0.15
 
 # =========================================================================
-# MAPPA GLOBALE DEGLI OSTACOLI (2026-10-06) -- vedi GlobalGrid.update().
-# Una cella diventa occupata solo dopo GLOBAL_OCC_CONFIRM_OBS osservazioni
-# consecutive concordi. Prima bastava UNA sola osservazione, partendo da
-# qualunque stato -- anche da "vista libera quattro volte". Con il fronte
-# sicuro questa mappa e' cio' che ricorda gli ostacoli fra un tentativo e
-# l'altro, quindi non puo' credere a una scansione isolata.
+# MAPPA GLOBALE DEGLI OSTACOLI (vedi GlobalGrid.update)
+#   GLOBAL_OCC_CONFIRM_OBS: una cella diventa occupata dopo tante osservazioni CONSECUTIVE di
+#     ostacolo: la mappa ricorda gli ostacoli fra un tentativo e l'altro e non puo' credere a
+#     una scansione isolata. La prima osservazione di ostacolo azzera le prove di "libero"
+#     (reazione rapida a un ostacolo nuovo).
+#   GLOBAL_OCC_CONFIRM_WALKED: conferme richieste dove il robot e' passato col corpo: averci
+#     camminato e' una prova piu' forte di una lettura da lontano. Le celle non diventano
+#     immuni (il mondo cambia), ma servono piu' conferme.
+#   GLOBAL_OCC_MAX_COUNT: tetto del contatore di prove.
 # =========================================================================
 GLOBAL_OCC_CONFIRM_OBS = 2
 GLOBAL_OCC_MAX_COUNT = 4
 GLOBAL_OCC_COARSE_CELLS = 8          # lato del blocco dell'indice a grana grossa (8 x 3 cm = 24 cm)
-
-# CELLE SU CUI IL ROBOT E' PASSATO (2026-10-12, dalla prima missione in esterno).
-#
-# Il contatore di update() azzera le prove di "libero" alla PRIMA osservazione di
-# ostacolo (`curr_count + 1 if curr_count >= 0 else 1`): e' il modo di pretendere
-# osservazioni CONSECUTIVE, e serve a reagire in fretta a un ostacolo nuovo. Il prezzo
-# e' che due osservazioni di ostacolo battono qualunque numero di osservazioni di
-# spazio libero.
-#
-# Misurato sulla missione del 2026-10-12 14:47, cella (1,1): una cella su cui il robot
-# era rimasto fermo per 16 scansioni, con obstacle_distance 0.35-0.38 m SOTTO DI SE',
-# e' stata dichiarata occupata da due letture prese da 1.8 e 2.5 m (0.121 e 0.109 m).
-# In 16 scansioni su 72 la mappa dichiarava occupata la cella in cui il robot si
-# trovava fisicamente: il pianificatore evitava terreno su cui il robot stava in piedi,
-# e ha speso 35 scansioni e 5 blocchi su quella cella.
-#
-# Che il robot ci sia passato sopra col corpo non e' un'osservazione come le altre: e'
-# una prova. Quelle celle non diventano immuni (il mondo cambia, qualcuno puo' mettersi
-# li'), ma per dichiararle occupate servono piu' conferme.
-#
-# Misurato rigiocando le 72 scansioni della missione, contro la verita' delle viste da
-# meno di 0.8 m: falsi ostacoli 274 -> 193 (-30%), ostacoli non visti 377 -> 384 (+7),
-# celle "il robot era qui ed e' occupata" 16 -> 0. L'alternativa (non azzerare mai le
-# prove di libero) dava 173 falsi ma 490 ostacoli non visti: scartata.
 GLOBAL_OCC_CONFIRM_WALKED = 4
 
 # =========================================================================
-# MAPPA DELLO SPAZIO LIBERO (2026-10-12, dalla prima missione in esterno)
-#
-# La mappa di occupazione ricorda solo "ostacolo", cioe' obstacle_distance <= 0.15.
-# Un varco da 0.26 m, per lei, e' prato aperto: NON ESISTE, in cio' che il pianificatore
-# legge, un modo di dire "qui si passa a stento". Il fronte invece lavora sul valore
-# continuo e pretende FRONTIER_CLEARANCE_M. Da questa differenza nascono due sintomi
-# osservati nella missione del 12-10 14:47, cella (1,1):
-#   - il pianificatore propone un percorso nel varco, il fronte rifiuta, [SUBITO] scarta
-#     QUELL'arco, il pianificatore trova l'arco accanto -- stesso varco. Otto volte.
-#   - prune_prm_nodes_in_obstacles riconosce i nodi dentro un ostacolo ma non ha dove
-#     scriverlo: lo scarto e' soft e al refresh successivo gli archi tornano. 336 scarti
-#     per 88 nodi davvero cattivi, cioe' ognuno rifatto quasi 4 volte.
-#
-# Qui la mappa ricorda, per cella, QUANTO SPAZIO c'era: cosi' il pianificatore puo'
-# applicare lo stesso identico test del fronte, sulla stessa grandezza.
-#
-# Statistica: media delle osservazioni prese entro CLEARANCE_NEAR_M; dove non ce ne sono,
-# media di tutte. Impara quindi dalla PRIMA osservazione anche lontana, e si corregge
-# quando il robot si avvicina. Misurato sulle due missioni del 12-10 (fermate del fronte
-# riconosciute / punti su cui il robot e' davvero passato e che verrebbero vietati):
-#   bit + margine (oggi)      fuori 39% / 6.1%    al chiuso 43% / 16.0%
-#   vicine, se no tutte       fuori 52% / 1.9%    al chiuso 86% / 16.5%
-#   media di tutte            fuori 52% / 1.3%    al chiuso 21% / 16.0%  <- crolla in corridoio
-# La variante scelta domina quella di oggi su entrambe le missioni.
-#
-# CLEARANCE_MAP_DECIDES = False: la mappa impara e si misura il disaccordo con il criterio
-# attuale, ma a decidere resta la mappa binaria. Si commuta dopo una missione di prova.
+# MAPPA DELLO SPAZIO LIBERO (vedi GlobalGrid.update_clearance)
+# Per ogni cella ricorda QUANTO spazio c'era (obstacle_distance), non solo "ostacolo si/no":
+# cosi' il pianificatore potrebbe applicare lo stesso test del fronte sulla stessa grandezza.
+# Statistica: media delle osservazioni prese entro CLEARANCE_NEAR_M dal robot; dove non ce ne
+# sono, media di tutte.
+# CLEARANCE_MAP_DECIDES = False: la mappa impara e la riga [SPAZIO] del log misura il
+# disaccordo, ma decide la mappa binaria (sulle missioni del 12-13/10 lo spazio libero non ha
+# dato vantaggi: vedi CHANGELOG 2026-10-14).
+# =========================================================================
 CLEARANCE_NEAR_M = 1.0
 CLEARANCE_MAP_DECIDES = False
 
 # =========================================================================
-# GAIT SELECTION THRESHOLDS -- three-tier terrain difficulty, well below the
-# OBSTACLE thresholds above (those mean "basically impassable"; these mean
-# "how carefully should Spot walk through terrain we've already decided is
-# passable"). A segment's 90th-percentile gradient/roughness (see
-# prm_graph.PRM.sample_terrain_between_points) is classified PLAIN /
-# MODERATE / HARD using the WORSE (max) of the two metrics -- either one
-# alone can push a segment into a more cautious tier, same OR logic as the
-# obstacle veto in fuse_obstacle_mask.
-# Starting points only -- retune against how Spot actually behaves on your
-# terrain; nothing here has been validated on hardware.
+# SCELTA DELL'ANDATURA (vedi easy_walk.select_mobility_params)
+# Tre livelli dalla pendenza (col corpo) e dalla rugosita' del tratto da percorrere; decide
+# la peggiore delle due. In altezza di gradino netto (H / 0.48): PLAIN sotto ~7 cm, HARD da
+# ~12 cm. Sono soglie di "quanta cura", molto sotto quelle di ostacolo.
 # =========================================================================
 GAIT_PLAIN_SLOPE_MAX = 0.15     # below this on BOTH -> PLAIN tier (flat ground)
 GAIT_PLAIN_ROUGH_MAX = 0.05
-# 2026-10-12: da 0.35 a 0.25, sui numeri VERI della prima missione in esterno. Con 0.35
-# HARD non e' mai scattato (48 passi su 48 fra PLAIN e MODERATE) perche' il gradiente
-# massimo misurato sul prato e' stato 0.330. Distribuzione del gradiente sui 48 archi
-# percorsi: p25 0.132, mediana 0.171, p75 0.203, p90 0.248, massimo 0.330.
-# Spostando la soglia qui: PLAIN 29%, MODERATE 60%, HARD 10% -- HARD scatta sul decimo
-# piu' ripido, che e' cio' che l'utente voleva.
 GAIT_MODERATE_SLOPE_MAX = 0.25  # below this on BOTH -> MODERATE tier; at/above -> HARD tier
-# 2026-10-14: in altezza di gradino netto (H / 0.48, vedi SLOPE_THRESHOLD): PLAIN sotto ~7 cm
-# (0.15), HARD da ~12 cm (0.25). Il gradino delle 12:47:20 del 13-10 (~17-19 cm) e' HARD.
 GAIT_MODERATE_ROUGH_MAX = 0.10
 
-# ground_mu_hint per tier (bosdyn.api.spot.TerrainParams): BD's own docs suggest 0.4-0.8,
-# 0.8 being the robot's default (assume good grip); lower values tell Spot to expect less
-# friction and plan foot placement more conservatively.
+# ground_mu_hint per livello (bosdyn.api.spot.TerrainParams): 0.8 e' il default di Spot (buona
+# aderenza); valori piu' bassi gli dicono di aspettarsi meno attrito e appoggiare con piu' cura.
 GAIT_MU_PLAIN = 0.8
 GAIT_MU_MODERATE = 0.6
 GAIT_MU_HARD = 0.4
 
-# Velocita' massime per livello (m/s lineare, rad/s rotazione) -- 2026-10-06.
-# Prima non esisteva alcun limite: Spot camminava fino al proprio massimo (~1.6 m/s).
-# Valori pensati per l'ESTERNO, che e' il campo d'uso: anche un prato "in piano" non e'
-# un pavimento. Vedi movements.DEFAULT_MAX_LINEAR_VEL_MPS per l'avvertenza su min/max.
+# Velocita' massime per livello (m/s lineare, rad/s rotazione), pensate per l'esterno. Vedi
+# movements.DEFAULT_MAX_LINEAR_VEL_MPS per l'avvertenza su min/max.
 GAIT_VEL_PLAIN = 0.5
 GAIT_VEL_MODERATE = 0.35
 GAIT_VEL_HARD = 0.25
@@ -459,112 +268,42 @@ GAIT_ANG_PLAIN = 0.6
 GAIT_ANG_MODERATE = 0.5
 GAIT_ANG_HARD = 0.4
 
-# =========================================================================
-# PRM EDGE-COST DIRECTIONAL WEIGHTING -- quanto deve costare IN PIU', nella
-# funzione di costo usata da Dijkstra per scegliere tra archi gia' ammessi,
-# un traverso laterale (sidehill/rollio) rispetto a una salita/discesa
-# longitudinale (beccheggio) della STESSA grandezza. Un arco sotto soglia
-# non viene mai scartato solo per questo -- il veto vero (arco ammesso o
-# no) resta SLOPE_THRESHOLD in entrambe le direzioni, applicato in
-# build_graph()/refresh_local_edge_weights()/arcVerification.py, del tutto
-# indipendente da questo moltiplicatore. Questo serve solo a far preferire,
-# tra due archi ENTRAMBI ammessi, quello meno esposto al rollio -- un
-# quadrupede tollera peggio l'inclinazione laterale di quella in avanti a
-# parita' di pendenza. Punto di partenza, da ritarare su hardware reale.
-#
-# VALORE PER IL PRIMO TEST: 1.0 (neutro -- laterale e longitudinale pesano
-# uguale nel costo, la direzione resta comunque distinta dal vecchio campo
-# isotropo). Era 1.5, ma era una supposizione non osservata su Spot, e la
-# stima di pendenza per arco sovrastimava le componenti piccole fino a ~1.9x
-# (vedi CONTEXT.md, punto A dei problemi aperti): moltiplicarla ancora per 1.5
-# avrebbe amplificato l'errore. Con il profilo d'arco corretto (base fisica +
-# campionamento NaN-aware, vedi compute_arc_slope_profile) quella sovrastima e'
-# rientrata, quindi un peso > 1.0 e' ora valutabile sui dati reali; il CSV per
-# segmento registra i termini di costo.
-# =========================================================================
+# Peso della pendenza LATERALE (rollio) rispetto a quella longitudinale nel costo degli archi
+# (beta_lateral = beta * questo). 1.0 = stesso peso. Non scarta archi: serve solo a preferire,
+# fra due archi ammessi, quello meno esposto al rollio.
 LATERAL_SLOPE_COST_MULTIPLIER = 1.0
 
-# =========================================================================
-# SOGLIA DIAGNOSTICA -- quanto vicino a SLOPE_THRESHOLD conta come "quasi al
-# limite" per i log/salvataggi di debug (flip del veto tra due refresh, .npy
-# dei casi limite in easy_walk.py). Puramente informativa: non influisce su
-# NESSUNA decisione del robot, solo su cosa finisce nei log per la revisione
-# post-missione.
-# =========================================================================
+# Quanto vicino a SLOPE_THRESHOLD conta come "quasi al limite" nei log e nei salvataggi di
+# diagnostica. Non influisce su nessuna decisione.
 NEAR_THRESHOLD_MARGIN_FRACTION = 0.15
 
 # =========================================================================
-# PROFILO DI PENDENZA PER ARCO -- parametri fisici (vedi compute_arc_slope_profile).
-#
-# SLOPE_BASELINE_M: la stessa base fisica gia' usata da
-#   compute_gradient_and_roughness() per il campo di gradiente per-cella. Il profilo
-#   d'arco usava invece il passo nativo della cella (~3 cm): su quella base la faccia
-#   verticale di un armadio da 80 cm produce 0.80 / (2 * 0.03) = 13 m/m, e un'anta da
-#   1.45 m produce 24 -- esattamente i massimi comparsi nei log delle missioni del
-#   2026-10-05. Misurando il dislivello su ~25 cm (l'ordine di un passo di Spot) un
-#   gradino isolato viene diluito, mentre una salita vera e prolungata resta intatta.
-#   E' la stessa correzione gia' applicata al campo per-cella, che non era mai stata
-#   estesa al profilo per-arco.
-#   PRECISAZIONE (revisione del 2026-10-06 sera): la differenza e' CENTRATA, k celle avanti
-#   e k indietro con k = round(0.25 / 0.03) = 8, quindi il dislivello si misura su 2k = 16
-#   celle, cioe' ~0.48 m, non 0.25. Vale identico per il PRM, il fronte e il campo per-cella,
-#   quindi sono coerenti fra loro; ma un gradino isolato e' diluito il doppio di quanto
-#   dicevano i commenti: un gradino di 25 cm da' ~0.52 di pendenza (sotto la soglia 0.6) e
-#   ~0.125 di rugosita' (sotto 0.15). Spot sale gradini fino a ~30 cm, quindi non e' un
-#   rischio in se'; e' da ricordare se si ritarano le soglie. Non cambiato.
-#
-# LATERAL_SLICE_HALF_WIDTH_M: meta' larghezza della fetta perpendicolare usata per il
-#   rollio. Prima la fetta era lunga quanto l'ARCO (+/- dist/2), quindi un arco da 2 m
-#   raccoglieva terreno fino a 1 m per lato: qualunque mobile entro un metro generava
-#   una "pendenza laterale" enorme e vetava l'arco, e la portata del veto cambiava con
-#   la lunghezza del passo (lo stesso punto risultava percorribile con un arco da 1.5 m
-#   e vietato con uno da 2 m). Il rollio e' per definizione l'inclinazione TRA LE
-#   TRACCE DEI PIEDI: oltre quella fascia non si misura rollio, si misura paesaggio.
-#   0.30 m deriva dai 0.50 m di larghezza di Spot (vedi compute_robot_footprint_mask)
-#   piu' margine per la variabilita' di appoggio.
-#
-# MIN_ARC_SAMPLE_FRACTION: frazione minima di campioni che deve cadere davvero dentro
-#   la griglia perche' has_data sia True (vedi compute_arc_slope_profile).
+# PROFILO DI PENDENZA DI UN ARCO (vedi compute_arc_slope_profile)
+#   SLOPE_BASELINE_M: MEZZA base della differenza di quota. La differenza e' centrata, k celle
+#     avanti e k indietro con k = round(0.25 / 0.03) = 8: il dislivello si misura su ~0.48 m,
+#     circa un passo. Su una base piu' corta la faccia di un mobile darebbe pendenze enormi;
+#     su questa un gradino netto di H vale H / 0.48.
+#   LATERAL_SLICE_HALF_WIDTH_M: mezza larghezza della fetta perpendicolare per il rollio:
+#     larga quanto il robot (0.50 m) piu' margine. Oltre quella fascia non e' rollio.
+#   MIN_ARC_SAMPLE_FRACTION: frazione minima di campioni con dati perche' l'arco abbia una
+#     pendenza (has_data); sotto, l'arco e' "senza dati", che non vuol dire piatto.
+#   ARC_BODY_EXTENSION_M: di quanto si allunga l'arco a OGNI estremo per la pendenza "col
+#     corpo", usata per veto, costo e andatura: il robot fermo su un nodo ha le zampe 0.55 m
+#     davanti e dietro, quindi sente il terreno oltre i due nodi. Il fronte resta sull'arco fra
+#     i nodi (piu' permissivo del PRM). 0 = solo l'arco.
 # =========================================================================
 SLOPE_BASELINE_M = 0.25
 LATERAL_SLICE_HALF_WIDTH_M = 0.30
 MIN_ARC_SAMPLE_FRACTION = 0.5
-
-# ARC_BODY_EXTENSION_M (2026-10-13): di quanto si allunga l'arco, a OGNI estremo, quando se
-# ne misura la pendenza per il VETO e il COSTO del PRM e per la scelta dell'andatura. Mezzo corpo:
-# il robot fermo su un nodo ha le zampe 0.55 m davanti e 0.55 m dietro, quindi il terreno
-# che "sente" su un tratto va oltre i due nodi. Missione del 13-10 12:40, 12:47:20: un
-# gradino di ~17 cm stava 20 cm oltre la fine dell'arco; l'arco misurava 0.17 (MODERATE)
-# e il robot e' rimasto fermo 9 s col muso a 27 gradi, zampe anteriori sul gradino.
-# 2026-10-14: vale anche per il VETO del PRM (un solo valore, prm_graph.body_slope): il
-# robot non deve potersi fermare su un nodo con le zampe su un pendio oltre soglia. Misurato
-# sulle mappe delle 12:40: archi scartati 0.77% -> 1.19%, nodi isolati 1 -> 5. Il fronte
-# (arcVerification) resta invece sull'arco fra i nodi: e' piu' permissivo del PRM, quindi
-# non puo' mai bloccare un arco che il PRM ha accettato per pendenza. 0 = solo l'arco.
 ARC_BODY_EXTENSION_M = ROBOT_HALF_LENGTH_M
-# Calcolo: compute_arc_slope_profile(..., body_ext_m=...) -> spotGrid._body_slope.
 
 
 def fill_invalid_nearest(values_2d, invalid_mask):
     """
-    Extend each valid cell's value into the nearest invalid (masked) cells.
+    Riempie le celle non attendibili (invalid_mask True) con il valore della cella
+    attendibile piu' vicina: celle che Spot dichiara non valide e impronta del robot.
 
-    Used to patch both sensor-invalid terrain cells (BD's own terrain_valid grid
-    flags a cell invalid when its height estimate is too extreme to trust) and
-    the robot's own footprint (self-occluded, never a real reading). In both
-    cases the honest fix is the same: borrow the nearest trustworthy neighbor's
-    value rather than leaving raw/garbage data or a NaN hole in the terrain layer.
-
-    Args:
-        values_2d: 2D array of raw values (e.g. terrain height)
-        invalid_mask: 2D bool array, True where values_2d should be considered
-                      untrustworthy and filled in from the nearest False cell
-
-    Returns:
-        2D array, same shape as values_2d, with invalid_mask cells replaced by
-        their nearest valid neighbor's value. If everything is valid, or
-        everything is invalid, returns values_2d unchanged (nothing sensible to
-        borrow from in the second case).
+    Restituisce una copia; se tutto e' valido, o tutto non valido, i valori invariati.
     """
     if not np.any(invalid_mask) or not np.any(~invalid_mask):
         return values_2d.copy()
@@ -574,21 +313,13 @@ def fill_invalid_nearest(values_2d, invalid_mask):
 
 def _gather_heights(terrain_2d, grid_origin_x, grid_origin_y, cell_size, xs, ys, valid_2d=None):
     """
-    Campionamento vettoriale delle quote da una griglia densa.
+    Quote della griglia nelle posizioni (xs, ys), array di qualunque forma.
 
-    Restituisce (quote, dentro_griglia): le posizioni fuori griglia valgono NaN e
-    NON vengono compattate via. Prima venivano semplicemente scartate dalla lista
-    dei campioni, e np.gradient trattava i superstiti come contigui a cell_size --
-    inventando pendenze inesistenti ogni volta che un arco sfiorava il bordo della
-    finestra scansionata.
-
-    Usa np.floor, non int(): int() tronca verso lo zero e quindi sbaglia cella per
-    coordinate negative. Il frame VISION di questa missione ha y sempre negative.
-
-    valid_2d (2026-10-06): maschera delle celle attendibili (is_valid di correct_terrain).
-    Se data, i campioni su celle NON attendibili (riempite, filtrate, mai scritte, sotto
-    l'impronta) valgono NaN come quelli fuori griglia, e il secondo valore restituito
-    diventa "dentro E attendibile".
+    Restituisce (quote, dentro): dove non c'e' dato la quota e' NaN e il campione resta al
+    suo posto (non viene compattato via, che inventerebbe pendenze fra punti non vicini).
+    Con valid_2d i campioni su celle non attendibili valgono NaN come quelli fuori griglia,
+    e `dentro` vuol dire "dentro E attendibile". Usa np.floor e non int(), che sbaglia cella
+    per coordinate negative.
     """
     num_rows, num_cols = terrain_2d.shape
     cols = np.floor((xs - grid_origin_x) / cell_size).astype(np.int64)
@@ -606,10 +337,8 @@ def _gather_heights(terrain_2d, grid_origin_x, grid_origin_y, cell_size, xs, ys,
 
 def p90(values):
     """
-    90 percentile, IDENTICO a float(np.percentile(values, 90)) (metodo 'linear', stessa
-    interpolazione di numpy 1.24, verificato bit per bit su 200 mila array casuali), per
-    valori finiti. 2026-10-13: np.percentile costa ~130 microsecondi di solo contorno per
-    chiamata; nella costruzione del grafo era chiamata 121 mila volte, 15.7 s su 35.
+    90 percentile, IDENTICO a float(np.percentile(values, 90)) (interpolazione lineare) per
+    valori finiti, ma senza il costo fisso di np.percentile, che qui si chiama molto spesso.
     """
     a = np.asarray(values, dtype=np.float64).ravel()
     n = a.size
@@ -627,16 +356,10 @@ def p90(values):
 
 def _baseline_gradient(heights, step, baseline_m):
     """
-    Differenza centrata su una base FISICA (baseline_m metri) invece che sul passo
-    nativo di campionamento -- vedi SLOPE_BASELINE_M per il perche'.
-
-    Opera sull'ultimo asse, quindi accetta sia un profilo 1D (longitudinale) sia una
-    pila di fette 2D (laterale), mettendo in comune tutti i campioni. NaN-aware: dove
-    manca un campione il risultato e' NaN e viene scartato, invece di produrre una
-    pendenza finta tra due punti non adiacenti.
-
-    Returns:
-        array 1D dei moduli di pendenza validi (eventualmente vuoto).
+    Pendenza come differenza centrata su una base FISICA (vedi SLOPE_BASELINE_M), lungo
+    l'ultimo asse: va bene per un profilo 1D (longitudinale) e per una pila di fette 2D
+    (laterale), che vengono messe in comune. Dove manca un campione il risultato e' NaN e
+    viene scartato. Restituisce l'array 1D dei moduli di pendenza validi (anche vuoto).
     """
     n = heights.shape[-1]
     k = max(1, int(round(baseline_m / step)))
@@ -655,69 +378,34 @@ def compute_arc_slope_profile(terrain_2d, grid_origin_x, grid_origin_y, cell_siz
                               min_sample_fraction=MIN_ARC_SAMPLE_FRACTION, valid_2d=None,
                               obstacle_2d=None, body_ext_m=0.0):
     """
-    Compute the slope Spot would actually experience walking a specific arc, in BOTH
-    directions, sampled directly from real terrain heights (not a precomputed gradient
-    field). A pure function of the terrain data explicitly passed in -- not tied to any
-    particular object's stored state -- so both the PRM graph (build time, main thread)
-    and the arc-verification background thread (real time, its own freshly-fetched scan)
-    can each call this with their own current data, with no staleness or cross-thread
-    coupling between them.
+    Pendenza che Spot sentirebbe percorrendo l'arco (x1, y1) -> (x2, y2), misurata sulle
+    quote della griglia passata. Funzione pura dei dati: la usano il PRM (sulla scansione
+    del momento) e il fronte (sulla sua fotografia).
 
-      - LONGITUDINAL (pitch-relevant): sample terrain height along the arc's centerline
-        and differentiate it over baseline_m -- the real height profile the robot would
-        walk, measured over a stride-sized baseline rather than over a single ~3cm cell.
+      - LONGITUDINALE (beccheggio): quote ogni cella lungo la linea dell'arco, differenze
+        su SLOPE_BASELINE_M (vedi _baseline_gradient).
+      - LATERALE (rollio): ogni perp_sample_spacing_m lungo l'arco una fetta perpendicolare
+        larga quanto il robot (+/- lateral_half_width_m), con le stesse differenze; i
+        campioni di tutte le fette vanno insieme.
 
-      - LATERAL (roll-relevant): every perp_sample_spacing_m along the arc, drop a
-        perpendicular slice +/- lateral_half_width_m wide (the width of the robot, NOT
-        the length of the arc), sample heights across it and differentiate over the same
-        baseline. All lateral samples from every slice are pooled before taking one
-        percentile, so a sidehill traverse gets caught even if the along-arc profile
-        alone looks flat.
+    Ognuna delle due si riassume col 90 percentile: una cella sbagliata isolata non conta,
+    ma un tratto ripido non viene annacquato dalla media dell'arco.
 
-    Both directions are summarized with the 90th percentile -- robust to isolated
-    noisy cells, but not diluted by averaging over the whole arc.
+    has_data e' True solo se almeno min_sample_fraction dei campioni ha un dato, in
+    entrambe le direzioni: un arco visto per meno di meta' e' "senza dati", che non vuol
+    dire piatto (il PRM passa allora alla mappa globale).
 
-    has_data is True only if at least min_sample_fraction of the samples actually fell
-    inside the grid, in BOTH directions. The previous version returned True
-    unconditionally as soon as a grid object existed: an arc entirely outside the
-    currently-scanned window was reported as a LIVE measurement of 0.0 slope -- unknown
-    ground presented as known-flat -- and the global-map fallback in
-    PRM.sample_terrain_between_points, which is gated on `not has_data`, was therefore
-    unreachable (hence global_map: 0.0% in every mission summary).
+    valid_2d: maschera delle celle attendibili; le altre (riempite, filtrate, mai scritte)
+    non entrano. obstacle_2d: celle gia' ostacolo per obstacle_distance, escluse anche loro:
+    la faccia di un mobile non e' un pendio, ed e' gia' gestita come ostacolo dal PRM e dal
+    fronte. Un arco che perde cosi' i dati diventa "senza dati", non "libero": entra nel
+    grafo con un costo di ripiego e chi lo percorre lo verifica col fronte.
 
-    valid_2d (2026-10-06, rete di sicurezza): maschera is_valid di correct_terrain. Le
-    quote riempite (buchi del sensore, celle filtrate dal controllo sul suolo, celle mai
-    scritte) non entrano piu' nelle differenze: prima la pendenza si misurava anche sul
-    terreno riempito, che e' una stima. Con la maschera anche has_data conta solo i
-    campioni attendibili: un arco visto per meno di meta' torna "senza dati" e il PRM
-    passa alla mappa globale, invece di dichiarare piatto cio' che non ha visto.
-    Senza maschera: comportamento precedente.
-
-    obstacle_2d (2026-10-07, questione aperta B): maschera delle celle che
-    `obstacle_distance` chiama GIA' ostacolo. Vengono escluse dalle differenze come le
-    celle non attendibili. Motivo: la faccia verticale di un mobile non e' terreno in
-    pendenza, e' un ostacolo -- ed e' gia' gestita come tale, due volte: il veto di
-    occupazione del PRM e il fronte sicuro, che si ferma a FRONTIER_CLEARANCE_M da
-    qualunque cella con obstacle_distance bassa. Contarla ANCHE come pendenza del
-    terreno la conta la terza volta, e con il peggiore degli effetti: non ferma il
-    robot davanti al mobile (ci pensa il fronte), scollega il grafo PRM in tutta la
-    stanza.
-
-    Misurato sulla missione del 2026-10-07 13:58, stanza con mobili: 200 archi distinti
-    vetati per pendenza, mediana longitudinale 1.487 contro soglia 0.600, massimo 2.092
-    -- valori impossibili su un pavimento piano, e la ripianificazione falliva da OGNI
-    nodo (225, 227, 228) nonostante 22-28 collegamenti ciascuno, quindi la ritirata era
-    l'unico esito possibile. Escludendo queste celle quegli archi non diventano
-    "liberi": diventano "senza dati di pendenza" (has_data False), e un arco senza dati
-    NON viene vetato ne' in build_graph ne' in _try_add_edge -- entra nel grafo con un
-    costo di ripiego, e chi lo percorre lo verifica metro per metro col fronte sicuro.
-    E' la scelta esplicita del 2026-10-07: la sicurezza su quegli archi la dà il fronte,
-    non una pendenza misurata su un armadio.
-
-    Senza maschera: comportamento precedente.
+    body_ext_m > 0: in piu' i tre valori "col corpo" (vedi _body_slope).
 
     Returns:
-        (longitudinal_slope, lateral_slope, has_data)
+        (long, lat, has_data), oppure con body_ext_m > 0
+        (long, lat, has_data, long col corpo, lat col corpo, has col corpo)
     """
     if terrain_2d is None or grid_origin_x is None or cell_size is None:
         return _no_slope_data(body_ext_m)
@@ -726,11 +414,9 @@ def compute_arc_slope_profile(terrain_2d, grid_origin_x, grid_origin_y, cell_siz
     if dist < 1e-6:
         return _no_slope_data(body_ext_m)
 
-    # Uscita rapida (2026-10-06 sera): se l'arco, allargato della fetta laterale, non tocca
-    # nemmeno la griglia, nessun campione vi cade dentro -> has_data False con pendenze 0,
-    # identico al calcolo completo. In build_graph la grande maggioranza degli archi sta
-    # fuori dalla finestra di ~3.8 m: prima ognuno pagava il campionamento intero (~0.2 ms,
-    # due volte per arco -> ~30 s per costruzione).
+    # Uscita rapida: se l'arco, allargato della fetta laterale, non tocca la griglia, nessun
+    # campione vi cade dentro -> "senza dati", identico al calcolo completo ma senza pagarlo
+    # (la maggior parte degli archi sta fuori dalla finestra di 3.84 m).
     num_rows, num_cols = terrain_2d.shape
     pad = lateral_half_width_m + cell_size
     if (max(x1, x2) + pad < grid_origin_x or min(x1, x2) - pad > grid_origin_x + num_cols * cell_size or
@@ -740,15 +426,13 @@ def compute_arc_slope_profile(terrain_2d, grid_origin_x, grid_origin_y, cell_siz
     dir_x, dir_y = (x2 - x1) / dist, (y2 - y1) / dist   # along-arc unit vector
     perp_x, perp_y = -dir_y, dir_x                      # across-arc unit vector
 
-    # Celle attendibili E non-ostacolo: una sola maschera, usata per entrambe le direzioni
-    # (vedi obstacle_2d nella docstring). Se nessuna delle due e' data, resta None e il
-    # campionamento si comporta esattamente come prima.
+    # Celle attendibili E non ostacolo: una sola maschera per entrambe le direzioni.
     usable_2d = valid_2d
     if obstacle_2d is not None:
         obs = np.asarray(obstacle_2d, dtype=bool)
         usable_2d = (~obs) if valid_2d is None else (np.asarray(valid_2d, dtype=bool) & ~obs)
 
-    # --- LONGITUDINAL: along the centerline, differentiated over baseline_m ---
+    # --- LONGITUDINALE: lungo la linea dell'arco ---
     num_along = max(2, int(dist / cell_size) + 1)
     t = np.linspace(0.0, 1.0, num_along)
     step_along = dist / (num_along - 1)
@@ -759,7 +443,7 @@ def compute_arc_slope_profile(terrain_2d, grid_origin_x, grid_origin_y, cell_siz
     grad_long = _baseline_gradient(h_along, step_along, baseline_m)
     longitudinal_slope = p90(grad_long) if grad_long.size else 0.0
 
-    # --- LATERAL: perpendicular slices as wide as the ROBOT, not as the arc ---
+    # --- LATERALE: fette perpendicolari larghe quanto il ROBOT, non quanto l'arco ---
     num_slices = max(1, int(dist / perp_sample_spacing_m) + 1)
     num_perp = max(2, int(2 * lateral_half_width_m / cell_size) + 1)
     step_perp = 2 * lateral_half_width_m / (num_perp - 1)
@@ -789,16 +473,14 @@ def compute_arc_slope_profile(terrain_2d, grid_origin_x, grid_origin_y, cell_siz
 
 
 # =========================================================================
-# PENDENZA DI MOLTI ARCHI INSIEME (2026-10-14)
+# PENDENZA DI MOLTI ARCHI INSIEME
 #
 # Stesso calcolo di compute_arc_slope_profile / _slope_profile_from_sampler / _body_slope,
 # fatto con matrici: una riga per arco. Gli archi si raggruppano per numero di campioni (che
 # dipende solo dalla lunghezza: sul reticolo le lunghezze sono poche decine), e per ogni
-# gruppo posizioni, letture delle quote, differenze su SLOPE_BASELINE_M e 90 percentile si
-# fanno in un colpo solo. Le operazioni sono le stesse, nello stesso ordine, quindi i numeri
-# sono IDENTICI al bit a quelli arco per arco (verificato sulle missioni rigiocate: vedi
-# test_replay.py e la prova di confronto nel commit). Prima l'aggiornamento del grafo passava
-# il 90% del tempo in decine di migliaia di chiamate su array di poche decine di numeri.
+# gruppo posizioni, letture delle quote, differenze e 90 percentile si fanno in un colpo
+# solo. Le operazioni sono le stesse e nello stesso ordine, quindi i numeri sono IDENTICI al
+# bit a quelli arco per arco: va mantenuto cosi' (lo controlla test_replay.py).
 # =========================================================================
 def p90_rows(m):
     """p90 riga per riga di una matrice, ignorando i NaN; IDENTICO a p90 sui valori finiti di
@@ -997,12 +679,10 @@ def _body_slope(gather, base, x1, y1, x2, y2, dir_x, dir_y, perp_x, perp_y,
                 h_along, inside_along, step_along, grad_lat, inside_perp, u, step_perp,
                 num_slices, dist, perp_spacing, baseline_m, min_sample_fraction, ext_m):
     """
-    2026-10-13. Pendenza "col corpo": come quella dell'arco, ma sul tratto allungato di ext_m
-    a entrambi gli estremi (vedi ARC_BODY_EXTENSION_M). Riusa i campioni gia' letti per
-    l'arco e legge SOLO i pezzi aggiunti: prima si ricampionava tutto l'arco allungato da
-    capo, e la costruzione del grafo raddoppiava. I campioni aggiunti stanno allo stesso
-    passo di quelli dell'arco (ext arrotondato a un multiplo del passo: +/- 1.5 cm lungo
-    l'arco, +/- 5 cm per le fette laterali).
+    Pendenza "col corpo": come quella dell'arco, ma sul tratto allungato di ext_m a entrambi
+    gli estremi (vedi ARC_BODY_EXTENSION_M). Riusa i campioni gia' letti per l'arco e legge
+    solo i pezzi aggiunti, allo stesso passo (ext arrotondato a un multiplo del passo:
+    +/- 1.5 cm lungo l'arco, +/- 5 cm per le fette laterali).
 
     Restituisce (long, lat, has) gia' presi come il PEGGIORE fra arco e arco allungato, cosi'
     il tratto aggiunto non puo' diluire una salita che sta dentro l'arco. Se l'arco non ha
@@ -1128,14 +808,9 @@ def compute_arc_sample_coverage(terrain_2d, grid_origin_x, grid_origin_y, cell_s
                                 x1, y1, x2, y2, perp_sample_spacing_m=0.10,
                                 lateral_half_width_m=LATERAL_SLICE_HALF_WIDTH_M):
     """
-    SOLO DIAGNOSTICA. Frazione dei campioni di un arco che cadono davvero dentro la griglia
-    locale: (frazione_lungo_l_arco, frazione_nelle_fette_laterali), entrambe in [0, 1].
-    Un valore basso qui dice "fidati meno di questo numero".
-
-    Allineata alla geometria usata da compute_arc_slope_profile: la fetta laterale e'
-    +/- lateral_half_width_m, non +/- dist/2. Da quando has_data e' onesto (vedi
-    compute_arc_slope_profile) questa misura e' ridondante per DECIDERE, ma resta utile
-    nel CSV per capire quanto margine c'era sotto la soglia di min_sample_fraction.
+    SOLO DIAGNOSTICA (colonne coverage_* del CSV dei segmenti). Frazione dei campioni di un
+    arco che cadono dentro la griglia: (lungo l'arco, nelle fette laterali), in [0, 1], con
+    la stessa geometria di compute_arc_slope_profile.
     """
     if terrain_2d is None or grid_origin_x is None or cell_size is None:
         return 0.0, 0.0
@@ -1171,24 +846,10 @@ class LocalGrid:
                                    'source': 'non ancora eseguito', 'n_ref': 0}
 
     def create_vtk_no_step_grid(self, proto, robot_state_client):
-        """Generate VTK polydata for the no step grid from the local grid response.
-        Questa funzione:
-
-        Cerca la local grid "no_step" nel messaggio ricevuto.
-
-        Decodifica i valori (raw o RLE).
-
-        Costruisce una griglia di punti (x,y,z) nel frame VISION.
-
-        Colora le celle (rosso = non steppable, blu = steppable).
-
-        Restituisce:
-
-            pts -> punti 3D nel frame VISION
-
-            cells_no_step -> valori della grid
-
-            color -> colori RGB"""
+        """
+        Layer "no_step" della risposta: (punti (x, y, z) nel frame VISION, valori, colori RGB:
+        rosso = non calpestabile, blu = calpestabile). Array vuoti se il layer manca.
+        """
         local_grid_proto = None
         cell_size = 0.0
         for local_grid_found in proto:
@@ -1233,22 +894,14 @@ class LocalGrid:
 
 
     def create_vtk_obstacle_grid(self, proto, robot_state_client):
-        """Generate points, cell values and colors for the obstacle distance grid.
-
-        The obstacle_distance grid encodes the signed distance (in metres) from each
-        cell to the nearest detected obstacle:
-            dist < 0   -> strictly inside an obstacle  -> blocked  (red)
-            dist >= 0  -> border or free space          -> passable (blue)
-
-        Zero-padding policy: no safety margin is added around obstacles.
-        A cell is passable as soon as its distance is >= 0.
-        Unlike the no_step grid, grass is NOT classified as an obstacle here,
-        making this grid more suitable for outdoor environments.
+        """
+        Layer "obstacle_distance": distanza col segno (m) dall'ostacolo piu' vicino, negativa
+        dentro un ostacolo. A differenza di no_step non tratta l'erba come ostacolo, per
+        questo e' il layer usato per gli ostacoli.
 
         Returns:
-            pts (np.ndarray, shape (N,3)): cell positions in the VISION frame
-            cells_obstacle_dist (np.ndarray, shape (N,)): raw signed-distance values
-            color (np.ndarray, shape (N,3) uint8): RGB colours per cell
+            (punti (N, 3) nel frame VISION, distanze (N,), colori RGB (N, 3): rosso dentro un
+            ostacolo, blu fuori). Array vuoti se il layer manca.
         """
         local_grid_proto = None
         cell_size = 0.0
@@ -1304,9 +957,8 @@ class LocalGrid:
 
     def offset_grid_pixels(self, pts, vision_tform_local_grid, cell_size):
         """
-        [FIX ROTOTRASLAZIONE SE3]
-        Ruota e trasla la griglia locale nel frame VISION considerando
-        sia la posizione sia il quaternione di rotazione.
+        Porta i punti dal frame della griglia locale al frame VISION (rotazione e traslazione
+        complete), riferendoli al CENTRO di ogni cella.
         """
         pts_centered = pts.copy()
         pts_centered[:, 0] += cell_size * 0.5
@@ -1381,9 +1033,8 @@ class LocalGrid:
 
     def _fetch_layers(self, types_of_grid):
         """
-        Scarica i layer richiesti. Prima prova UNA sola richiesta per tutti (stessa fotografia
-        per tutti i layer); se fallisce (vecchi SDK / bug protobuf) ripiega su una richiesta
-        per layer, come prima.
+        Scarica i layer richiesti con UNA sola richiesta (stessa fotografia per tutti); se non
+        funziona ripiega su una richiesta per layer.
         """
         if getattr(self, '_multi_request_ok', True):
             try:
@@ -1421,18 +1072,14 @@ class LocalGrid:
         """
         Scarica e decodifica i layer richiesti.
 
-        2026-10-06 sera (dopo la revisione), due controlli in piu'. Restituisce
-        (None, None, None) -- che tutti i chiamanti gestiscono gia' -- se dopo max_attempts
-        tentativi:
-          - manca anche un solo layer richiesto. Prima si restituiva il dizionario senza quel
-            layer: i chiamanti controllavano solo 'obstacle_distance' e poi leggevano
-            grids_data['terrain'] -> KeyError, missione terminata per un errore di rete;
-          - i layer non sono allineati fra loro (origine, dimensioni, cella diverse). Con una
-            richiesta per layer, se il robot si muove fra una richiesta e l'altra la griglia
-            puo' ricentrarsi: i valori di terrain finirebbero indicizzati con l'origine di
-            obstacle_distance, spostati di qualche cella.
-        Avvisa una volta se la griglia risulta ruotata rispetto a VISION: tutto il codice
-        assume che non lo sia (indici di cella calcolati con la sola traslazione).
+        Restituisce (grids_data, main_proto, protos), oppure (None, None, None) se dopo
+        max_attempts tentativi manca anche un solo layer o i layer non sono allineati fra
+        loro (origine, dimensioni o cella diverse: se il robot si muove fra una richiesta e
+        l'altra la griglia puo' ricentrarsi). main_proto e' il primo layer richiesto: la sua
+        origine indicizza tutti i layer.
+
+        Avvisa una volta se la griglia e' ruotata rispetto a VISION: tutto il codice assume
+        che non lo sia (indici di cella calcolati con la sola traslazione).
         """
         if isinstance(types_of_grid, str):
             types_of_grid = [types_of_grid]
@@ -1489,17 +1136,19 @@ class LocalGrid:
                 pts, vals, color = self.create_vtk_terrain_grid(p, robot_state_client, layer_name=grid_type)
                 grids_data[grid_type] = {'pts': pts, 'values': vals, 'color': color}
                 if grid_type == 'terrain':
-                    # Passo di quantizzazione delle quote di QUESTA scansione: serve come
-                    # tolleranza in _cells_never_written. 'raw_zero' e' tenuto per
-                    # compatibilita' con i chiamanti e vale solo da interruttore della
-                    # regola -- NON e' piu' il riferimento, vedi _cells_never_written.
+                    # Passo di quantizzazione delle quote di QUESTA scansione: tolleranza per
+                    # _cells_never_written. 'raw_zero' fa solo da interruttore di quella
+                    # regola (None = spenta).
                     grids_data[grid_type]['raw_zero'] = float(np.float32(lg.local_grid.cell_value_offset))
                     grids_data[grid_type]['scale'] = float(lg.local_grid.cell_value_scale)
 
         return grids_data, main_proto, p
 
     def create_vtk_terrain_grid(self, proto, robot_state_client, layer_name='terrain'):
-        """Generate VTK polydata for any terrain-based grid from the local grid response."""
+        """
+        Layer di tipo terreno (terrain, terrain_valid, intensity): (punti nel frame VISION,
+        valori, colori). Per `terrain` il valore restituito e' la quota in VISION.
+        """
         local_grid_proto = None
         cell_size = 0.0
 
@@ -1539,11 +1188,8 @@ class LocalGrid:
 
         pts = self.offset_grid_pixels(pts, vision_tform_local_grid, cell_size)
 
-        # BUG FIX: `terrain_values` above is the raw height in the local grid's own
-        # (untransformed) frame, which can sit at an arbitrary/drifting z-reference.
-        # offset_grid_pixels already applied the full rotation+translation to `pts`,
-        # so pts[:, 2] holds the correct absolute height in the VISION frame -- use that
-        # as the returned terrain value instead of the raw, frame-relative one.
+        # Le quote decodificate sono nel frame della griglia locale; dopo offset_grid_pixels
+        # pts[:, 2] e' la quota nel frame VISION, che e' quella che si restituisce.
         terrain_values_vision = pts[:, 2].astype(np.float32)
 
         color = np.zeros([len(z_vals), 3], dtype=np.uint8)
@@ -1555,32 +1201,26 @@ class LocalGrid:
                         robot_footprint_mask=None, cell_size=0.03, robot_rc=None,
                         unwritten_value=None, unwritten_scale=None, return_unwritten=False):
         """
-        Single source of terrain correction. Fills BOTH sensor-invalid cells and
-        the robot's own footprint with their nearest valid neighbor's height via
-        fill_invalid_nearest(). This corrected surface is what everything
-        downstream should consume -- compute_gradient_and_roughness(), the
-        terrain_real used for visualization/PRM node elevation, and the is_valid
-        gate that keeps fuse_obstacle_mask() from ever vetoing based on an
-        extrapolated/borrowed value -- instead of each place doing its own
-        ad-hoc fill or footprint patch as before.
+        Unico punto di correzione del terreno. Le celle non attendibili -- non valide per
+        Spot, sotto il corpo del robot, troppo sopra il suolo (_cells_above_ground), mai
+        scritte dai sensori (_cells_never_written) -- vengono riempite con la quota della
+        cella attendibile piu' vicina e marcate non valide. Tutto il resto del codice usa
+        questo terreno corretto, e is_valid impedisce che un valore riempito decida qualcosa.
 
         Args:
-            terrain_values: raw terrain heights (flat or (num_cells_y, num_cells_x))
-            terrain_valid_values: BD's terrain_valid grid (>= TERRAIN_VALID_MIN means
-                trustworthy -- NON '> 0.0', vedi la costante per il perche')
-            robot_footprint_mask: optional 2D bool mask, True under the robot's body
+            terrain_values: quote grezze (piatte o (num_cells_y, num_cells_x))
+            terrain_valid_values: layer terrain_valid di Spot (attendibile se >= TERRAIN_VALID_MIN)
+            robot_footprint_mask: maschera 2D facoltativa, True sotto il corpo del robot
             unwritten_value: interruttore della regola delle celle mai scritte
-                (grids_data['terrain']['raw_zero']). None = regola disattivata. NON e'
-                piu' il riferimento della quota, vedi _cells_never_written.
-            unwritten_scale: passo di quantizzazione (grids_data['terrain']['scale']).
-            return_unwritten: se True restituisce anche la maschera delle celle mai scritte.
+                (grids_data['terrain']['raw_zero']); None = regola spenta
+            unwritten_scale: passo di quantizzazione (grids_data['terrain']['scale'])
+            return_unwritten: restituisce anche la maschera delle celle mai scritte
 
         Returns:
-            terrain_corrected: 1D float array, filled terrain heights
-            is_valid: 1D bool array -- True where the ORIGINAL sensor reading was
-                      trustworthy (not footprint, not sensor-invalid, not filtered)
-            unwritten: (solo con return_unwritten) 1D bool array, celle mai scritte:
-                      da trattare come NON VISTE (vedi make_grid_snapshot)
+            terrain_corrected: quote corrette, 1D
+            is_valid: 1D, True dove la lettura ORIGINALE era attendibile
+            unwritten: (solo con return_unwritten) 1D, celle mai scritte, da trattare come
+                NON VISTE (vedi arcVerification.make_grid_snapshot)
         """
         terrain_2d = terrain_values.reshape((num_cells_y, num_cells_x)).astype(np.float32)
 
@@ -1596,8 +1236,8 @@ class LocalGrid:
 
         # Filtro sull'altezza del suolo -- vedi GROUND_HEIGHT_TOLERANCE_M.
         above_ground = self._cells_above_ground(terrain_2d, ~fill_mask, cell_size, robot_rc)
-        # Celle mai scritte: la quota si RICAVA dai dati, non si prevede piu'.
-        # Si passa valid_2d (la bandiera di Spot), non ~fill_mask: vedi _cells_never_written.
+        # Celle mai scritte: si passa valid_2d (la bandiera di Spot), non ~fill_mask: vedi
+        # _cells_never_written.
         unwritten = self._cells_never_written(terrain_2d, valid_2d, unwritten_value, unwritten_scale)
         fill_mask = fill_mask | above_ground | unwritten
 
@@ -1612,35 +1252,14 @@ class LocalGrid:
         """
         Celle che i sensori non hanno mai scritto: restano tutte alla STESSA quota esatta.
 
-        RISCRITTA il 2026-10-07. Prima la quota si PREVEDEVA uguale a cell_value_offset
-        ("il valore grezzo 0"). Due errori indipendenti, entrambi fatali:
-          1. cell_value_offset e' nel frame della GRIGLIA LOCALE, mentre le quote di
-             `terrain` sono in VISION (create_vtk_terrain_grid restituisce pts[:, 2]).
-             Misurato sulle scansioni del 2026-10-07: differenza 0.259-0.350 m contro una
-             tolleranza di 0.25 mm.
-          2. quelle celle non stanno al grezzo 0, ma a un intero qualunque (350, 273,
-             269 ... diverso a ogni scansione, perche' Spot sposta l'offset).
-        Risultato: la regola non e' MAI scattata -- zero celle in tutte e 16 le scansioni
-        registrate, mentre il plateau era di 1845-3710 celle (11-23% della griglia).
+        La quota non si prevede (dipende dal frame e Spot sposta l'offset a ogni scansione): si
+        RICAVA come la quota esatta piu' frequente fra le celle che Spot stesso dichiara non
+        attendibili. Se almeno UNWRITTEN_MIN_CELLS la condividono (e almeno
+        UNWRITTEN_MIN_SPOT_INVALID di quelle a quella quota sono non valide per Spot), ogni
+        cella a quella quota e' mai scritta, comprese le poche che Spot marca buone per errore.
+        E' una rete: quasi tutte queste celle Spot le marca gia' non valide.
 
-        Ora la quota non si prevede, si RICAVA: e' la quota esatta piu' frequente fra le
-        celle che SPOT STESSO dichiara non attendibili. Se almeno UNWRITTEN_MIN_CELLS la
-        condividono, ogni cella a quella quota e' mai scritta -- comprese le poche che il
-        layer di validita' marca buone per errore (misurato: lo 0-1.8%). Nessuna costante
-        magica e nessun confronto fra frame diversi.
-
-        Niente piu' condizione sulla distanza dal suolo: il plateau sta allo zero verticale
-        della griglia locale, che con il robot in piedi cade ~0.93 m sopra il pavimento --
-        sotto GROUND_HEIGHT_TOLERANCE_M = 1.2 m, quindi quella condizione non poteva
-        comunque scattare nel caso normale. Il caso del 2026-10-05 (robot acceso un piano
-        piu' su, 3.226 m) era l'eccezione.
-
-        Serve ancora, adesso che TERRAIN_VALID_MIN e' corretto? Si', come rete: il
-        98.2-100% di queste celle Spot le marca gia' non valide, il resto passerebbe.
-
-        unwritten_value non e' piu' il riferimento: resta solo da interruttore,
-        None = regola spenta, come prima.
-
+        unwritten_value fa solo da interruttore (None = regola spenta).
         Aggiorna self.last_ground_filter['n_unwritten'] e ['n_unwritten_below'].
         """
         none = np.zeros_like(sensor_valid_2d, dtype=bool)
@@ -1685,9 +1304,8 @@ class LocalGrid:
         e' appoggiato. Solo sopra: vedi il commento alla costante per il perche'.
 
         Il suolo e' la mediana delle celle attendibili entro GROUND_REF_RADIUS_M dal robot.
-        La griglia locale di Spot e' centrata sul robot (verificato sulle figure del
-        2026-10-05: centro della finestra e posizione del robot coincidono entro ~5 cm),
-        quindi di default il robot e' al centro; robot_rc=(riga, colonna) lo sovrascrive.
+        La griglia locale di Spot e' centrata sul robot (entro ~5 cm), quindi di default il
+        robot e' al centro; robot_rc=(riga, colonna) lo sovrascrive.
 
         Registra l'esito in self.last_ground_filter per i log e il salvataggio dati.
         Restituisce una maschera 2D booleana (tutta False se il suolo non e' stimabile).
@@ -1729,25 +1347,17 @@ class LocalGrid:
     def compute_gradient_and_roughness(self, terrain_corrected, terrain_valid_values, num_cells_x, num_cells_y, cell_size,
                                        slope_baseline_m=SLOPE_BASELINE_M, is_valid=None):
         """
-        Genera layer di pendenza e rugosita' a partire da un terreno GIA' corretto
-        (vedi correct_terrain) -- niente piu' fill qui dentro, solo smoothing e
-        differenziazione. Le zone realmente cieche (sensore, non impronta) vengono
-        azzerate nell'output finale per pulizia visiva/diagnostica.
+        Layer di pendenza e rugosita' per cella, da un terreno GIA' corretto (vedi
+        correct_terrain). Le celle che Spot dichiara non valide valgono 0 nell'uscita.
 
-        La PENDENZA viene calcolata su una base fisica (slope_baseline_m, default
-        ~25cm -- l'ordine di un passo di Spot) invece che sulla spaziatura nativa
-        della cella (circa 3cm). Con una base cosi' stretta, un piccolo gradino o
-        bordo (es. 8cm) produce lo stesso valore numerico di una salita continua e
-        genuinamente pericolosa -- np.gradient(mean_t, cell_size) misura letteralmente
-        "quanto sale da una cella alla prossima", non "che pendenza sentirebbe Spot
-        camminando qui". Misurare il dislivello su una distanza comparabile a un
-        passo diluisce i gradini isolati mantenendo intatta la pendenza di una vera
-        salita prolungata.
+        PENDENZA: differenza centrata su una base fisica (vedi SLOPE_BASELINE_M: ~0.48 m,
+        circa un passo) invece che sulla cella da 3 cm, su cui un piccolo bordo varrebbe
+        quanto una salita vera. Questo campo per cella serve ai nodi e alle figure; la
+        pendenza che decide e' quella per arco (compute_arc_slope_profile).
 
-        La RUGOSITA' resta sulla finestra corta originale (window_size=5): cattura
-        un pericolo diverso (terreno irregolare/sassoso sotto il piede), per cui la
-        scala corta e' quella corretta -- allargarla comincerebbe a nascondere
-        proprio l'irregolarita' fine che deve individuare.
+        RUGOSITA': deviazione standard della quota su una finestra corta (5 celle, 15 cm),
+        per il terreno irregolare sotto il piede: allargarla nasconderebbe proprio quello.
+        Le statistiche usano solo celle attendibili (is_valid).
         """
         terrain_2d = terrain_corrected.reshape((num_cells_y, num_cells_x)).astype(np.float64)
 
@@ -1760,14 +1370,8 @@ class LocalGrid:
 
         # Celle che possono entrare nelle statistiche di vicinato. Con is_valid (uscita di
         # correct_terrain) restano fuori anche le celle riempite e quelle scartate dal
-        # filtro sull'altezza del suolo; senza, si torna al comportamento precedente.
-        #
-        # Perche' conta (2026-10-05, iterazione 6): fuse_obstacle_mask() impediva gia' a
-        # una cella non attendibile di generare un veto SU SE STESSA, ma non impediva alle
-        # sue VICINE valide di assorbirne il valore dentro la finestra 5x5. 29 celle mai
-        # scritte hanno cosi' prodotto 83 falsi ostacoli attorno a se'. Con le statistiche
-        # calcolate solo su celle valide quei veti scendono a 0 e la rugosita' massima da
-        # 1.585 a 0.029, mentre i 54 veti veri dell'iterazione 2 restano tutti.
+        # filtro sull'altezza del suolo: altrimenti una cella non attendibile "contamina" la
+        # rugosita' delle vicine valide nella finestra 5x5.
         if is_valid is not None:
             weight_2d = np.asarray(is_valid).reshape((num_cells_y, num_cells_x)).astype(np.float64)
         else:
@@ -1822,21 +1426,12 @@ class LocalGrid:
                         obstacle_threshold=OBSTACLE_THRESHOLD,
                         rough_threshold=ROUGH_THRESHOLD):
         """
-        Pura logica di veto. La correzione del terreno (fill + impronta robot) e'
-        gia' avvenuta a monte in correct_terrain(); questa funzione decide soltanto,
-        cella per cella, se obstacle_distance / rugosita' superano le soglie --
-        filtrato da is_valid cosi' che un valore estrapolato/riempito non possa mai
-        da solo generare un blocco.
+        Maschera degli ostacoli per cella: -1 ostacolo, +1 libero. Una cella attendibile e'
+        ostacolo se obstacle_distance <= obstacle_threshold oppure rugosita' >
+        rough_threshold; una cella non attendibile (riempita) non e' mai ostacolo.
 
-        NOTA: il gradiente NON fa piu' parte di questo veto per-cella. La pendenza e'
-        ora valutata esclusivamente per-ARCO, su tutta la sua lunghezza reale e in
-        entrambe le direzioni (longitudinale e laterale), in
-        prm_graph.PRM.compute_arc_slope_profile() -- usata per scartare l'arco
-        direttamente in build_graph()/refresh_local_edge_weights(), non per marcare
-        singole celle come ostacolo. Gli ostacoli discreti restano di competenza
-        esclusiva di obstacle_distance; la rugosita' resta un veto per-cella (una
-        zona sassosa/irregolare e' comunque una proprieta' locale, non qualcosa da
-        mediare sull'intera lunghezza di un arco).
+        La pendenza non entra qui: si valuta per ARCO (compute_arc_slope_profile), su tutta
+        la sua lunghezza e nelle due direzioni. La rugosita' invece e' una proprieta' locale.
         """
         cells_obstacle_dist = cells_obstacle_dist.ravel()
         rough_values = rough_values.ravel()
@@ -1860,30 +1455,17 @@ class LocalGrid:
                                      diagnostic_only=False,
                                      body_length=1.10, body_width=0.50):
         """
-        Returns the footprint mask only once per mission (the very first call).
-        Every call after that returns None, so downstream functions skip footprint
-        masking entirely and rely on Spot's own terrain_valid_values from then on --
-        the original reasoning was that the footprint gap is only ever real on the
-        very first scan.
+        Maschera 2D delle celle sotto il corpo del robot (rettangolo orientato, piu' margin).
+        Viene restituita UNA SOLA VOLTA per missione, alla prima chiamata (alla prima
+        scansione il terreno sotto il robot non e' mai stato visto); dopo restituisce None e
+        vale il terrain_valid di Spot.
 
-        diagnostic_only=True computes and returns the mask WITHOUT consuming the
-        one-shot flag and WITHOUT changing any behaviour -- for measuring how many
-        cells under the robot's body would be flagged as obstacles on later scans,
-        before deciding whether to apply the mask every scan. See the FOOTPRINT-DIAG
-        block in easy_walk.py.
+        diagnostic_only=True la calcola senza consumare quell'unica volta (diagnostica
+        [FOOTPRINT-DIAG] in easy_walk). body_length / body_width: dimensioni del corpo, da
+        cambiare solo per la diagnostica (confronto col solo nucleo fra le zampe).
 
-        body_length / body_width: dimensioni del corpo (m) prima del margine. I default
-        sono le dimensioni reali di Spot e NON vanno cambiati nell'uso normale. Servono
-        alla diagnostica per confrontare il rettangolo intero con il solo NUCLEO (la
-        fascia entro la carreggiata delle zampe): un ostacolo dentro il nucleo
-        significherebbe che il robot ci sta gia' sopra, quindi mascherare li' non puo'
-        nascondere nulla di raggiungibile, mentre mascherare l'intero rettangolo in un
-        corridoio stretto puo' cancellare un muro vero.
-
-        ATTENZIONE (2026-10-05): il thread di arcVerification.py chiama anche lui
-        questa funzione, quindi in condizioni di corsa puo' essere IL BACKGROUND a
-        consumare l'unica maschera prevista, lasciando il ciclo principale senza.
-        Un motivo in piu' per misurare prima di decidere.
+        Attenzione: la chiama anche il thread del fronte (arcVerification), quindi la maschera
+        "una volta sola" puo' consumarla lui per primo.
         """
         if not diagnostic_only:
             if not self.footprint_correction_pending:
@@ -1931,7 +1513,7 @@ class GlobalGrid:
         self.clear_near_n = {}
         self.clear_all_sum = {}
         self.clear_all_n = {}
-        # Versione delle celle occupate (2026-10-12): cresce a ogni cambio da/verso -1. Serve
+        # Versione delle celle occupate: cresce a ogni cambio da/verso -1. Serve
         # a riusare il raster dilatato di occupied_many finche' la mappa non cambia.
         self._occ_version = 0
         self._margin_raster = None      # (versione, steps, raster, gx0, gy0)
@@ -1970,8 +1552,7 @@ class GlobalGrid:
     def clearance(self, x, y):
         """
         Spazio libero ricordato in quel punto (m), o None se mai osservato. Media delle
-        viste ravvicinate quando ce ne sono, altrimenti media di tutte -- vedi
-        CLEARANCE_NEAR_M per la misura che ha scelto questa statistica.
+        viste ravvicinate quando ce ne sono, altrimenti media di tutte (vedi CLEARANCE_NEAR_M).
         """
         key = (int(np.floor(x / self.resolution)), int(np.floor(y / self.resolution)))
         n = self.clear_near_n.get(key, 0)
@@ -2013,7 +1594,7 @@ class GlobalGrid:
 
     def update_clearance(self, pts, obstacle_distance, usable, near=None):
         """
-        2026-10-12. Impara lo spazio libero per cella. Chiamata accanto a update().
+        Impara lo spazio libero per cella. Chiamata accanto a update().
 
         obstacle_distance: le distanze (gia' filtrate) della scansione, allineate a pts.
         usable: celle da cui si puo' imparare (attendibili, oppure sotto il corpo).
@@ -2040,50 +1621,29 @@ class GlobalGrid:
 
     def update(self, pts, obstacle_mask, walked=None):
         """
-        [FIX AGGIORNAMENTO PROBABILISTICO]
-        Se una cella inizialmente vista occupata viene vista libera per
-        piu' scansioni consecutive, torna ad essere considerata libera (1.0).
+        Aggiorna la mappa con una scansione. obstacle_mask: -1 ostacolo, +1 vista libera,
+        0 nessuna informazione (cella non attendibile in questa scansione: si salta).
 
-        walked (2026-10-12): maschera booleana allineata a pts delle celle coperte dal CORPO
-        del robot adesso. Vengono ricordate (walked_cells) e da li' in poi, per dichiararle
-        occupate, servono GLOBAL_OCC_CONFIRM_WALKED osservazioni invece di
-        GLOBAL_OCC_CONFIRM_OBS. Vedi la costante per la misura che l'ha motivata.
+        Isteresi per cella (contatore in obs_count):
+          - occupata dopo GLOBAL_OCC_CONFIRM_OBS osservazioni di ostacolo consecutive (la prima
+            azzera le prove di "libero");
+          - libera quando il contatore torna a 0 o sotto;
+          - nel mezzo resta com'era. Una cella mai vista e osservata libera diventa libera
+            (serve a is_known).
+        Le celle di un disco pericoloso (mark_hazard) non tornano mai libere.
+
+        walked: maschera, allineata a pts, delle celle coperte dal CORPO del robot adesso.
+        Vengono ricordate (walked_cells) e per dichiararle occupate servono
+        GLOBAL_OCC_CONFIRM_WALKED osservazioni invece di GLOBAL_OCC_CONFIRM_OBS.
         """
         pts_flat = pts.reshape(-1, 3)
         mask_flat = obstacle_mask.ravel()
 
-        # np.floor, non np.round -- stesso identico motivo spiegato in
-        # GlobalTerrainGrid.update(): `pts` sono i CENTRI delle celle, cioe'
-        # (i + 0.5) * resolution, e np.round di un mezzo punto esatto arrotonda al pari.
-        # Le chiavi scritte risultavano 0, 2, 2, 4, 5, 5, 7, 7 ...: celle diverse che
-        # collassano sulla stessa chiave, e chiavi intermedie (1, 3, 6 ...) mai scritte.
-        # is_occupied() interroga invece con coordinate arbitrarie lungo un arco, che si
-        # distribuiscono su TUTTE le chiavi: quelle mai scritte cadevano nel default
-        # self.grid.get(key, 1.0), cioe' "libero". Una cella realmente occupata poteva
-        # quindi essere letta come libera. In pratica l'effetto era in larga parte
-        # mascherato dal safety_margin (controlla un intorno di ~13 celle e quasi sempre
-        # ne becca una scritta), ma restava un buco sul percorso che decide se un arco e'
-        # ostruito. Con floor su entrambi i lati la corrispondenza e' esatta e 1:1.
+        # Chiave di cella = floor(x / resolution), come in is_occupied (np.round sui centri
+        # delle celle arrotonderebbe al pari e lascerebbe chiavi mai scritte).
         gx_array = np.floor(pts_flat[:, 0] / self.resolution).astype(int)
         gy_array = np.floor(pts_flat[:, 1] / self.resolution).astype(int)
 
-        # Isteresi (2026-10-06, vedi GLOBAL_OCC_CONFIRM_OBS):
-        #   - occupata solo dopo GLOBAL_OCC_CONFIRM_OBS osservazioni di ostacolo consecutive
-        #     (prima: UNA sola, da qualunque stato -- anche da "vista libera 4 volte");
-        #   - libera quando il contatore torna a 0 o sotto, come prima;
-        #   - nel mezzo la cella mantiene lo stato che aveva.
-        # Una cella mai vista e osservata libera viene scritta come libera (serve a is_known).
-        #
-        # 2026-10-06 sera (dopo la revisione):
-        #   - state == 0 vuol dire "nessuna informazione" (cella non attendibile in questa
-        #     scansione: buco del sensore, scartata dal filtro sul suolo, mai scritta). Prima
-        #     queste celle arrivavano come +1, cioe' "vista libera": l'interno di un tronco o
-        #     di un muro (scartato dal filtro perche' sta sopra il suolo) risultava terreno
-        #     noto e libero, e una cella che alternava ostacolo / non attendibile non veniva
-        #     mai confermata occupata. Ora si salta.
-        #   - le celle di un disco pericoloso (caduta) non vengono mai riportate a libere:
-        #     prima bastavano GLOBAL_OCC_MAX_COUNT = 4 scansioni normali, e il punto di una
-        #     caduta di solito sembra normale ai sensori (verificato: spariva alla 4a).
         hazard_cells = self.hazard_cells
         walked_cells = self.walked_cells
         if walked is not None:
@@ -2117,9 +1677,8 @@ class GlobalGrid:
 
     def is_occupied(self, x, y, safety_margin=0.0):
         """
-        Verifica se una coordinata reale (x, y) cade in una cella occupata.
-        Opzionalmente controlla anche un intorno (safety_margin in metri).
-        Utilizza offset pre-calcolati per evitare cicli nidificati ripetitivi.
+        True se (x, y) cade in una cella occupata o, con safety_margin > 0, se c'e' una
+        cella occupata entro safety_margin metri (disco). Una cella mai vista e' libera.
         """
         gx_center = int(np.floor(x / self.resolution))
         gy_center = int(np.floor(y / self.resolution))
@@ -2127,10 +1686,8 @@ class GlobalGrid:
         if safety_margin <= 0.0:
             return self.grid.get((gx_center, gy_center), 1.0) == -1.0
 
-        # Prefiltro a grana grossa: se nessun blocco che interseca l'intorno contiene celle
-        # occupate, la risposta e' "libero" senza guardare le singole celle. Con il margine
-        # portato a 0.15 m l'intorno e' di 81 celle; senza prefiltro la costruzione del grafo
-        # passerebbe da ~2 s a ~12 s. Risultato identico al controllo completo.
+        # Prefiltro a grana grossa: se nessun blocco che tocca l'intorno contiene celle
+        # occupate, la risposta e' "libero" senza guardare le singole celle (stesso risultato).
         steps = int(np.ceil(safety_margin / self.resolution))
         c = GLOBAL_OCC_COARSE_CELLS
         any_coarse = False
@@ -2163,7 +1720,7 @@ class GlobalGrid:
 
     def _get_margin_raster(self, safety_margin):
         """
-        2026-10-12. Raster delle celle per cui is_occupied(x, y, safety_margin) e' True: le
+        Raster delle celle per cui is_occupied(x, y, safety_margin) e' True: le
         celle occupate dilatate con LO STESSO disco di is_occupied (dx^2 + dy^2 <= steps^2,
         steps = ceil(margin / resolution)). Restituisce (raster, gx0, gy0) oppure None se non
         c'e' nessuna cella occupata. Ricostruito solo quando la mappa cambia (_occ_version).
@@ -2193,10 +1750,8 @@ class GlobalGrid:
 
     def occupied_many(self, xs, ys, safety_margin=0.0):
         """
-        2026-10-12. is_occupied su molti punti insieme, con risultato IDENTICO punto per punto
-        (stesse chiavi floor(x / resolution), stesso disco). Serve alla costruzione del grafo:
-        prima 1 milione di chiamate Python a is_occupied per costruzione (~7 s misurati sulla
-        missione del 12-10 10:36), ora una lettura di array.
+        is_occupied su molti punti insieme, con risultato IDENTICO punto per punto (stesse
+        chiavi floor(x / resolution), stesso disco): serve alla costruzione del grafo.
         """
         xs = np.asarray(xs, dtype=np.float64)
         ys = np.asarray(ys, dtype=np.float64)
@@ -2213,12 +1768,11 @@ class GlobalGrid:
 
     def mark_hazard(self, x, y, radius=0.5):
         """
-        Segna come occupato (con il contatore al massimo) un disco attorno a un punto in cui
-        e' successo qualcosa di pericoloso -- oggi: una CADUTA (2026-10-06). Il terreno li'
-        puo' sembrare normale ai sensori (scivoloso, cedevole, una buca coperta d'erba), quindi
-        non si aspetta che le scansioni lo confermino: il pianificatore lo evita da subito.
-        Dal 2026-10-06 sera le scansioni successive NON lo liberano piu' (vedi update): resta
-        occupato per tutta la missione. Restituisce il numero di celle segnate.
+        Segna come occupato un disco attorno a un punto pericoloso (oggi: dove il robot e'
+        CADUTO). Il terreno li' puo' sembrare normale ai sensori (scivoloso, cedevole, una
+        buca coperta d'erba), quindi non si aspetta conferma dalle scansioni, e le scansioni
+        successive non lo liberano: resta occupato per tutta la missione. Restituisce il
+        numero di celle segnate.
         """
         if not hasattr(self, 'hazards'):
             self.hazards = []
@@ -2251,16 +1805,10 @@ class GlobalGrid:
 
     def is_known(self, x, y):
         """
-        True se questa posizione e' gia' stata OSSERVATA almeno una volta, a prescindere
-        dall'esito (libera o occupata).
-
-        Serve a distinguere "l'ho vista ed e' libera" da "non l'ho mai vista", che
-        is_occupied() da sola non sa fare: per una cella mai osservata il default di
-        self.grid.get(key, 1.0) e' 1.0, cioe' "libera", quindi l'ignoto si traveste da
-        spazio libero. Per muoversi va benissimo (si procede con prudenza e si verifica
-        strada facendo), ma per SCEGLIERE un punto obiettivo no: a parita' di distanza
-        dal centro della cella e' molto meglio un punto che sappiamo libero di uno che
-        non abbiamo mai guardato. Vedi find_best_point_in_cell in easy_walk.py.
+        True se questa posizione e' stata OSSERVATA almeno una volta (libera o occupata).
+        is_occupied da sola non distingue "vista libera" da "mai vista" (entrambe False): qui
+        si', e serve per esempio a scegliere un obiettivo visto libero piuttosto che ignoto
+        (find_best_point_in_cell) e a non creare scorciatoie GraphNav su terreno mai visto.
         """
         gx = int(np.floor(x / self.resolution))
         gy = int(np.floor(y / self.resolution))
@@ -2314,21 +1862,14 @@ def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
                                 min_sample_fraction=MIN_ARC_SAMPLE_FRACTION,
                                 sample_array=None, body_ext_m=0.0):
     """
-    Nucleo di calcolo condiviso della pendenza longitudinale/laterale, indipendente
-    dalla FONTE dei dati di altezza -- qui usato dalla mappa globale sparsa (vedi
-    GlobalTerrainGrid.compute_arc_slope_profile). sample_height(px, py) deve restituire
-    l'altezza del terreno in quel punto, o None se non disponibile.
+    Pendenza di un arco su una mappa SPARSA (la mappa globale del terreno, vedi
+    GlobalTerrainGrid.compute_arc_slope_profile). sample_height(px, py) da' la quota in un
+    punto o None; sample_array fa lo stesso su un array (NaN dove manca).
 
-    IMPORTANTE: usa esattamente la stessa geometria e la stessa base fisica di
-    compute_arc_slope_profile (base SLOPE_BASELINE_M, fetta laterale larga quanto il
-    robot). Prima differiva -- passo nativo e fetta lunga quanto l'arco -- il che non
-    si notava solo perche' questo percorso era di fatto irraggiungibile (has_data era
-    sempre True nel percorso live). Ora che il fallback globale funziona davvero, le
-    due fonti DEVONO misurare la stessa grandezza, altrimenti lo stesso arco cambierebbe
-    pendenza a seconda che sia dentro o fuori dalla finestra scansionata.
-
-    has_data riflette se sono stati trovati ABBASTANZA campioni REALI -- per una mappa
-    sparsa "esiste la mappa" non significa "ho dati in questo punto".
+    Stessa geometria e stessa base di compute_arc_slope_profile: le due fonti devono
+    misurare la stessa grandezza, altrimenti un arco cambierebbe pendenza entrando o uscendo
+    dalla finestra scansionata (test_replay.py lo controlla). has_data dice se ci sono
+    abbastanza campioni VERI.
 
     Returns:
         (longitudinal_slope, lateral_slope, has_data)
@@ -2340,20 +1881,9 @@ def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
     dir_x, dir_y = (x2 - x1) / dist, (y2 - y1) / dist
     perp_x, perp_y = -dir_y, dir_x
 
-    # --- USCITA ANTICIPATA: la mappa ha dati da queste parti? -------------------
-    # Questa funzione campiona una mappa SPARSA, un punto alla volta, in Python. Un
-    # arco da 2 m costa ~500 lookup: ~70 lungo la mezzeria piu' ~440 nelle fette
-    # laterali. In una missione reale la stragrande maggioranza degli archi del PRM
-    # sta FUORI da qualunque area gia' vista (la finestra scansionata e' ~3 m, il
-    # grafo copre decine di metri): nella missione del 2026-10-05 13:12 il 98% delle
-    # query finiva qui e non trovava nulla, dopo aver pero' pagato tutti i ~500
-    # lookup per scoprirlo -- circa 50 s di puro spreco per ogni costruzione del
-    # grafo, e la costruzione avviene piu' volte per missione.
-    # Tre lookup bastano a escludere il caso comune. Non e' una euristica sul
-    # RISULTATO: se almeno un punto risponde si prosegue con il calcolo completo e
-    # la decisione finale resta quella di min_sample_fraction, identica a prima.
-    # 2026-10-12: sample_array (opzionale) fa la stessa cosa di sample_height su un array di
-    # punti in una sola lettura, con valori identici (vedi GlobalTerrainGrid._sample_heights).
+    # Uscita anticipata: se inizio, meta' e fine dell'arco non hanno dati, "senza dati"
+    # (la maggior parte degli archi sta fuori da tutto cio' che e' stato visto). Se almeno
+    # uno risponde si fa il calcolo completo, e decide min_sample_fraction.
     if sample_array is not None:
         h3 = sample_array(np.array([x1, 0.5 * (x1 + x2), x2]), np.array([y1, 0.5 * (y1 + y2), y2]))
         if not np.isfinite(h3).any():
@@ -2422,25 +1952,18 @@ def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
 
 class GlobalTerrainGrid:
     """
-    Mappa globale, persistente, dell'ALTEZZA del terreno -- non della pendenza. La
-    pendenza e' direzionale (dipende da come si percorre un arco, vedi
-    compute_arc_slope_profile) e va quindi ricalcolata al volo; l'altezza invece e'
-    uno scalare per punto, esattamente come l'occupazione di GlobalGrid, e puo' essere
-    accumulata nel tempo con lo stesso schema a chiave (gx, gy).
+    Mappa globale e persistente della QUOTA del terreno (media delle osservazioni per
+    cella), non della pendenza: la pendenza dipende da come si percorre un arco e si
+    ricalcola al volo (compute_arc_slope_profile). Stessa risoluzione della griglia locale;
+    se in missioni lunghe la memoria diventasse un problema, la leva e' `resolution`.
 
-    Risoluzione nativa (stessa cell_size della griglia locale di Spot, non ridotta) --
-    su missioni molto lunghe questo puo' crescere parecchio in memoria; se mai diventasse
-    un problema, la prima leva e' aumentare `resolution` qui, non altrove.
+    Si alimenta solo con quote corrette (LocalGrid.correct_terrain) e con la stessa maschera
+    del calcolo dal vivo (easy_walk.slope_usable_mask: celle attendibili e non ostacolo),
+    tramite easy_walk.fold_scan_into_global_maps.
 
-    Alimentata SOLO con altezze gia' corrette (vedi LocalGrid.correct_terrain) e filtrate
-    da is_valid -- un valore riempito/estrapolato (impronta robot, punto cieco sensore)
-    non deve mai contaminare la media, esattamente come per il veto in fuse_obstacle_mask.
-
-    Nota sui limiti: la deriva dell'odometria visiva di Spot (frame VISION) nel tempo puo'
-    far si' che due letture della "stessa" cella globale provengano in realta' da punti
-    fisici leggermente diversi, sporcando silenziosamente la media -- stesso rischio gia'
-    presente in GlobalGrid per l'occupazione, qui piu' insidioso perche' il dato e'
-    continuo (un errore non e' vistoso come una cella libera diventata "occupata").
+    Limite: se l'odometria (frame VISION) derivasse, letture della "stessa" cella verrebbero
+    da punti un po' diversi. Sulle missioni del 13-10 lo scarto fra scansioni successive e'
+    0.1 cm in mediana.
     """
     def __init__(self, resolution=0.03):
         self.resolution = resolution
@@ -2455,8 +1978,7 @@ class GlobalTerrainGrid:
         Args:
             pts: (N,3) o (N,2) -- solo le colonne x,y vengono usate (posizione mondo)
             heights: array 1D di N altezze GIA' corrette (vedi correct_terrain)
-            is_valid: array 1D booleano di N elementi -- True solo dove il sensore ha
-                      dato una lettura affidabile (non impronta robot, non punto cieco)
+            is_valid: array 1D booleano di N elementi, True dove la quota va usata
         """
         pts_flat = np.asarray(pts).reshape(-1, pts.shape[-1] if pts.ndim > 1 else 2)
         x_array = pts_flat[:, 0]
@@ -2464,15 +1986,8 @@ class GlobalTerrainGrid:
         heights_flat = np.asarray(heights).ravel()
         valid_flat = np.asarray(is_valid).ravel()
 
-        # np.floor, non np.round. `pts` sono i CENTRI delle celle, cioe' (i + 0.5) *
-        # resolution: np.round di un mezzo punto esatto arrotonda al pari, quindi le
-        # chiavi scritte risultavano 0, 2, 2, 4, 5, 5, 7, 7 ... -- celle diverse che
-        # collassano sulla stessa chiave e, soprattutto, chiavi intermedie che non
-        # vengono MAI scritte. get_height() interroga invece con coordinate arbitrarie,
-        # che si distribuiscono su tutte le chiavi 1:1, e cadeva quindi nei buchi.
-        # Con floor su entrambi i lati la corrispondenza e' esatta.
-        # Il bug non si vedeva finche' questo percorso era di fatto irraggiungibile
-        # (has_data sempre True nel ramo live, vedi compute_arc_slope_profile).
+        # Chiave = floor(x / resolution) come in get_height (np.round sui centri delle celle
+        # arrotonderebbe al pari e lascerebbe chiavi mai scritte).
         gx_array = np.floor(x_array / self.resolution).astype(int)
         gy_array = np.floor(y_array / self.resolution).astype(int)
 
@@ -2528,12 +2043,9 @@ class GlobalTerrainGrid:
 
     def compute_arc_slope_profile(self, x1, y1, x2, y2, perp_sample_spacing_m=0.10, body_ext_m=0.0):
         """
-        Come spotGrid.compute_arc_slope_profile, ma campionando dalla mappa globale
-        accumulata invece che dalla griglia locale live -- usata come fallback quando
-        un arco e' fuori dalla finestra scansionata IN QUESTO momento, ma l'area era
-        gia' stata vista in una scansione precedente. has_data e' True solo se sono
-        stati trovati abbastanza campioni reali lungo l'arco, non solo perche' la mappa
-        esiste (vedi _slope_profile_from_sampler).
+        Come spotGrid.compute_arc_slope_profile, ma sulla mappa globale: serve per gli archi
+        fuori dalla finestra di adesso in zone gia' viste prima (vedi
+        _slope_profile_from_sampler).
 
         Returns:
             (longitudinal_slope, lateral_slope, has_data)
@@ -2559,7 +2071,7 @@ class GlobalTerrainGrid:
 
     def _mean_height_raster(self):
         """
-        2026-10-12. Raster delle altezze medie (height_sum / height_count, NaN dove mai vista),
+        Raster delle altezze medie (height_sum / height_count, NaN dove mai vista),
         ricostruito solo quando la mappa cambia. Stessa divisione di get_height, quindi stessi
         valori al bit.
         """
@@ -2618,13 +2130,11 @@ class GlobalTerrainGrid:
 
     def certainly_no_slope_data(self, x1, y1, x2, y2, min_sample_fraction=MIN_ARC_SAMPLE_FRACTION):
         """
-        2026-10-12. Per molti archi insieme (array): True dove compute_arc_slope_profile
-        risponderebbe CERTAMENTE "nessun dato". Riproduce esattamente le sue uscite anticipate
-        -- mappa vuota, arco fuori dal rettangolo del visto, i tre punti (inizio, meta', fine)
-        senza dati, copertura della mezzeria sotto min_sample_fraction -- con gli stessi
-        campioni (linspace su max(2, int(dist / resolution) + 1) punti). Dove risponde False
-        si chiama la funzione vera: il risultato complessivo e' identico, cambia solo quante
-        volte la si chiama (misurato: il 98% delle chiamate in costruzione finiva cosi').
+        Per molti archi insieme (array): True dove compute_arc_slope_profile risponderebbe
+        CERTAMENTE "nessun dato". Riproduce esattamente le sue uscite anticipate (mappa vuota,
+        arco fuori dal rettangolo del visto, inizio/meta'/fine senza dati, copertura della
+        linea sotto min_sample_fraction) con gli stessi campioni. Dove risponde False si
+        chiama la funzione vera: il risultato e' identico, si evitano solo le chiamate inutili.
         """
         x1 = np.asarray(x1, dtype=np.float64); y1 = np.asarray(y1, dtype=np.float64)
         x2 = np.asarray(x2, dtype=np.float64); y2 = np.asarray(y2, dtype=np.float64)
