@@ -1,32 +1,25 @@
 """
-Verifica del percorso in tempo reale: FRONTE SICURO (2026-10-06).
+Fronte sicuro: fin dove il percorso pianificato e' confermato libero ADESSO.
 
-Fino al 2026-10-05 questo modulo verificava il percorso ARCO PER ARCO e ricordava
-per sempre i verdetti ("verificato" / "bloccato"). Nella prima missione in esterno
-(2026-10-05 16:05) questo ha fatto ritirare il robot cinque volte da terreno libero:
-gli archi venivano giudicati mentre il robot camminava, da lontano, troncati sul
-bordo della finestra -- e il verdetto non veniva piu' riesaminato. Vedi CONTEXT.md,
-punto 19. Il difetto di fondo era di impostazione: l'arco e' un oggetto del grafo,
-senza significato fisico, mentre la visibilita' e' continua.
-
-Ora il dato e' uno solo: FIN DOVE, lungo il percorso pianificato e partendo dalla
-posizione attuale del robot, il terreno e' confermato libero ADESSO. Si ricalcola da
-zero a ogni scansione, quindi non esiste un verdetto che possa sopravvivere alle
+A ogni scansione, partendo dalla posizione del robot, si percorre la spezzata del percorso
+(prolungata oltre l'obiettivo di mezzo corpo, per il muso) e ci si ferma al primo punto non
+libero. Il risultato si ricalcola da zero a ogni scansione: nessun verdetto sopravvive alle
 condizioni in cui e' stato preso.
 
-Il fronte si ferma al primo di:
-  'ostacolo'      obstacle_distance sotto la distanza minima dalla linea centrale
+Motivi per cui il fronte si ferma:
+  'ostacolo'      obstacle_distance sotto la distanza minima dalla linea del percorso
   'rugosita'      cella vetata per rugosita' (stesso criterio di fuse_obstacle_mask)
   'pendenza'      tratto con pendenza longitudinale o laterale oltre SLOPE_THRESHOLD
   'fine_dati'     fuori dalla finestra, o cella mai vista dal sensore
   'fine_percorso' tutto il percorso e' libero
 
-La distinzione fra "ostacolo" e "non ancora visto" e' quella che mancava: un fronte
-che si ferma sul bordo dei dati dice "avvicinati e guarda", non "e' bloccato".
+'fine_dati' non vuol dire "bloccato" ma "avvicinati e guarda".
 
-ATTENZIONE AL NOME "FOV" nelle funzioni di supporto in fondo al file: non e' il campo
-visivo delle telecamere (360 gradi, ben oltre), e' l'estensione della griglia locale
-(~3.8 m di lato attorno al robot).
+Il modulo contiene anche il thread che ricalcola il fronte durante il movimento
+(ArcVerificationTracker), usato per fermare il robot se qualcosa entra nel percorso.
+
+Nota sul nome "FOV" in is_arc_in_fov: e' l'estensione della griglia locale (3.84 m di lato
+attorno al robot), non il campo visivo delle telecamere.
 """
 import threading
 import time
@@ -34,7 +27,6 @@ import logging
 
 import numpy as np
 
-from bosdyn.client.async_tasks import AsyncPeriodicQuery
 from bosdyn.client.robot_state import RobotStateClient
 from bosdyn.client.frame_helpers import get_a_tform_b, VISION_FRAME_NAME, BODY_FRAME_NAME
 
@@ -45,41 +37,21 @@ import spotGrid
 LOGGER = logging.getLogger(__name__)
 
 
-
-# =============================================================================
-# Fotografia della griglia locale: tutto cio' che serve al fronte, gia' in 2D.
-# =============================================================================
 # =========================================================================
-# FILTRO TEMPORALE SU obstacle_distance (2026-10-07)
+# FILTRO TEMPORALE SU obstacle_distance
 #
-# Misurato sulla missione del 2026-10-07 14:0x, 19 scansioni dell'iterazione 0: con il
-# robot FERMO e il percorso IDENTICO (stessi nodi [187, 140, 3152], stessa origine di
-# griglia, stesso yaw), fra la scansione 003 e la 004 la cella in (-1.38, 1.46) ha
-# letto 0.296 e poi 0.336 su una soglia secca di 0.300. Verdetto del fronte: "ostacolo,
-# avanzamento 0.04 m" e poi "libero, 1.35 m". Niente si era mosso.
+# obstacle_distance oscilla di qualche centimetro fra due scansioni anche a robot fermo
+# (1.5 cm in media, 7.3 cm di punta), cioe' quanto il margine d'aria con cui lo si
+# confronta: senza filtro un percorso che sfiora un ostacolo passa da "libero" a "bloccato"
+# e ritorno a ogni scansione. Due rimedi:
+#   - MEDIANA sulle ultime OBSTACLE_MEDIAN_FRAMES letture della stessa cella di mondo: una
+#     punta isolata non decide da sola. Costa al massimo una scansione di ritardo.
+#   - ISTERESI: una cella diventa bloccante sotto FRONTIER_CLEARANCE_M e torna libera solo
+#     sopra FRONTIER_CLEARANCE_M + OBSTACLE_HYSTERESIS_M.
 #
-# Rumore misurato su obstacle_distance fra due scansioni consecutive, lungo il percorso:
-# 1.5 cm in media, 7.3 cm di punta -- cioe' dello stesso ordine del margine d'aria di
-# 5 cm con cui lo confrontiamo. Un percorso che sfiora il bordo gonfiato di un ostacolo
-# attraversa quindi la soglia avanti e indietro a ogni scansione, e il robot alterna
-# "vai" e "fermati" sulla stessa scena. E' la causa dei cicli attesa/blocco/arretramento
-# osservati, non una decisione sbagliata del fronte.
-#
-# Due rimedi, scelti il 2026-10-07:
-#   - MEDIANA sulle ultime OBSTACLE_MEDIAN_FRAMES letture della stessa cella di mondo.
-#     Una punta isolata di rumore non decide piu' da sola. Costa al massimo una
-#     scansione di ritardo nel vedere un ostacolo nuovo, che il fronte assorbe perche'
-#     guarda avanti 1.3 m, non 3 cm.
-#   - ISTERESI: una cella diventa bloccante sotto FRONTIER_CLEARANCE_M e smette di
-#     esserlo solo sopra FRONTIER_CLEARANCE_M + OBSTACLE_HYSTERESIS_M. Dentro la banda
-#     il verdetto precedente resta, quindi non puo' oscillare.
-#
-# L'allineamento fra scansioni e' esatto e gratuito: verificato sulle 19 scansioni, le
-# origini di griglia sono sempre multipli interi della cella (0.03 m) e gli scorrimenti
-# fra scansioni consecutive sono interi esatti (es. -40, -1 celle). Il riallineamento e'
-# quindi uno scorrimento di indici, senza interpolazione e senza perdita. Se per qualche
-# ragione lo scorrimento non fosse intero, o cambiasse la dimensione della cella, la
-# cronologia viene azzerata e si torna al comportamento senza filtro: mai dati inventati.
+# Le origini delle griglie di Spot sono multipli interi della cella, quindi riallineare due
+# scansioni e' uno scorrimento di indici, senza interpolazione. Se lo scorrimento non e'
+# intero o cambia la dimensione della cella, la cronologia si azzera.
 # =========================================================================
 OBSTACLE_MEDIAN_FRAMES = 3
 OBSTACLE_HYSTERESIS_M = 0.04
@@ -130,12 +102,8 @@ class _ObstacleHistory:
         return out
 
     # Tolleranza sul resto dello scorrimento, in frazione di cella. Lo scorrimento si misura
-    # SEMPRE fra due griglie consecutive, mai da un'origine assoluta: cell_size arriva dal
-    # protobuf come float32 (0.029999999329447746, non 0.03), e dividendo per quel valore
-    # un'origine a -88 celle l'errore relativo diventa 2.5e-06 -- sopra qualunque tolleranza
-    # ragionevole, e la cronologia si azzererebbe a ogni scansione (succedeva: scoperto il
-    # 2026-10-07 perche' il filtro non cambiava nessun verdetto). La differenza fra due
-    # origini vicine, invece, resta esatta a meno di 1e-7 celle.
+    # fra due griglie CONSECUTIVE, mai da un'origine assoluta: cell_size arriva come float32
+    # (0.029999999329447746), e su un'origine lontana l'errore supererebbe la tolleranza.
     _SHIFT_TOL_CELLS = 0.05
 
     def update(self, od, origin_x, origin_y, cell_size):
@@ -199,8 +167,7 @@ class GridSnapshot:
     stesso ordinamento usato ovunque nel progetto: riga = y, colonna = x, origine nel
     vertice in basso a sinistra (vedi spotGrid._gather_heights).
 
-    blocked_latch (2026-10-07): maschera dell'isteresi, vedi _ObstacleHistory. None =
-    nessun filtro, comportamento identico a prima.
+    blocked_latch: maschera dell'isteresi (vedi _ObstacleHistory); None = nessun filtro.
     """
     __slots__ = ('obstacle_dist', 'rough_veto', 'seen', 'terrain', 'origin_x', 'origin_y',
                  'cell_size', 'robot_x', 'robot_y', 'time', 'valid', 'blocked_latch', 'robot_yaw')
@@ -208,8 +175,8 @@ class GridSnapshot:
     def __init__(self, obstacle_dist, rough_veto, seen, terrain, origin_x, origin_y, cell_size,
                  robot_x, robot_y, timestamp=None, valid=None, blocked_latch=None, robot_yaw=None):
         self.blocked_latch = blocked_latch
-        # 2026-10-12: imbardata del robot nella stessa fotografia, per riconoscere le celle
-        # sotto il corpo (vedi _under_body). None = non nota: si usa il cerchio inscritto.
+        # Imbardata del robot nella stessa fotografia, per riconoscere le celle sotto il
+        # corpo (vedi _under_body). None = non nota: si usa il cerchio inscritto.
         self.robot_yaw = None if robot_yaw is None else float(robot_yaw)
         self.obstacle_dist = obstacle_dist
         self.rough_veto = rough_veto
@@ -231,18 +198,12 @@ def make_grid_snapshot(cells_obstacle_dist, rough_values, is_valid, terrain_vali
     Costruisce la fotografia dai vettori piatti che il codice calcola gia' a ogni scansione.
 
     - rough_veto: stesso criterio di fuse_obstacle_mask (rugosita' > soglia, su cella valida).
-    - seen: il sensore ha dato una quota per quella cella (terrain_valid grezzo). NON e'
-      is_valid: is_valid esclude anche le celle scartate dal filtro altezza (muri, celle mai
-      scritte), che invece sono state viste -- l'eventuale ostacolo lo segnala
-      obstacle_distance.
-      2026-10-07: il confronto e' con spotGrid.TERRAIN_VALID_MIN, non con 0.0. Il layer
-      contiene 0 e 1, ma unpack_grid gli applica scale e offset e lo 0 diventa +/-5.5e-17,
-      con il SEGNO che cambia da una scansione all'altra: il vecchio `> 0.0` dichiarava
-      "vista" ogni cella in 10 scansioni su 16. Vedi la costante in spotGrid.
-    - unwritten (2026-10-06): celle mai scritte dai sensori (correct_terrain con
-      return_unwritten=True). Spot ne dichiara non valide il 98-100% (misurato il
-      2026-10-07), ma non tutte: qui contano comunque come NON viste, quindi il fronte si
-      ferma li' con 'fine_dati'.
+    - seen: il sensore ha dato una quota per quella cella (terrain_valid grezzo, confrontato
+      con spotGrid.TERRAIN_VALID_MIN e non con 0: dopo scala e offset lo 0 diventa +/-5e-17).
+      Non e' is_valid: is_valid esclude anche le celle scartate dal filtro sull'altezza del
+      suolo (muri), che invece sono state viste; l'ostacolo lo segnala obstacle_distance.
+    - unwritten: celle mai scritte dai sensori (correct_terrain con return_unwritten=True):
+      contano come NON viste, quindi il fronte si ferma li' con 'fine_dati'.
     """
     shape = (num_y, num_x)
     rough = np.asarray(rough_values, dtype=np.float64).reshape(shape)
@@ -253,9 +214,8 @@ def make_grid_snapshot(cells_obstacle_dist, rough_values, is_valid, terrain_vali
         seen = np.ones(shape, dtype=bool)
     if unwritten is not None and np.size(unwritten) == num_x * num_y:
         seen = seen & ~np.asarray(unwritten, dtype=bool).reshape(shape)
-    # Filtro temporale + isteresi su obstacle_distance (vedi _ObstacleHistory). La lettura
-    # grezza non viene piu' usata direttamente da nessuno: ne' dal fronte, ne' dal test di
-    # rotazione, che leggono entrambi questa fotografia.
+    # Filtro temporale + isteresi su obstacle_distance (vedi _ObstacleHistory): fronte e
+    # controllo di rotazione leggono questa fotografia, non la lettura grezza.
     od_raw = np.asarray(cells_obstacle_dist, dtype=np.float64).reshape(shape)
     od_filtered, latch = OBSTACLE_HISTORY.update(od_raw, origin_x, origin_y, cell_size)
 
@@ -270,16 +230,13 @@ def make_grid_snapshot(cells_obstacle_dist, rough_values, is_valid, terrain_vali
 
 def _under_body(snap, xs, ys):
     """
-    2026-10-12. True per i punti che stanno SOTTO IL CORPO del robot adesso: rettangolo
+    True per i punti che stanno SOTTO IL CORPO del robot adesso: rettangolo
     +/-ROBOT_HALF_LENGTH_M x +/-ROBOT_HALF_WIDTH_M attorno alla posa, orientato con
     l'imbardata della fotografia. Senza imbardata, il cerchio inscritto (raggio mezza
     larghezza), che sta sotto il corpo in qualunque orientamento.
 
-    Li' c'e' il robot: per definizione non c'e' un ostacolo in cui entrare. E' lo stesso
-    principio gia' usato da spotGrid.rotation_is_clear (punto 32d). Serve perche' nella
-    missione del 12-10 10:36 il fronte si e' fermato due volte -- a meta' movimento e poi
-    da fermo -- su un punto a 8-9 cm dal centro del robot, mentre passava rasente al
-    tavolo (obstacle_distance sotto il robot 0.21 m contro 0.25 di mezza larghezza).
+    Li' c'e' il robot, quindi non c'e' un ostacolo in cui entrare: quei punti non fermano
+    mai il fronte (stesso principio di spotGrid.rotation_is_clear).
     """
     dx = np.asarray(xs, dtype=np.float64) - snap.robot_x
     dy = np.asarray(ys, dtype=np.float64) - snap.robot_y
@@ -337,17 +294,13 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
             FRONTIER_BODY_HALF_LENGTH_M.
         check_slope: controlla anche la pendenza dei tratti liberi.
         body: (meta' ingombro lungo la marcia, meta' ingombro di traverso), vedi
-            spotGrid.body_extents. Default: robot che guarda dove va (0.55, 0.25). Quando il
-            robot non puo' ruotare (passo 4) e cammina di lato, l'ingombro cambia: di
-            traverso diventa 0.55 m.
-        air_m (2026-10-12): aria fra fianco e ostacolo. None = ROBOT_CLEARANCE_AIR_M (0.05),
-            cioe' la distanza minima 0.30 con cui si DECIDE di partire. Il thread di arresto
-            passa spotGrid.FRONTIER_ABORT_AIR_M (0.0): a movimento in corso ci si ferma solo
-            se il percorso davanti passa a meno di mezza larghezza (0.25) da qualcosa, cioe'
-            per un'intrusione vera. I 5 cm fra le due soglie sono l'isteresi fra "parto" e
-            "mi fermo" (richiesta dell'utente: un tratto dichiarato libero si percorre). Con
-            un'aria diversa dalla nominale il latch dell'isteresi non si applica: e' tarato
-            sulla soglia 0.30.
+            spotGrid.body_extents. Default: robot che guarda dove va (0.55, 0.25).
+        air_m: aria fra fianco e ostacolo. None = ROBOT_CLEARANCE_AIR_M (0.05), cioe' la
+            distanza minima 0.30 con cui si DECIDE di partire. Il thread di arresto passa
+            spotGrid.FRONTIER_ABORT_AIR_M (0.0): a movimento in corso ci si ferma solo per
+            un'intrusione vera, a meno di mezza larghezza (0.25). I 5 cm fra le due soglie
+            evitano di fermarsi su un tratto appena dichiarato libero. Con un'aria diversa
+            dalla nominale l'isteresi non si applica (e' tarata sulla soglia 0.30).
 
         I campioni sotto il corpo del robot adesso non sono mai ostacolo (vedi _under_body).
 
@@ -394,35 +347,28 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
 
     no_data = ~inside | (~snap.seen[rows, cols] & ~near_robot)
     obstacle = inside & (od < thr) & ~under_body
-    # Isteresi (2026-10-07): una cella gia' giudicata bloccante resta bloccante finche' non
-    # risale sopra FRONTIER_CLEARANCE_M + OBSTACLE_HYSTERESIS_M (vedi _ObstacleHistory).
-    # Si applica SOLO dove vale la soglia nominale: dove la regola di uscita l'ha abbassata
-    # il robot sta cercando di uscire da uno spazio stretto, e lagarci dentro l'isteresi lo
-    # inchioderebbe li'.
+    # Isteresi: una cella gia' bloccante resta tale finche' non risale sopra
+    # FRONTIER_CLEARANCE_M + OBSTACLE_HYSTERESIS_M (vedi _ObstacleHistory). Solo dove vale la
+    # soglia nominale: dove la regola di uscita l'ha abbassata il robot sta uscendo da uno
+    # spazio stretto, e l'isteresi lo inchioderebbe li'.
     if snap.blocked_latch is not None and use_latch:
         nominal = thr >= clearance_nominal - 1e-9
         obstacle |= inside & nominal & snap.blocked_latch[rows, cols] & ~under_body
-    # Regola di uscita (2026-10-06 sera, corretta dopo la revisione): nel primo metro la
-    # soglia scende a od_robot - 2 cm per permettere di uscire da uno spazio stretto, ma
-    # quella soglia valeva per QUALUNQUE ostacolo lungo il tratto. Un palo a 15 cm dal
-    # fianco, 70 cm avanti, veniva accettato solo perche' il robot partiva vicino a un
-    # altro oggetto (verificato: il corpo si sovrapponeva al palo di 10 cm). La promessa e'
-    # "non avvicinarsi piu' di quanto gia' si sia": nel primo metro un campione sotto la
-    # soglia nominale e' ammesso solo se non scende sotto il meglio raggiunto finora lungo
-    # il percorso (meno la tolleranza qui sotto). Allontanarsi resta permesso, riavvicinarsi no.
+    # Regola di uscita da uno spazio stretto: nel primo metro (FRONTIER_ESCAPE_DIST_M) la
+    # soglia scende a od_robot - 2 cm, ma vale la promessa "non avvicinarsi piu' di quanto
+    # gia' si sia": un campione sotto la soglia nominale e' ammesso solo se non scende sotto
+    # il meglio raggiunto finora lungo il percorso (meno la tolleranza). Allontanarsi si',
+    # riavvicinarsi no: un palo sul fianco poco piu' avanti resta bloccante.
     if clearance_escape < clearance_nominal:
         od_capped = np.minimum(np.where(inside, od, clearance_nominal), clearance_nominal)
-        # 2026-10-12: sotto il corpo il riferimento e' la distanza del robot ADESSO, non le
-        # letture sotto la pancia: una cella sotto il corpo che legge di piu' alzava "il meglio
-        # raggiunto" e faceva scattare il riavvicinamento appena fuori dal corpo.
+        # Sotto il corpo il riferimento e' la distanza del robot adesso, non le letture sotto
+        # la pancia (che alzerebbero "il meglio raggiunto" senza motivo).
         od_capped = np.where(under_body, min(od_robot, clearance_nominal), od_capped)
         best_so_far = np.maximum.accumulate(od_capped)
         in_escape = inside & (ss < spotGrid.FRONTIER_ESCAPE_DIST_M) & (od < clearance_nominal) & ~under_body
-        # Tolleranza: almeno 1.5 celle. obstacle_distance va a gradini di una cella (3 cm):
-        # con 2 cm un percorso quasi parallelo a un muro, a distanza costante, scattava al
-        # gradino successivo (verificato dalla seconda revisione: bloccato 257 volte su 360
-        # a 5 gradi dal muro, prima 13). Con 4.5 cm il comportamento lungo un muro torna
-        # quello di prima, e il palo sul fianco resta bloccato.
+        # Tolleranza: almeno 1.5 celle. obstacle_distance va a gradini di una cella (3 cm), e
+        # lungo un muro quasi parallelo al percorso un gradino non deve contare come
+        # riavvicinamento.
         tol = max(0.02, 1.5 * snap.cell_size)
         obstacle = obstacle | (in_escape & (od < best_so_far - tol))
     rough = inside & snap.rough_veto[rows, cols] & ~near_robot
@@ -438,11 +384,8 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
             reason, value = 'fine_dati', None
         elif obstacle[k]:
             reason, value = 'ostacolo', float(od[k])
-            # 2026-10-12: la soglia EFFETTIVA in quel punto, per il log. Se a fermare il
-            # fronte e' stata l'isteresi (cella gia' bloccante, non ancora risalita sopra
-            # soglia + OBSTACLE_HYSTERESIS_M) la riga diceva "ostacolo a 0.32 m (minimo
-            # 0.30 m)", che sembra una contraddizione: nella missione del 12-10 14:47
-            # sono 23 fermate su 33. Ora si vede quale regola ha deciso.
+            # La soglia EFFETTIVA in quel punto e se ha deciso l'isteresi, per il log: senza,
+            # "ostacolo a 0.32 m (minimo 0.30 m)" sembrerebbe una contraddizione.
             result['stop_threshold'] = float(thr[k])
             result['stop_by_latch'] = bool(
                 snap.blocked_latch is not None and use_latch
@@ -454,10 +397,10 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
         reason, value = 'fine_percorso', None
         dist, stop_xy = float(ss[-1]), (float(xs[-1]), float(ys[-1]))
 
-    # Pendenza sui tratti GIA' confermati liberi, segmento per segmento: se un tratto e'
-    # troppo ripido il fronte arretra al suo inizio. Stessa funzione e stessa soglia del
-    # PRM, quindi il fronte non puo' rifiutare per pendenza un arco che il PRM ammette
-    # sugli stessi dati.
+    # Pendenza sui tratti gia' confermati liberi, segmento per segmento: se un tratto e'
+    # troppo ripido il fronte arretra al suo inizio. Stessa funzione e stessa soglia del PRM
+    # sull'arco fra i nodi (il PRM usa in piu' il valore col corpo, quindi e' piu' severo:
+    # il fronte non puo' rifiutare per pendenza un arco che il PRM ha ammesso).
     if check_slope and spotGrid.FRONTIER_SLOPE_MIN_LENGTH_M > 0:
         s_start = 0.0
         for k in range(len(pl) - 1):
@@ -539,23 +482,6 @@ def describe_frontier(frontier):
 # =============================================================================
 # Verificatore in background: tiene aggiornato il fronte mentre il robot cammina.
 # =============================================================================
-def _update_thread(async_task):
-    while True:
-        async_task.update()
-        time.sleep(0.1)
-
-
-class AsyncArcVerificationTracker(AsyncPeriodicQuery):
-    """Non usata (chiama un servizio che non esiste). Lasciata com'era."""
-
-    def __init__(self, robot_state_client):
-        super(AsyncArcVerificationTracker, self).__init__('arc_verification', robot_state_client, LOGGER,
-                                                          period_sec=0.2)
-
-    def _start_query(self):
-        return self._client.get_arc_verification(['arc_verification'])
-
-
 class ArcVerificationTracker:
     """
     Thread in background che ricalcola il fronte sicuro sul percorso corrente a ogni
@@ -563,8 +489,7 @@ class ArcVerificationTracker:
 
     Serve DURANTE il movimento: il ciclo principale lo interroga per fermare il robot se il
     fronte si accorcia sotto il punto verso cui sta andando. Prima di partire il ciclo
-    principale calcola il fronte da se', sulla propria scansione: non c'e' piu' nessuna
-    attesa del thread.
+    principale calcola il fronte da se', sulla propria scansione.
 
     Il risultato porta la versione del percorso su cui e' stato calcolato: dopo una
     ripianificazione un fronte vecchio non puo' essere scambiato per uno nuovo.
