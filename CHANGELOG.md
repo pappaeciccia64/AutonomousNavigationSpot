@@ -84,6 +84,11 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 - **Tetto alla deviazione.** Missione 08-10 15:09: con il robot a 2.4 m dall'obiettivo il pianificatore aveva proposto un giro di ~15 m.
 - Il costo del piano in corso si calcola con gli stessi costi di Dijkstra, penalità comprese.
 
+### Grafo di missione (`mission_graph.py`)
+- **Reticolo regolare al posto del campionamento casuale** (`global_sampler.GlobalSampler`, ora tolto). Prima: 5 punti/m², ~3125 nodi su 25×25 m, nessun seed, grafo diverso a ogni missione, ~85 600 archi da valutare (~10 s per costruzione, 3–4 costruzioni per missione). Il reticolo a passo 0.714 m con due anelli ne ha ~4700, 18 volte meno, ed è riproducibile bit per bit.
+- **Rettangolare, non triangolare.** Il triangolare non può avere i centri delle celle come nodi (servirebbe che 2n/√3 fosse un intero pari). Le alternative erano spostare l'obiettivo sul nodo più vicino (fino a 50 cm) o inserire i centri e togliere i nodi vicini, che lasciava il reticolo irregolare attorno a 20 celle su 25, con archi da 0.57 a 1.44 m.
+- **Passo da 0.5 a 0.25 m, archi dal secondo anello (≥ 0.5 m).** Missione 08-10 15:40: il corridoio di partenza aveva ~45 cm di linee centrali ammesse e le due file del reticolo a passo 0.5 cadevano entrambe fuori, quindi nel grafo il corridoio non esisteva. A passo 0.25 ci sono due file dentro. Gli anelli sono stati ridefiniti come cerchio di raggio k·s·√2, per coerenza con il refresh del PRM.
+
 ### Mappe e terreno (`spotGrid.py`)
 - **Tolleranza sulla rotazione da 0.05 a 0.15 m.** Richiesta dell'utente: "il padding dall'ostacolo non deve bloccarlo nella rotazione, a volte lo spazio ci sarebbe, con GraphNav riesce". Missione 08-10 10:47, 46 scansioni, direzioni del giro insieme libere e raggiungibili girandosi:
 

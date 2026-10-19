@@ -1,64 +1,40 @@
 """
-mission_graph.py -- il grafo di missione, REGOLARE e DETERMINISTICO.
-
-Sostituisce il campionamento casuale di global_sampler.GlobalSampler (np.random.uniform,
-5 punti/m^2, ~3125 nodi su 25x25 m, grafo diverso a ogni missione) con un RETICOLO
-rettangolare di nodi equidistanziati, costruito in forma chiusa a partire dalla DIMENSIONE
-DELLA MISSIONE -- (righe, colonne, lato_cella), gli stessi tre numeri di SPOT_MISSION_GRID
-e di environmentMap.EnvironmentMap.
+mission_graph.py -- il grafo di missione: un RETICOLO rettangolare di nodi equidistanziati,
+costruito in forma chiusa dalla DIMENSIONE DELLA MISSIONE (righe, colonne, lato cella: gli
+stessi tre numeri di SPOT_MISSION_GRID e di environmentMap.EnvironmentMap).
 
 Due flag per l'utente: la SPAZIATURA fra i nodi e gli ANELLI di collegamento.
 
 PERCHE' UN RETICOLO
-  1. Riproducibilita'. Oggi non c'e' nessun seed: ogni missione parte da un grafo diverso,
-     quindi mission_replay non puo' riprodurre le scelte del pianificatore e due missioni
-     nella stessa stanza non sono confrontabili. Qui il grafo e' funzione solo dei
-     parametri: stessi parametri, stesso grafo, bit per bit.
-  2. Costa meno, non di piu'. A passo 0.714 m sono 1225 nodi su 625 m^2 contro i 3125
-     attuali, e con due anelli ~4700 archi contro gli ~85600 da valutare oggi: 18 volte
-     meno archi su cui calcolare occupazione e pendenza, che e' il costo vero di
-     build_graph (~10 s per costruzione, 3-4 per missione).
-  3. Geometria fuori dal costo. Con archi di due sole lunghezze, alpha*dist +
-     beta*pendenza dice quello che intende dire; con punti casuali un giro piu' lungo puo'
-     costare meno di uno dritto solo per dove sono caduti i punti.
-  4. Niente appaiamento geometrico all'avvio ne' a ogni ricostruzione: le coppie sono
-     quelle del reticolo, gia' pronte (vedi add_edges_to_prm).
+  1. Riproducibilita'. Il grafo dipende solo dai parametri: stessi parametri, stesso grafo,
+     bit per bit. Il rigioco riproduce le scelte del pianificatore e due missioni nella
+     stessa stanza sono confrontabili.
+  2. Pochi archi. A passo 0.714 m sono 1225 nodi su 625 m^2 e, con due anelli, ~4700 archi:
+     occupazione e pendenza, il costo vero della valutazione, si calcolano su questi.
+  3. Geometria fuori dal costo. Con archi di poche lunghezze fisse alpha*dist +
+     beta*pendenza dice quello che intende dire; con punti sparsi a caso un giro piu' lungo
+     puo' costare meno di uno dritto solo per dove sono caduti i punti.
+  4. Le coppie sono quelle del reticolo, gia' pronte: non c'e' appaiamento geometrico ne'
+     all'avvio ne' a ogni aggiornamento (vedi add_edges_to_prm).
 
-PERCHE' SOLO RETTANGOLARE -- e perche' il triangolare e' stato scartato (2026-10-08)
-  Il triangolare sembra la scelta naturale per "nodi equidistanziati": sei vicini alla
-  stessa distanza, direzioni a 60 gradi, isotropo, percorsi piu' corti (detour massimo
-  ~2.6% contro ~8% del rettangolare a 8 vicini). E' stato scartato per un motivo che vince
-  su quelli: NON PUO' CONTENERE I CENTRI DELLE CELLE, che sono gli obiettivi
-  dell'esplorazione e non devono spostarsi di un centimetro.
-  Il triangolare ha passo s in x e s*sqrt(3)/2 fra le file; perche' i centri (multipli di
-  cell_size in entrambe le direzioni) cadano su nodi servirebbe che cell_size sia multiplo
-  sia di s sia di s*sqrt(3)/2, cioe' che 2n/sqrt(3) sia un intero pari. sqrt(3) e'
-  irrazionale: non succede per nessun passo (provati n=4..11: 4.62, 5.77, 6.93, 8.08...).
-  Le due vie d'uscita erano entrambe peggiori: spostare l'obiettivo sul nodo piu' vicino
-  (fino a 50 cm: inaccettabile, e' il bersaglio della missione), oppure inserire il centro
-  e togliere i nodi di reticolo troppo vicini -- che funziona, ma lascia il reticolo
-  localmente irregolare attorno a 20 celle su 25, con archi da 0.57 a 1.44 m invece di due
-  sole lunghezze. Nel rettangolare con passo cell_size/n i centri sono nodi per
-  costruzione: zero nodi inseriti, zero togliti, zero eccezioni.
-  Se un giorno si volesse riaprire la questione, il punto da attaccare e' questo, non
-  l'isotropia.
+PERCHE' RETTANGOLARE E NON TRIANGOLARE
+  Il triangolare sarebbe piu' isotropo e darebbe percorsi piu' corti, ma NON PUO' CONTENERE
+  I CENTRI DELLE CELLE, che sono gli obiettivi dell'esplorazione e non devono spostarsi.
+  Servirebbe che cell_size fosse multiplo sia di s sia di s*sqrt(3)/2, e con sqrt(3)
+  irrazionale non succede per nessun passo. Nel rettangolare con passo cell_size/n i centri
+  sono nodi per costruzione. Se si volesse riaprire la questione, il punto da attaccare e'
+  questo, non l'isotropia.
 
 SPAZIATURA
   Il passo richiesto viene SEMPRE arrotondato a cell_size/n con n intero: e' la condizione
   che rende ogni centro cella un nodo del reticolo. La riga [GRAFO] del log dice il passo
   effettivo. Default: DEFAULT_LATTICE_SPACING_M = 0.25 m (= 5/20).
+  Il passo puo' essere piu' corto di min_edge_length: i vicini troppo vicini semplicemente
+  non si collegano, e gli archi partono dagli anelli piu' esterni. La soglia sugli archi
+  serve alla pendenza (un arco troppo corto non dice nulla del terreno); il passo fitto
+  serve ad avere SEMPRE una fila di nodi dentro un corridoio (vedi ALIASING).
 
-  PASSO SOTTO min_edge_length (2026-10-08, missione 08-10 15:40). Il passo PUO' essere piu'
-  corto di min_edge_length: i vicini troppo vicini semplicemente non si collegano, e gli
-  archi partono dagli anelli piu' esterni (vedi ANELLI). La soglia sugli archi resta 0.5 m
-  perche' serve alla pendenza (un arco troppo corto non dice nulla del terreno); a cosa
-  serve il passo fitto e' un'altra cosa: avere SEMPRE una fila di nodi dentro un corridoio.
-  Nella missione del 08-10 15:40 il corridoio di partenza aveva ~45 cm di linee centrali
-  ammesse (0.30 m di spazio per lato) e le due file del reticolo a passo 0.5 cadevano
-  entrambe fuori: il corridoio nel grafo non esisteva. A passo 0.25 ogni striscia larga
-  piu' di 0.25 m contiene una fila.
-
-ANELLI -- quante connessioni (ridefiniti il 2026-10-08)
+ANELLI -- quante connessioni
   L'anello k e' il quadrato di nodi a k passi di indice (anello 1 = gli 8 intorno, anello 2
   = i 16 del giro dopo, ...). `rings` = k collega ogni nodo a tutti i nodi entro la
   diagonale dell'anello k, cioe' entro k*s*sqrt(2), purche' l'arco sia lungo almeno
@@ -70,41 +46,37 @@ ANELLI -- quante connessioni (ridefiniti il 2026-10-08)
     rings=3 -> in piu' 0.75, 0.79, 0.90, 1.00, 1.03, 1.06 m: tratti piu' lunghi, ~2.5
                volte gli archi.
   I tratti lunghi in rettilineo li produce comunque easy_walk.shortcut_index, che salta i
-  nodi intermedi fino a 2.5 m quando il FRONTE SICURO conferma il tratto sui dati dal vivo.
+  nodi intermedi quando il FRONTE SICURO conferma il tratto sui dati dal vivo.
   rings=None arriva fino a min(connection_radius, max_edge_length).
 
 ANCORAGGIO
   Il reticolo e' ancorato all'ORIGINE, che per come e' scritta environmentMap e' insieme la
   posa di accensione del robot E il centro della cella di partenza
   (get_world_position_from_cell: "Cell (0,0) center is at the origin"). Quindi c'e' un nodo
-  esattamente sotto il robot all'avvio -- niente "boot node" da aggiungere a mano, vedi
-  origin_node_id. Gli indici (i, j) possono essere negativi; il rettangolo li ritaglia.
+  esattamente sotto il robot all'avvio, vedi origin_node_id. Gli indici (i, j) possono
+  essere negativi; il rettangolo li ritaglia.
 
 ALIASING -- il limite da conoscere
-  Un reticolo puo' perdere un varco che il caso trovava: se un corridoio cade fra due file
-  di nodi, nel grafo non esiste. E' l'unico modo in cui la regolarita' e' peggiore del
-  caso, ed e' il motivo per cui la spaziatura e' un parametro. Riferimento: il fronte
-  sicuro pretende spotGrid.FRONTIER_CLEARANCE_M = 0.30 m di obstacle_distance dalla linea
-  centrale, quindi un corridoio utile e' largo almeno 0.60 m. Le linee centrali ammesse
-  sono una striscia larga (larghezza - 0.60 m): perche' ci cada sempre una fila di nodi il
-  passo deve essere piu' corto di quella striscia. Missione del 08-10 15:40: striscia di
-  ~45 cm, file a passo 0.5 entrambe fuori, corridoio inesistente nel grafo; a passo 0.25
-  (default dal 2026-10-08) ci sono due file dentro.
+  Se un corridoio cade fra due file di nodi, nel grafo non esiste. Il fronte sicuro
+  pretende spotGrid.FRONTIER_CLEARANCE_M = 0.30 m dalla linea centrale, quindi un corridoio
+  utile e' largo almeno 0.60 m e le linee centrali ammesse sono una striscia larga
+  (larghezza - 0.60 m): perche' ci cada sempre una fila di nodi il passo deve essere piu'
+  corto di quella striscia. A passo 0.25 ogni striscia piu' larga di 0.25 m ne contiene una.
 
-COME SI PASSA A SPOT
-      mg = mission_graph.build_mission_graph(env=env)   # ~30 ms: nodi + adiacenza
+COME SI USA
+      mg = mission_graph.build_mission_graph(env=env)   # ~0.2 s: nodi + adiacenza
       mg.into_prm(prm)                                  # i nodi, id 0..N-1
-      gb_sampler = mg.as_sampler()                      # al posto di GlobalSampler
+      gb_sampler = mg.as_sampler()                      # punti del reticolo per cella
       ...
       mg.add_edges_to_prm(prm, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M)
-                                                        # al posto di prm.build_graph()
-  add_edges_to_prm chiama lo stesso PRM._evaluate_and_add_edge di build_graph, quindi veti
-  e pesi sono identici a oggi; quello che salta e' l'appaiamento geometrico. Cio' che resta
-  da calcolare sul robot sono i veti e i pesi, che per costruzione non sono precalcolabili:
-  l'occupazione viene dalla mappa globale che si riempie strada facendo, la pendenza d'arco
-  dal terreno visto in quel momento. E' esattamente "Spot ci aggiunge solo i dati locali".
+  add_edges_to_prm valuta ogni coppia con PRM._evaluate_and_add_edge, la stessa funzione
+  usata per tutti gli archi: veti e pesi vengono da li'. Sul robot si calcolano solo i veti
+  e i pesi, che per costruzione non sono precalcolabili: l'occupazione viene dalla mappa
+  globale che si riempie strada facendo, la pendenza d'arco dal terreno visto in quel
+  momento.
   save_npz/load_npz servono ad avere un reticolo IDENTICO fra piu' missioni, non per la
-  velocita': misurato, costruire da zero costa ~30 ms e ricaricare ~20 ms.
+  velocita': con la missione di default (3185 nodi) costruire da zero costa ~180 ms,
+  ricaricare ~70 ms (python3 mission_graph.py --tempi).
 
 Il modulo dipende SOLO da numpy: si importa e si prova fuori dal robot, senza l'SDK.
 environmentMap, prm_graph e matplotlib sono importati dentro le funzioni che li usano.
@@ -190,7 +162,7 @@ def covering_radius(spacing):
 
 
 def node_density(spacing):
-    """Nodi per metro quadro (per confronto con i 5/m^2 del campionamento casuale)."""
+    """Nodi per metro quadro."""
     return 1.0 / spacing ** 2
 
 
@@ -250,8 +222,7 @@ def _lattice_pairs(spacing, ij, xy, min_edge_m, reach_m):
     """
     Le coppie di nodi che diventeranno archi, con la loro lunghezza. Sfrutta il fatto che i
     nodi stanno su indici interi: i vicini si trovano scorrendo una finestra di offset
-    (O(N*k) di aritmetica intera) invece di interrogare un albero k-d su tutte le coppie,
-    che e' quello che fa PRM.build_graph a ogni ricostruzione.
+    (O(N*k) di aritmetica intera) invece di interrogare un albero k-d su tutte le coppie.
 
     Restituisce (pairs, lengths, n_sotto_soglia): le coppie ammesse, le lunghezze, e quante
     coppie sono state scartate perche' piu' corte di min_edge_m. Con un passo allineato e
@@ -288,8 +259,8 @@ def _lattice_pairs(spacing, ij, xy, min_edge_m, reach_m):
     return pairs[order], lengths[order], n_short
 
 
-# 2026-10-14: pendenze delle coppie calcolate in blocco con le matrici (vedi
-# PRM.precompute_arc_slopes). False = arco per arco come prima; il risultato e' identico.
+# Pendenze delle coppie calcolate in blocco con le matrici (vedi PRM.precompute_arc_slopes).
+# False = arco per arco; il risultato e' identico.
 BATCH_SLOPES = True
 
 
@@ -418,14 +389,12 @@ class MissionGraph:
     def add_edges_to_prm(self, prm, global_map=None, edge_safety_margin=0.0, verbose=True,
                          incremental=False):
         """
-        Valuta le coppie GIA' CALCOLATE e aggiunge quelle ammesse, usando la stessa funzione
-        di build_graph (PRM._evaluate_and_add_edge): identici veti -- archi bloccati,
-        occupazione nella mappa globale, pendenza longitudinale e laterale -- e identici
-        pesi. Quello che non si rifa' e' l'appaiamento geometrico.
+        Valuta le coppie GIA' CALCOLATE e aggiunge quelle ammesse con
+        PRM._evaluate_and_add_edge: veti (archi bloccati, occupazione nella mappa globale,
+        pendenza longitudinale e laterale) e pesi. Le coppie sono quelle del reticolo, non
+        si rifa' nessun appaiamento geometrico.
 
-        Da chiamare al posto di prm.build_graph(...) quando i nodi vengono da qui.
-
-        incremental (2026-10-13): rivaluta SOLO le coppie vicine alle zone con dati nuovi
+        incremental: rivaluta SOLO le coppie vicine alle zone con dati nuovi
         dall'ultima valutazione (prm.dirty_rects, vedi prm_graph.DIRTY_MARGIN_M); le altre
         tengono arco e peso che hanno. Il risultato e' lo stesso della costruzione completa:
         fuori da quelle zone nessun dato che entra nella valutazione e' cambiato. Si torna
@@ -435,7 +404,7 @@ class MissionGraph:
         todo_all = [(int(a), int(b), float(d)) for (a, b), d in zip(self.pairs, self.lengths)
                     if int(a) in prm.nodes and int(b) in prm.nodes]
         dirty = self._dirty_pairs(prm, global_map, todo_all) if incremental else None
-        prm.robot_node = None          # come build_graph: il permesso vale per il nodo attuale
+        prm.robot_node = None          # il permesso vicino al robot vale solo per il nodo attuale
         if dirty is None:
             for idx in prm.nodes:
                 prm.edges[idx] = []
@@ -456,8 +425,8 @@ class MissionGraph:
             prm._sync_global_slope_cache()
 
         added = 0
-        # 2026-10-12: occupazione di tutte le coppie in un colpo solo e cache della pendenza
-        # globale riempita dove certamente non ci sono dati (esiti identici, vedi
+        # Occupazione di tutte le coppie in un colpo solo e cache della pendenza globale
+        # riempita dove certamente non ci sono dati (esiti identici, vedi
         # PRM._occupancy_blocked_many e PRM._prefill_global_slope_nodata). Le adiacenze sono
         # appena state svuotate e le coppie del reticolo sono distinte: fresh=True.
         batch = hasattr(prm, '_occupancy_blocked_many')
@@ -467,7 +436,7 @@ class MissionGraph:
         if batch:
             prm._prefill_global_slope_nodata(todo)
         fresh = batch and self._pairs_distinct()
-        # ZONA SENZA DATI (2026-10-12): archi su cui nessuna fonte ha informazione prendono
+        # ZONA SENZA DATI: archi su cui nessuna fonte ha informazione prendono
         # direttamente il costo di ripiego, identico a quello del percorso completo (vedi
         # PRM._add_edge_without_data). Serve gamma = 0: con la rugosita' nel costo, no.
         fast_ok = (fresh and hasattr(prm, '_add_edge_without_data') and prm.gamma == 0.0)
@@ -476,9 +445,9 @@ class MissionGraph:
         cache = getattr(prm, '_gslope_cache', {})
         blocked_set = prm.tracker_blocked_edges
         n_fast = 0
-        # 2026-10-14: pendenze di tutte le coppie da valutare in un colpo solo (matrici), dal
-        # vivo e -- dove dal vivo non ci sono dati -- dalla mappa globale. Stessi numeri del
-        # calcolo arco per arco, circa 13 volte piu' in fretta (vedi PRM.precompute_arc_slopes).
+        # Pendenze di tutte le coppie da valutare in un colpo solo (matrici), dal vivo e,
+        # dove dal vivo non ci sono dati, dalla mappa globale. Stessi numeri del calcolo arco
+        # per arco, circa 13 volte piu' in fretta (vedi PRM.precompute_arc_slopes).
         live_profs = [None] * len(todo)
         if BATCH_SLOPES and batch and hasattr(prm, 'precompute_arc_slopes'):
             skip = np.array([bool(o) for o in occ_flags], dtype=bool)
@@ -502,8 +471,8 @@ class MissionGraph:
 
         self.last_update = (len(todo), len(todo_all), dirty is not None)
 
-        # Gli archi percorsi dal robot sono liberi per costruzione e vanno rimessi comunque,
-        # come fa build_graph: i nodi di sosta stanno spesso sotto min_edge_length.
+        # Gli archi percorsi dal robot sono liberi per costruzione e vanno rimessi comunque:
+        # i nodi di sosta stanno spesso sotto min_edge_length.
         for a, b in list(getattr(prm, 'traversed_edges', ())):
             if a in prm.nodes and b in prm.nodes:
                 if hasattr(prm, '_traversed_edge_ok') and not prm._traversed_edge_ok(a, b, global_map):
