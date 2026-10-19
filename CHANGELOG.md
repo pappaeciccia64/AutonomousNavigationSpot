@@ -98,6 +98,9 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 ### GraphNav (`navGraphUtils.py`)
 - **Chiusure d'anello durante la missione** (`close_loops_checked`), con fiducial e odometria e il controllo di collisione di Spot sugli archi nuovi. Prima si chiudevano solo a fine missione e solo con i fiducial: il grafo restava una catena e ogni ritorno ripercorreva tutta la strada fatta.
 
+### Controllo pre-missione (`preflight.py`)
+- Tabella aggiornata: `MAX_MANEUVERS_SAME_EDGE` non esiste più da quando è stata tolta la marcia di traverso (07-10), e `preflight` bocciava una copia corretta di `easy_walk.py`.
+
 ### Mappe e terreno (`spotGrid.py`)
 - **Tolleranza sulla rotazione da 0.05 a 0.15 m.** Richiesta dell'utente: "il padding dall'ostacolo non deve bloccarlo nella rotazione, a volte lo spazio ci sarebbe, con GraphNav riesce". Missione 08-10 10:47, 46 scansioni, direzioni del giro insieme libere e raggiungibili girandosi:
 
@@ -181,3 +184,6 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 - **Chiavi della mappa globale con `np.floor`, non `np.round`** (occupazione e altezze): con i centri delle celle l'arrotondamento al pari faceva collassare celle diverse sulla stessa chiave e lasciava chiavi mai scritte, lette come "libere".
 - **Rugosità calcolata solo su celle valide.** Missione 05-10, iterazione 6: 29 celle mai scritte hanno prodotto 83 falsi ostacoli attorno a sé; con le statistiche solo sulle valide quei veti vanno a 0 (rugosità massima da 1.585 a 0.029) e i 54 veti veri restano.
 - `LATERAL_SLOPE_COST_MULTIPLIER` da 1.5 a 1.0: 1.5 era una supposizione, e la stima della pendenza di allora sovrastimava le componenti piccole fino a ~1.9 volte.
+
+### Controllo pre-missione (`preflight.py`)
+- **Nato dalla missione del 05-10 15:55**, interrotta appena costruito il grafo da `AttributeError: 'GlobalGrid' object has no attribute 'is_known'`: `easy_walk.py` era aggiornato, `spotGrid.py` sul robot era una copia vecchia. Nessun rischio (prima di qualunque movimento), ma robot già acceso e in piedi.

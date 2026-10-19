@@ -10,22 +10,20 @@ def getPosition(robot_state_client):
 
 def check_line_of_sight(x1, y1, x2, y2, pts, cells, obstacle_threshold=0.0, max_valid_dist=0.2):
     """
-    Check if there's a clear line of sight between two points.
-    Uses sampling along the line to check for obstacles.
-
-    Uses the obstacle_distance grid where:
-        dist < 0   -> strictly inside an obstacle (blocked)
-        dist >= 0  -> border or free space (passable – zero padding)
+    Linea di vista fra due punti, campionata ogni 10 cm (almeno 10 campioni) sulla griglia
+    (pts, cells), con cells = obstacle_distance: sotto obstacle_threshold e' ostacolo.
+    Restituisce 'blocked' al primo campione su un ostacolo, 'unseen' se un campione non ha
+    un punto di griglia entro max_valid_dist, altrimenti 'clear'.
     """
     distance = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
-    num_checks = max(10, int(distance * 10))  # 10 checks per meter
+    num_checks = max(10, int(distance * 10))
 
     for i in range(num_checks):
         t = i / max(1, num_checks - 1)
         check_x = x1 + t * (x2 - x1)
         check_y = y1 + t * (y2 - y1)
 
-        # Find nearest grid point
+        # Punto di griglia piu' vicino
         distances = np.sqrt((pts[:, 0] - check_x) ** 2 + (pts[:, 1] - check_y) ** 2)
         nearest_idx = np.argmin(distances)
         min_dist = distances[nearest_idx]
@@ -34,7 +32,7 @@ def check_line_of_sight(x1, y1, x2, y2, pts, cells, obstacle_threshold=0.0, max_
             return 'unseen'
 
         if cells[nearest_idx] < obstacle_threshold:
-            return 'blocked'  # Path blocked
+            return 'blocked'
 
-    return 'clear'  # Path clear
+    return 'clear'
 

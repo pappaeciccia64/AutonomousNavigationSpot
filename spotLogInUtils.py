@@ -33,8 +33,8 @@ def setLogInfo(options):
 
 class SimpleEstop:
     """
-    Simple E-Stop manager without GUI.
-    Call start() to activate, stop() to release.
+    E-Stop software senza interfaccia. Alla creazione si registra e lascia muovere il robot;
+    stop() lo ferma, allow() lo rilascia.
     """
 
     def __init__(self, robot, name='simple_estop'):
@@ -42,16 +42,15 @@ class SimpleEstop:
         self.endpoint = EstopEndpoint(self.estop_client, name, estop_timeout=9.0)
         self.endpoint.force_simple_setup()
         self.keepalive = EstopKeepAlive(self.endpoint)
-        # Start in allowed state
         self.keepalive.allow()
         print(f"[OK] E-Stop '{name}' activated and released")
 
     def stop(self):
-        """Trigger E-Stop (robot stops immediately)."""
+        """Attiva l'E-Stop: il robot si ferma subito."""
         self.keepalive.stop()
         print("[ESTOP] Robot stopped")
 
     def allow(self):
-        """Release E-Stop (robot can move)."""
+        """Rilascia l'E-Stop: il robot puo' muoversi."""
         self.keepalive.allow()
         print("[ESTOP] Robot allowed to move")

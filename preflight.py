@@ -3,15 +3,9 @@
 Controllo pre-volo: verifica che i file sulla macchina del robot siano allineati fra
 loro PRIMA di lanciare una missione.
 
-Motivo: il 2026-10-05 alle 15:55 una missione si e' interrotta subito dopo la
-costruzione del grafo con
-
-    AttributeError: 'GlobalGrid' object has no attribute 'is_known'
-
-perche' `easy_walk.py` era aggiornato ma `spotGrid.py` era una copia precedente. Il
-robot era gia' acceso e in piedi. Non c'e' stato alcun rischio -- il crash e' avvenuto
-prima di qualunque movimento -- ma e' tempo perso, e in esterno sarebbe stato tempo
-perso a batteria accesa in mezzo a un campo.
+Se sul robot `easy_walk.py` e' aggiornato ma un altro modulo e' una copia vecchia, la
+missione si ferma con un AttributeError appena il robot e' acceso e in piedi: tempo perso,
+e in esterno tempo perso a batteria accesa in mezzo a un campo. Qui lo si scopre prima.
 
 Il controllo e' PURAMENTE STATICO: legge i file, non importa nulla, non tocca il robot,
 non serve l'SDK bosdyn. Si puo' lanciare in qualunque momento.
@@ -53,27 +47,25 @@ REQUIRED = {
         "metodi": [
             ("GlobalGrid", "is_occupied"),
             ("GlobalGrid", "is_known"),            # usato da find_best_point_in_cell
-            ("GlobalGrid", "_set_state"),          # passo 6
+            ("GlobalGrid", "_set_state"),
             ("GlobalGrid", "_rebuild_coarse_index"),
             ("GlobalGrid", "mark_hazard"),         # cadute
             ("GlobalTerrainGrid", "compute_arc_slope_profile"),
             ("LocalGrid", "compute_robot_footprint_mask"),
             ("LocalGrid", "correct_terrain"),
-            ("LocalGrid", "_cells_above_ground"),    # filtro altezza suolo (passo 1)
+            ("LocalGrid", "_cells_above_ground"),    # filtro sull'altezza del suolo
             ("LocalGrid", "_cells_never_written"),   # celle mai scritte (sopra o sotto il suolo)
-            ("LocalGrid", "_fetch_layers"),          # revisione 2026-10-06 sera
+            ("LocalGrid", "_fetch_layers"),
             ("LocalGrid", "_layer_geometry"),
             ("GlobalGrid", "segment_hits_hazard"),
             ("LocalGrid", "fuse_obstacle_mask"),
         ],
     },
-    # Grafo di missione regolare (2026-10-08). easy_walk lo importa e ne usa queste cose:
-    # se il file sul robot e' una copia vecchia, la missione si fermerebbe subito dopo
-    # l'accensione -- che e' esattamente il caso per cui preflight esiste.
+    # Il grafo di missione: easy_walk lo importa e ne usa queste cose.
     "mission_graph.py": {
         "costanti": ["LATTICE_RINGS", "DEFAULT_MIN_EDGE_M", "DEFAULT_MAX_EDGE_M",
                      "DEFAULT_CONNECTION_RADIUS_M",
-                     # 2026-10-08: dimensione della missione e passo di default, letti da easy_walk
+                     # dimensione della missione e passo di default, letti da easy_walk
                      "DEFAULT_MISSION_ROWS", "DEFAULT_MISSION_COLS", "DEFAULT_CELL_SIZE_M",
                      "DEFAULT_LATTICE_SPACING_M"],
         "funzioni": ["build_mission_graph", "load_npz", "align_spacing", "suggested_spacing",
@@ -87,7 +79,7 @@ REQUIRED = {
             ("LatticeSampler", "get_point_in_cell"),
         ],
     },
-    # 2026-10-08: easy_walk chiama questi metodi per le scorciatoie GraphNav.
+    # easy_walk chiama questi metodi per le scorciatoie GraphNav.
     "navGraphUtils.py": {
         "costanti": [],
         "funzioni": [],
@@ -99,7 +91,7 @@ REQUIRED = {
         ],
     },
     "prm_graph.py": {
-        "costanti": ["ANCHOR_SEARCH_M", "ANCHOR_ON_NODE_M",   # 2026-10-08
+        "costanti": ["ANCHOR_SEARCH_M", "ANCHOR_ON_NODE_M",
                      "ANCHOR_IGNORE_NEAR_M",
                      "OCCUPANCY_SAMPLES_PER_M", "OCCUPANCY_SAMPLES_MIN",
                      "STOP_NODE_MAP_IGNORE_M"],
@@ -109,15 +101,15 @@ REQUIRED = {
             ("PRM", "sample_terrain_between_points"),
             ("PRM", "_compute_edge_weight"),
             ("PRM", "set_global_terrain_map"),
-            ("PRM", "add_stop_node"),             # passo 5
+            ("PRM", "add_stop_node"),
             ("PRM", "_evaluate_and_add_edge"),
             ("PRM", "set_robot_node"),            # cadute
             ("PRM", "_occupancy_blocked"),
-            ("PRM", "_global_slope"),             # revisione 2026-10-06 sera
+            ("PRM", "_global_slope"),
             ("PRM", "_sync_global_slope_cache"),
             ("PRM", "_traversed_edge_ok"),
-            ("PRM", "anchor_node"),               # 2026-10-08: nessun nodo nuovo
-            ("PRM", "set_allowed_nodes"),         # 2026-10-08: solo celle visitate
+            ("PRM", "anchor_node"),
+            ("PRM", "set_allowed_nodes"),         # solo celle visitate
             ("PRM", "set_detour_limit"),
             ("PRM", "path_length"),
         ],
@@ -125,7 +117,7 @@ REQUIRED = {
     "arcVerification.py": {
         "costanti": [],
         "funzioni": ["is_arc_in_fov", "verify_arc_safety",
-                     "make_grid_snapshot", "compute_safe_frontier", "allowed_advance",   # passo 3
+                     "make_grid_snapshot", "compute_safe_frontier", "allowed_advance",
                      "point_along", "describe_frontier"],
         "metodi": [("ArcVerificationTracker", "update_path"),
                    ("ArcVerificationTracker", "get_frontier"),
@@ -133,7 +125,7 @@ REQUIRED = {
     },
     "movements.py": {
         "costanti": ["DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT",
-                     "DEFAULT_MAX_LINEAR_VEL_MPS", "DEFAULT_MAX_ANGULAR_VEL_RPS",   # passo 2
+                     "DEFAULT_MAX_LINEAR_VEL_MPS", "DEFAULT_MAX_ANGULAR_VEL_RPS",
                      "RETREAT_MAX_LINEAR_VEL_MPS",
                      "FALL_TILT_DEG", "UPRIGHT_TILT_DEG", "SELF_RIGHT_TIMEOUT_S",       # cadute
                      "STAND_TIMEOUT_S", "SELF_RIGHT_MAX_ATTEMPTS",
@@ -146,18 +138,14 @@ REQUIRED = {
         "costanti": ["MIN_PARTIAL_STEP_M", "FRONTIER_BLOCK_CONFIRM_SCANS", "FRONTIER_RESCAN_WAIT_S",
                      "MAX_BLOCK_REPLANS", "FRONTIER_ABORT_CONFIRM", "FRONTIER_ABORT_TOLERANCE_M",
                      "GOAL_REACHED_TOLERANCE_M", "MAX_LOOP_ITERATIONS",
-                     "SAVE_SCAN_BUNDLES",                 # passi 7-8
-                     "ROTATION_ROOM_SEARCH_M", "ROTATION_ROOM_DIRECTIONS_DEG",           # passo 4
-                     # 2026-10-08: MAX_MANEUVERS_SAME_EDGE non esiste piu' da quando la marcia
-                     # di traverso e' stata eliminata (2026-10-07): al suo posto ci sono il
-                     # limite per tratto e quello sugli arretramenti consecutivi. La tabella era
-                     # rimasta indietro, e preflight bocciava una copia di easy_walk.py corretta.
+                     "SAVE_SCAN_BUNDLES",
+                     "ROTATION_ROOM_SEARCH_M", "ROTATION_ROOM_DIRECTIONS_DEG",
                      "SHORTCUT_MAX_DIST_M", "MAX_ROTATION_FAILS_SAME_EDGE",
                      "MAX_STRAIGHT_RETREATS_IN_A_ROW",
-                     # Grafo di missione regolare (2026-10-08, mission_graph.py)
+                     # grafo di missione
                      "MISSION_LATTICE_SPACING_M", "MISSION_LATTICE_RINGS",
                      "PRM_MIN_EDGE_M", "PRM_MAX_EDGE_M", "PRM_CONNECTION_RADIUS_M",
-                     # guardie anti-stallo e avanzamento multinodo (2026-10-08)
+                     # guardie anti-stallo e avanzamento multinodo
                      "MAX_ROTATION_DISCARDS", "MAX_IDLE_LOOPS", "IDLE_MOVE_M",
                      "MISSION_GRID_ROWS", "MISSION_GRID_COLS", "MISSION_CELL_SIZE_M",
                      "PLAN_ONLY_EXPLORED_CELLS", "PLAN_MAX_DETOUR_RATIO", "PLAN_DETOUR_SLACK_M",
@@ -167,7 +155,7 @@ REQUIRED = {
                      "CONE_PATH_LOOKAHEAD_M", "ABORT_IGNORE_DATA_EDGE_UNTIL_M",
                      "FALL_HAZARD_RADIUS_M",                                             # cadute
                      "RETREAT_MAX_SEGMENTS", "RETREAT_MIN_SEGMENT_M", "RETREAT_AFTER_ABORT_M",
-                     "RETREAT_CONTINUITY_M", "RETREAT_MAX_SEGMENT_M",                    # revisione
+                     "RETREAT_CONTINUITY_M", "RETREAT_MAX_SEGMENT_M",
                      "GRAPHNAV_TIMEOUT_S", "GRAPHNAV_MAX_LINEAR_VEL_MPS", "GRAPHNAV_MAX_ANGULAR_VEL_RPS",
                      "MAX_FALLS_PER_MISSION"],
         "funzioni": ["find_best_point_in_cell", "retreat_along_traveled_path",
@@ -188,16 +176,16 @@ REQUIRED_PARAMS = [
     ("movements.py", "relative_move", "should_abort"),
     ("movements.py", "relative_move", "poll_period_s"),
     ("movements.py", "relative_move", "disable_foot_obstacle_avoidance"),
-    ("movements.py", "relative_move", "max_linear_vel"),                # passo 2
-    ("movements.py", "_build_mobility_params", "max_linear_vel"),       # passo 2
+    ("movements.py", "relative_move", "max_linear_vel"),
+    ("movements.py", "_build_mobility_params", "max_linear_vel"),
     ("easy_walk.py", "navigate_to", "should_abort"),
     ("easy_walk.py", "find_best_point_in_cell", "global_map"),
     ("spotGrid.py", "compute_arc_slope_profile", "baseline_m"),
     ("spotGrid.py", "compute_arc_slope_profile", "lateral_half_width_m"),
-    ("spotGrid.py", "correct_terrain", "cell_size"),                    # passo 1
-    ("spotGrid.py", "compute_gradient_and_roughness", "is_valid"),      # passo 1
-    ("arcVerification.py", "compute_safe_frontier", "body"),            # passo 4
-    ("easy_walk.py", "navigate_to", "keep_heading"),                    # passo 4
+    ("spotGrid.py", "correct_terrain", "cell_size"),
+    ("spotGrid.py", "compute_gradient_and_roughness", "is_valid"),
+    ("arcVerification.py", "compute_safe_frontier", "body"),
+    ("easy_walk.py", "navigate_to", "keep_heading"),
     ("prm_graph.py", "add_stop_node", "is_robot"),                      # cadute
     ("easy_walk.py", "shortcut_index", "global_map"),
     ("spotGrid.py", "correct_terrain", "unwritten_value"),              # celle mai scritte
@@ -206,7 +194,7 @@ REQUIRED_PARAMS = [
     ("spotGrid.py", "compute_arc_slope_profile", "valid_2d"),           # pendenza su celle attendibili
     ("spotGrid.py", "_gather_heights", "valid_2d"),
     ("prm_graph.py", "update_local_grid_data", "valid_2d"),
-    ("prm_graph.py", "compute_path_cost", "allow_direct_first_hop"),   # revisione 2026-10-06 sera
+    ("prm_graph.py", "compute_path_cost", "allow_direct_first_hop"),
     ("spotGrid.py", "return_local_grid", "max_attempts"),
 ]
 
