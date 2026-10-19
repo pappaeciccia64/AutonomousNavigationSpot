@@ -12,16 +12,13 @@ from google.protobuf import wrappers_pb2
 
 
 # =========================================================================
-# LIMITI DI VELOCITA' (2026-10-06).
+# LIMITI DI VELOCITA'.
 #
-# Fino a questa data NESSUN comando di movimento impostava un limite: Spot camminava
-# con il proprio default, fino a ~1.6 m/s. Nella missione del 2026-10-05 la media sui
-# tratti era ~0.3 m/s, ma comprendeva accelerazione e frenata: a meta' tratto i picchi
-# erano molto piu' alti, troppo per un terreno esterno anche se in piano.
-#
-# I limiti per livello di terreno stanno in spotGrid.GAIT_VEL_* e arrivano qui tramite
-# select_mobility_params() in easy_walk.py. Questi sono i valori usati quando il
-# chiamante non ne passa (es. comandi isolati, ritirata).
+# Ogni comando di movimento imposta un limite: senza, Spot cammina fino al proprio massimo
+# (~1.6 m/s), troppo per un terreno esterno anche se in piano. I limiti per livello di
+# terreno stanno in spotGrid.GAIT_VEL_* e arrivano qui tramite select_mobility_params() in
+# easy_walk.py. Questi sono i valori usati quando il chiamante non ne passa (comandi
+# isolati, ritirata).
 #
 # ATTENZIONE: in Spot il limite e' una coppia (min_vel, max_vel). Impostando solo
 # max_vel, min_vel resta ZERO e il robot non puo' piu' muoversi all'indietro ne' di
@@ -33,18 +30,17 @@ DEFAULT_MAX_ANGULAR_VEL_RPS = 0.6
 RETREAT_MAX_LINEAR_VEL_MPS = 0.3     # all'indietro il robot vede peggio: si va piu' piano
 
 # =========================================================================
-# TEMPO MASSIMO DI UN MOVIMENTO e ERRORI DI RETE (2026-10-06 sera, dopo la revisione).
+# TEMPO MASSIMO DI UN MOVIMENTO e ERRORI DI RETE.
 #
-# Il comando durava 6000 s e il ciclo di attesa usciva solo all'arrivo, a un errore di Spot
-# o su richiesta del chiamante. Se Spot non riusciva ad arrivare (corpo fermato dalla sua
-# anticollisione, zampe che scivolano su un pendio bagnato) il robot restava li' a provare
-# fino a 100 minuti. Ora: tempo massimo = MOVE_TIMEOUT_FACTOR x (tempo teorico alla
-# velocita' limite) + MOVE_TIMEOUT_MARGIN_S; scaduto, il robot viene fermato e il movimento
-# conta come fallito. Lo stesso tempo e' la scadenza del comando dentro Spot.
+# Se Spot non riesce ad arrivare (corpo fermato dalla sua anticollisione, zampe che
+# scivolano su un pendio bagnato) non deve restare li' a provare all'infinito. Tempo
+# massimo = MOVE_TIMEOUT_FACTOR x (tempo teorico alla velocita' limite) +
+# MOVE_TIMEOUT_MARGIN_S; scaduto, il robot viene fermato e il movimento conta come
+# fallito. Lo stesso tempo e' la scadenza del comando dentro Spot.
 #
-# Un errore di rete durante l'attesa (WiFi in esterno) prima usciva come eccezione e
-# terminava la missione SENZA fermare il robot, che finiva la traiettoria da solo. Ora si
-# riprova fino a MOVE_MAX_RPC_ERRORS volte di fila; poi si ferma il robot e si rilancia.
+# Un errore di rete durante l'attesa (WiFi in esterno) non deve lasciare il robot a finire
+# la traiettoria da solo: si riprova fino a MOVE_MAX_RPC_ERRORS volte di fila, poi si
+# ferma il robot e si rilancia l'eccezione.
 # =========================================================================
 MOVE_TIMEOUT_FACTOR = 3.0
 MOVE_TIMEOUT_MARGIN_S = 10.0
@@ -69,10 +65,9 @@ MOVE_MAX_RPC_ERRORS = 3
 # contingenza, non il caso d'uso, quindi il default segue l'esterno.
 #
 # CONSEGUENZA DA TENERE PRESENTE: con questa protezione spenta, l'unica rete di
-# sicurezza e' la nostra verifica degli archi (arcVerification + l'avanzamento
-# parziale in easy_walk). Non ci sono controlli indipendenti sotto. E' il motivo
-# per cui vale la pena non percorrere mai tratti non ispezionati e avere un
-# arresto a meta' movimento e una ritirata funzionanti.
+# sicurezza sotto le zampe e' il nostro fronte sicuro (arcVerification), con l'arresto
+# a meta' movimento e la ritirata. Non ci sono controlli indipendenti sotto: per questo
+# non si percorrono mai tratti non confermati.
 #
 # Per una prova al chiuso in cui si voglia la rete in piu', basta passare
 # disable_foot_obstacle_avoidance=False alle funzioni qui sotto -- senza toccare
@@ -94,8 +89,8 @@ def _build_mobility_params(locomotion_hint=None, ground_mu_hint=None, swing_heig
                            disable_foot_obstacle_avoidance=None,
                            max_linear_vel=None, max_angular_vel=None):
     """
-    Costruisce MobilityParams in un solo posto, cosi' i due comandi di movimento qui
-    sotto non possono piu' divergere fra loro (prima la stessa logica era duplicata).
+    Costruisce MobilityParams in un solo posto, cosi' i comandi di movimento qui sotto non
+    possono divergere fra loro.
 
     max_linear_vel / max_angular_vel: limiti in m/s e rad/s. None = default di modulo.
     Il limite viene SEMPRE impostato: senza, Spot usa il proprio massimo (~1.6 m/s).
@@ -126,7 +121,7 @@ def _build_mobility_params(locomotion_hint=None, ground_mu_hint=None, swing_heig
 
 
 # =========================================================================
-# CADUTE (2026-10-06) -- rilevazione e raddrizzamento.
+# CADUTE -- rilevazione e raddrizzamento.
 #
 # Una caduta e' riconosciuta se lo stato del robot riporta un fault di comportamento con
 # causa CAUSE_FALL, OPPURE se il corpo e' inclinato oltre FALL_TILT_DEG (vale anche se il
@@ -264,51 +259,45 @@ def relative_move(dx, dy, dyaw, frame_name, robot_command_client, robot_state_cl
                    disable_foot_obstacle_avoidance=None,
                    should_abort=None, poll_period_s=0.2,
                    max_linear_vel=None, max_angular_vel=None):
-    """Move the robot relative to its current pose.
+    """Muove il robot rispetto alla posa attuale.
 
     dx, dy, dyaw sono nel frame del CORPO: dx>0 avanti, dx<0 indietro, dy laterale,
     dyaw rotazione. Spot cammina in tutte le direzioni, quindi dx negativo con dyaw=0
     e' una marcia indietro vera e propria, senza bisogno di girarsi.
 
     Args:
-        locomotion_hint: Optional spot_command_pb2.LocomotionHint value (e.g. HINT_CRAWL) to set the gait.
-        ground_mu_hint: Optional float friction coefficient hint (e.g. 0.4-0.8) for terrain_params.
-        swing_height: Optional spot_command_pb2.SwingHeight value (e.g. SWING_HEIGHT_HIGH).
+        locomotion_hint: spot_command_pb2.LocomotionHint opzionale (es. HINT_CRAWL), l'andatura.
+        ground_mu_hint: coefficiente d'attrito atteso opzionale (es. 0.4-0.8), in terrain_params.
+        swing_height: spot_command_pb2.SwingHeight opzionale (es. SWING_HEIGHT_HIGH).
         disable_foot_obstacle_avoidance: se True spegne l'anticollisione dei PIEDI di Spot
             (serve su prato, vedi DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT in cima al file).
             None = usa il default della missione.
         should_abort: callable senza argomenti, interrogato a ogni ciclo di feedback.
             Se restituisce un valore vero il movimento viene FERMATO subito e la funzione
-            torna (False, distanza_percorsa). Prima di questo parametro il comando era
-            bloccante fino a fine traiettoria: il verificatore in background poteva
-            accorgersi di un ostacolo a movimento in corso (ed e' successo nella missione
-            del 2026-10-05 13:12) ma nessuno poteva leggerlo in tempo per fermarsi.
-            Il MOTIVO dell'arresto lo conosce il chiamante, che possiede la callback;
-            qui si restituisce solo (False, distanza) per non cambiare la firma.
-        poll_period_s: intervallo fra due letture del feedback. Era fisso a 1.0 s --
-            troppo per accorgersi di qualcosa: a ~0.5 m/s significa mezzo metro fra un
-            controllo e il successivo. 0.2 s riduce la cecita' a ~10 cm.
+            torna (False, distanza_percorsa). E' cosi' che il fronte sicuro, che gira in un
+            thread, ferma il robot a meta' movimento. Il MOTIVO dell'arresto lo conosce il
+            chiamante, che possiede la callback.
+        poll_period_s: intervallo fra due letture del feedback. A ~0.5 m/s, 0.2 s vuol dire
+            ~10 cm percorsi fra un controllo e il successivo.
         max_linear_vel, max_angular_vel: limiti di velocita' (m/s, rad/s). None = default
             di modulo (DEFAULT_MAX_*). Vedi l'avvertenza in cima al file sul minimo.
 
     Returns:
-        tuple: (success: bool, distance_traveled: float)
-               - success: True if goal reached, False if failed OR aborted
-               - distance_traveled: meters traveled before stopping/failing
+        (success, distance_traveled): success True se l'obiettivo e' raggiunto, False se il
+        movimento e' fallito o e' stato interrotto; distance_traveled in metri.
     """
     transforms = robot_state_client.get_robot_state().kinematic_state.transforms_snapshot
 
-    # Save initial position
+    # Posizione di partenza
     initial_tform_body = get_se2_a_tform_b(transforms, frame_name, BODY_FRAME_NAME)
     initial_x = initial_tform_body.x
     initial_y = initial_tform_body.y
 
-    # Build the transform for where we want the robot to be relative to where the body currently is.
+    # Obiettivo nel frame richiesto: posa attuale del corpo composta con lo spostamento.
     body_tform_goal = math_helpers.SE2Pose(x=dx, y=dy, angle=dyaw)
     out_tform_body = get_se2_a_tform_b(transforms, frame_name, BODY_FRAME_NAME)
     out_tform_goal = out_tform_body * body_tform_goal
 
-    # Command the robot to go to the goal point in the specified frame.
     mobility_params = _build_mobility_params(
         locomotion_hint=locomotion_hint, ground_mu_hint=ground_mu_hint,
         swing_height=swing_height,
@@ -326,7 +315,7 @@ def relative_move(dx, dy, dyaw, frame_name, robot_command_client, robot_state_cl
     cmd_id = robot_command_client.robot_command(lease=None, command=robot_cmd,
                                                 end_time_secs=t_start + timeout_s)
 
-    # Wait until the robot has reached the goal, fails, times out, or the caller asks to abort
+    # Attesa: arrivo, fallimento, tempo scaduto o arresto chiesto dal chiamante.
     rpc_errors = 0
     distance_traveled = 0.0
     while True:
@@ -338,7 +327,7 @@ def relative_move(dx, dy, dyaw, frame_name, robot_command_client, robot_state_cl
             feedback = robot_command_client.robot_command_feedback(cmd_id)
             mobility_feedback = feedback.feedback.synchronized_feedback.mobility_command_feedback
 
-            # Get current position
+            # Posizione attuale
             current_state = robot_state_client.get_robot_state()
             current_transforms = current_state.kinematic_state.transforms_snapshot
             current_tform_body = get_se2_a_tform_b(current_transforms, frame_name, BODY_FRAME_NAME)
@@ -353,13 +342,11 @@ def relative_move(dx, dy, dyaw, frame_name, robot_command_client, robot_state_cl
             time.sleep(poll_period_s)
             continue
 
-        # Calculate distance traveled
         distance_traveled = np.sqrt((current_tform_body.x - initial_x) ** 2 +
                                     (current_tform_body.y - initial_y) ** 2)
 
-        # Arresto richiesto dal chiamante (es. il verificatore ha appena marcato bloccato
-        # l'arco che stiamo percorrendo). Una callback che solleva un'eccezione non deve
-        # poter lasciare il robot in movimento: in quel caso si prosegue come prima.
+        # Arresto richiesto dal chiamante (il fronte sicuro ha visto qualcosa sul tratto).
+        # Una callback che solleva un'eccezione viene ignorata: il movimento prosegue.
         if should_abort is not None:
             try:
                 abort_now = bool(should_abort())
@@ -380,9 +367,8 @@ def relative_move(dx, dy, dyaw, frame_name, robot_command_client, robot_state_cl
         traj_feedback = mobility_feedback.se2_trajectory_feedback
         if (traj_feedback.status == traj_feedback.STATUS_AT_GOAL and
                 traj_feedback.body_movement_status == traj_feedback.BODY_STATUS_SETTLED):
-            # 2026-10-13: messaggio esplicito. Prima "Arrived at the goal (traveled 0.03m)"
-            # anche dopo una ROTAZIONE sul posto, dove quei 3 cm sono solo lo spostamento del
-            # centro del corpo mentre gira: sembrava un avanzamento minuscolo.
+            # Dopo una rotazione sul posto i pochi cm percorsi sono il centro del corpo che si
+            # sposta girando, non un avanzamento: il messaggio lo dice.
             if abs(float(dx)) < 1e-6 and abs(float(dy)) < 1e-6:
                 turned = float(np.degrees(np.arctan2(
                     np.sin(current_tform_body.angle - initial_tform_body.angle),
@@ -407,7 +393,7 @@ def move_to_world_point_without_turning(target_x, target_y, frame_name,
     """
     Raggiunge un punto del mondo MANTENENDO l'orientamento attuale: Spot ci arriva
     camminando all'indietro o di lato, come serve.
-    Velocita' di default: RETREAT_MAX_LINEAR_VEL_MPS, come move_backward().
+    Velocita' di default: RETREAT_MAX_LINEAR_VEL_MPS.
 
     Serve alla ritirata sui propri passi: i punti da cui si e' passati stanno dietro al
     robot, e in uno spazio stretto non c'e' modo di girarsi per affrontarli di muso.

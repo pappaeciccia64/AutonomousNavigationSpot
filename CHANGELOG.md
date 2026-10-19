@@ -34,6 +34,9 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 - **Pendenza "col corpo"** (`ARC_BODY_EXTENSION_M`): per costo e andatura l'arco si allunga di mezzo corpo a ogni estremo, perché il robot fermo su un nodo ha le zampe 0.55 m avanti e indietro. Missione 13-10 12:40, ore 12:47:20: un gradino di ~17 cm stava 20 cm oltre la fine dell'arco, l'arco misurava 0.17 (MODERATE) e il robot è rimasto fermo 9 s col muso a 27 gradi, zampe anteriori sul gradino. `_body_slope` legge solo i pezzi aggiunti: ricampionare l'arco allungato da capo raddoppiava la costruzione del grafo.
 - **90° percentile calcolato a mano**, identico a `np.percentile` bit per bit. `np.percentile` costava ~130 µs di solo contorno per chiamata: 121 mila chiamate, 15.7 s su 35 della costruzione del grafo.
 
+### Movimenti (`movements.py`)
+- Messaggio esplicito dopo una rotazione sul posto. Prima diceva "Arrived at the goal (traveled 0.03m)", e i 3 cm (il centro del corpo che si sposta girando) sembravano un avanzamento minuscolo.
+
 ---
 
 ## 2026-10-12
@@ -74,6 +77,9 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 - **Soglia HARD dell'andatura da 0.35 a 0.25**, sui numeri della prima missione in esterno. Con 0.35 HARD non è mai scattato (48 passi su 48 fra PLAIN e MODERATE): il gradiente massimo sul prato è stato 0.330. Sui 48 archi percorsi: p25 0.132, mediana 0.171, p75 0.203, p90 0.248. Con 0.25: PLAIN 29%, MODERATE 60%, HARD 10%, cioè HARD sul decimo più ripido, come voleva l'utente.
 - `occupied_many` e `certainly_no_slope_data`: le versioni in blocco di `is_occupied` e del controllo "nessun dato" della mappa globale, con risultati identici punto per punto (il 98% delle chiamate in costruzione finiva in "nessun dato").
 
+### GraphNav (`navGraphUtils.py`)
+- **Niente scaricamenti del grafo solo per un nome.** Il numero del waypoint successivo si ricava dai waypoint creati da noi, e nome e id dell'ultimo arrivano dalla risposta del robot (`last_created_waypoint`). Missione 12-10 14:47: 41 scaricamenti completi su 60 servivano solo a questo, con un costo che cresce con la mappa (70 waypoint a fine missione).
+
 ---
 
 ## 2026-10-08
@@ -88,6 +94,9 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 - **Reticolo regolare al posto del campionamento casuale** (`global_sampler.GlobalSampler`, ora tolto). Prima: 5 punti/m², ~3125 nodi su 25×25 m, nessun seed, grafo diverso a ogni missione, ~85 600 archi da valutare (~10 s per costruzione, 3–4 costruzioni per missione). Il reticolo a passo 0.714 m con due anelli ne ha ~4700, 18 volte meno, ed è riproducibile bit per bit.
 - **Rettangolare, non triangolare.** Il triangolare non può avere i centri delle celle come nodi (servirebbe che 2n/√3 fosse un intero pari). Le alternative erano spostare l'obiettivo sul nodo più vicino (fino a 50 cm) o inserire i centri e togliere i nodi vicini, che lasciava il reticolo irregolare attorno a 20 celle su 25, con archi da 0.57 a 1.44 m.
 - **Passo da 0.5 a 0.25 m, archi dal secondo anello (≥ 0.5 m).** Missione 08-10 15:40: il corridoio di partenza aveva ~45 cm di linee centrali ammesse e le due file del reticolo a passo 0.5 cadevano entrambe fuori, quindi nel grafo il corridoio non esisteva. A passo 0.25 ci sono due file dentro. Gli anelli sono stati ridefiniti come cerchio di raggio k·s·√2, per coerenza con il refresh del PRM.
+
+### GraphNav (`navGraphUtils.py`)
+- **Chiusure d'anello durante la missione** (`close_loops_checked`), con fiducial e odometria e il controllo di collisione di Spot sugli archi nuovi. Prima si chiudevano solo a fine missione e solo con i fiducial: il grafo restava una catena e ogni ritorno ripercorreva tutta la strada fatta.
 
 ### Mappe e terreno (`spotGrid.py`)
 - **Tolleranza sulla rotazione da 0.05 a 0.15 m.** Richiesta dell'utente: "il padding dall'ostacolo non deve bloccarlo nella rotazione, a volte lo spazio ci sarebbe, con GraphNav riesce". Missione 08-10 10:47, 46 scansioni, direzioni del giro insieme libere e raggiungibili girandosi:
@@ -148,6 +157,12 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 - (sera) **Uscita rapida nel profilo di pendenza** per gli archi che non toccano la griglia: prima ognuno pagava il campionamento intero, ~30 s per costruzione.
 - (sera) **Download dei layer più robusto**: niente risultato se manca un layer (prima `KeyError` e missione terminata per un errore di rete) o se i layer non sono allineati fra loro.
 - (sera, revisione) La differenza della pendenza è centrata: la base reale è ~0.48 m, non 0.25. Un gradino di 25 cm dà ~0.52 di pendenza e ~0.125 di rugosità, entrambe sotto soglia. Non cambiato.
+
+### Movimenti (`movements.py`)
+- **Limite di velocità su ogni comando.** Prima nessuno lo impostava e Spot camminava fino a ~1.6 m/s: nella missione del 05-10 la media sui tratti era ~0.3 m/s, ma con picchi a metà tratto troppo alti per l'esterno. Il limite è sempre simmetrico (`min_vel` = −`max_vel`): con il solo massimo il robot non può più andare indietro né a sinistra, e la ritirata smetterebbe di funzionare senza errori.
+- **Arresto a metà movimento** (`should_abort`) e feedback ogni 0.2 s invece di 1.0 (a 0.5 m/s, mezzo metro fra due controlli). Prima il comando era bloccante fino a fine traiettoria: nella missione del 05-10 13:12 il verificatore aveva visto un ostacolo a movimento in corso, ma nessuno poteva fermare il robot.
+- Rilevazione delle cadute e raddrizzamento automatico (`check_fall`, `recover_from_fall`).
+- (sera, dopo la revisione) **Tempo massimo per movimento.** Il comando durava 6000 s: se Spot non riusciva ad arrivare, restava a provare fino a 100 minuti. (sera) **Errori di rete**: prima uscivano come eccezione e chiudevano la missione senza fermare il robot, che finiva la traiettoria da solo; ora si riprova 3 volte, poi si ferma il robot.
 
 ---
 
