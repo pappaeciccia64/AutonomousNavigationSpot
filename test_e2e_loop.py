@@ -4,7 +4,7 @@ easy_walk.py) contro un robot finto in un mondo sintetico.
 
 Cosa e' finto: la posizione del robot, la griglia locale (finestra 128x128 da 3 cm che
 segue il robot, con obstacle_distance calcolata dal mondo e celle fantasma negli angoli
-come il 2026-10-05), il movimento (il robot si sposta lungo la retta, interrogando
+come nei dati veri), il movimento (il robot si sposta lungo la retta, interrogando
 should_abort a ogni tratto), il thread del fronte (calcola il fronte vero sulla posizione
 del momento). Tutto il resto e' il codice vero: correzione terreno, mappe globali, PRM,
 nodi di sosta, fronte, decisioni, blocchi, ripianificazioni, ritirata, salvataggio dati.
@@ -72,10 +72,9 @@ class World:
             occ |= (WX >= x0) & (WX <= x1) & (WY >= y0) & (WY <= y1)
         self.occ_now = occ
         self.od = distance_transform_edt(~occ) * CS if occ.any() else np.full((W, W), 9.0)
-        # Distanza CON SEGNO dentro gli ostacoli, come il layer vero di Spot (nei dati del
-        # 2026-10-08 16:35 il 22% delle celle e' negativo, fino a oltre -0.5 m). Prima qui
-        # c'era -0.01 fisso: il controllo di rotazione vedeva "1 cm dentro il muro" anche
-        # quando il corpo ci entrava per 15, e approvava rotazioni impossibili.
+        # Distanza CON SEGNO dentro gli ostacoli, come il layer vero di Spot (missione 08-10
+        # 16:35: il 22% delle celle negativo, fino a oltre -0.5 m). Con un valore fisso il
+        # controllo di rotazione non vede quanto il corpo entra nel muro.
         if occ.any():
             self.od[occ] = -(distance_transform_edt(occ) * CS)[occ]
 
@@ -205,9 +204,8 @@ def _yaw_of(q):
 
 def fake_navigate_to(tx, ty, rx, ry, rsc, cc, vtb, should_abort=None, keep_heading=False, **kw):
     """
-    FEDELE al navigate_to vero (2026-10-08). Prima questo finto metteva il robot dritto
-    verso il bersaglio ignorando `vtb`, quindi non poteva accorgersi di un orientamento
-    passato in ritardo. Il vero navigate_to invece:
+    FEDELE al navigate_to vero, per accorgersi di un orientamento passato in ritardo. Il vero
+    navigate_to:
       1. calcola dyaw = direzione del bersaglio - orientamento letto da `vtb`;
       2. relative_move(0, 0, dyaw): ruota di dyaw RISPETTO ALLA POSA VERA del robot;
       3. relative_move(dist, 0, 0): cammina dritto per `dist`, lungo il muso VERO, con
@@ -336,7 +334,7 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
     FALL.update(armed=fall is not None, fallen=False, recoverable=(fall == 'recuperabile'), where=None)
     easy_walk.MISSION_STATS['falls'] = easy_walk.MISSION_STATS['self_rights'] = 0
     # Il reticolo vero della missione: passo 0.25 m, archi 0.5-1.25 m, sulle 2 x 2 celle da
-    # 5 m di FakeEnv (dal 2026-10-14 tutti gli scenari: il campionamento a caso non esiste piu').
+    # 5 m di FakeEnv, per tutti gli scenari.
     import mission_graph
     mg = mission_graph.build_mission_graph(
         rows=2, cols=2, cell_size_m=5.0, spacing_m=0.25, rings=None,
@@ -485,9 +483,8 @@ if __name__ == '__main__':
 
     # Ricostruzione della situazione della missione 08-10 16:35: corridoio stretto e
     # obiettivo DIETRO il robot, cioe' rotazione di ~180 gradi dove non si puo' girare. La'
-    # il ciclo fece 8 giri in 3.2 s senza muoversi. Revisione 2026-10-08 sera: prima il
-    # corridoio era 0.90 m (non 0.80 come diceva il titolo) e il robot partiva GIA' dentro
-    # la cella obiettivo, quindi lo scenario passava senza provare niente.
+    # il ciclo fece 8 giri in 3.2 s senza muoversi. Il robot deve partire FUORI dalla cella
+    # obiettivo, altrimenti lo scenario passa senza provare niente.
     r = run("S11. corridoio da 0.80 m, obiettivo dietro: rotazione impossibile (caso 16:35)",
             [(0.0, 12.0, 0.0, 3.10), (0.0, 12.0, 3.90, 12.0)], (7.0, 3.5, 0.0), (0, 0))
     check(r['err'] is None, "nessuna eccezione")
@@ -503,7 +500,7 @@ if __name__ == '__main__':
           f"'nessuna alternativa nel grafo' x{r['log'].count('Nessuna alternativa nel grafo dal punto')}, "
           f"[TRAPPOLA] x{r['tags']['[TRAPPOLA]']}, [CONO] x{r['tags']['[CONO]']}")
 
-    # S12 (2026-10-08 sera, revisione): l'avanzamento multinodo deve passare a ogni gamba
+    # S12: l'avanzamento multinodo deve passare a ogni gamba
     # l'orientamento VERO del robot. Con archi corti il multinodo scatta, e con un percorso
     # che curva un orientamento vecchio di una gamba manda il robot fuori dal percorso.
     easy_walk.PRM_MAX_EDGE_M = 0.70711

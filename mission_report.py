@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Rapporto di una missione, da leggere subito dopo una prova (2026-10-14).
+Rapporto di una missione, da leggere subito dopo una prova.
 
 Raccoglie in una pagina di testo i numeri che servono a capire com'e' andata: celle, tempi,
 movimento e andature, fermate del fronte e il loro perche', blocchi e ripianificazioni,

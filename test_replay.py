@@ -1,5 +1,5 @@
 """
-Prova di RIGIOCO sulle scansioni vere salvate in missione (2026-10-14).
+Prova di RIGIOCO sulle scansioni vere salvate in missione.
 
 Rigioca le scansioni di una o piu' missioni (MissionMap/<missione>/scans/*.npz, in ordine di
 tempo) attraverso il codice vero: mappe globali, reticolo della missione, aggiornamento del

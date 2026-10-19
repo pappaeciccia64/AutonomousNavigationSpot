@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Visualizzatore dei dati di missione (2026-10-06). Gira su qualunque computer: servono solo
+Visualizzatore dei dati di missione. Gira su qualunque computer: servono solo
 numpy e matplotlib, NON l'SDK di Spot.
 
 Durante la missione il robot non disegna figure (vedi visualize_grid_with_candidates in
@@ -185,7 +185,7 @@ def draw_vis_bundle(ax, d):
 
 
 # =============================================================================
-# VISTA GLOBALE (2026-10-07): l'equivalente della vecchia figura "Global Map View".
+# VISTA GLOBALE.
 # Tutto e' ricostruito "com'era in quel momento": la mappa e' il mosaico delle scansioni
 # fatte FINO alla scansione mostrata, il grafo e' l'ultima vista PRM salvata prima.
 # =============================================================================
@@ -218,7 +218,7 @@ class MissionContext:
 
     @staticmethod
     def _load_trajectory(folder):
-        """trajectory.csv in MissionLogs/<stessa missione>, se c'e' (missioni dal 2026-10-07)."""
+        """trajectory.csv in MissionLogs/<stessa missione>, se c'e' (le missioni piu' vecchie non l'hanno)."""
         name = os.path.basename(os.path.normpath(folder))
         for cand in (os.path.join(os.path.dirname(os.path.dirname(os.path.normpath(folder))), "MissionLogs", name,
                                   "trajectory.csv"),
@@ -281,20 +281,16 @@ def _arr(d, key, shape_tail=None):
     return np.empty((0,) + tuple(shape_tail or ()))
 
 
-# 2026-10-12: la mappa di colori si prende UNA volta. plt.get_cmap(...)(v) ricostruiva la
-# tavola a ogni chiamata: con ~3900 archi disegnati erano 15 000 ricostruzioni e ~2 s per
-# ridisegno, cioe' quasi tutta la lentezza del visualizzatore.
+# La mappa di colori si prende UNA volta: plt.get_cmap(...)(v) ricostruisce la tavola a ogni
+# chiamata, e con migliaia di archi era quasi tutto il tempo di un ridisegno.
 _SLOPE_CMAP = plt.get_cmap('RdYlGn_r')
 _SLOPE_LUT_CACHE = {}   # ripiego quando il bundle non accetta attributi
-# Oltre questo numero di archi il pannello globale ne disegna uno ogni N: a quella densita'
-# sono comunque un velo e il costo di disegno diventa il collo di bottiglia (2026-10-12).
-GLOBAL_PRM_MAX_EDGES = 20000
 
 
 def _slope_colors_many(keys, long_s, lat_s):
     """
-    2026-10-12. _slope_color su molti archi in una volta: stessi colori, calcolati con
-    operazioni su array invece che uno per uno.
+    _slope_color su molti archi in una volta: stessi colori, calcolati con operazioni su
+    array invece che uno per uno.
     """
     long_s = np.asarray(long_s, dtype=np.float64)
     lat_s = np.asarray(lat_s, dtype=np.float64)
@@ -307,19 +303,17 @@ def _slope_colors_many(keys, long_s, lat_s):
     return rgba
 
 
-# --- ARCHI COME IMMAGINE (2026-10-13) ----------------------------------------------------
-# Misurato sulla missione del 12-10 17:32: con ~10 000 archi nel pannello locale e ~16 000 in
-# quello globale, le due LineCollection costavano ~240 ms su ~400 di ogni ridisegno -- e un
-# ridisegno completo c'e' anche a ogni trascinamento o zoom col mouse, per questo "scorreva
-# male" con le mappe grandi. Ora gli archi si disegnano UNA volta in un'immagine RGBA (stessi
-# colori; dove si sovrappongono la trasparenza si somma come prima) e la si mostra con imshow,
-# che costa come la mappa. L'immagine si tiene in cache per vista PRM ed estensione.
+# --- ARCHI COME IMMAGINE ------------------------------------------------------------------
+# Gli archi si disegnano UNA volta in un'immagine RGBA (dove si sovrappongono la trasparenza
+# si somma) e la si mostra con imshow, che costa come la mappa: con decine di migliaia di
+# archi, disegnarli come linee rendeva lento ogni ridisegno, compresi trascinamento e zoom.
+# L'immagine si tiene in cache per vista PRM ed estensione.
 _EDGE_RASTER_CACHE = {}
 _EDGE_RASTER_CACHE_MAX = 256
 # Lato massimo dell'immagine degli archi, in pixel: oltre, la risoluzione si allarga.
 EDGE_RASTER_MAX_PX = 1600
-# Opacita' di un arco in un pixel rispetto a quella della vecchia linea da 0.5 punti: tarata a
-# occhio confrontando le due figure sulla missione del 12-10 17:32.
+# Opacita' di un arco in un pixel, tarata a occhio perche' l'immagine somigli a linee da
+# 0.5 punti.
 EDGE_RASTER_COVERAGE = 0.45
 EDGE_RASTER_COVERAGE_GLOBAL = 0.22   # nel globale gli archi per pixel sono molti di piu'
 
@@ -454,10 +448,8 @@ def _overlay_prm_local(ax, ctx, i):
         return
     vd = vis[1]
     x0, x1, y0, y1 = _extent(d)
-    # 2026-10-12: filtro VETTORIALE. Prima un ciclo Python su tutti gli archi del PRM --
-    # dalla missione in esterno sono ~80 000, ricontrollati a ogni ridisegno, ed e' il
-    # motivo per cui il visualizzatore era lento. Qui si tengono solo gli archi che toccano
-    # la finestra, con due operazioni su array. Il disegno e' identico.
+    # Si tengono solo gli archi che toccano la finestra, con operazioni su array: gli archi
+    # del PRM sono decine di migliaia e si ricontrollano a ogni ridisegno.
     ids = np.asarray(_arr(vd, 'prm_node_ids', ()), dtype=np.int64).ravel()
     nxy = np.asarray(_arr(vd, 'prm_node_xy', (2,)), dtype=np.float64).reshape(-1, 2)
     edges = np.asarray(_arr(vd, 'prm_edges', (2,)), dtype=np.int64).reshape(-1, 2)
@@ -476,7 +468,7 @@ def _overlay_prm_local(ax, ctx, i):
     else:
         e = edges
     if len(e):
-        # 2026-10-13: immagine invece di LineCollection (vedi ARCHI COME IMMAGINE).
+        # Come immagine, vedi ARCHI COME IMMAGINE.
         def build():
             segs = np.stack([pos[e[:, 0]], pos[e[:, 1]]], axis=1)
             cols = _edge_colors(vd, e, (0.2, 0.2, 0.2, 0.35), alpha=0.35)
@@ -493,8 +485,8 @@ def _overlay_prm_local(ax, ctx, i):
 
 def _global_edges_image(ctx, name, vd):
     """
-    2026-10-13. Immagine degli archi del pannello globale per una vista PRM, in cache (vedi
-    ARCHI COME IMMAGINE). Tutti gli archi, senza assottigliamento. (img, extent) o (None, None).
+    Immagine degli archi del pannello globale per una vista PRM, in cache (vedi ARCHI COME
+    IMMAGINE). Tutti gli archi, senza assottigliamento. (img, extent) o (None, None).
     """
     gx0, gx1 = ctx.x0, ctx.x0 + ctx.nx * ctx.res
     gy0, gy1 = ctx.y0, ctx.y0 + ctx.ny * ctx.res
@@ -553,9 +545,8 @@ def draw_global(ax, ctx, i, final=False):
         print(f"[viewer] celle non disegnate: {e}")
     if vd is not None:
         xy = {int(k): tuple(p) for k, p in zip(_arr(vd, 'prm_node_ids', ()), _arr(vd, 'prm_node_xy', (2,)))}
-        # Questo pannello disegna TUTTI gli archi del grafo (90 216 nella missione del 12-10
-        # 14:47). Dal 2026-10-13 come immagine in cache, preparata in sottofondo all'apertura
-        # (vedi ARCHI COME IMMAGINE); GLOBAL_PRM_MAX_EDGES non serve piu'.
+        # Questo pannello disegna TUTTI gli archi del grafo (fino a ~90 000), come immagine
+        # in cache preparata in sottofondo all'apertura (vedi ARCHI COME IMMAGINE).
         img, gext = _global_edges_image(ctx, vis[0], vd)
         if img is not None:
             ax.imshow(img, origin='lower', interpolation='nearest', zorder=2, extent=gext)
@@ -724,7 +715,7 @@ def main():
     for k, layer in enumerate(LAYERS):
         print(f"  {k + 1}: {layer[0]}")
     redraw()
-    # 2026-10-13: le immagini degli archi del pannello globale si preparano in sottofondo.
+    # Le immagini degli archi del pannello globale si preparano in sottofondo.
     threading.Thread(target=_prebuild_global_images, args=(ctx,), daemon=True).start()
     plt.show()
     return 0
