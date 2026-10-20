@@ -53,23 +53,23 @@ MISSION_STATS = {
     'scan_bundles': 0,
     'frontier_blocks': 0,
     'frontier_aborts': 0,
-    'rotation_refusals': 0,   # 2026-10-07: rotazioni rifiutate dal controllo sul settore
-    'straight_retreats': 0,   # 2026-10-07: arretramenti dritti dopo un rifiuto di rotazione
-    'goal_repicks': 0,        # 2026-10-07: punti obiettivo riscelti dentro il ciclo
-    'cone_moves': 0,          # 2026-10-07: avanzamenti dentro il cono di rotazione possibile
-    'retreats_suppressed': 0,  # 2026-10-07: arretramenti evitati perche' inutili
-    'early_replans': 0,       # 2026-10-07: ripianificazioni alla prima cella bloccante
-    'traps_detected': 0,      # 2026-10-07: trappole riconosciute dal ventaglio a 360 gradi
-    'arrival_refusals': 0,    # 2026-10-07: passi rifiutati perche' la posa d'arrivo non ha uscite
-    'graphnav_backtracks': 0,     # 2026-10-07: ritorni di un waypoint riusciti con GraphNav
-    'graphnav_backtrack_fail': 0, # 2026-10-07: ritorni con GraphNav falliti (ripiego a zampe)
-    'nodes_pruned': 0,            # 2026-10-07: nodi PRM scartati perche' dentro un ostacolo
-    'idle_loops': 0,              # 2026-10-08: giri di ciclo a vuoto (guardia anti-stallo)
-    'multinode_cut': 0,           # 2026-10-08: sequenze multinodo fermate a un nodo intermedio
-    'multinode_moves': 0,         # 2026-10-08: movimenti che hanno attraversato piu' nodi
-    'multinode_nodes': 0,         # 2026-10-08: nodi attraversati da quei movimenti
-    'prm_refresh': 0,             # 2026-10-08: refresh degli archi effettuati
-    'prm_refresh_skipped': 0,     # 2026-10-08: refresh saltati (nessun evento, robot fermo)
+    'rotation_refusals': 0,   # rotazioni rifiutate dal controllo sul settore
+    'straight_retreats': 0,   # arretramenti dritti dopo un rifiuto di rotazione
+    'goal_repicks': 0,        # punti obiettivo riscelti dentro il ciclo
+    'cone_moves': 0,          # avanzamenti dentro il cono di rotazione possibile
+    'retreats_suppressed': 0,  # arretramenti evitati perche' inutili
+    'early_replans': 0,       # ripianificazioni alla prima cella bloccante
+    'traps_detected': 0,      # trappole riconosciute dal ventaglio a 360 gradi
+    'arrival_refusals': 0,    # passi rifiutati perche' la posa d'arrivo non ha uscite
+    'graphnav_backtracks': 0,     # ritorni di un waypoint riusciti con GraphNav
+    'graphnav_backtrack_fail': 0, # ritorni con GraphNav falliti (ripiego a zampe)
+    'nodes_pruned': 0,            # nodi PRM scartati perche' dentro un ostacolo
+    'idle_loops': 0,              # giri di ciclo a vuoto (guardia anti-stallo)
+    'multinode_cut': 0,           # sequenze multinodo fermate a un nodo intermedio
+    'multinode_moves': 0,         # movimenti che hanno attraversato piu' nodi
+    'multinode_nodes': 0,         # nodi attraversati da quei movimenti
+    'prm_refresh': 0,             # refresh degli archi effettuati
+    'prm_refresh_skipped': 0,     # refresh saltati (nessun evento, robot fermo)
     'rotation_maneuvers': 0,
     'shortcuts': 0,
     'falls': 0,
@@ -116,18 +116,14 @@ def _timing_add(phase, seconds):
 
 
 # ==================================================================
-# GRAFO DI MISSIONE REGOLARE (2026-10-08) -- vedi mission_graph.py.
+# GRAFO DI MISSIONE REGOLARE -- vedi mission_graph.py.
 #
-# I nodi non vengono piu' campionati a caso (sampler: np.random.uniform, nessun
-# seed, ~3125 nodi su 25x25 m, grafo diverso a ogni missione e ~85600 archi da valutare a
-# ogni ricostruzione) ma da un reticolo rettangolare con passo cell_size/n. Conseguenze:
-#   - grafo DETERMINISTICO: stessi parametri, stesso grafo, quindi mission_replay puo'
+# I nodi stanno su un reticolo rettangolare con passo cell_size/n. Conseguenze:
+#   - grafo DETERMINISTICO: stessi parametri, stesso grafo, quindi test_replay puo'
 #     riprodurre le scelte del pianificatore e due missioni sono confrontabili;
 #   - il centro di ogni cella e' un nodo del reticolo per costruzione, quindi l'obiettivo
 #     di cella e' il centro geometrico ESATTO (non un punto vicino);
-#   - il punto di accensione e' il centro della cella di partenza ed e' anch'esso un nodo:
-#     non serve piu' aggiungere il "boot node" a mano;
-#   - archi di due sole lunghezze e 4-8 volte meno archi da valutare.
+#   - il punto di accensione e' il centro della cella di partenza ed e' anch'esso un nodo.
 #
 #   MISSION_LATTICE_SPACING_M  passo fra i nodi, da mission_graph.MISSION_SPACING_M (None =
 #                              0.25 m). Puo' stare sotto PRM_MIN_EDGE_M: i vicini piu'
@@ -139,30 +135,27 @@ def _timing_add(phase, seconds):
 #                              e k=2: archi da 0.50, 0.56 e 0.71 m in 16 direzioni. None =
 #                              tutti quelli entro max_edge_length. Da riga di comando: --rings.
 #   MISSION_GRID_ROWS/COLS, MISSION_CELL_SIZE_M  dimensione della missione, da
-#                              mission_graph.MISSION_* (None = 2 x 4 celle da 5 m). Si cambiano con
+#                              mission_graph.MISSION_*. Si cambiano con
 #                              --rows --cols --cell oppure SPOT_MISSION_GRID (vedi easy_walk).
 #
-# PRM_MAX_EDGE_M segue il reticolo (mg.reach_m) e NON resta a 2.0: refresh_local_edge_weights
-# ricostruisce da se' le coppie candidate dentro la finestra usando max_edge_length del PRM,
-# quindi con 2.0 il limite sugli anelli varrebbe solo fuori dalla finestra e il grafo si
-# riempirebbe di archi lunghi solo attorno al robot. I tratti lunghi li produce comunque
+# Regola degli archi (scelta dell'utente): nodi a 0.25 m, ma un arco esiste SOLO fra nodi
+# distanti fra 0.5 e 1.25 m -- cioe' `rings=None` (nessun limite per gusci) con
+# PRM_MAX_EDGE_M = 1.25. Un arco salta fino a cinque passi di reticolo: con archi piu' corti
+# l'ingresso in una cella diventa una catena di molti waypoint, e ogni waypoint e' una
+# rotazione, proprio nei corridoi stretti in cui ruotare non si puo'. Il prezzo e' una
+# costruzione del grafo ~5 volte piu' lenta (vedi CHANGELOG), in parte restituito dal
+# refresh a eventi.
+#
+# PRM_MAX_EDGE_M e' anche il max_edge_length del PRM (mg.reach_m):
+# refresh_local_edge_weights ricostruisce da se' le coppie candidate dentro la finestra
+# usando quel valore, quindi un tetto diverso varrebbe solo fuori dalla finestra e il grafo
+# si riempirebbe di archi lunghi solo attorno al robot. I tratti lunghi li produce comunque
 # shortcut_index, che li conferma sui dati DAL VIVO invece di giudicarli da lontano.
-# ==================================================================
-# 2026-10-08, dopo la missione delle 16:35. Regola degli archi scelta dall'utente: nodi a
-# 0.25 m, ma un arco esiste SOLO fra nodi distanti fra 0.5 e 1.25 m -- cioe' `rings=None`
-# (nessun limite per gusci) con PRM_MAX_EDGE_M = 1.25. Motivo: nella missione delle 16:35 il
-# tetto era 0.707 m, quindi un ingresso cella diventava una catena di 16-19 waypoint e ogni
-# waypoint una rotazione, nel corridoio da 1.5 m in cui ruotare era proprio la cosa che non
-# si poteva fare (8 giri di ciclo in 3.2 s senza muoversi di un centimetro). Con 1.25 m un
-# arco salta cinque passi di reticolo.
-# COSTO MISURATO sulla mappa globale vera di quella missione, 3321 nodi:
-#   archi 0.5-0.707 (prima): 25 120 coppie, 18 853 ammessi, costruzione 0.92 s, refresh 0.12 s
-#   archi 0.5-1.25  (ora)  : 109 474 coppie, 79 229 ammessi, costruzione 4.72 s, refresh 0.43 s
-# Sulla missione delle 16:35 (4 costruzioni, 47 scansioni) sono ~39 s invece di ~9 s: il
-# prezzo e' noto e accettato, ed e' in parte restituito dal refresh a eventi qui sotto.
+#
 # Righe, colonne, lato cella e passo vengono da mission_graph.mission_settings(): si
 # scelgono la' (MISSION_ROWS, MISSION_COLS, MISSION_CELL_SIZE_M, MISSION_SPACING_M; None =
 # default). Da qui si costruiscono sia la mappa delle celle sia il grafo.
+# ==================================================================
 _MISSION = mission_graph.mission_settings()
 MISSION_GRID_ROWS = _MISSION[0]
 MISSION_GRID_COLS = _MISSION[1]
@@ -170,20 +163,18 @@ MISSION_CELL_SIZE_M = _MISSION[2]
 MISSION_LATTICE_SPACING_M = _MISSION[3]
 MISSION_LATTICE_RINGS = None    # nessun limite per gusci: decide PRM_MAX_EDGE_M
 PRM_MIN_EDGE_M = 0.5
-PRM_MAX_EDGE_M = 1.25           # tetto degli archi, e nel ripiego casuale
+PRM_MAX_EDGE_M = 1.25           # tetto degli archi (vedi sopra)
 PRM_CONNECTION_RADIUS_M = 3.0
 
-# --- Dove puo' passare il pianificatore (2026-10-08, missione 08-10 15:09) ---------------
+# --- Dove puo' passare il pianificatore -------------------------------------------------
 # Per entrare in una cella il percorso puo' usare SOLO le celle gia' visitate, la cella in
-# cui si trova il robot e la cella obiettivo. Se l'unica strada passa da una cella non
-# visitata non si prova: il tentativo fallisce, il lato viene segnato come provato
-# (finalize_or_defer_blocked_cell) e si passa a un'altra cella; quella bloccata verra'
-# ritentata piu' avanti, da un altro lato. Nella missione del 08-10 15:09, per entrare in
-# (0,2) il pianificatore passava dalla riga 1, mai esplorata.
+# cui si trova il robot e la cella obiettivo: le celle mai esplorate non si attraversano.
+# Se l'unica strada passa da una cella non visitata non si prova: il tentativo fallisce, il
+# lato viene segnato come provato (finalize_or_defer_blocked_cell) e si passa a un'altra
+# cella; quella bloccata verra' ritentata piu' avanti, da un altro lato.
 PLAN_ONLY_EXPLORED_CELLS = True
 # Tetto alla deviazione: un percorso piu' lungo di RATIO * linea d'aria + SLACK vale
-# "nessun percorso" (vedi PRM.set_detour_limit). Nella stessa missione, a 2.4 m
-# dall'obiettivo, il pianificatore proponeva ~15 m di giro. None = nessun tetto.
+# "nessun percorso" (vedi PRM.set_detour_limit). None = nessun tetto.
 PLAN_MAX_DETOUR_RATIO = 2.0
 PLAN_DETOUR_SLACK_M = 1.0
 # Copia del modulo: dentro attempt_enter_cell_from_position il nome prm_graph e' l'istanza.
@@ -258,9 +249,9 @@ def _robot_on_node(prm, node_id, x, y):
     return pos is not None and float(np.hypot(pos[0] - x, pos[1] - y)) <= ANCHOR_ON_NODE_M
 
 
-# 2026-10-13: all'inizio di ogni cella si rivalutano solo gli archi vicini alle zone con dati
-# nuovi (vedi mission_graph.MissionGraph.add_edges_to_prm, incremental). False = si rifanno
-# tutti, come prima.
+# True: all'inizio di ogni cella si rivalutano solo gli archi vicini alle zone con dati
+# nuovi (vedi mission_graph.MissionGraph.add_edges_to_prm, incremental). False = si
+# rivalutano tutti; il risultato e' lo stesso.
 INCREMENTAL_GRAPH_UPDATE = True
 
 
@@ -295,9 +286,9 @@ _MISSION_CTX = {
     'log_folder': None,
     'segment_log': None,
     'summary_done': False,
-    # Quota del suolo all'AVVIO DELLA MISSIONE nel frame VISION (2026-10-06). Spot misura le
+    # Quota del suolo all'AVVIO DELLA MISSIONE nel frame VISION. Spot misura le
     # quote rispetto a dove e' stato ACCESO: se lo si porta alla zona di missione facendo
-    # delle scale, tutte le quote risultano spostate (-3.2 m il 2026-10-05). x, y e direzione
+    # delle scale, tutte le quote risultano spostate (di metri). x, y e direzione
     # sono gia' riferiti all'avvio missione (env.set_origin con la posa di partenza); per la
     # quota si salva questo valore in tutti i dati e nelle mappe, e il viewer mostra le quote
     # rispetto ad esso. I CALCOLI non ne dipendono: usano solo differenze di quota e il
@@ -337,21 +328,20 @@ def _set_mission_z0(robot_state_client, z_body):
     return z0
 
 # ==================================================================
-# NAVIGAZIONE CON IL FRONTE SICURO (2026-10-06) -- vedi decide_next_move() e il ciclo
+# NAVIGAZIONE CON IL FRONTE SICURO -- vedi decide_next_move() e il ciclo
 # in attempt_enter_cell_from_position(). Le distanze del fronte stanno in spotGrid
 # (FRONTIER_*), qui solo la logica del ciclo.
 #   MIN_PARTIAL_STEP_M           -- passo minimo: sotto questa lunghezza non vale la pena
 #                                   muoversi (si pagherebbe una scansione per pochi cm).
 #   FRONTIER_BLOCK_CONFIRM_SCANS -- quante scansioni consecutive, a robot FERMO, senza poter
 #                                   avanzare nemmeno del passo minimo, prima di dichiarare
-#                                   un blocco. E' la conferma "da vicino" che mancava: il
-#                                   vecchio verificatore condannava al primo scorcio.
+#                                   un blocco: la conferma "da vicino", invece di
+#                                   condannare un arco al primo scorcio da lontano.
 #   FRONTIER_RESCAN_WAIT_S       -- pausa fra due scansioni di conferma.
 #   MAX_BLOCK_REPLANS            -- dopo un blocco si ripianifica dal punto in cui si e'; se
 #                                   succede piu' di queste volte nello stesso tentativo, ci
-#                                   si arrende (ritirata, cella rimandata). Dal 2026-10-07
-#                                   lo stesso contatore limita anche le riscelte del punto
-#                                   obiettivo, cosi' non se ne aggiunge uno nuovo.
+#                                   si arrende (ritirata, cella rimandata). Lo stesso
+#                                   valore limita anche le riscelte del punto obiettivo.
 #   FRONTIER_ABORT_CONFIRM       -- a movimento in corso, quanti fronti consecutivi (~0.2 s
 #                                   l'uno) devono dire "non arrivi dove stai andando" prima
 #                                   di fermare il robot. 2 evita di inchiodare per un singolo
@@ -367,57 +357,48 @@ MAX_BLOCK_REPLANS = 3
 FRONTIER_ABORT_CONFIRM = 2
 FRONTIER_ABORT_TOLERANCE_M = 0.05
 
-# 2026-10-07: legata allo scostamento che il fronte stesso impone, invece di 0.60 fisso.
-# allowed_advance() ferma il CENTRO del robot a FRONTIER_BODY_HALF_LENGTH_M +
-# FRONTIER_MARGIN_M = 0.65 m prima del primo punto non libero; con la tolleranza a 0.60
-# restava una banda morta di 5 cm in cui il robot non poteva ne' avanzare ne' dichiarare di
-# essere arrivato. Misurato sulla missione del 2026-10-07 (iterazione 1, cella (0,1)): il
-# robot si e' fermato con path_len 0.63-0.64 m, cioe' 3 cm fuori tolleranza, ha aspettato
-# tre scansioni e ha dichiarato un blocco. Le due costanti devono essere la stessa cosa.
+# Legata allo scostamento che il fronte stesso impone: allowed_advance() ferma il CENTRO del
+# robot a FRONTIER_BODY_HALF_LENGTH_M + FRONTIER_MARGIN_M = 0.65 m prima del primo punto non
+# libero. Una tolleranza piu' piccola lascerebbe una banda morta in cui il robot non puo' ne'
+# avanzare ne' dichiarare di essere arrivato, e finirebbe per dichiarare un blocco. Le due
+# costanti devono essere la stessa cosa.
 GOAL_REACHED_TOLERANCE_M = spotGrid.FRONTIER_BODY_HALF_LENGTH_M + spotGrid.FRONTIER_MARGIN_M
 MAX_LOOP_ITERATIONS = 150
 
-# --- GUARDIE ANTI-STALLO (2026-10-08, dalla missione delle 16:35) ---------------------
-# Nell'iterazione 2 di quella missione il ciclo ha fatto OTTO giri in 3.2 secondi con il
-# robot immobile: stessa posizione, stessa imbardata, stesso nodo. Rigiocando le scansioni
-# con rotation_plan: la rotazione verso il prossimo nodo chiedeva quasi 180 gradi (il
-# percorso tornava indietro, perche' l'obiettivo stava dietro un muro), il settore spazzato
-# la rifiutava (margine -0.17/-0.19 m), il cono non trovava direzioni che avvicinassero, e
-# le direzioni utilizzabili erano 3 su 24 -- non zero, quindi NON "trappola". Il codice
-# scartava il tratto, ripianificava e faceva `continue`: senza muoversi. Al giro dopo il
-# primo waypoint puntava da un'altra parte e la rotazione veniva rifiutata di nuovo.
+# --- GUARDIE ANTI-STALLO ------------------------------------------------------------
+# Il ciclo puo' girare a vuoto con il robot immobile: la rotazione verso il prossimo nodo
+# viene rifiutata, il cono non trova direzioni che avvicinino, ma le direzioni utilizzabili
+# non sono zero (quindi non e' "trappola"); si scarta il tratto, si ripianifica, e al giro
+# dopo il primo waypoint punta da un'altra parte e la rotazione viene rifiutata di nuovo.
 #   MAX_ROTATION_DISCARDS -- scarti di tratto per rifiuto di rotazione ammessi in un
-#       tentativo di cella. Il limite che c'era, MAX_ROTATION_FAILS_SAME_EDGE, e' indicizzato
-#       sulla COPPIA DI NODI: ma la coppia cambia a ogni ripianificazione, quindi il
-#       contatore ripartiva da 1 all'infinito e non e' mai scattato.
+#       tentativo di cella. Contati per TENTATIVO e non per coppia di nodi: la coppia cambia
+#       a ogni ripianificazione, e un contatore per coppia non scatterebbe mai (e' il
+#       limite di MAX_ROTATION_FAILS_SAME_EDGE).
 #   MAX_IDLE_LOOPS -- giri di ciclo consecutivi senza che il robot si sia spostato di
 #       almeno IDLE_MOVE_M. E' la rete generica: qualunque sia il ramo che gira a vuoto,
 #       dopo tanti giri fermi si rinuncia alla cella in modo ordinato invece di consumare
 #       batteria. Deve stare SOPRA la sequenza legittima piu' lunga a robot fermo,
 #       altrimenti taglia via proprio le reti di ripiego (ritorno con GraphNav) che quella
-#       sequenza deve raggiungere. Revisione 2026-10-08 sera, calcolata sui limiti del
-#       ciclo invece che stimata (la prima versione diceva 12 "sopra ~8", ed era sotto):
+#       sequenza deve raggiungere. Calcolata sui limiti del ciclo:
 #         [SUBITO]                MAX_EARLY_REPLANS              4
 #         obiettivo riscelto      MAX_BLOCK_REPLANS              3
 #         conferme di blocco      FRONTIER_BLOCK_CONFIRM_SCANS x (MAX_BLOCK_REPLANS+1) = 3 x 4 = 12
 #         rifiuti di rotazione    MAX_ROTATION_DISCARDS          4
 #         rifiuti d'arrivo        MAX_ARRIVAL_REFUSALS           3
 #                                                        totale 26  -> 30
-#       A ~0.7 s per giro fermo sono ~20 s. Il caso del 16:35 (8 giri) lo prende comunque
-#       MAX_ROTATION_DISCARDS al quinto rifiuto; questa e' la rete per tutto il resto.
+#       A ~0.7 s per giro fermo sono ~20 s. Il giro a vuoto sulla rotazione lo prende
+#       prima MAX_ROTATION_DISCARDS; questa e' la rete per tutto il resto.
 MAX_ROTATION_DISCARDS = 4
 MAX_IDLE_LOOPS = 30
 IDLE_MOVE_M = 0.05
 
 # ==================================================================
-# ROTAZIONE E ARRETRAMENTO (2026-10-07). Sostituiscono la marcia di traverso.
+# ROTAZIONE E ARRETRAMENTO.
 #
 # Decisione dell'utente: il robot punta SEMPRE il muso verso il punto da raggiungere.
 # Niente marcia obliqua. Di traverso Spot e' largo 1.10 m invece di 0.50, quindi il
-# fronte pretende 0.59 m di obstacle_distance invece di 0.30: il vecchio ripiego
-# "non riesco a ruotare, vado di lato" rendeva il robot PIU' LARGO proprio dove lo
-# spazio e' poco. Misurato sulle missioni del 2026-10-07: sei blocchi su percorsi che
-# col muso in avanti erano liberi per 1.3-1.4 m sono nati solo cosi'.
+# fronte pretende 0.59 m di obstacle_distance invece di 0.30: andare di lato quando non
+# si riesce a ruotare renderebbe il robot PIU' LARGO proprio dove lo spazio e' poco.
 #
 # Quando la rotazione non e' possibile il robot ARRETRA IN LINEA RETTA lungo l'asse
 # del corpo -- che non e' marcia obliqua: l'ingombro resta 0.50 m e la soglia del
@@ -431,34 +412,30 @@ ROTATION_RETREAT_M = 0.60
 ROTATION_RETREAT_MIN_M = 0.20
 MAX_ROTATION_FAILS_SAME_EDGE = 2
 
-# --- Ventaglio dentro il cono di rotazione possibile (2026-10-07) -- vedi plan_cone_move.
+# --- Ventaglio dentro il cono di rotazione possibile -- vedi plan_cone_move.
 CONE_SWEEP_MAX_DEG = 90.0      # quanto in la' si guarda, a destra e a sinistra del muso
 CONE_SWEEP_STEP_DEG = 10.0     # passo della scansione angolare (9 direzioni per lato)
 CONE_MIN_GAIN_M = 0.20         # una direzione vale solo se avvicina all'obiettivo di tanto
-# 2026-10-08 (missione 08-10 16:11, scansione it001_cell0_2_007): il cono puntava all'OBIETTIVO
-# della cella in linea d'aria. Il percorso andava a ovest attorno a un blocco, l'obiettivo era
-# a est oltre un vicolo cieco: "avvicinarsi" all'obiettivo ha portato il robot 1.36 m dentro
-# il vicolo cieco, dalla parte opposta al percorso. Ora il cono punta al punto del PERCORSO
-# a questa distanza dal robot: se quel punto e' dietro, nessuna direzione del cono avvicina,
-# e si passa all'arretramento -- che e' la mossa giusta.
+# Il cono punta al punto del PERCORSO a questa distanza dal robot, non all'obiettivo della
+# cella in linea d'aria: se il percorso gira attorno a un blocco, "avvicinarsi" all'obiettivo
+# in linea d'aria puo' portare il robot dentro un vicolo cieco, dalla parte opposta al
+# percorso. Se quel punto e' dietro, nessuna direzione del cono avvicina, e si passa
+# all'arretramento -- che e' la mossa giusta.
 CONE_PATH_LOOKAHEAD_M = 1.5
 # Durante la rotazione sul posto un fronte "fine dati" piu' corto non interrompe il movimento:
 # ruotando la zona vista si sposta e il bordo dei dati si accorcia di qualche centimetro senza
-# alcun ostacolo (stessa missione, scansione 008: 1.29 m raggiungibili su 1.38). Vale finche'
+# alcun ostacolo. Vale finche'
 # il robot non si e' spostato di almeno tanto; un fronte accorciato da un OSTACOLO interrompe
 # sempre.
 ABORT_IGNORE_DATA_EDGE_UNTIL_M = 0.15
 
-# Arretramenti consecutivi ammessi, CONTATI PER SEQUENZA e non per arco (2026-10-07).
-# Il limite precedente, MAX_ROTATION_FAILS_SAME_EDGE, era indicizzato su
-# (nodo_robot, nodo_successivo): ma ogni arretramento crea un nodo di sosta nuovo, quindi la
-# chiave cambiava e il contatore ripartiva da 1 all'infinito. Nella missione del 2026-10-07
-# si vede nel log: "tentativo 1/2" sette volte di fila, e "2/2" solo nelle due occasioni in
-# cui il robot non era riuscito a spostarsi e la chiave era rimasta la stessa. Il limite
-# non e' mai scattato, ed e' cosi' che sono nati i 3.5 m indietro.
+# Arretramenti consecutivi ammessi, CONTATI PER SEQUENZA e non per arco:
+# MAX_ROTATION_FAILS_SAME_EDGE e' indicizzato su (nodo_robot, nodo_successivo), e dopo un
+# arretramento il robot puo' trovarsi agganciato a un altro nodo, quindi da solo non ferma
+# una catena di arretramenti.
 MAX_STRAIGHT_RETREATS_IN_A_ROW = 2
 
-# --- Ventaglio a 360 gradi: riconoscere la trappola (2026-10-07) -- vedi scan_escape_directions.
+# --- Ventaglio a 360 gradi: riconoscere la trappola -- vedi scan_escape_directions.
 ESCAPE_FAN_STEP_DEG = 15.0        # 24 direzioni; 24 valutazioni del fronte, ~frazione di scansione
 ESCAPE_FAN_MIN_ADVANCE_M = 0.30   # sotto questo spazio una direzione non e' una via d'uscita
 # Controllo preventivo sulla posa d'arrivo (vedi arrival_has_exit): si paga solo dove serve,
@@ -467,7 +444,7 @@ ARRIVAL_EXIT_CHECK_MAX_STEP_M = 0.40
 ARRIVAL_EXIT_CHECK_OD_M = 0.50
 MAX_ARRIVAL_REFUSALS = 3          # per tentativo di cella, per non avvitarsi sul rifiuto
 
-# --- Ritorni con GraphNav invece che camminando all'indietro (2026-10-07) ----------------
+# --- Ritorni con GraphNav invece che camminando all'indietro ------------------------------
 # Tornare indietro a zampe, all'indietro, sui tratti registrati e' la manovra piu' rischiosa
 # che facciamo: il robot non vede dove va e non si rilocalizza. GraphNav cammina in avanti,
 # con la localizzazione e l'anti-ostacolo di Boston Dynamics. Si lascia una traccia di
@@ -475,49 +452,36 @@ MAX_ARRIVAL_REFUSALS = 3          # per tentativo di cella, per non avvitarsi su
 GRAPHNAV_WAYPOINT_MIN_SPACING_M = 0.75   # distanza minima fra due briciole
 GRAPHNAV_MAX_BACKTRACK_HOPS = 3          # poi si rimanda la cella e si passa alla priorita' dopo
 
-# --- Scorciatoie nel grafo GraphNav (2026-10-08) -----------------------------------------
+# --- Scorciatoie nel grafo GraphNav -----------------------------------------------------
 # Ogni waypoint si collega solo al precedente: il grafo GraphNav e' una CATENA che ricalca la
-# strada fatta, e GraphNav cammina solo sugli archi. Tornare a un waypoint a un metro di
-# distanza ma registrato molti passi prima voleva dire ripercorrere tutta la catena: i "giri
-# strani" dei ritorni. Gli anelli si chiudevano solo a fine missione e solo con i fiducial
-# ("Created 0 new edge(s)" nel log del 08-10 15:40). Ora, prima di ogni spostamento con
-# GraphNav (graphnav_add_shortcuts):
-#   1. scorciatoie NOSTRE: due waypoint a meno di GRAPHNAV_SHORTCUT_MAX_M, senza arco
-#      diretto, la cui linea retta e' stata VISTA libera nella mappa globale con
-#      GRAPHNAV_SHORTCUT_MARGIN_M di margine (le celle occupate della mappa sono gia'
-#      gonfiate di OBSTACLE_THRESHOLD = 0.15: 0.20 + 0.15 = 0.35 m dall'ostacolo, piu' della
-#      meta' larghezza del corpo). Mai attraverso zone mai viste.
+# strada fatta, e GraphNav cammina solo sugli archi. Senza scorciatoie, tornare a un waypoint
+# a un metro di distanza ma registrato molti passi prima vuol dire ripercorrere tutta la
+# catena. Prima di ogni spostamento con GraphNav (graphnav_add_shortcuts):
+#   1. scorciatoie NOSTRE, scelte SULLA STRADA (vedi plan_graphnav_shortcuts): si calcola la
+#      strada piu' corta verso la destinazione considerando TUTTE le coppie di waypoint a
+#      meno di GRAPHNAV_SHORTCUT_MAX_M, senza arco diretto, la cui linea retta e' stata
+#      VISTA libera nella mappa globale con GRAPHNAV_SHORTCUT_MARGIN_M di margine, e si
+#      creano solo quelle che la strada usa. Mai attraverso zone mai viste.
 #   2. chiusure d'anello di Spot (fiducial + odometria) con il loro controllo di collisione.
 # GraphNav conserva comunque il suo anti-ostacolo durante il movimento.
-#
-# 2026-10-14: scorciatoie scelte SULLA STRADA (vedi plan_graphnav_shortcuts). Prima si
-# aggiungevano fino a 30 scorciatoie fra waypoint a meno di 2 m, le piu' corte per prime: con
-# celle da 4 m e il giro a serpentina, fra una riga di celle e l'altra quasi nessuna coppia
-# stava entro 2 m, e il ritorno a wp_0 delle 12:40 del 13-10 ha ripercorso tutta la missione:
-# 46.4 m (linea d'aria 13.1 m), 115 s. Ora si calcola la strada piu' corta verso la
-# destinazione considerando TUTTE le scorciatoie possibili fino a GRAPHNAV_SHORTCUT_MAX_M, e
-# si creano solo quelle che la strada usa. Rigiocato sui grafi scaricati del 13-10: ritorno
-# delle 12:40 da 46.4 a 13.4 m; 12:14 da 18.8 a 17.2 m; 12:27 da 17.9 a 15.7 m.
 # GRAPHNAV_SHORTCUT_MARGIN_M: margine dalle celle occupate (che sono gia' a obstacle_distance
-# <= 0.15): 0.30 + 0.15 = 0.45 m dall'ostacolo, perche' gli archi ora sono piu' lunghi.
+# <= 0.15): 0.30 + 0.15 = 0.45 m dall'ostacolo, largo perche' gli archi sono lunghi.
 GRAPHNAV_SHORTCUTS = True
 GRAPHNAV_SDK_LOOP_CLOSURE = True
 GRAPHNAV_SHORTCUT_MAX_M = 3.0
 GRAPHNAV_SHORTCUT_MARGIN_M = 0.30
-# Lunghezza massima degli archi che crea la chiusura d'anello di Spot (non cambiata).
+# Lunghezza massima degli archi che crea la chiusura d'anello di Spot.
 GRAPHNAV_SDK_LOOP_MAX_M = 2.0
 # Un nodo PRM con meno di questo spazio libero non e' raggiungibile dal fronte: si scarta.
 PRM_NODE_MIN_CLEARANCE_M = spotGrid.FRONTIER_CLEARANCE_M   # 0.30
 # Ripianificazioni "precoci" (alla prima cella bloccante, senza aspettare la conferma da
 # ferma) ammesse per tentativo di cella. Vedi il ramo 'wait'.
 MAX_EARLY_REPLANS = 4
-# 2026-10-13 (missione 13-10 11:22, cella (1,2)): dopo una trappola il robot tornava con
-# GraphNav alla briciola precedente, ripianificava, ritrovava IDENTICO lo stesso percorso
-# (nessun arco scartato, contatori azzerati) e rientrava nella stessa trappola: 6 giri prima
-# che lo fermassimo a mano. Ora ogni ritorno indietro ha memoria per il tentativo (vedi
-# _trap_backtrack): l'arco su cui il robot si e' fermato diventa impercorribile fino alla fine
-# del tentativo, e al MAX_BACKTRACKS_PER_ATTEMPT-esimo ritorno il robot torna indietro e
-# rinuncia alla cella da questo lato.
+# Ogni ritorno indietro ha memoria per il tentativo (vedi _trap_backtrack): l'arco su cui il
+# robot si e' fermato diventa impercorribile fino alla fine del tentativo, e al
+# MAX_BACKTRACKS_PER_ATTEMPT-esimo ritorno il robot torna indietro e rinuncia alla cella da
+# questo lato. Senza memoria, dalla briciola precedente il pianificatore ritroverebbe lo
+# stesso percorso e il robot rientrerebbe nella stessa trappola.
 MAX_BACKTRACKS_PER_ATTEMPT = 2
 # Entro questa distanza l'obiettivo del recupero e' "lo stesso" di quello appena fallito.
 RECOVERY_SAME_GOAL_M = 0.30
@@ -552,11 +516,11 @@ FALL_HAZARD_RADIUS_M = 0.5
 RETREAT_MAX_SEGMENTS = 3
 RETREAT_MIN_SEGMENT_M = 0.20
 RETREAT_AFTER_ABORT_M = 0.40
-#   RETREAT_CONTINUITY_M  -- (2026-10-06 sera) si arretra lungo un tratto registrato solo se
-#                            il robot sta davvero dove quel tratto finiva. Dopo uno spostamento
-#                            con GraphNav fra celle (che non registra tratti) l'ultimo tratto
-#                            registrato poteva stare a molti metri: il robot ci andava
-#                            camminando all'indietro, alla cieca (rilievo della revisione).
+#   RETREAT_CONTINUITY_M  -- si arretra lungo un tratto registrato solo se il robot sta
+#                            davvero dove quel tratto finiva. Dopo uno spostamento con GraphNav
+#                            fra celle (che non registra tratti) l'ultimo tratto registrato puo'
+#                            stare a molti metri, e il robot ci andrebbe camminando
+#                            all'indietro, alla cieca.
 #   RETREAT_MAX_SEGMENT_M -- tratto piu' lungo di cosi': non lo si ripercorre all'indietro.
 RETREAT_CONTINUITY_M = 0.50
 RETREAT_MAX_SEGMENT_M = 2.50
@@ -680,7 +644,7 @@ class BodyTiltRecorder:
         self._peak_pitch = 0.0
         self._n = 0
         self._errors = 0
-        # Traiettoria reale campionata (2026-10-07): (t, x, y, yaw, roll, pitch). Finisce in
+        # Traiettoria reale campionata: (t, x, y, yaw, roll, pitch). Finisce in
         # trajectory.csv, per confrontare dove il robot e' andato davvero con cio' che era
         # stato comandato.
         self.samples = []
@@ -835,16 +799,16 @@ def _raw_scale(grids_data):
 
 
 # ==================================================================
-# SPOSTAMENTI CON GRAPHNAV (2026-10-06 sera, dopo la revisione) -- fra celle lontane e per il
-# ritorno a wp_0. Sostituiscono, solo per le chiamate di questo file,
-# RecordingInterface.navigate_to_waypoint / navigate_to_first_waypoint (navGraphUtils.py non
-# e' modificato), che:
-#   - non avevano tempo massimo (navigate_to_first_waypoint ripeteva all'infinito anche con il
-#     robot caduto o senza percorso, e la missione non arrivava mai a sedersi);
-#   - usavano TravelParams vuoti: nessun limite di velocita', cioe' gli spostamenti piu' lunghi
-#     della missione alla velocita' di default di Spot;
-#   - su STATUS_LOST forzavano la localizzazione SUL WAYPOINT DI DESTINAZIONE e dichiaravano
-#     "arrivato": il robot poteva trovarsi altrove. Ora STATUS_LOST = fallimento, robot fermo.
+# SPOSTAMENTI CON GRAPHNAV -- fra celle lontane, per i ritorni e per il ritorno a wp_0.
+# Questo file non usa RecordingInterface.navigate_to_waypoint / navigate_to_first_waypoint
+# di navGraphUtils.py, ma _graphnav_navigate_to, che:
+#   - ha un tempo massimo (GRAPHNAV_TIMEOUT_S), cosi' un robot caduto o senza percorso non
+#     blocca la missione;
+#   - limita la velocita' (GRAPHNAV_MAX_*_VEL): gli spostamenti con GraphNav sono i piu'
+#     lunghi della missione;
+#   - tratta STATUS_LOST come fallimento, a robot fermo, dopo i tentativi di riaggancio: non
+#     forza la localizzazione sul waypoint di destinazione dichiarando "arrivato" quando il
+#     robot potrebbe trovarsi altrove.
 # ==================================================================
 MAX_FALLS_PER_MISSION = 3      # alla terza caduta il robot si rialza e la missione si ferma
 GRAPHNAV_TIMEOUT_S = 240.0
@@ -860,20 +824,16 @@ _GRAPHNAV_FAIL_STATUSES = {
 }
 
 
-# --- LOCALIZZAZIONE DI GRAPHNAV (2026-10-13) ------------------------------------------
-# Missioni del 12-10 17:16 e 17:32, all'aperto: al primo uso di GraphNav il robot era GIA'
-# perso ("Cannot issue a navigation request when the robot is already lost"). Nella prima
-# questo ha anche chiuso l'esplorazione (tre spostamenti rifiutati). Verificato sui grafi
-# scaricati: la mappa era sana -- l'odometria delle zampe e la visione differivano al
-# massimo di 13-14 cm su 34-49 m (come nella missione delle 14:47, che e' tornata), e le
-# nostre scorciatoie coincidevano con la visione entro 6 cm. A perdersi e' il localizzatore
-# dal vivo, il cui stato nel grafo non c'e'. Quindi:
+# --- LOCALIZZAZIONE DI GRAPHNAV --------------------------------------------------------
+# All'aperto il localizzatore dal vivo di GraphNav si puo' perdere anche quando la mappa e'
+# sana (odometria delle zampe e visione d'accordo entro ~15 cm su decine di metri), e un
+# robot perso si vede rifiutare ogni spostamento. Quindi:
 #   1. riga [LOCALIZZAZIONE] a ogni briciola, solo quando qualcosa cambia, per vedere QUANDO
 #      e PERCHE' si perde (rilevatore di perdita di Spot);
 #   2. riaggancio: se GraphNav risulta perso, si rilocalizza sul waypoint piu' vicino secondo
 #      le nostre pose, con la stima iniziale dall'odometria (waypoint_tform_ko del grafo per
-#      ko_tform_body di adesso: esatta a meno della deriva misurata, 14 cm al massimo), poi
-#      la rifinisce l'ICP di Spot. NON si dichiara "arrivato": si riprova a navigare.
+#      ko_tform_body di adesso: esatta a meno della deriva), poi la rifinisce l'ICP di Spot.
+#      NON si dichiara "arrivato": si riprova a navigare.
 #   3. rilevatore di perdita PERMISSIVO negli spostamenti GraphNav.
 GRAPHNAV_LOST_DETECTOR_STRICTNESS = 'LOST_DETECTOR_STRICTNESS_PERMISSIVE'   # None = quella di Spot
 GRAPHNAV_MAX_RELOCALIZATIONS = 3       # riagganci per singolo spostamento GraphNav
@@ -1053,7 +1013,7 @@ def _graph_route(adj, start, goal):
 def plan_graphnav_shortcuts(poses, base_edges, start_id, goal_id, global_map,
                             max_m=None, margin_m=None):
     """
-    2026-10-14. Scorciatoie da aggiungere al grafo GraphNav per andare da start_id a goal_id.
+    Scorciatoie da aggiungere al grafo GraphNav per andare da start_id a goal_id.
     Funzione pura (niente robot), provata offline sui grafi scaricati: vedi test_replay.py.
 
     poses: {wp_id: (x, y)} dei waypoint di cui si conosce la posizione (frame della mappa
@@ -1108,14 +1068,14 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, sdk=Tru
                            target_wp_id=None, robot_xy=None):
     """
     Aggiunge scorciatoie al grafo GraphNav prima di uno spostamento (vedi GRAPHNAV_SHORTCUTS).
-    Non solleva mai: senza scorciatoie GraphNav funziona come prima.
+    Non solleva mai: senza scorciatoie GraphNav funziona lo stesso, sulla catena.
 
-    Missione del 08-10 16:11: Spot accetta archi nuovi (create_edge) SOLO mentre registra
-    ("NotRecordingError"), mentre la chiusura d'anello (process_topology) va fatta a
-    registrazione ferma, e appena fermata puo' rispondere "MapModifiedError" finche' la mappa
-    non e' finita di elaborare. Quindi:
+    Spot accetta archi nuovi (create_edge) SOLO mentre registra ("NotRecordingError"),
+    mentre la chiusura d'anello (process_topology) va fatta a registrazione ferma, e appena
+    fermata puo' rispondere "MapModifiedError" finche' la mappa non e' finita di elaborare.
+    Quindi:
       map_edges -- le scorciatoie dalla mappa globale: da chiamare PRIMA di stop_recording
-                   (si saltano da sole se la registrazione e' ferma). 2026-10-14: servono
+                   (si saltano da sole se la registrazione e' ferma). Servono
                    target_wp_id (la destinazione) e, se il localizzatore non dice dove si
                    trova il robot, robot_xy; si creano solo quelle sulla strada (vedi
                    plan_graphnav_shortcuts).
@@ -1193,9 +1153,8 @@ def _graphnav_navigate_to(recordingInterface, waypoint_id, robot_state_client, c
     """Porta il robot a un waypoint con GraphNav. True solo se ci arriva davvero."""
     # Prima di muoversi: chiusure d'anello di Spot (a registrazione ferma). Le scorciatoie
     # dalla mappa le aggiunge chi chiama, PRIMA di fermare la registrazione.
-    # 2026-10-12: tutto cio' che sta qui dentro finisce nella voce 'GraphNav' di [TEMPO].
-    # Nella missione del 12-10 14:47, 212 s su 806 di orologio (26%) non finivano in nessuna
-    # fase misurata, e la fetta piu' grossa era proprio questa (83 s il solo ritorno a wp_0).
+    # Tutto cio' che sta qui dentro finisce nella voce 'GraphNav' di [TEMPO]: e' una delle
+    # fasi piu' lunghe della missione (il solo ritorno a wp_0 puo' durare minuti).
     _t_gn = time.perf_counter()
     try:
         return _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_client,
@@ -1210,7 +1169,7 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
     client = recordingInterface._graph_nav_client
     tp = _graph_nav_pb2.TravelParams()
     tp.velocity_limit.CopyFrom(movements._velocity_limit(GRAPHNAV_MAX_LINEAR_VEL_MPS, GRAPHNAV_MAX_ANGULAR_VEL_RPS))
-    # 2026-10-13: rilevatore di perdita permissivo (vedi LOCALIZZAZIONE DI GRAPHNAV).
+    # Rilevatore di perdita permissivo (vedi LOCALIZZAZIONE DI GRAPHNAV).
     if GRAPHNAV_LOST_DETECTOR_STRICTNESS and hasattr(tp, 'lost_detector_strictness'):
         try:
             # dal descrittore: l'enum sta in lost_detection_pb2, che nelle versioni vecchie
@@ -1220,8 +1179,8 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
         except Exception:
             pass
     print(f"[GRAPHNAV] {label}: avvio (massimo {timeout_s:.0f} s, {GRAPHNAV_MAX_LINEAR_VEL_MPS:.1f} m/s).")
-    # 2026-10-13: prima di partire si guarda lo stato del localizzatore; se e' perso si
-    # riaggancia subito, invece di farsi rifiutare il comando tre volte.
+    # Prima di partire si guarda lo stato del localizzatore; se e' perso si riaggancia
+    # subito, invece di farsi rifiutare il comando.
     relocs = 0
     loc0 = graphnav_log_localization(None, recordingInterface, robot_state_client,
                                      f"prima di '{label}'", force=True)
@@ -1244,9 +1203,7 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
                 continue
             nav_errors += 1
             print(f"[GRAPHNAV] {label}: comando rifiutato ({nav_errors}/3): {e}")
-            # 2026-10-07: qui il `return False` stava FUORI dall'if, quindi un solo errore
-            # RPC transitorio abbandonava lo spostamento mentre il messaggio diceva "(1/3)",
-            # e le tre righe sotto erano codice morto. I contatori non arrivavano mai a 2.
+            # Un errore RPC transitorio non abbandona lo spostamento: si rinuncia al terzo.
             if nav_errors >= 3:
                 movements.stop_robot(command_client, reason="GraphNav: comando rifiutato")
                 MISSION_STATS['graphnav_fail'] += 1
@@ -1261,7 +1218,6 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
         except Exception as e:
             fb_errors += 1
             print(f"[GRAPHNAV] {label}: errore nel feedback ({fb_errors}/3): {e}")
-            # 2026-10-07: stesso difetto del ramo sopra -- `return False` fuori dall'if.
             if fb_errors >= 3:
                 movements.stop_robot(command_client, reason="GraphNav: feedback non disponibile")
                 MISSION_STATS['graphnav_fail'] += 1
@@ -1274,8 +1230,8 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
             MISSION_STATS['graphnav_ok'] += 1
             return True
         if status == _GN.STATUS_LOST and relocs < GRAPHNAV_MAX_RELOCALIZATIONS:
-            # 2026-10-13: riaggancio sul waypoint piu' vicino (NON sulla destinazione, e senza
-            # dichiarare l'arrivo: si rimanda il comando e si continua a navigare).
+            # Riaggancio sul waypoint piu' vicino (NON sulla destinazione, e senza dichiarare
+            # l'arrivo: si rimanda il comando e si continua a navigare).
             relocs += 1
             print(f"[GRAPHNAV] {label}: GraphNav ha perso la localizzazione per strada: "
                   f"riaggancio ({relocs}/{GRAPHNAV_MAX_RELOCALIZATIONS}).")
@@ -1319,14 +1275,12 @@ def _graphnav_return_to_start(recordingInterface, robot_state_client, command_cl
                                  "ritorno a wp_0", timeout_s=2 * GRAPHNAV_TIMEOUT_S)
 
 
-# --- Zona attorno al corpo nella mappa GLOBALE (2026-10-08, missione 08-10 15:09) -------
+# --- Zona attorno al corpo nella mappa GLOBALE ------------------------------------------
 # Le celle a ridosso del fianco del robot risultano "ostacolo" SOLO quando il robot ci sta
-# accanto: nella missione del 08-10 15:09, attorno a (58.6, -32.8) le stesse celle lette da
-# 1-2 m di distanza avevano obstacle_distance 0.18-0.24 (libere), lette con il robot fermo
-# li' accanto 0.09-0.15 (ostacolo), sempre a 0.23-0.45 m dall'asse, all'altezza delle zampe
-# posteriori. Due scansioni da fermo bastano a confermarle nella mappa globale
-# (GLOBAL_OCC_CONFIRM_OBS = 2), e il PRM scartava l'arco su cui il robot era APPENA passato:
-# "un percorso che prima vedeva libero, appena ci e' passato sopra e' diventato occupato".
+# accanto: lette da 1-2 m sono libere, lette con il robot fermo li' accanto scendono sotto
+# soglia, a 0.2-0.45 m dall'asse, all'altezza delle zampe posteriori. Due scansioni da fermo
+# basterebbero a confermarle nella mappa globale (GLOBAL_OCC_CONFIRM_OBS = 2), e il PRM
+# scarterebbe l'arco su cui il robot e' APPENA passato.
 #   - NUCLEO (il rettangolo del corpo): il robot ci sta sopra, quindi e' libero per
 #     costruzione -> si scrive "visto libero".
 #   - ANELLO (fino a GLOBAL_MAP_SELF_RING_M oltre il corpo): da qui la lettura non e'
@@ -1343,13 +1297,13 @@ def _mask_for_global_map(obstacle_mask, is_valid, pts=None, robot_pose=None,
                          return_core=False):
     """
     Maschera da passare a GlobalGrid.update: -1 ostacolo, +1 vista libera, 0 nessuna
-    informazione (cella non attendibile in questa scansione). Prima le celle non attendibili
-    arrivavano come +1, cioe' "viste libere" (vedi GlobalGrid.update).
+    informazione (cella non attendibile in questa scansione, che quindi non conta come
+    "vista libera": vedi GlobalGrid.update).
 
     pts, robot_pose=(x, y, yaw): se passati, applica la zona attorno al corpo (vedi
     GLOBAL_MAP_SELF_RING_M): nucleo libero, anello senza ostacoli.
 
-    return_core (2026-10-12): restituisce anche la maschera del NUCLEO, cioe' le celle
+    return_core: restituisce anche la maschera del NUCLEO, cioe' le celle
     coperte dal corpo adesso. Va passata a GlobalGrid.update come `walked`: sono celle su
     cui il robot e' fisicamente passato, e per dichiararle occupate serviranno piu'
     conferme (vedi spotGrid.GLOBAL_OCC_CONFIRM_WALKED).
@@ -1377,15 +1331,14 @@ def _mask_for_global_map(obstacle_mask, is_valid, pts=None, robot_pose=None,
 def fold_scan_into_global_maps(global_map, global_terrain_map, pts, terrain, obstacle_mask, is_valid,
                                cells_obstacle_dist, shape, robot_pose):
     """
-    2026-10-14. Una scansione nelle due mappe globali: occupazione (con la zona attorno al
+    Una scansione nelle due mappe globali: occupazione (con la zona attorno al
     corpo, vedi _mask_for_global_map) e terreno. Unico punto usato dalla missione (inizio
     tentativo, ogni giro, scansione finale) e da test_replay.py, cosi' la prova di rigioco
     verifica il codice vero e non una sua copia.
 
     La mappa del terreno riceve la STESSA maschera del calcolo dal vivo (slope_usable_mask:
-    attendibili E non ostacolo). Prima salvava anche le quote delle celle ostacolo, e tronchi
-    e muri diventavano "pendenze": rigiocando le scansioni del 13-10 12:40, sulle stesse 1885
-    coppie, archi oltre 0.6 0.0% dal vivo contro 10.9% dalla mappa globale.
+    attendibili E non ostacolo): le quote delle celle ostacolo trasformerebbero tronchi e
+    muri in "pendenze" nella mappa globale.
 
     Restituisce la maschera del nucleo (celle sotto il corpo), che serve alla mappa dello
     spazio libero.
@@ -1398,7 +1351,7 @@ def fold_scan_into_global_maps(global_map, global_terrain_map, pts, terrain, obs
 
 def _update_clearance_map(global_map, pts, snap, is_valid, unwritten, core, robot_xy):
     """
-    2026-10-12. Alimenta la mappa dello spazio libero con la scansione corrente.
+    Alimenta la mappa dello spazio libero con la scansione corrente.
 
     Usa la obstacle_distance FILTRATA (quella su cui il fronte decide davvero, mediana +
     isteresi: vedi arcVerification), non la lettura grezza. Imparano solo le celle
@@ -1426,7 +1379,7 @@ def _update_clearance_map(global_map, pts, snap, is_valid, unwritten, core, robo
 
 def _log_clearance_gap(prm, global_map):
     """
-    2026-10-12. Una riga per giro sul divario fra i due criteri di percorribilita':
+    Una riga per giro sul divario fra i due criteri di percorribilita':
     la mappa binaria (bit occupato + margine) e la mappa dello spazio libero (stessa soglia
     del fronte). Tace quando sono d'accordo. Serve a decidere sul campo se commutare
     spotGrid.CLEARANCE_MAP_DECIDES.
@@ -1472,16 +1425,11 @@ def _log_footprint_diagnostic(local_grid, pts, robot_x, robot_y, robot_yaw,
     PURAMENTE OSSERVATIVO: usa diagnostic_only=True, quindi non consuma il flag
     one-shot di compute_robot_footprint_mask e non cambia nessun comportamento.
 
-    AGGIORNAMENTO 2026-10-07 -- la "questione A" del CONTEXT era chiusa sulla base
-    sbagliata. Diceva "era prossimita', non auto-visione, e zero celle nel nucleo".
-    Sui dati del 2026-10-07 si misurano invece 190-191 celle NEL NUCLEO, tutte per
-    RUGOSITA'. La causa non e' l'auto-visione: sotto il corpo i sensori non possono
-    scrivere, quelle celle restano alla quota del plateau delle celle mai scritte, e il
-    salto di ~0.93 m rispetto al pavimento fa esplodere la deviazione standard della
-    finestra 5x5. Con _cells_never_written corretta (vedi spotGrid, 2026-10-07) scendono
-    a ZERO. Quindi la maschera one-shot resta com'e': applicarla a ogni scansione
-    nasconderebbe muri veri in un corridoio stretto, e il problema che sembrava
-    richiederla non esisteva.
+    La maschera dell'impronta si applica una volta sola: applicarla a ogni scansione
+    nasconderebbe muri veri in un corridoio stretto. Celle ostacolo NEL NUCLEO, quando
+    compaiono, sono di solito celle mai scritte dai sensori (sotto il corpo non possono
+    scrivere) lasciate alla quota sbagliata, che fanno esplodere la rugosita': le toglie
+    spotGrid._cells_never_written, non questa maschera.
 
     PERCHE' -- i due veti di fuse_obstacle_mask, ricalcolati identici:
       - "prossimita'": cells_obstacle_dist <= OBSTACLE_THRESHOLD. NON vuol dire
@@ -1632,24 +1580,15 @@ def _emit_mission_summary_once():
     except Exception as e:
         print(f"[LOG] Impossibile produrre il riepilogo di missione: {e}")
 
-# TODO: check if we can avoid to set a sleep after each movement command
-# TODO: change the folder destination of the name download of graph
+# TODO: verificare se si puo' evitare la pausa dopo ogni comando di movimento
+# TODO: cambiare la cartella in cui si scarica il grafo
 
 def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cells_obstacle_dist,
                             sampler, global_map=None, safety_margin=None, exclude=None):
     """
     Sceglie il punto obiettivo dentro la cella: il piu' CENTRALE fra quelli non occupati.
 
-    Prima questa funzione restituiva SEMPRE il centro geometrico esatto della cella,
-    ignorando del tutto `pts` e `cells_obstacle_dist` che pure riceveva. Con celle da
-    5x5 m in una stanza arredata, il centro geometrico cade spesso dentro o a ridosso di
-    un mobile: il robot veniva mandato verso un punto irraggiungibile, tutti gli archi
-    che ci arrivavano erano vetati, e l'unico percorso superstite diventava un giro
-    largo. E' il meccanismo dietro il percorso 176 -> 211 -> 3127 della missione del
-    2026-10-05 13:12, che superava il bersaglio di oltre un metro per poi tornare
-    indietro, finendo in una tasca stretta.
-
-    Regola (2026-10-13): il CENTRO GEOMETRICO e' l'obiettivo, libero o ignoto che sia.
+    Regola: il CENTRO GEOMETRICO e' l'obiettivo, libero o ignoto che sia.
     Si cambia solo se si VEDE che e' occupato (mappa globale con safety_margin) o se il
     ciclo di navigazione lo ha gia' scartato sui dati dal vivo (`exclude`). In quel caso:
       1. punti OSSERVATI liberi ad almeno FRONTIER_CLEARANCE_M dagli ostacoli (scansione
@@ -1660,7 +1599,7 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
     restituisce (None, None, ...): il chiamante lo tratta gia' come fallimento di
     ingresso e passa alla logica dei lati non ancora provati.
 
-    exclude (2026-10-07): lista di punti gia' provati e risultati irraggiungibili, da non
+    exclude: lista di punti gia' provati e risultati irraggiungibili, da non
     riproporre. Serve alla riscelta dentro il ciclo di navigazione (vedi
     attempt_enter_cell_from_position): il punto scelto all'inizio del tentativo viene
     deciso da lontano, quando la cella e' ancora tutta ignota, e puo' rivelarsi a ridosso
@@ -1669,14 +1608,14 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
     global_map: spotGrid.GlobalGrid accumulata. Viene aggiornata con la scansione
     corrente appena prima di questa chiamata, quindi e' la fonte piu' completa
     disponibile -- piu' della sola griglia locale, che copre ~3.8 m e in genere non
-    arriva al centro della cella bersaglio. Se None, comportamento identico a prima.
+    arriva al centro della cella bersaglio. Se None si usa il centro senza controlli.
 
     Returns:
         (target_x, target_y, valid_samples, rejected_samples)
         Le due liste alimentano la visualizzazione (gialli = ammessi, rossi = scartati).
     """
-    # Stesso margine del PRM e del fronte sicuro (2026-10-06): un punto obiettivo piu' vicino
-    # agli ostacoli di quanto il fronte accetti non verrebbe mai raggiunto. Era 0.05.
+    # Stesso margine del PRM e del fronte sicuro: un punto obiettivo piu' vicino agli
+    # ostacoli di quanto il fronte accetti non verrebbe mai raggiunto.
     if safety_margin is None:
         safety_margin = spotGrid.PRM_EDGE_SAFETY_MARGIN_M
     cell_center = env.get_world_position_from_cell(cell_row, cell_col)
@@ -1687,17 +1626,14 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
     sampled = list(sampler.get_point_in_cell(cell_row, cell_col))
 
     if global_map is None:
-        # Nessuna informazione di occupazione: comportamento storico invariato.
+        # Nessuna informazione di occupazione: il centro della cella.
         return cell_center_x, cell_center_y, sampled, []
 
-    # 2026-10-13 -- REGOLA DEL CENTRO. Il centro geometrico e' l'obiettivo e si cambia SOLO
-    # se si VEDE che e' occupato: nella mappa globale, o perche' il ciclo di navigazione lo
-    # ha gia' scartato sui dati dal vivo (e' in `exclude`). Se e' ignoto ci si va vicino e
-    # si guarda; se e' libero resta lui.
-    # Prima bastava UN punto gia' visto libero per battere il centro ignoto
-    # (`pool = free if free else unknown`): quel punto era l'ultimo lembo scansionato dalla
-    # cella precedente, cioe' sul bordo, a ~2 m dal centro. Nelle missioni del 13-10 (12:14,
-    # 12:27, 12:40) e' successo in 20 ingressi su 38, con tre arrivi FUORI dalla cella.
+    # REGOLA DEL CENTRO. Il centro geometrico e' l'obiettivo e si cambia SOLO se si VEDE
+    # che e' occupato: nella mappa globale, o perche' il ciclo di navigazione lo ha gia'
+    # scartato sui dati dal vivo (e' in `exclude`). Se e' ignoto ci si va vicino e si
+    # guarda; se e' libero resta lui. Un punto gia' visto libero non batte il centro ignoto:
+    # di solito e' l'ultimo lembo scansionato dalla cella precedente, cioe' sul bordo.
     def _near_tried(p):
         return bool(exclude) and any(np.hypot(p[0] - ex, p[1] - ey) < 0.30 for ex, ey in exclude)
 
@@ -1713,10 +1649,10 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
 
     # Il centro e' occupato: si cerca il punto piu' vicino al centro dove il robot CI STA,
     # cioe' ad almeno FRONTIER_CLEARANCE_M (0.30 m) dagli ostacoli, la stessa distanza che
-    # pretende il fronte. Alle 12:40 del 13-10 le riscelte cadevano a 0.35-0.50 m dal punto
-    # scartato, ancora dentro la siepe (obstacle_distance -0.04, 0.06, 0.27): la mappa
-    # globale non l'aveva ancora vista tutta. Per questo si guarda anche la scansione dal
-    # vivo (pts, cells_obstacle_dist) e lo spazio libero imparato (global_map.clearance).
+    # pretende il fronte. La mappa globale puo' non aver ancora visto tutto l'ostacolo, e un
+    # punto a mezzo metro dal centro scartato puo' cadere ancora dentro: per questo si guarda
+    # anche la scansione dal vivo (pts, cells_obstacle_dist) e lo spazio libero imparato
+    # (global_map.clearance).
     min_clear = spotGrid.FRONTIER_CLEARANCE_M
     live_od = None
     if pts is not None and cells_obstacle_dist is not None:
@@ -1752,7 +1688,7 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
 
     # Prima i punti VISTI liberi con spazio sufficiente: il centro e' gia' risultato
     # occupato, quindi la zona e' nota e tornare a "guardare" un ignoto accanto all'ostacolo
-    # e' proprio il giro a vuoto delle 12:40. Solo se non ce n'e' nessuno, l'ignoto.
+    # sarebbe un giro a vuoto. Solo se non ce n'e' nessuno, l'ignoto.
     pool = free if free else unknown
     reason = "gia' scartato dal vivo" if center_tried else "occupato nella mappa"
     if not pool:
@@ -1764,9 +1700,7 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
         return (p[0] - cell_center_x) ** 2 + (p[1] - cell_center_y) ** 2
 
     # A parita' di distanza dal centro (a meno di un passo di reticolo) vince il punto piu'
-    # vicino al ROBOT: e' quello dalla sua parte dell'ostacolo. Alle 12:40 del 13-10, cella
-    # (2,0), c'erano due punti a 0.50 m dal centro: uno oltre la siepe, l'altro dal lato del
-    # robot, che e' quello su cui poi il robot e' entrato.
+    # vicino al ROBOT: e' quello dalla sua parte dell'ostacolo, non quello oltre.
     step = 0.25
     best_x, best_y = min(pool, key=lambda p: (round(np.sqrt(_d2_from_center(p)) / step),
                                               np.hypot(p[0] - robot_x, p[1] - robot_y)))
@@ -1781,18 +1715,13 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
 
 def goal_still_reachable(snap, goal_x, goal_y):
     """
-    2026-10-07. Il punto obiettivo e' ancora raggiungibile sui dati FRESCHI?
+    Il punto obiettivo e' ancora raggiungibile sui dati FRESCHI?
 
     Il fronte sicuro pretende che la linea centrale del percorso stia ad almeno
     FRONTIER_CLEARANCE_M da un ostacolo. Un punto obiettivo con obstacle_distance sotto
     quella soglia non potra' MAI essere raggiunto, per quante scansioni si facciano: il
-    robot aspetta, aspetta, e dichiara un blocco.
-
-    Successo misurato sulla missione del 2026-10-07 (iterazione 1, cella (0,1)): il punto
-    obiettivo aveva obstacle_distance 0.27 contro i 0.30 richiesti -- 3 cm -- ed era stato
-    scelto da 3 m di distanza quando l'area era ancora tutta ignota. Il robot ha fatto tre
-    scansioni ferme e si e' bloccato. Entro 80 cm da quel punto c'erano 808 celle valide,
-    la piu' vicina a 2 cm dal robot.
+    robot aspetterebbe e dichiarerebbe un blocco. Succede perche' il punto si sceglie da
+    lontano, quando la zona e' ancora ignota.
 
     Returns:
         True se il punto e' raggiungibile o se non lo si puo' giudicare (fuori dalla
@@ -1900,7 +1829,7 @@ def _save_visualization_bundle(save_path, pts, terrain_real, obstacle_mask, robo
 def decide_next_move(robot_xy, path_waypoints, frontier, no_progress_count):
     """
     Cosa fare adesso, dato il fronte sicuro. Funzione pura: niente robot, niente I/O, quindi
-    provabile fuori dal campo (vedi test_step3_frontier.py).
+    provabile fuori dal campo.
 
     path_waypoints: [(node_id, x, y), ...] -- i nodi ancora da raggiungere, il primo e' il
         prossimo. La posizione del robot NON e' inclusa.
@@ -1930,22 +1859,19 @@ def decide_next_move(robot_xy, path_waypoints, frontier, no_progress_count):
 
     adv = arcVerification.allowed_advance(frontier)
     if adv >= seg_len - 0.02:
-        # --- AVANZAMENTO MULTINODO (2026-10-08) ----------------------------------------
+        # --- AVANZAMENTO MULTINODO ----------------------------------------------------
         # Il fronte sicuro percorre TUTTO il percorso pianificato, non il primo tratto:
-        # restituisce fin dove e' confermato libero adesso. Prima questa informazione
-        # veniva calcolata e buttata via, perche' qui si guardava solo il primo nodo, e il
-        # robot si fermava, riscansionava e ripartiva a ogni nodo. Nella missione del
-        # 2026-10-08 16:35 il fronte confermava 1.9-3.2 m mentre gli archi erano lunghi
-        # 0.5-0.7 m: tre o quattro nodi avanti, ignorati.
-        # Ora si contano TUTTI i nodi che stanno dentro l'avanzamento consentito, e il
+        # restituisce fin dove e' confermato libero adesso, spesso piu' nodi avanti.
+        # Si contano TUTTI i nodi che stanno dentro l'avanzamento consentito, e il
         # ciclo li percorre uno dopo l'altro SENZA scansione, refresh ne' ripianificazione
-        # in mezzo. Si cammina sempre sulla polilinea, un tratto per volta: NON si taglia
-        # la corda fra due nodi, che passerebbe su terreno non verificato (e' quello che
-        # fa shortcut_index, ma solo dopo avere verificato la corda col fronte).
+        # in mezzo, invece di fermarsi e riscansionare a ogni nodo. Si cammina sempre sulla
+        # polilinea, un tratto per volta: NON si taglia la corda fra due nodi, che
+        # passerebbe su terreno non verificato (e' quello che fa shortcut_index, ma solo
+        # dopo avere verificato la corda col fronte).
         # Il controllo NON diventa un verdetto ricordato: durante il movimento il thread
         # ricalcola il fronte a ~5 Hz sul percorso rimanente e ferma il robot se si
-        # accorcia (vedi _should_abort_move e FRONTIER_ABORT_CONFIRM). E' lo stesso
-        # principio del punto 19/22 del CONTEXT: si eliminano le FERMATE, non le verifiche.
+        # accorcia (vedi _should_abort_move e FRONTIER_ABORT_CONFIRM). Si eliminano le
+        # FERMATE, non le verifiche.
         cum, nodes = 0.0, 0
         px, py = rx, ry
         for (_, wx, wy) in path_waypoints:
@@ -1974,14 +1900,10 @@ def rotation_plan(robot_yaw, robot_xy, target_xy, od_robot, snap=None):
     """
     Si puo' ruotare sul posto per guardare il punto da raggiungere?
 
-    RISCRITTO il 2026-10-07. Prima bastava confrontare obstacle_distance sotto il robot con
-    ROTATION_CLEARANCE_M = 0.65, cioe' chiedere che fosse libero TUTTO il cerchio di raggio
-    0.60 attorno al robot: il caso peggiore su tutte le direzioni e tutti gli angoli.
-    Ruotando di 39 gradi il corpo spazza invece un settore, e gli ostacoli stanno dove
-    stanno. Misurato sulla missione del 2026-10-07 (iterazione 2, cella (1,0)): il
-    confronto scalare ha rifiutato 9 rotazioni su 10, e di quelle 9 il controllo sul
-    settore dice che 8 erano sicure. Tre di quei rifiuti hanno prodotto un blocco su un
-    percorso che col muso in avanti era libero per 1.39 m.
+    Ruotando di un certo angolo il corpo spazza un settore, non tutto il cerchio di raggio
+    0.60 attorno al robot: si controllano le celle davvero spazzate. Chiedere libero tutto
+    il cerchio (obstacle_distance sotto il robot >= ROTATION_CLEARANCE_M) e' il caso
+    peggiore su tutte le direzioni e tutti gli angoli, e rifiuterebbe molte rotazioni sicure.
 
     Ordine dei controlli, dal piu' economico:
       1. rotazione sotto ROTATION_CHECK_MIN_DYAW_DEG -- trascurabile, si ruota
@@ -1989,8 +1911,7 @@ def rotation_plan(robot_yaw, robot_xy, target_xy, od_robot, snap=None):
          libero, si ruota senza altri calcoli (prefiltro)
       3. spotGrid.rotation_is_clear() sulle celle davvero spazzate (0.26 ms)
 
-    Senza `snap` (nessuna fotografia della griglia) si ricade sul solo confronto scalare,
-    cioe' il comportamento precedente.
+    Senza `snap` (nessuna fotografia della griglia) si ricade sul solo confronto scalare.
 
     Funzione pura, provabile fuori dal campo. Restituisce dict con:
       turn (bool), dyaw_deg, motion_dir (rad), margin (margine del settore spazzato, in
@@ -2023,7 +1944,7 @@ SHORTCUT_MAX_DIST_M = 2.5          # oltre, il tratto non sta comunque nella fin
 
 def shortcut_index(robot_xy, path_waypoints, snap, global_map=None, prm=None, robot_node_id=None):
     """
-    Scorciatoia (2026-10-06): l'indice del waypoint PIU' LONTANO raggiungibile in linea retta
+    Scorciatoia: l'indice del waypoint PIU' LONTANO raggiungibile in linea retta
     dal robot con il tratto interamente confermato libero dal fronte sicuro (muso compreso).
     0 = nessuna scorciatoia. Toglie le svolte inutili fra nodi del PRM.
     Il controllo e' il fronte stesso sui dati dal vivo: ostacoli, rugosita', pendenza.
@@ -2033,12 +1954,11 @@ def shortcut_index(robot_xy, path_waypoints, snap, global_map=None, prm=None, ro
     questo che il robot ci e' caduto). Gli archi del PRM le evitano gia'; una scorciatoia
     controllata solo dal vivo potrebbe riportarci sopra il robot.
 
-    2026-10-07 -- E GLI ARCHI GIA' SCARTATI. Senza questo controllo la scorciatoia
-    riagganciava un waypoint il cui collegamento diretto era appena stato invalidato, e il
-    ciclo non usciva piu': il tratto veniva scartato, Dijkstra trovava una strada che passava
-    comunque per quel nodo attraverso i nodi intermedi, e la scorciatoia ci ripuntava dritto.
-    Osservato nella missione del 2026-10-07: ~40 giri identici sul nodo 225. Servono `prm` e
-    `robot_node_id`; senza, il controllo si salta (comportamento precedente).
+    E GLI ARCHI GIA' SCARTATI. Senza questo controllo la scorciatoia riaggancerebbe un
+    waypoint il cui collegamento diretto e' appena stato invalidato, e il ciclo non
+    uscirebbe piu': il tratto viene scartato, Dijkstra trova una strada che passa comunque
+    per quel nodo attraverso i nodi intermedi, e la scorciatoia ci ripunta dritto. Servono
+    `prm` e `robot_node_id`; senza, il controllo si salta.
     """
     rx, ry = robot_xy
     for k in range(len(path_waypoints) - 1, 0, -1):
@@ -2047,9 +1967,8 @@ def shortcut_index(robot_xy, path_waypoints, snap, global_map=None, prm=None, ro
             key = (min(robot_node_id, wid), max(robot_node_id, wid))
             if key in getattr(prm, 'tracker_blocked_edges', ()):
                 continue
-            # Anche gli scarti soft (mark_edge_blocked_soft: [SUBITO], rotazione rifiutata):
-            # nella missione del 2026-10-07 16:39 la scorciatoia ripuntava il nodo 218 subito
-            # dopo che l'arco 3169->218 era stato scartato per rotazione.
+            # Anche gli scarti soft (mark_edge_blocked_soft: [SUBITO], rotazione rifiutata),
+            # altrimenti la scorciatoia ripunta il nodo appena scartato per rotazione.
             if getattr(prm, 'edge_validity', {}).get(key) is False:
                 continue
         d = float(np.hypot(wx - rx, wy - ry))
@@ -2073,16 +1992,13 @@ ROTATION_ROOM_DIRECTIONS_DEG = (180, 135, -135, 90, -90, 45, -45, 0)   # rispett
 
 def plan_straight_retreat(robot_xy, robot_yaw, snap, max_dist=ROTATION_RETREAT_M):
     """
-    2026-10-07. Quanto puo' arretrare il robot IN LINEA RETTA, all'indietro, senza girarsi.
+    Quanto puo' arretrare il robot IN LINEA RETTA, all'indietro, senza girarsi.
 
     Non e' marcia obliqua: muovendosi lungo il proprio asse l'ingombro resta 0.50 m di
     larghezza e il fronte applica la soglia normale di 0.30 m, non i 0.59 della marcia di
     traverso. E' la via d'uscita quando la rotazione verso il prossimo punto non e'
     possibile: ci si stacca da cio' che impedisce di girarsi e al giro dopo si riprova da
     una posizione diversa.
-
-    Misurato sulla missione del 2026-10-07: l'arretramento dritto era disponibile in TUTTE
-    e 12 le scansioni dell'iterazione 1, da 1.08 a 1.37 m.
 
     Funzione pura. Restituisce (x, y, distanza) del punto raggiungibile, oppure None se non
     si puo' arretrare di almeno ROTATION_RETREAT_MIN_M.
@@ -2101,7 +2017,7 @@ def plan_straight_retreat(robot_xy, robot_yaw, snap, max_dist=ROTATION_RETREAT_M
 
 def slope_usable_mask(is_valid_flat, cells_obstacle_dist, shape):
     """
-    2026-10-07 (questione aperta B, chiusa). Maschera delle celle le cui QUOTE possono
+    Maschera delle celle le cui QUOTE possono
     entrare nel calcolo della pendenza di un arco: attendibili (is_valid di correct_terrain)
     E non-ostacolo.
 
@@ -2111,28 +2027,17 @@ def slope_usable_mask(is_valid_flat, cells_obstacle_dist, shape):
     ANCHE come pendenza la conta la terza volta, e con il peggiore degli effetti: non ferma
     il robot davanti al mobile (ci pensa il fronte), scollega il grafo PRM in tutta la stanza.
 
-    Misurato sulla missione del 2026-10-07 13:58, stanza con mobili: 200 archi distinti
-    vetati per pendenza, mediana longitudinale 1.487 contro soglia 0.600, massimo 2.092 --
-    su un pavimento piano. La ripianificazione falliva da OGNI nodo (225, 227, 228) pur
-    avendone 22-28 collegamenti ciascuno, quindi la ritirata era l'unico esito possibile.
-    Rimisurato sulle 12 scansioni della missione 14:0x, 3607 archi campionati nella finestra:
-
-        archi vetati per pendenza   40.3%  ->   0.1%
-        archi senza dati pendenza    4.9%  ->  42.5%
-        archi AMMESSI nel grafo     59.7%  ->  99.9%
-        pendenza long. massima    2.2-3.3  ->  0.03-0.10
-
-    Gli archi che perdono il dato NON diventano "liberi per decreto": diventano "senza dati"
-    e un arco senza dati non viene vetato ne' in build_graph ne' in _try_add_edge (entra con
-    un costo di ripiego), e chi lo percorre lo verifica metro per metro col fronte sicuro.
-    E' la scelta esplicita del 2026-10-07: su quegli archi la sicurezza la da' il fronte, non
-    una pendenza misurata su un armadio.
+    Gli archi che perdono il dato NON diventano "liberi per decreto": diventano "senza dati",
+    e un arco senza dati non viene vetato (entra nel grafo con un costo di ripiego, vedi
+    PRM._evaluate_and_add_edge); chi lo percorre lo verifica metro per metro col fronte
+    sicuro. E' una scelta esplicita: su quegli archi la sicurezza la da' il fronte, non una
+    pendenza misurata su un armadio.
 
     La maschera si combina QUI e non dentro prm_graph perche' e' qui che si hanno in mano
     entrambi gli array, e perche' in prm_graph `current_valid_2d` serve a una cosa sola -- il
     profilo di pendenza per-arco (compute_arc_slope_profile) -- quindi restringerla non ha
     altri effetti. Chi legge prm_graph.update_local_grid_data trova `valid_2d` documentato
-    come "celle attendibili": dal 2026-10-07 significa "attendibili come TERRENO".
+    come "celle attendibili": qui significa "attendibili come TERRENO".
     """
     valid = np.asarray(is_valid_flat, dtype=bool).reshape(shape)
     if cells_obstacle_dist is None:
@@ -2144,20 +2049,19 @@ def slope_usable_mask(is_valid_flat, cells_obstacle_dist, shape):
 def graphnav_drop_breadcrumb(env, recordingInterface, robot_state_client, prm_node_id,
                              cell_row, cell_col, force=False):
     """
-    2026-10-07. Lascia una briciola: un waypoint GraphNav nel punto in cui si trova il robot,
+    Lascia una briciola: un waypoint GraphNav nel punto in cui si trova il robot,
     legato al nodo PRM da cui sta passando.
 
-    Serve per i ritorni. Finora si tornava indietro camminando ALL'INDIETRO sui tratti
-    registrati (retreat_along_traveled_path): il robot non vede dove mette le zampe, non si
+    Serve per i ritorni. Camminando ALL'INDIETRO sui tratti registrati
+    (retreat_along_traveled_path) il robot non vede dove mette le zampe, non si
     rilocalizza, e un errore si accumula. Con una traccia di waypoint il ritorno lo fa
     GraphNav, che cammina in avanti, con la localizzazione e l'anti-ostacolo di Boston
-    Dynamics. Decisione del 2026-10-07.
+    Dynamics (decisione dell'utente).
 
     Densita': un waypoint solo se il robot e' almeno GRAPHNAV_WAYPOINT_MIN_SPACING_M
     dall'ultimo lasciato, piu' sempre uno all'ingresso di una cella (force=True). Un
-    waypoint per OGNI nodo PRM attraversato darebbe una mappa troppo densa: i nodi di sosta
-    nascono dai passi parziali e nella missione del 2026-10-07 14:5x erano 37, molti a
-    20-60 cm uno dall'altro.
+    waypoint per OGNI posizione di sosta darebbe una mappa troppo densa: i passi parziali
+    lasciano soste a 20-60 cm una dall'altra.
 
     La traccia vive su env (_graphnav_trail) perche' deve sopravvivere ai tentativi di cella.
     Non solleva mai: una briciola mancata e' una briciola, non un motivo per fermare il robot.
@@ -2178,10 +2082,9 @@ def graphnav_drop_breadcrumb(env, recordingInterface, robot_state_client, prm_no
             return None
     try:
         recordingInterface.create_default_waypoint(cell_row=cell_row, cell_col=cell_col)
-        # 2026-10-12: nome e id dal waypoint appena creato (li porta la risposta del robot),
-        # non da get_localization_state(), che riscarica tutto il grafo solo per leggerli --
-        # 41 briciole su 60 scaricamenti nella missione del 12-10 14:47. Ripiego sulla
-        # vecchia strada se l'interfaccia non li espone.
+        # Nome e id dal waypoint appena creato (li porta la risposta del robot), non da
+        # get_localization_state(), che riscarica tutto il grafo solo per leggerli. Ripiego
+        # su get_localization_state() se l'interfaccia non li espone.
         last = getattr(recordingInterface, 'last_created_waypoint', None)
         if isinstance(last, dict) and last.get('id'):
             wp_id, wp_name = last['id'], last.get('name')
@@ -2201,7 +2104,7 @@ def graphnav_drop_breadcrumb(env, recordingInterface, robot_state_client, prm_no
     trail.append(crumb)
     print(f"[BRICIOLA] Waypoint {wp_name} in ({x:.2f}, {y:.2f}), nodo PRM {prm_node_id} "
           f"(traccia: {len(trail)} waypoint).")
-    # 2026-10-13: stato del localizzatore di GraphNav, stampato solo quando cambia.
+    # Stato del localizzatore di GraphNav, stampato solo quando cambia.
     graphnav_log_localization(env, recordingInterface, robot_state_client, f"briciola {wp_name}")
     return crumb
 
@@ -2209,7 +2112,7 @@ def graphnav_drop_breadcrumb(env, recordingInterface, robot_state_client, prm_no
 def graphnav_step_back(env, recordingInterface, robot_state_client, command_client,
                        min_dist_m=0.40):
     """
-    2026-10-07. Torna al waypoint piu' recente che sia almeno min_dist_m DIETRO, con GraphNav.
+    Torna al waypoint piu' recente che sia almeno min_dist_m DIETRO, con GraphNav.
 
     Si cerca indietro nella traccia perche' l'ultima briciola puo' essere stata lasciata qui,
     dove il robot e' adesso: tornarci non sposterebbe niente. Se nessuna briciola e' abbastanza
@@ -2217,8 +2120,7 @@ def graphnav_step_back(env, recordingInterface, robot_state_client, command_clie
 
     Restituisce (ok, crumb). ok=True solo se GraphNav dichiara di essere ARRIVATO: in
     _graphnav_navigate_to lo STATUS_LOST e' un fallimento, non si forza la localizzazione
-    sulla destinazione (era il difetto di navGraphUtils.navigate_to_waypoint, che su LOST
-    dichiarava "arrivato" mentre il robot poteva essere altrove).
+    sulla destinazione (vedi SPOSTAMENTI CON GRAPHNAV).
 
     La registrazione va FERMATA prima di navigare e ripresa dopo: GraphNav non naviga mentre
     registra. E' la stessa sequenza usata per gli spostamenti fra celle.
@@ -2267,19 +2169,17 @@ def graphnav_step_back(env, recordingInterface, robot_state_client, command_clie
 def backtracking_cannot_help(env, prm_graph, goal_id, robot_state_client, max_hops,
                              min_dist_m=0.40):
     """
-    2026-10-07. Tornare indietro con GraphNav puo' servire a qualcosa?
+    Tornare indietro con GraphNav puo' servire a qualcosa?
 
     escape_by_backtracking torna a una briciola e SOLO DOPO chiede al grafo un percorso da
     li'. Ma ogni briciola ha gia' il suo nodo PRM: la stessa domanda si puo' fare prima di
-    muoversi. Nella missione del 2026-10-07 16:50 sono stati fatti 6 ritorni su 9 (celle
-    (0,2) e (0,3)) per scoprire tre volte di fila "da qui il grafo non offre percorsi":
-    l'obiettivo era in un'altra componente del grafo gia' da diversi giri ([REPLAN FALLITO]),
-    quindi nessun waypoint dietro poteva cambiare la risposta.
+    muoversi. Se l'obiettivo sta in un'altra componente del grafo, nessun waypoint dietro
+    puo' cambiare la risposta, e i ritorni sarebbero solo strada sprecata.
 
     Risponde True solo se OGNI briciola che verrebbe visitata ha un nodo PRM collegato nel
     grafo e da nessuno di essi c'e' un percorso. Se anche una sola non si puo' giudicare
     (nodo mancante o isolato, es. scartato dentro un ostacolo) risponde False e si torna
-    indietro come prima: nel dubbio non si toglie la via d'uscita.
+    indietro: nel dubbio non si toglie la via d'uscita.
     """
     trail = getattr(env, '_graphnav_trail', None) or []
     if not trail or goal_id not in prm_graph.nodes:
@@ -2305,7 +2205,7 @@ def _trap_backtrack(trap_state, block_arc, env, prm_graph, goal_id, recordingInt
                     robot_state_client, command_client, global_map, mobility_kwargs, pts,
                     obstacle_mask, label="", **kwargs):
     """
-    2026-10-13. Ritorno indietro (escape_by_backtracking) con MEMORIA per il tentativo.
+    Ritorno indietro (escape_by_backtracking) con MEMORIA per il tentativo.
 
     trap_state: dict del tentativo ({'n': ritorni gia' fatti}), che non si azzera mai dentro
     il tentativo. block_arc: (a, b), l'arco su cui il robot si e' fermato.
@@ -2316,7 +2216,7 @@ def _trap_backtrack(trap_state, block_arc, env, prm_graph, goal_id, recordingInt
     il pianificatore deve proporre un'altra strada, o ammettere che non c'e'. Al
     MAX_BACKTRACKS_PER_ATTEMPT-esimo ritorno il robot torna comunque indietro -- la' dov'e'
     non puo' restare -- ma il tentativo finisce: la cella si rimanda e si prova da un altro
-    lato. Prima la missione del 13-10 11:22 ha fatto 6 volte lo stesso giro.
+    lato. Senza questa memoria il robot rifarebbe lo stesso giro all'infinito.
     """
     trap_state['n'] = trap_state.get('n', 0) + 1
     if block_arc is not None and block_arc[0] is not None and block_arc[1] is not None:
@@ -2342,19 +2242,16 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
                            max_hops=GRAPHNAV_MAX_BACKTRACK_HOPS, label="",
                            skip_if_graph_cannot_help=False):
     """
-    2026-10-07. La via d'uscita quando da qui non si va da nessuna parte.
+    La via d'uscita quando da qui non si va da nessuna parte.
 
-    Logica decisa il 2026-10-07: si torna indietro di un waypoint con GraphNav, si prova a
-    ripianificare verso l'obiettivo da li'; se non si puo', si torna indietro di un altro, e
-    cosi' via fino a max_hops. Dopo max_hops la cella si rimanda e si passa alla priorita'
-    successiva. Prima si camminava all'indietro a zampe fino a esaurire i tratti registrati,
-    senza mai ritentare la pianificazione nel mezzo.
+    Si torna indietro di un waypoint con GraphNav e si prova a ripianificare verso
+    l'obiettivo da li'; se non si puo', si torna indietro di un altro, e cosi' via fino a
+    max_hops. Dopo max_hops la cella si rimanda e si passa alla priorita' successiva.
 
     Se GraphNav non ce la fa (traccia vuota, non localizzato, STUCK, tempo scaduto) si ricade
-    sulla ritirata a zampe: e' peggiore, ma e' l'ultima rete e non la togliamo. Nella trappola
-    misurata il 2026-10-07 14:5x ruotare era impossibile (0.40 m contro 0.604 necessari), e
-    GraphNav per percorrere un arco vuole girare il muso: li' potrebbe tornare STUCK proprio
-    dove serve. Si vedra' sul campo.
+    sulla ritirata a zampe: e' peggiore, ma e' l'ultima rete e non la togliamo. In una
+    trappola dove ruotare e' impossibile GraphNav, che per percorrere un arco vuole girare il
+    muso, puo' tornare STUCK proprio dove serve.
 
     Restituisce dict: ok (si puo' continuare la missione), ids (nuovo percorso o None),
     robot_node (nuovo nodo del robot o None), how (cosa e' successo, per il log).
@@ -2386,7 +2283,7 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
 
         MISSION_STATS['graphnav_backtracks'] += 1
         prm_graph.needs_refresh = True       # il robot si e' spostato: vedi REFRESH A EVENTI
-        # 2026-10-13: la scansione dello scarto preliminare e' stata fatta da un altro punto (e
+        # La scansione dello scarto preliminare e' stata fatta da un altro punto (e
         # l'esclusione del corpo starebbe dove il robot era): via, fino alla prossima scansione.
         prm_graph.set_live_obstacles(None, None, 0, 0, 1, 0, 0)
         try:
@@ -2415,14 +2312,11 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
 def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=PRM_NODE_MIN_CLEARANCE_M,
                                  global_map=None):
     """
-    2026-10-07. Scarta dal grafo i nodi che cadono DENTRO un ostacolo.
+    Scarta dal grafo i nodi che cadono DENTRO un ostacolo.
 
-    Gli archi che attraversano celle occupate erano gia' vetati (_occupancy_blocked), ma i
-    nodi non venivano mai controllati: nascono dal campionatore globale prima che il robot
-    abbia visto qualcosa. Nella missione del 2026-10-07 14:5x il nodo obiettivo della cella
-    (0,1) aveva obstacle_distance **-0.21 m**, cioe' era fisicamente dentro un ostacolo, e
-    i due ripieghi successivi 0.12 m: sono i tre "obiettivi riscelti" di quella missione,
-    spesi per scoprire sul posto una cosa che si sapeva dai dati.
+    Gli archi che attraversano celle occupate sono vetati (_occupancy_blocked), ma i nodi
+    nascono dal reticolo prima che il robot abbia visto qualcosa: un nodo dentro un
+    ostacolo resterebbe destinazione o punto di passaggio, da scoprire solo sul posto.
 
     Soglia min_clearance_m = FRONTIER_CLEARANCE_M (0.30): sotto quella il centro del corpo
     non ci sta e il fronte non ci arrivera' mai, quindi il nodo e' inutile sia come
@@ -2436,13 +2330,10 @@ def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=PRM_NODE_MIN_CLEARAN
     siccome gli archi vengono tolti in modo NON permanente, un nodo giudicato male da una
     lettura rumorosa torna in gioco quando i dati freschi lo smentiscono.
 
-    2026-10-12, dalla missione in esterno: la finestra della scansione contiene solo ~235
-    nodi su 3321 (il 7% del grafo), quindi tutto il resto non viene nemmeno esaminato, per
-    quanto sia evidente nei dati che e' dentro un muro. E siccome lo scarto e' soft e la
-    mappa binaria non sa registrare "stretto", al refresh successivo gli archi tornano:
-    336 scarti per 88 nodi davvero cattivi, cioe' ognuno rifatto quasi 4 volte.
-    Con `global_map` si guarda ANCHE la mappa dello spazio libero, che copre tutto il grafo
-    e ricorda -- e il giudizio su un nodo lontano non va piu' perso a ogni giro.
+    La finestra della scansione contiene solo una piccola parte del grafo (~7%), e lo
+    scarto e' soft: al refresh successivo gli archi tornano. Con `global_map` (e
+    spotGrid.CLEARANCE_MAP_DECIDES) si guarda ANCHE la mappa dello spazio libero, che copre
+    tutto il grafo e ricorda, cosi' il giudizio su un nodo lontano non va perso a ogni giro.
     """
     ids = [nid for nid in prm.nodes if prm.edges.get(nid)]   # gia' isolati: niente da togliere
     if not ids:
@@ -2469,30 +2360,18 @@ def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=PRM_NODE_MIN_CLEARAN
 def scan_escape_directions(robot_xy, robot_yaw, snap, step_deg=ESCAPE_FAN_STEP_DEG,
                            min_advance_m=ESCAPE_FAN_MIN_ADVANCE_M, probe_m=3.0):
     """
-    2026-10-07. Il giro completo: in quali direzioni il robot puo' DAVVERO andare da qui?
+    Il giro completo: in quali direzioni il robot puo' DAVVERO andare da qui?
 
     Per ciascuna direzione del giro (passo step_deg) misura due cose indipendenti:
       - quanto spazio concede il fronte sicuro andando in linea retta in quella direzione;
       - se il robot puo' girarsi tanto da puntarci il muso (spotGrid.rotation_is_clear).
-    Una direzione e' UTILIZZABILE solo se entrambe rispondono si'. Il movimento di traverso
-    non esiste piu' (vedi il commento in testa al file), quindi una corsia larga che richiede
-    una rotazione impossibile NON e' una via d'uscita, per quanto larga sia.
+    Una direzione e' UTILIZZABILE solo se entrambe rispondono si'. Il robot non cammina di
+    traverso (vedi ROTAZIONE E ARRETRAMENTO), quindi una corsia larga che richiede una
+    rotazione impossibile NON e' una via d'uscita, per quanto larga sia.
 
-    Perche' serve (misurato sulla missione del 2026-10-07 14:5x, file
-    iteration_2_cell_1_0_BLOCKED_vis.npz, robot in (-1.69, 1.87), od sotto di lui 0.402):
-
-        direzione   spazio libero   rotazione necessaria   ruotabile
-          -180            1.30 m           -73 gradi          NO
-             0            1.09 m          +107 gradi          NO
-          -105 (muso)      0.00 m           +2 gradi          si
-        altre 21        0.00-0.24 m           --              NO
-
-    Zero direzioni utilizzabili: il robot era incastrato in un angolo, con le due corsie
-    aperte dietro rotazioni che in 0.40 m di spazio non si fanno. La ritirata sul tratto
-    percorso era l'unica uscita ed era giusta -- ma il codice e' arrivato a quella
-    conclusione scartando OTTO archi uno per uno e spendendo una ventina di scansioni,
-    mentre questo ventaglio costa 24 valutazioni del fronte. Lo stesso schema si e'
-    ripetuto al nodo 281 e, con rotazioni di +/-179 gradi, in cella (0,2).
+    Serve a riconoscere una trappola (zero direzioni utilizzabili: robot in un angolo, con
+    le corsie aperte dietro rotazioni che li' non si fanno) con 24 valutazioni del fronte,
+    invece di scoprirlo scartando gli archi uno per uno, una scansione dopo l'altra.
 
     Funzione pura. Restituisce la lista delle direzioni esaminate, ciascuna con:
     dir_deg (assoluta), rel_deg (rotazione necessaria), advance, reason, rotatable, usable.
@@ -2528,7 +2407,7 @@ def describe_escape_fan(dirs, max_rows=4):
 
 def is_trapped(robot_xy, robot_yaw, snap):
     """
-    2026-10-07. True se NESSUNA direzione del giro e' insieme percorribile e raggiungibile
+    True se NESSUNA direzione del giro e' insieme percorribile e raggiungibile
     girandosi: la condizione che l'utente ha posto per tornare indietro ("solo se non puo'
     piu' andare avanti ne' ruotare"), verificata in una scansione invece che in venti.
     Restituisce (trapped, dirs) -- dirs serve per il log, cosi' nei dati si vede perche'.
@@ -2539,12 +2418,10 @@ def is_trapped(robot_xy, robot_yaw, snap):
 
 def arrival_has_exit(snap, arrival_xy, heading, min_advance_m=ESCAPE_FAN_MIN_ADVANCE_M):
     """
-    2026-10-07. Dal punto in cui sto per fermarmi, ci sara' un'uscita?
+    Dal punto in cui sto per fermarmi, ci sara' un'uscita?
 
     Il fronte sicuro guarda la strada DAVANTI, non se dalla posa d'arrivo si potra'
-    ripartire: nella missione del 2026-10-07 14:5x il robot e' entrato in un angolo senza
-    uscite con un ultimo passo di 23 cm, ricostruito dalla ritirata
-    ((0.40, 1.76) -> (-0.71, 1.70) -> (-1.47, 1.79) -> (-1.69, 1.87)).
+    ripartire: con un passo corto il robot puo' entrare in un angolo senza uscite.
 
     Si valuta il ventaglio nel punto d'arrivo usando la fotografia CORRENTE: e' una stima
     (da li' il robot vedra' di piu'), ma e' la stessa informazione su cui si sta decidendo
@@ -2567,22 +2444,20 @@ def arrival_has_exit(snap, arrival_xy, heading, min_advance_m=ESCAPE_FAN_MIN_ADV
 
 def mark_edge_blocked_soft(prm, idx1, idx2):
     """
-    2026-10-07. Toglie un arco dal grafo ADESSO, senza condannarlo per sempre.
+    Toglie un arco dal grafo ADESSO, senza condannarlo per sempre.
 
     prm_graph.mark_edge_invalid() lo mette anche in `tracker_blocked_edges`, che non viene
-    MAI ricreato -- ne' da refresh_local_edge_weights ne' da build_graph. Giusto per un
+    MAI ricreato -- ne' dal refresh ne' dalla ricostruzione degli archi. Giusto per un
     blocco confermato da tre scansioni ferme; sbagliato per [SUBITO], che scarta dopo UNA
-    scansione: nella missione del 2026-10-07 14:5x otto archi attorno al nodo 3164 sono
-    finiti fuori dal grafo per tutto il resto della missione a causa di un ostacolo
-    marginale a 9 cm dal robot, con il risultato che quel nodo e' rimasto isolato.
+    scansione: un ostacolo marginale visto una volta isolerebbe un nodo per tutta la missione.
 
     Qui si tolgono solo l'arco e la sua validita': alla prossima rivalutazione, se i dati
     freschi dicono che e' libero, l'arco torna -- che e' esattamente il comportamento di
     rientro che refresh_local_edge_weights e' stato scritto per avere.
     """
     key = (min(idx1, idx2), max(idx1, idx2))
-    # 2026-10-08: scartare un arco cambia il piano, quindi al prossimo giro il refresh
-    # degli archi va fatto (vedi REFRESH A EVENTI nel ciclo di navigazione).
+    # Scartare un arco cambia il piano, quindi al prossimo giro il refresh degli archi va
+    # fatto (vedi REFRESH A EVENTI nel ciclo di navigazione).
     prm.needs_refresh = True
     prm.edge_validity[key] = False
     prm.traversed_edges.discard(key)
@@ -2593,28 +2468,15 @@ def mark_edge_blocked_soft(prm, idx1, idx2):
 def plan_cone_move(robot_xy, robot_yaw, snap, goal_xy, max_dyaw_deg=CONE_SWEEP_MAX_DEG,
                    step_deg=CONE_SWEEP_STEP_DEG, min_gain_m=CONE_MIN_GAIN_M):
     """
-    2026-10-07. "Ruota quanto PUOI, non quanto vorresti, e cammina."
+    "Ruota quanto PUOI, non quanto vorresti, e cammina."
 
     Quando la rotazione verso il prossimo nodo e' rifiutata, la domanda giusta non e' piu'
     "posso girarmi verso il nodo?" ma "qual e' la rotazione piu' grande che posso fare qui,
-    e in quale direzione dentro quel cono conviene andare?".
+    e in quale direzione dentro quel cono conviene andare?". In un corridoio stretto girarsi
+    richiede 1.21 m di diametro e non si puo', ma camminare si': spesso andare dritti, o
+    quasi, avvicina all'obiettivo piu' di qualunque arretramento.
 
-    Perche' serve, misurato sulla missione del 2026-10-07 14:0x (file
-    iteration_0_cell_0_1_replan_12_vis.npz, robot in (-2.28, 1.84), obiettivo a 1.26 m):
-
-        rotazione      avanzamento libero   ruotabile   distanza obiettivo dopo
-          0 gradi            1.30 m            si           0.50 m  (-0.76)
-        +22 gradi (voluta)     --              NO             --
-        arretrando 0.60 m      --              --           1.83 m  (+0.57)
-
-    Andare DRITTI, senza ruotare affatto, portava il robot da 1.26 a 0.50 m dall'obiettivo.
-    Il codice ha invece arretrato, sette volte di fila, 3.5 m -- e nel punto d'arrivo di
-    ogni arretramento la rotazione era comunque impossibile (margine -0.09 m), quindi quegli
-    arretramenti erano inutili prima ancora di essere fatti. Il robot era in un corridoio da
-    ~60 cm di corsia libera: lì girare richiede 1.21 m di diametro e NON si puo' fare, ma
-    camminare si', e il corridoio puntava a 22 gradi dall'obiettivo.
-
-    Criterio di scelta (deciso il 2026-10-07): fra le direzioni che AVVICINANO all'obiettivo
+    Criterio di scelta: fra le direzioni che AVVICINANO all'obiettivo
     di almeno min_gain_m, si prende quella con piu' spazio confermato libero. Non la piu'
     libera in assoluto: quella porterebbe il robot via dalla cella.
 
@@ -2659,12 +2521,10 @@ def plan_cone_move(robot_xy, robot_yaw, snap, goal_xy, max_dyaw_deg=CONE_SWEEP_M
 
 def retreat_would_help(snap, back_xy, robot_yaw, dyaw_deg):
     """
-    2026-10-07. L'arretramento di 0.60 m renderebbe possibile la rotazione che serve?
+    L'arretramento di 0.60 m renderebbe possibile la rotazione che serve?
 
-    Misurato sulla missione del 2026-10-07: nei due momenti esaminati la risposta era NO
-    (margine -0.09 m a (-2.28, 1.84) e -0.00 m a (-3.91, 1.74)), e il robot ha arretrato
-    comunque, sette volte, perche' nessuno gliel'aveva chiesto. In un corridoio la geometria
-    0.60 m piu' indietro e' la stessa: arretrare non apre spazio, lo sposta.
+    In un corridoio la geometria 0.60 m piu' indietro e' la stessa: arretrare non apre
+    spazio, lo sposta. Si arretra solo se da li' la rotazione diventa possibile.
 
     Si valuta la rotazione nel punto di ARRIVO usando la fotografia corrente -- e' una stima,
     perche' da li' il robot vedra' qualcosa di piu', ma e' la stessa informazione su cui si
@@ -2683,10 +2543,14 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                                      iteration=0,
                                      recordingInterface=None, verification_tracker=None, mobility_kwargs=None):
 
-    """Attempt to enter a target cell from the current robot position.
+    """Prova a entrare nella cella (target_row, target_col) dalla posizione attuale del robot.
 
-    mobility_kwargs: optional dict of gait overrides (locomotion_hint, ground_mu_hint,
-        swing_height) forwarded all the way down to movements.relative_move via navigate_to.
+    Scansione, aggiornamento delle mappe e del grafo, scelta del punto obiettivo, percorso,
+    poi il ciclo di navigazione con il fronte sicuro. True se il robot finisce dentro la cella.
+
+    mobility_kwargs: dict facoltativo che impone l'andatura (locomotion_hint, ground_mu_hint,
+        swing_height) per tutti i tratti, passato fino a movements.relative_move attraverso
+        navigate_to. Vuoto = andatura scelta tratto per tratto (select_mobility_params).
     """
     mobility_kwargs = mobility_kwargs or {}
 
@@ -2701,10 +2565,9 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         retreat_along_traveled_path(env, robot_state_client, command_client,
                                     mobility_kwargs=mobility_kwargs)
 
-    # Recuperiamo il client nativo dall'istanza della nostra classe LocalGrid
     local_grid_client = local_grid.local_grid_client
 
-    # 1. Richiedi TUTTI i layer necessari usando la nuova funzione
+    # 1. Tutti i layer necessari, in una richiesta
     grids_data, main_proto, all_grids_proto = local_grid.return_local_grid(
         ['obstacle_distance', 'terrain', 'terrain_valid'],
         robot_state_client
@@ -2714,26 +2577,26 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         print("[ERROR] Rilevamento griglie locali fallito.")
         return False
 
-    # 2. Estrai i valori dal dizionario
+    # 2. Valori dei layer
     pts = grids_data['obstacle_distance']['pts']
     cells_obstacle_dist = grids_data['obstacle_distance']['values']
     terrain_values = grids_data['terrain']['values']
     valid_values = grids_data['terrain_valid']['values']
 
-    # Estrai metadati geometrici
+    # Geometria della griglia
     num_x = main_proto.local_grid.extent.num_cells_x
     num_y = main_proto.local_grid.extent.num_cells_y
     cell_size = main_proto.local_grid.extent.cell_size
 
     # =========================================================================
-    # --- MODIFICA GLOBAL MAP: Gestione persistente della mappa di occupazione ---
+    # MAPPE GLOBALI: create alla prima scansione, poi accumulate per tutta la missione
     # =========================================================================
     if global_grid.global_occupancy_map is None:
         global_grid.global_occupancy_map = spotGrid.GlobalGrid(resolution=cell_size)
         print("[MAP] Inizializzata nuova mappa di occupazione globale persistente.")
 
-    # Mappa globale persistente delle altezze -- stessa risoluzione nativa della griglia
-    # locale (nessuna riduzione), stesso schema lazy-init della mappa di occupazione.
+    # Mappa globale delle altezze: stessa risoluzione nativa della griglia locale (nessuna
+    # riduzione), creata come quella di occupazione.
     if global_grid.global_terrain_map is None:
         global_grid.global_terrain_map = spotGrid.GlobalTerrainGrid(resolution=cell_size)
         print("[MAP] Inizializzata nuova mappa globale persistente del terreno (altezza).")
@@ -2752,7 +2615,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         pts, robot_x, robot_y, robot_yaw, num_x, num_y
     )
 
-    # Correzione terreno (fill invalidi + impronta robot) -- unica fonte di verità
+    # Correzione del terreno (celle non valide e impronta del robot): da qui in poi si usa
+    # solo terrain_real
     terrain_real, is_valid = local_grid.correct_terrain(
         terrain_values, valid_values, num_x, num_y,
         robot_footprint_mask=footprint_mask_2d, cell_size=cell_size,
@@ -2760,7 +2624,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
     )
     _log_ground_filter(local_grid, "scan-iniziale")
 
-    # Calcolo derivate geometriche (Pendenza e Rugosità) sul terreno GIA' corretto
+    # Pendenza e rugosita' sul terreno GIA' corretto
     grad_values, rough_values = local_grid.compute_gradient_and_roughness(
         terrain_real, valid_values, num_x, num_y, cell_size, is_valid=is_valid
     )
@@ -2768,8 +2632,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
     grad_for_prm = grad_values.copy()
     rough_for_prm = rough_values.copy()
 
-    # Fusione (VETO): pura logica di soglia, il terreno è già stato corretto sopra.
-    # Il gradiente NON entra più in questo veto per-cella -- vedi note in fuse_obstacle_mask().
+    # Fusione (VETO): pura logica di soglia, il terreno e' gia' stato corretto sopra.
+    # Il gradiente NON entra in questo veto per cella -- vedi fuse_obstacle_mask().
     obstacle_mask = local_grid.fuse_obstacle_mask(
         cells_obstacle_dist=cells_obstacle_dist,
         rough_values=rough_values,
@@ -2788,10 +2652,10 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                                is_valid, cells_obstacle_dist, (num_y, num_x),
                                (robot_x, robot_y, robot_yaw))
 
-    # Rendiamo la mappa terreno disponibile al PRM come fallback per la pendenza
+    # La mappa del terreno serve al PRM come ripiego per la pendenza
     prm_graph.set_global_terrain_map(global_terrain_map)
 
-    # Salvataggio periodico su disco delle mappe globali (.pkl)
+    # Mappe globali su disco (.pkl), a ogni tentativo
     if mission_folder is not None:
         pkl_map_path = os.path.join(mission_folder, "global_occupancy_map.pkl")
         global_map.save_map(pkl_map_path)
@@ -2830,7 +2694,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             print(f"[DATA SAVE] Impossibile salvare i file .npy: {e}")
 
     # ================================================================== #
-    # --- [CORREZIONE PRM] AGGIORNAMENTO LOCALE DI GRADIENTE E RUGOSITÀ ---
+    # DATI LOCALI NEL PRM: terreno, pendenza e rugosita' della scansione
     # ================================================================== #
     local_x_min, local_x_max = pts[:, 0].min(), pts[:, 0].max()
     local_y_min, local_y_max = pts[:, 1].min(), pts[:, 1].max()
@@ -2854,7 +2718,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         cell_size=cell_size
     )
 
-    # Aggiorna gradienti e rugosità SOLO per i nodi PRM che ricadono all'interno della local grid
+    # Gradiente e rugosita' dei nodi PRM dentro la griglia locale; quelli fuori tengono il
+    # valore che hanno (0.0 se non ne hanno ancora uno)
     for node_id, (nx, ny) in prm_graph.nodes.items():
         if local_x_min <= nx <= local_x_max and local_y_min <= ny <= local_y_max:
             dx = nx - grid_origin_x
@@ -2875,10 +2740,10 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             if node_id not in prm_graph.node_roughness:
                 prm_graph.node_roughness[node_id] = 0.0
 
-    # 2026-10-13: la scansione appena fatta entra anche nello scarto preliminare degli
-    # archi (prm_graph.LIVE_PREFILTER_OD_M): alla costruzione la mappa globale non ha ancora
+    # La scansione appena fatta entra anche nello scarto preliminare degli archi
+    # (prm_graph.LIVE_PREFILTER_OD_M): alla costruzione la mappa globale non ha ancora
     # confermato niente di questo posto, e gli archi che attraversano gli ostacoli appena
-    # visti restavano tutti validi. Qui obstacle_distance e' quella grezza: la fotografia
+    # visti resterebbero validi. Qui obstacle_distance e' quella grezza: la fotografia
     # filtrata nasce nel ciclo di navigazione.
     try:
         prm_graph.set_live_obstacles(
@@ -2891,9 +2756,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
 
     t_build = time.perf_counter()
     # ATTENZIONE AI NOMI: qui `prm_graph` e' il PARAMETRO della funzione (l'istanza di PRM),
-    # non il modulo omonimo. Se i nodi vengono dal reticolo (vedi _build_mission_prm) le
-    # coppie candidate sono gia' note e si salta l'appaiamento geometrico; i veti e i pesi
-    # sono gli stessi, li calcola lo stesso PRM._evaluate_and_add_edge di build_graph.
+    # non il modulo omonimo. Le coppie candidate sono quelle del reticolo (vedi
+    # _build_mission_prm); veti e pesi li calcola PRM._evaluate_and_add_edge.
     _rebuild_prm_edges(prm_graph, global_map)
     _timing_add('costruzione grafo', time.perf_counter() - t_build)
     _upd = getattr(getattr(prm_graph, 'mission_graph', None), 'last_update', None)
@@ -2915,7 +2779,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         robot_x, robot_y, env, target_row, target_col, pts, cells_obstacle_dist, sampler,
         global_map=global_map)
 
-    # 2026-10-13: l'obiettivo di questo tentativo, per il recupero subito dopo un fallimento
+    # L'obiettivo di questo tentativo, per il recupero subito dopo un fallimento
     # (vedi RECOVERY_SAME_GOAL_M nel ciclo principale).
     env._last_attempt_goal = (None if target_x is None or target_y is None
                               else (float(target_x), float(target_y)))
@@ -2936,16 +2800,16 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
     _restrict_planning_to_explored_cells(prm_graph, env, target_row, target_col,
                                          (robot_x, robot_y))
 
-    # --- Nodi di partenza e di arrivo: dal 2026-10-08 nodi ESISTENTI del grafo ------------
-    # (prm_graph.ALLOW_NEW_STOP_NODES = False): add_stop_node aggancia la posizione al nodo
-    # adatto invece di crearne uno. L'obiettivo e' gia' un nodo del reticolo (lo sceglie
-    # find_best_point_in_cell fra i punti del campionatore).
+    # --- Nodi di partenza e di arrivo: nodi ESISTENTI del grafo ---------------------------
+    # add_stop_node aggancia la posizione al nodo adatto invece di crearne uno.
+    # L'obiettivo e' gia' un nodo del reticolo (lo sceglie find_best_point_in_cell fra i
+    # punti del campionatore).
     robot_node_id = prm_graph.add_stop_node(
         robot_x, robot_y, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
         label="partenza tentativo")
     prm_graph.set_robot_node(robot_node_id, 0.0)
     # Briciola GraphNav del punto di partenza del tentativo: e' quello a cui serve poter
-    # tornare se la cella si rivela un vicolo cieco (2026-10-07).
+    # tornare se la cella si rivela un vicolo cieco.
     graphnav_drop_breadcrumb(env, recordingInterface, robot_state_client, robot_node_id,
                              target_row, target_col, force=True)
     goal_id = prm_graph.add_stop_node(
@@ -2991,18 +2855,17 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
     )
 
     # ===================================================================================
-    # CICLO DI NAVIGAZIONE CON IL FRONTE SICURO (2026-10-06, rivisto il 2026-10-07)
+    # CICLO DI NAVIGAZIONE CON IL FRONTE SICURO
     #
     # A ogni giro: scansione fresca, aggiornamento mappe e PRM, eventuale ripianificazione,
     # poi il FRONTE: fin dove il percorso e' confermato libero adesso. Il robot avanza
-    # fino a li' (meno meta' corpo e margine), sul primo tratto del percorso.
-    #
-    # 2026-10-07, tre cambiamenti:
-    #   - il muso punta SEMPRE il prossimo punto: la marcia di traverso e' eliminata, e se
-    #     la rotazione non e' possibile si arretra dritti (vedi plan_straight_retreat);
+    # fino a li' (meno meta' corpo e margine), lungo il percorso.
+    #   - il muso punta SEMPRE il prossimo punto: niente marcia di traverso; se la
+    #     rotazione non e' possibile si prova il cono, poi l'arretramento dritto (vedi
+    #     plan_cone_move e plan_straight_retreat);
     #   - la rotazione si giudica sulle celle davvero spazzate (spotGrid.rotation_is_clear),
     #     non sul cerchio circoscritto;
-    #   - se l'obiettivo risulta irraggiungibile sui dati freschi se ne scegle un altro
+    #   - se l'obiettivo risulta irraggiungibile sui dati freschi se ne sceglie un altro
     #     nella cella, invece di aspettare e dichiarare un blocco (goal_still_reachable).
     # ===================================================================================
     replan_counter = 0
@@ -3011,9 +2874,9 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
     block_replans = 0
     loop_iter = 0
     rotation_fails = {}     # tratto -> quante volte la rotazione verso di esso e' stata rifiutata
-    rotation_discards = 0   # 2026-10-08: scarti per rifiuto di rotazione in QUESTO tentativo
-    best_goal_dist = float('inf')   # 2026-10-08 sera: per azzerare i rifiuti solo sui PROGRESSI
-    idle_loops = 0          # 2026-10-08: giri consecutivi senza spostarsi (vedi MAX_IDLE_LOOPS)
+    rotation_discards = 0   # scarti per rifiuto di rotazione in QUESTO tentativo
+    best_goal_dist = float('inf')   # per azzerare i rifiuti solo sui PROGRESSI
+    idle_loops = 0          # giri consecutivi senza spostarsi (vedi MAX_IDLE_LOOPS)
     last_xy = None          # posizione al giro precedente, per contare i giri a vuoto
     rotation_fail_xy = {}   # tratto -> posizione del robot all'ultimo rifiuto
     retreats_in_a_row = 0   # arretramenti consecutivi: azzerato da un avanzamento vero
@@ -3021,7 +2884,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
     arrival_refusals = 0    # passi rifiutati perche' la posa d'arrivo non ha uscite
     goal_repicks = 0        # quante volte si e' riscelto il punto obiettivo
     tried_goals = []        # punti obiettivo gia' provati e risultati irraggiungibili
-    trap_state = {'n': 0}   # 2026-10-13: ritorni indietro in QUESTO tentativo, mai azzerato (vedi _trap_backtrack)
+    trap_state = {'n': 0}   # ritorni indietro in QUESTO tentativo, mai azzerato (vedi _trap_backtrack)
 
     while path_waypoints and len(path_waypoints) > 0:
         loop_iter += 1
@@ -3046,19 +2909,17 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         robot_yaw = np.arctan2(2.0 * (robot_quat.w * robot_quat.z + robot_quat.x * robot_quat.y),
                                1.0 - 2.0 * (robot_quat.y ** 2 + robot_quat.z ** 2))
 
-        # --- Guardia generica anti-stallo (2026-10-08): quanti giri di fila senza spostarsi.
+        # --- Guardia generica anti-stallo: quanti giri di fila senza spostarsi.
         if last_xy is not None and float(np.hypot(robot_x - last_xy[0], robot_y - last_xy[1])) < IDLE_MOVE_M:
             idle_loops += 1
         else:
             idle_loops = 0
-        # Revisione 2026-10-08 sera: i rifiuti di rotazione si azzerano solo quando il robot
-        # si AVVICINA davvero all'obiettivo (20 cm meglio del meglio raggiunto finora), non
-        # quando si sposta e basta. Prima versione di questa revisione: azzeramento a ogni
-        # spostamento. Il banco di prova (S11, corridoio da 0.80 m con l'obiettivo dietro)
-        # ha mostrato perche' e' sbagliato: non potendo girarsi verso ovest, il pianificatore
-        # portava il robot un nodo a EST e riprovava da li', e cosi' via -- 35 scansioni e
-        # 4.5 m percorsi allontanandosi dall'obiettivo, con il contatore sempre a zero.
-        # Muoversi non e' fare progressi.
+        # I rifiuti di rotazione si azzerano solo quando il robot si AVVICINA davvero
+        # all'obiettivo (20 cm meglio del meglio raggiunto finora), non quando si sposta e
+        # basta: non potendo girarsi, il pianificatore puo' portare il robot un nodo piu' in
+        # la' dalla parte sbagliata e riprovare da li', e cosi' via, allontanandosi con il
+        # contatore sempre a zero (test_e2e_loop.py, scenario S11). Muoversi non e' fare
+        # progressi.
         d_goal_now = float(np.hypot(robot_x - target_x, robot_y - target_y))
         if d_goal_now < best_goal_dist - 0.20:
             best_goal_dist = d_goal_now
@@ -3074,7 +2935,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 verification_tracker.clear_path()
             return False
 
-        # 1. LETTURA AGGIORNATA DELLA SCENA LOCALE (fetch fresco, PRIMA di tutto il resto)
+        # 1. SCANSIONE FRESCA, prima di tutto il resto
         grids_data_up, main_proto_up, all_grids_proto_up = local_grid.return_local_grid(
             ['obstacle_distance', 'terrain', 'terrain_valid'],
             robot_state_client
@@ -3138,7 +2999,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             is_valid_up, cells_obs_up, (num_y_up, num_x_up), (robot_x, robot_y, robot_yaw))
         t_maps = time.perf_counter()
 
-        # 2. iniettiamo i dati locali freschi nel PRM e ripianifichiamo dal nodo attuale
+        # 2. Dati locali freschi nel PRM, poi eventuale ripianificazione dal nodo attuale
         grad_up_2d = grad_up.reshape((num_y_up, num_x_up))
         rough_up_2d = rough_up.reshape((num_y_up, num_x_up))
         terrain_up_2d = terrain_real_up.reshape((num_y_up, num_x_up))
@@ -3157,8 +3018,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         )
 
         # Fotografia della scansione appena fatta: serve gia' qui -- allo scarto preliminare
-        # degli archi nel refresh (2026-10-13, vedi prm_graph.LIVE_PREFILTER_OD_M), a quello
-        # dei nodi negli ostacoli -- e poi al fronte sicuro. Va creata UNA volta sola per scansione:
+        # degli archi nel refresh (vedi prm_graph.LIVE_PREFILTER_OD_M), a quello dei nodi
+        # negli ostacoli -- e poi al fronte sicuro. Va creata UNA volta sola per scansione:
         # make_grid_snapshot aggiorna anche il filtro temporale degli ostacoli.
         snap = arcVerification.make_grid_snapshot(
             cells_obs_up, rough_up, is_valid_up, valid_up, terrain_real_up,
@@ -3172,20 +3033,17 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         _update_clearance_map(global_map, pts_up, snap, is_valid_up, unwritten_up,
                               _gm_core_up, (robot_x, robot_y))
 
-        # 2026-10-13: lo scarto preliminare degli archi legge la obstacle_distance FILTRATA
+        # Lo scarto preliminare degli archi legge la obstacle_distance FILTRATA
         # (mediana su 3 scansioni + isteresi), la stessa del fronte.
         prm_graph.set_live_obstacles(snap.obstacle_dist, snap.seen, snap.origin_x, snap.origin_y,
                                      snap.cell_size, robot_x, robot_y, robot_yaw)
 
-        # --- REFRESH A EVENTI (2026-10-08) --------------------------------------------
-        # Prima: refresh_local_edge_weights a OGNI giro di ciclo. Pesi e pendenze degli
-        # archi cambiano solo quando cambiano i dati sotto di essi, cioe' quando la
-        # finestra si muove: a robot fermo stiamo ricalcolando per riottenere gli stessi
-        # numeri. Misurato sulla missione delle 16:35: 22 scansioni su 46 (48%) hanno uno
-        # spostamento sotto i 25 cm -- le riscansioni di conferma del blocco e i giri senza
-        # movimento -- e a 0.43 s l'una sono ~9.5 s buttati, quanto costava tutto il grafo
-        # prima.
-        # Ora si rinfresca solo quando serve: alla fine di un MOVIMENTO (completato,
+        # --- REFRESH A EVENTI ---------------------------------------------------------
+        # Pesi e pendenze degli archi cambiano solo quando cambiano i dati sotto di essi,
+        # cioe' quando la finestra si muove: a robot fermo un refresh ricalcolerebbe gli
+        # stessi numeri, e circa meta' delle scansioni sono riscansioni da fermo (conferme
+        # di blocco, giri senza movimento).
+        # Si rinfresca solo quando serve: alla fine di un MOVIMENTO (completato,
         # interrotto o fallito, anche se ha attraversato piu' nodi e archi del PRM) e dopo
         # gli EVENTI che cambiano il piano (blocco confermato, arco scartato,
         # ripianificazione, obiettivo riscelto, ritorno con GraphNav, caduta).
@@ -3216,8 +3074,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             MISSION_STATS['prm_refresh_skipped'] += 1
 
 
-        # Nodi DENTRO gli ostacoli: fuori dal grafo (2026-10-07). Vedi
-        # prune_prm_nodes_in_obstacles -- gli archi erano gia' vetati, i nodi mai.
+        # Nodi DENTRO gli ostacoli: fuori dal grafo (vedi prune_prm_nodes_in_obstacles).
         pruned_nodes = prune_prm_nodes_in_obstacles(prm_graph, snap, global_map=global_map)
         if pruned_nodes:
             MISSION_STATS['nodes_pruned'] += len(pruned_nodes)
@@ -3231,14 +3088,11 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         _log_clearance_gap(prm_graph, global_map)
 
         # Archi gia' rifiutati per rotazione DA QUESTO NODO: restano fuori finche' il robot
-        # non si sposta (2026-10-07). Lo scarto e' soft, quindi refresh_local_edge_weights li
-        # rimetteva in gioco a ogni giro: nella missione del 2026-10-07 16:39, cella (1,1), il
-        # robot e' rimasto fermo su 3169 alternando 3169->142 e 3169->218 per 112 giri
-        # ("tentativo 56/2"), senza mai arrivare alla ritirata. Spostandosi nasce un nodo di
-        # sosta nuovo, la chiave cambia e gli archi tornano valutabili da li'.
-        # Dal 2026-10-08 non nascono piu' nodi di sosta: il robot puo' restare agganciato
-        # allo stesso nodo anche dopo essersi spostato, quindi lo scarto vale solo finche' il
-        # robot e' dove la rotazione e' stata rifiutata.
+        # non si sposta. Lo scarto e' soft, quindi refresh_local_edge_weights li rimetterebbe
+        # in gioco a ogni giro, e il robot potrebbe restare fermo alternando due archi
+        # rifiutati senza mai arrivare alla ritirata. Il robot puo' restare agganciato allo
+        # stesso nodo anche dopo essersi spostato, quindi lo scarto vale solo finche' il robot
+        # e' dove la rotazione e' stata rifiutata.
         for (from_id, to_id), n_fails in rotation_fails.items():
             fx, fy = rotation_fail_xy.get((from_id, to_id), (robot_x, robot_y))
             if (from_id == robot_node_id and n_fails > 0
@@ -3275,7 +3129,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                     save_path=replan_save_path, prm_graph=prm_graph, chosen_path=full_path_coords,
                     cells_obstacle_dist=cells_obs_up, valid_values=valid_up,
                     grad_values=grad_up, rough_values=rough_up,
-                    include_diagnostics=False  # lightweight: main view + global map only
+                    include_diagnostics=False  # leggero: vista principale e mappa globale
                 )
             else:
                 print(f"[REPLAN STABILE] Percorso invariato da {robot_node_id} a {goal_id} "
@@ -3287,7 +3141,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         t_prm = time.perf_counter()
 
         # 3. FRONTE SICURO sulla scansione appena fatta ---------------------------------
-        # La scorciatoia rispetta gli archi gia' scartati (2026-10-07): vedi shortcut_index.
+        # La scorciatoia rispetta gli archi gia' scartati: vedi shortcut_index.
         k_short = shortcut_index((robot_x, robot_y), path_waypoints, snap, global_map,
                                  prm=prm_graph, robot_node_id=robot_node_id)
         if k_short > 0:
@@ -3306,13 +3160,12 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
 
         decision = decide_next_move((robot_x, robot_y), path_waypoints, frontier, no_progress)
         next_node_id, next_x, next_y = path_waypoints[0]
-        keep_heading = False     # mai piu' True: tenuto per i dati salvati e per navigate_to
+        keep_heading = False     # sempre False (niente traverso): resta nei dati salvati e in navigate_to
 
-        # Pacchetto della scansione salvato QUI, prima del blocco rotazione (2026-10-07): prima
-        # stava dopo, e i rami di rotazione rifiutata/cono/arretramento/trappola fanno
-        # `continue` prima di arrivarci -- nella missione del 2026-10-07 16:50 nessuno dei 17
-        # rifiuti di rotazione ha lasciato una scansione su disco. Il rifiuto si ricalcola
-        # offline da obstacle_distance, robot_xyz, robot_yaw e decision_target.
+        # Pacchetto della scansione salvato QUI, prima del blocco rotazione: i rami di
+        # rotazione rifiutata/cono/arretramento/trappola fanno `continue`, e salvando dopo
+        # quelle scansioni non finirebbero su disco. Il rifiuto si ricalcola offline da
+        # obstacle_distance, robot_xyz, robot_yaw e decision_target.
         if SAVE_SCAN_BUNDLES and mission_folder is not None:
             gf = local_grid.last_ground_filter
             shape_up = (num_y_up, num_x_up)
@@ -3324,11 +3177,11 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 terrain_raw=np.asarray(terrain_up, dtype=np.float32).reshape(shape_up),
                 terrain_valid_raw=np.asarray(valid_up, dtype=np.float32).reshape(shape_up),
                 obstacle_distance=np.asarray(cells_obs_up, dtype=np.float32).reshape(shape_up),
-                # 2026-10-12: il layer su cui il fronte DECIDE (mediana sulle ultime letture +
-                # isteresi, vedi arcVerification._ObstacleHistory) e la maschera del latch.
-                # Senza questi due un rigioco offline non puo' riprodurre i blocchi che
-                # nascono dalle letture del thread durante il movimento (scansione 13 del
-                # 12-10 10:36). Stesso orientamento degli altri: (num_y, num_x), riga = y.
+                # Il layer su cui il fronte DECIDE (mediana sulle ultime letture + isteresi,
+                # vedi arcVerification._ObstacleHistory) e la maschera del latch. Senza questi
+                # due un rigioco offline non puo' riprodurre i blocchi che nascono dalle
+                # letture del thread durante il movimento. Stesso orientamento degli altri:
+                # (num_y, num_x), riga = y.
                 obstacle_distance_filtered=np.asarray(snap.obstacle_dist, dtype=np.float32),
                 blocked_latch=(np.zeros(shape_up, bool) if snap.blocked_latch is None
                                else np.asarray(snap.blocked_latch, dtype=bool)),
@@ -3360,12 +3213,11 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 decision_target=np.array(decision.get('target', (np.nan, np.nan)), dtype=np.float64))
             MISSION_STATS['scan_bundles'] += 1
 
-        # 4. ROTAZIONE (riscritta il 2026-10-07) -----------------------------------------
+        # 4. ROTAZIONE -------------------------------------------------------------------
         # Il muso punta SEMPRE il punto da raggiungere. Se la rotazione non e' possibile NON
-        # si cammina di traverso (di traverso Spot e' largo 1.10 m e il fronte pretende 0.59
-        # invece di 0.30: il vecchio ripiego rendeva il robot piu' largo proprio dove lo
-        # spazio e' poco). Si arretra dritti lungo l'asse del corpo e al giro dopo si riprova
-        # da li'; alla seconda volta sullo stesso tratto il tratto si scarta.
+        # si cammina di traverso (vedi ROTAZIONE E ARRETRAMENTO in cima al file). Nell'ordine:
+        # avanzare dentro il cono di rotazione possibile, arretrare dritti se da li' la
+        # rotazione diventa possibile, riconoscere una trappola, scartare il tratto.
         if decision['kind'] == 'move':
             rot = rotation_plan(robot_yaw, (robot_x, robot_y), decision['target'],
                                 frontier['od_robot'], snap=snap)
@@ -3383,10 +3235,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                       f"{rotation_fails[edge_key]}/{MAX_ROTATION_FAILS_SAME_EDGE}.")
 
                 # --- 4a. PRIMA DI TUTTO: posso ANDARE AVANTI dentro il cono di rotazione che
-                # mi e' concesso? (2026-10-07) E' la correzione piu' importante delle
-                # quattro: nella missione del 2026-10-07 andare dritti, senza ruotare,
-                # avvicinava l'obiettivo di 0.76 m, e il robot ha arretrato perdendone 0.57.
-                # Vedi plan_cone_move per i numeri misurati.
+                # mi e' concesso? Spesso andare dritti, o quasi, avvicina all'obiettivo piu'
+                # di qualunque arretramento (vedi plan_cone_move).
                 cone_goal, _ = arcVerification.point_along(polyline, CONE_PATH_LOOKAHEAD_M)
                 cone = plan_cone_move((robot_x, robot_y), robot_yaw, snap, cone_goal)
                 if cone is not None:
@@ -3419,7 +3269,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                     no_progress = 0
                     continue
 
-                # --- 4b. Arretrare, ma SOLO se serve a qualcosa (2026-10-07).
+                # --- 4b. Arretrare, ma SOLO se serve a qualcosa (vedi retreat_would_help).
                 back = plan_straight_retreat((robot_x, robot_y), robot_yaw, snap)
                 helps, margin_back = (False, None)
                 if back is not None:
@@ -3466,9 +3316,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                           f"combinare niente: smetto di arretrare.")
 
                 # Ne' il cono ne' l'arretramento: e' una trappola o solo un arco sbagliato?
-                # (2026-10-07) Se e' una trappola non ha senso scartare archi: in cella (0,2)
-                # ne sono stati scartati quattro di fila, tutti chiedendo rotazioni di +/-179
-                # gradi, prima di arrivare comunque alla ritirata.
+                # Se e' una trappola non ha senso scartare archi uno dopo l'altro: si torna
+                # indietro subito.
                 trapped_rot, fan_rot = is_trapped((robot_x, robot_y), robot_yaw, snap)
                 n_us_r, fan_txt_r = describe_escape_fan(fan_rot)
                 if trapped_rot:
@@ -3479,7 +3328,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                           f"tratto da cui sono venuto.")
                     if verification_tracker is not None:
                         verification_tracker.clear_path()
-                    # Ritorno con GraphNav invece che a zampe all'indietro (2026-10-07): si torna di un
+                    # Ritorno con GraphNav invece che a zampe all'indietro: si torna di un
                     # waypoint, si riprova a pianificare da li', e cosi' via fino a
                     # GRAPHNAV_MAX_BACKTRACK_HOPS. La ritirata a zampe resta dentro come ultima rete.
                     esc = _trap_backtrack(
@@ -3500,9 +3349,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                     return False
                 print(f"[ROTAZIONE] Direzioni utilizzabili da qui: {n_us_r}/{len(fan_rot)} "
                       f"({fan_txt_r}).")
-                # 2026-10-08: limite per TENTATIVO, non per coppia di nodi. Vedi
-                # MAX_ROTATION_DISCARDS: la coppia cambia a ogni ripianificazione, quindi il
-                # vecchio limite non scattava mai e si scartavano archi a raffica stando fermi.
+                # Limite per TENTATIVO, non per coppia di nodi (vedi MAX_ROTATION_DISCARDS).
                 rotation_discards += 1
                 if rotation_discards > MAX_ROTATION_DISCARDS:
                     print(f"[ROTAZIONE] Gia' {rotation_discards - 1} tratti scartati in questo "
@@ -3528,12 +3375,10 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                     return False
                 print(f"[ROTAZIONE] Scarto il tratto {robot_node_id}->{next_node_id}: "
                       f"richiede di girarsi dove non c'e' spazio DA QUI. Ripianifico.")
-                # Scarto NON permanente (2026-10-07): un rifiuto di rotazione dipende dalla POSA
-                # del robot, non dall'arco -- lo stesso arco, affrontato da un altro punto o con
-                # un altro muso, puo' essere percorribilissimo. Nella missione del 2026-10-07
-                # 14:5x in cella (0,2) quattro archi sono stati condannati per sempre perche'
-                # chiedevano rotazioni di +/-179 gradi da un punto stretto. Permanente resta solo
-                # cio' che e' confermato da tre scansioni ferme o da un fallimento fisico.
+                # Scarto NON permanente: un rifiuto di rotazione dipende dalla POSA del robot,
+                # non dall'arco -- lo stesso arco, affrontato da un altro punto o con un altro
+                # muso, puo' essere percorribilissimo. Permanente resta solo cio' che e'
+                # confermato da tre scansioni ferme o da un fallimento fisico.
                 mark_edge_blocked_soft(prm_graph, robot_node_id, next_node_id)
                 new_ids = prm_graph.find_path_dijkstra(robot_node_id, goal_id)
                 if new_ids is not None:
@@ -3545,7 +3390,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                       "Mi stacco arretrando e rimando la cella.")
                 if verification_tracker is not None:
                     verification_tracker.clear_path()
-                # Ritorno con GraphNav invece che a zampe all'indietro (2026-10-07): si torna di un
+                # Ritorno con GraphNav invece che a zampe all'indietro: si torna di un
                 # waypoint, si riprova a pianificare da li', e cosi' via fino a
                 # GRAPHNAV_MAX_BACKTRACK_HOPS. La ritirata a zampe resta dentro come ultima rete.
                 esc = _trap_backtrack(
@@ -3590,13 +3435,10 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             break
 
         if decision['kind'] == 'wait':
-            # 2026-10-07 -- Prima di insistere: l'obiettivo e' ancora raggiungibile sui dati
-            # FRESCHI? Il punto viene scelto all'inizio del tentativo, da metri di distanza,
-            # quando la cella e' ancora tutta ignota; arrivandoci puo' risultare a ridosso di
-            # un muro, e allora nessun numero di scansioni lo rendera' raggiungibile. Nella
-            # missione del 2026-10-07 l'obiettivo aveva obstacle_distance 0.27 contro i 0.30
-            # richiesti dal fronte, e il robot si e' bloccato a 63 cm da esso mentre entro
-            # 80 cm c'erano 808 celle valide.
+            # Prima di insistere: l'obiettivo e' ancora raggiungibile sui dati FRESCHI? Il
+            # punto viene scelto all'inizio del tentativo, da metri di distanza, quando la
+            # cella e' ancora tutta ignota; arrivandoci puo' risultare a ridosso di un muro,
+            # e allora nessun numero di scansioni lo rendera' raggiungibile.
             if goal_repicks < MAX_BLOCK_REPLANS and not goal_still_reachable(snap, target_x, target_y):
                 goal_repicks += 1
                 need_refresh = True          # piano cambiato: vedi REFRESH A EVENTI
@@ -3632,22 +3474,12 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 else:
                     print("[TARGET] Nessun altro punto valido in questa cella.")
 
-            # 2026-10-07 -- RIPIANIFICA SUBITO, alla PRIMA cella bloccante, invece di
-            # restare fermo tre scansioni sullo stesso arco.
-            #
-            # Prima: il fronte diceva "ostacolo", il codice stampava "Mantengo il percorso
-            # precedente" e riguardava da fermo fino alla conferma. Ma con una soglia secca
-            # e il rumore misurato su obstacle_distance (1.5 cm tipici, 7.3 cm di punta,
-            # contro un margine di 5 cm) quelle tre scansioni erano tre lanci di moneta
-            # sulla stessa scena: nella missione del 2026-10-07 fra la scansione 003 e la
-            # 004, robot FERMO e percorso IDENTICO, la stessa cella ha letto 0.296 e poi
-            # 0.336 su soglia 0.300, e il verdetto e' passato da "ostacolo, 0.04 m" a
-            # "libero, 1.35 m". Aspettare non aggiungeva informazione, aggiungeva rumore.
-            #
-            # Ora quel rumore e' filtrato (mediana + isteresi in arcVerification), quindi
-            # una cella bloccante e' un'informazione da usare: l'arco si scarta e si cerca
-            # subito un percorso che passi da un'altra parte. Le scansioni da ferma
-            # restano come ultima rete, per dichiarare la cella irraggiungibile.
+            # RIPIANIFICA SUBITO, alla PRIMA cella bloccante, invece di restare fermo tre
+            # scansioni sullo stesso arco. Il rumore di obstacle_distance e' gia' filtrato
+            # (mediana + isteresi in arcVerification), quindi una cella bloccante e'
+            # un'informazione da usare: l'arco si scarta e si cerca subito un percorso che
+            # passi da un'altra parte. Le scansioni da fermo restano come ultima rete, per
+            # dichiarare la cella irraggiungibile.
             if (early_replans < MAX_EARLY_REPLANS
                     and frontier['reason'] in ('ostacolo', 'rugosita', 'pendenza')
                     and path_waypoints):
@@ -3658,11 +3490,9 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 eb = path_waypoints[min(seg_blk, len(path_waypoints) - 1)][0]
                 sx_b, sy_b = frontier['stop_xy']
 
-                # Prima di scartare l'ennesimo arco: sono in trappola? (2026-10-07)
-                # Nella missione del 2026-10-07 14:5x otto archi uscenti dallo stesso nodo
-                # sono stati scartati uno per uno, tutti fermati dallo stesso ostacolo a 9 cm
-                # dal robot -- tutti i 25 archi di quel nodo gli passavano accanto. Il blocco
-                # era un LUOGO, non un arco. Il ventaglio lo vede in una scansione.
+                # Prima di scartare l'ennesimo arco: sono in trappola? Se tutti gli archi del
+                # nodo passano accanto allo stesso ostacolo, il blocco e' un LUOGO, non un
+                # arco, e scartarli uno per uno non serve. Il ventaglio lo vede in una scansione.
                 trapped, fan = is_trapped((robot_x, robot_y), robot_yaw, snap)
                 n_us, fan_txt = describe_escape_fan(fan)
                 if trapped:
@@ -3673,7 +3503,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                           f"sono venuto, senza scartare altri archi.")
                     if verification_tracker is not None:
                         verification_tracker.clear_path()
-                    # Ritorno con GraphNav invece che a zampe all'indietro (2026-10-07): si torna di un
+                    # Ritorno con GraphNav invece che a zampe all'indietro: si torna di un
                     # waypoint, si riprova a pianificare da li', e cosi' via fino a
                     # GRAPHNAV_MAX_BACKTRACK_HOPS. La ritirata a zampe resta dentro come ultima rete.
                     esc = _trap_backtrack(
@@ -3752,7 +3582,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 except Exception as e:
                     print(f"[DATA SAVE] Impossibile salvare i dati del blocco: {e}")
 
-            # Trappola? (2026-10-07) Se non c'e' nessuna direzione utilizzabile, ripianificare
+            # Trappola? Se non c'e' nessuna direzione utilizzabile, ripianificare
             # e' inutile per costruzione: il problema non e' l'arco, e' il posto.
             trapped_blk, fan_blk = is_trapped((robot_x, robot_y), robot_yaw, snap)
             n_us_b, fan_txt_b = describe_escape_fan(fan_blk)
@@ -3763,7 +3593,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                       "ripercorro il tratto da cui sono venuto.")
                 if verification_tracker is not None:
                     verification_tracker.clear_path()
-                # Ritorno con GraphNav invece che a zampe all'indietro (2026-10-07): si torna di un
+                # Ritorno con GraphNav invece che a zampe all'indietro: si torna di un
                 # waypoint, si riprova a pianificare da li', e cosi' via fino a
                 # GRAPHNAV_MAX_BACKTRACK_HOPS. La ritirata a zampe resta dentro come ultima rete.
                 esc = _trap_backtrack(
@@ -3785,7 +3615,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
 
             # Qui il blocco e' confermato da FRONTIER_BLOCK_CONFIRM_SCANS scansioni ferme:
             # l'invalidazione resta permanente (a differenza di [SUBITO], vedi
-            # mark_edge_blocked_soft). Eccezione (2026-10-08): sul primo tratto, se il robot
+            # mark_edge_blocked_soft). Eccezione: sul primo tratto, se il robot
             # non e' sul nodo a cui e' agganciato, il tratto bloccato e' robot->nodo, non
             # l'arco del grafo: si scarta l'arco solo per ora.
             if k == 0 and not _robot_on_node(prm_graph, edge_a, robot_x, robot_y):
@@ -3812,7 +3642,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             if verification_tracker is not None:
                 verification_tracker.clear_path()
 
-            # Ritorno con GraphNav invece che a zampe all'indietro (2026-10-07): si torna di un
+            # Ritorno con GraphNav invece che a zampe all'indietro: si torna di un
             # waypoint, si riprova a pianificare da li', e cosi' via fino a
             # GRAPHNAV_MAX_BACKTRACK_HOPS. La ritirata a zampe resta dentro come ultima rete.
             esc = _trap_backtrack(
@@ -3848,10 +3678,9 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         move_x, move_y = decision['target']
         is_partial_step = not decision['full']
 
-        # --- Controllo preventivo sulla posa d'arrivo (2026-10-07) -------------------------
+        # --- Controllo preventivo sulla posa d'arrivo --------------------------------------
         # Solo per i passi corti o verso spazi stretti: sono quelli con cui si entra negli
-        # angoli senza uscita. Nella missione del 2026-10-07 14:5x l'ultimo passo prima della
-        # trappola era di 23 cm. Vedi arrival_has_exit.
+        # angoli senza uscita. Vedi arrival_has_exit.
         step_len = float(np.hypot(move_x - robot_x, move_y - robot_y))
         r_a, c_a, in_a = arcVerification._cells(snap, np.array([move_x]), np.array([move_y]))
         od_arrival = float(snap.obstacle_dist[r_a[0], c_a[0]]) if in_a[0] else float('inf')
@@ -3875,12 +3704,9 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                     full_path_coords = [prm_graph.get_node_position(nid) for nid in new_ids]
                     no_progress = 0
                     continue
-                # 2026-10-08 (missione 08-10 16:11): prima qui si andava "comunque". A
-                # (60.05, -31.06) il controllo aveva visto 0/24 uscite, il robot ci e' entrato,
-                # si e' trovato in trappola e ha dovuto tornare indietro con GraphNav per 3
-                # waypoint. Sapere in anticipo che il punto d'arrivo e' un vicolo cieco e
-                # andarci lo stesso non ha senso: si rinuncia a questo lato della cella, che
-                # verra' ritentata piu' avanti da un altro (finalize_or_defer_blocked_cell).
+                # Sapere in anticipo che il punto d'arrivo e' un vicolo cieco e andarci lo
+                # stesso non ha senso: si rinuncia a questo lato della cella, che verra'
+                # ritentata piu' avanti da un altro (finalize_or_defer_blocked_cell).
                 print(f"[ARRIVO] Nessuna alternativa nel grafo e il punto d'arrivo non ha "
                       f"uscite: non ci vado. Rinuncio a entrare in ({target_row},{target_col}) "
                       f"da questo lato.")
@@ -3915,9 +3741,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 #  - navigate_to calcola l'angolo di rotazione dall'orientamento che riceve,
                 #    e relative_move ruota RISPETTO ALLA POSA ATTUALE: con l'orientamento
                 #    della scansione iniziale (prima della gamba 0) il robot ruoterebbe
-                #    dell'angolo sbagliato e camminerebbe fuori dal percorso verificato.
-                #    Revisione del 2026-10-08 sera: il banco di prova, reso fedele, misurava
-                #    18 cm di scarto su un solo movimento a 2 nodi;
+                #    dell'angolo sbagliato e camminerebbe fuori dal percorso verificato;
                 #  - la distanza da percorrere si calcola da (robot_x, robot_y);
                 #  - l'arresto a meta' movimento misura il percorso rimanente da qui.
                 robot_x, robot_y, robot_z, robot_quat = spotUtils.getPosition(robot_state_client)
@@ -3976,7 +3800,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                     path_version = verification_tracker.update_path(
                         [(x, y) for _, x, y in path_waypoints])
             no_progress = 0
-            retreats_in_a_row = 0   # 2026-10-07: un avanzamento vero rompe la catena di arretramenti
+            retreats_in_a_row = 0   # un avanzamento vero rompe la catena di arretramenti
             if is_partial_step:
                 print(f"[PASSO PARZIALE] Verso il nodo {next_node_id}: avanzo di {decision['dist']:.2f} m "
                       f"su {np.hypot(next_x - robot_x, next_y - robot_y):.2f} fino a "
@@ -4169,7 +3993,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                     prm_graph.set_robot_node(robot_node_id, 0.0)
                     path_waypoints.pop(0)
 
-                # Briciola per i ritorni (2026-10-07): un waypoint GraphNav ogni
+                # Briciola per i ritorni: un waypoint GraphNav ogni
                 # GRAPHNAV_WAYPOINT_MIN_SPACING_M di strada percorsa.
                 graphnav_drop_breadcrumb(env, recordingInterface, robot_state_client,
                                          robot_node_id, target_row, target_col)
@@ -4210,7 +4034,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 if verification_tracker is not None:
                     verification_tracker.clear_path()
 
-                # Ritorno con GraphNav invece che a zampe all'indietro (2026-10-07): si torna di un
+                # Ritorno con GraphNav invece che a zampe all'indietro: si torna di un
                 # waypoint, si riprova a pianificare da li', e cosi' via fino a
                 # GRAPHNAV_MAX_BACKTRACK_HOPS. La ritirata a zampe resta dentro come ultima rete.
                 esc = _trap_backtrack(
@@ -4254,27 +4078,24 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
 
 def select_mobility_params(gradient, roughness):
     """
-    Three-tier gait selection based on how difficult the terrain is for the SPECIFIC
-    segment about to be walked (see prm_graph.PRM.sample_terrain_between_points), instead
-    of a single fixed gait profile for the whole mission.
+    Andatura su tre livelli, scelta in base alla difficolta' del terreno del SINGOLO tratto
+    che si sta per percorrere (vedi prm_graph.PRM.sample_terrain_between_points), invece di
+    un profilo fisso per tutta la missione.
 
-    Classification uses whichever of gradient/roughness is WORSE (i.e. crossing into a
-    harder tier on EITHER metric is enough) -- same OR logic as the obstacle veto in
-    spotGrid.fuse_obstacle_mask. Thresholds and mu values live in spotGrid.GAIT_* --
-    starting points only, retune against how Spot actually behaves on your terrain.
+    Decide la peggiore fra pendenza e rugosita' (basta superare la soglia su UNA delle due
+    per passare al livello piu' duro) -- la stessa logica OR del veto d'ostacolo in
+    spotGrid.fuse_obstacle_mask. Soglie, attriti e velocita' stanno in spotGrid.GAIT_*.
 
-    Tiers:
-      PLAIN    -- flat, smooth ground: normal gait (HINT_AUTO), medium swing height,
-                  high ground_mu_hint (assume good grip)
-      MODERATE -- some slope/roughness, still comfortably walkable: normal gait,
-                  high swing height, medium ground_mu_hint
-      HARD     -- noticeably difficult but not yet blocked (blocking is a separate,
-                  much higher threshold in fuse_obstacle_mask): crawl gait, high swing
-                  height, low ground_mu_hint (assume less grip, be conservative)
+    Livelli:
+      PLAIN    -- terreno piano e regolare: andatura normale (HINT_AUTO), passo medio,
+                  ground_mu_hint alto (buona presa)
+      MODERATE -- un po' di pendenza o rugosita': CRAWL, passo alto, ground_mu_hint medio
+      HARD     -- terreno difficile ma non vietato (il veto e' una soglia separata e molto
+                  piu' alta, in fuse_obstacle_mask): CRAWL, passo alto, ground_mu_hint
+                  basso (meno presa, prudenza)
     """
-    # 2026-10-06: tarato per l'ESTERNO. PLAIN aveva SWING_HEIGHT_LOW (passo da pavimento)
-    # e nessun livello aveva un limite di velocita'. Anche un prato in piano non e' un
-    # pavimento: passo piu' alto di un gradino per tutti i livelli, e velocita' limitate.
+    # Tarato per l'ESTERNO: anche un prato in piano non e' un pavimento, quindi passo
+    # almeno medio per tutti i livelli, e velocita' limitate a ogni livello.
     if gradient < spotGrid.GAIT_PLAIN_SLOPE_MAX and roughness < spotGrid.GAIT_PLAIN_ROUGH_MAX:
         tier = "PLAIN"
         params = dict(locomotion_hint=spot_command_pb2.HINT_AUTO,
@@ -4284,10 +4105,9 @@ def select_mobility_params(gradient, roughness):
                       max_angular_vel=spotGrid.GAIT_ANG_PLAIN)
     elif gradient < spotGrid.GAIT_MODERATE_SLOPE_MAX and roughness < spotGrid.GAIT_MODERATE_ROUGH_MAX:
         tier = "MODERATE"
-        # 2026-10-12, richiesta dell'utente dopo la prima missione in esterno: anche
-        # MODERATE va in CRAWL. Era HINT_AUTO. Nota: sul prato MODERATE prende ~60% dei
-        # passi, quindi il crawl diventa l'andatura prevalente e la missione rallenta --
-        # per tornare indietro basta rimettere HINT_AUTO qui.
+        # CRAWL anche qui, su richiesta dell'utente. Sul prato MODERATE prende ~60% dei
+        # passi, quindi il crawl e' l'andatura prevalente e la missione e' piu' lenta;
+        # con HINT_AUTO qui MODERATE torna all'andatura normale.
         params = dict(locomotion_hint=spot_command_pb2.HINT_CRAWL,
                       swing_height=spot_command_pb2.SWING_HEIGHT_HIGH,
                       ground_mu_hint=spotGrid.GAIT_MU_MODERATE,
@@ -4313,18 +4133,16 @@ def select_mobility_params(gradient, roughness):
 def navigate_to(target_x, target_y, robot_x, robot_y, robot_state_client, command_client, vision_tform_body,
                  should_abort=None, keep_heading=False, **mobility_kwargs):
     """
+    Porta il robot al punto (target_x, target_y): prima ruota verso il punto, poi cammina
+    dritto (due chiamate a movements.relative_move).
+
     keep_heading: se True il robot NON ruota prima di muoversi, raggiunge il punto con
-        l'orientamento che ha (anche di lato o all'indietro).
+        l'orientamento che ha (anche di lato o all'indietro). Il ciclo di navigazione passa
+        sempre False: di traverso Spot occupa 1.10 m invece di 0.50 e il fronte pretende
+        0.59 m di obstacle_distance invece di 0.30 (vedi ROTAZIONE E ARRETRAMENTO). Il
+        parametro resta per i test.
 
-        2026-10-07: il ciclo di navigazione non lo usa piu' (passa sempre False). Di
-        traverso Spot occupa 1.10 m invece di 0.50 e il fronte pretende 0.59 m di
-        obstacle_distance invece di 0.30, quindi il ripiego "non ruoto, vado di lato"
-        rendeva il robot piu' largo proprio dove lo spazio e' poco: misurato sulle
-        missioni del 2026-10-07, sei blocchi su percorsi liberi per 1.3-1.4 m. Il
-        parametro resta per l'arretramento (che viaggia lungo l'asse del corpo, non di
-        traverso: li' l'ingombro e' quello normale) e per i test.
-
-    mobility_kwargs: optional overrides forwarded to movements.relative_move, e.g.
+    mobility_kwargs: andatura facoltativa passata a movements.relative_move, es.
         locomotion_hint=spot_command_pb2.HINT_CRAWL,
         ground_mu_hint=0.4,
         swing_height=spot_command_pb2.SWING_HEIGHT_HIGH
@@ -4332,12 +4150,9 @@ def navigate_to(target_x, target_y, robot_x, robot_y, robot_state_client, comman
     Returns:
         (success: bool, distance_traveled: float, distance_commanded: float)
 
-    NOTE: movements.relative_move() returns a (success, distance_traveled) TUPLE.
-    Previously this function returned that tuple as-is under the name
-    "success_move", and the caller did `if success_move:` -- a non-empty tuple is
-    ALWAYS truthy in Python regardless of its contents, so a mechanically FAILED
-    move (e.g. (False, 0.0)) was indistinguishable from a real success. That bug
-    made it impossible to ever detect the robot getting physically stuck.
+    movements.relative_move() restituisce una TUPLA (successo, distanza percorsa): qui se ne
+    estrae il booleano, perche' una tupla non vuota in Python e' sempre vera e un
+    movimento fallito sembrerebbe riuscito.
     """
     dx, dy = target_x - robot_x, target_y - robot_y
     distance = np.sqrt(dx ** 2 + dy ** 2)
@@ -4366,12 +4181,11 @@ def navigate_to(target_x, target_y, robot_x, robot_y, robot_state_client, comman
                                                                    robot_state_client,
                                                                    should_abort=should_abort, **mobility_kwargs)
 
-    # Sanity check: relative_move() can report success (trajectory "settled") while
-    # having covered almost none of the requested distance -- e.g. Spot stopping
-    # dead against a real physical obstacle, especially since relative_move() sets
-    # disable_vision_foot_obstacle_avoidance=True, so Spot has no independent
-    # low-level safety net of its own here. A claimed success with near-zero
-    # progress on a real move is treated as a genuine failure, not a success.
+    # Controllo di plausibilita': relative_move() puo' dichiarare successo (traiettoria
+    # "assestata") avendo percorso quasi niente della distanza richiesta -- per esempio con
+    # Spot fermo contro un ostacolo fisico, tanto piu' che di default l'anticollisione dei
+    # piedi e' spenta (movements.DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT). Un successo con
+    # un avanzamento quasi nullo su un movimento vero conta come fallimento.
     MIN_PROGRESS_FRACTION = 0.5
     MIN_PROGRESS_ABS_M = 0.05
     required_progress = max(MIN_PROGRESS_ABS_M, MIN_PROGRESS_FRACTION * distance)
@@ -4402,10 +4216,10 @@ def retreat_along_traveled_path(env, robot_state_client, command_client,
                                 pts=None, obstacle_mask=None):
     """
     Ritirata: torna indietro sui propri passi camminando ALL'INDIETRO, senza mai girarsi.
+    E' l'ultima rete, quando il ritorno con GraphNav non riesce (vedi escape_by_backtracking).
 
     Quando il robot si infila in uno spazio stretto e li' non esiste piu' un percorso
-    verso l'obiettivo (e' successo nella missione del 2026-10-05 13:12: prima
-    [REPLAN FALLITO], poi l'arco successivo BLOCCATO), girarsi non e' una via d'uscita --
+    verso l'obiettivo, girarsi non e' una via d'uscita --
     serve spazio che in quel punto non c'e'. Arretrare invece ripercorre il varco da cui
     si e' entrati, che per costruzione era abbastanza largo da passarci. E arretrare lungo
     l'asse del corpo non e' marcia di traverso: l'ingombro resta 0.50 m di larghezza.
@@ -4490,16 +4304,13 @@ def retreat_along_traveled_path(env, robot_state_client, command_client,
 
 def cell_has_reachable_target(env, sampler, global_map, row, col, safety_margin=None):
     """
-    2026-10-08. Nella cella c'e' ANCORA un punto dove il robot potrebbe stare, secondo la
+    Nella cella c'e' ANCORA un punto dove il robot potrebbe stare, secondo la
     mappa globale accumulata finora? Restituisce (si_no, liberi, ignoti, occupati).
 
-    Serve a non ritentare una cella il cui obiettivo e' fisicamente dentro un ostacolo.
-    Nella missione delle 16:35 la griglia 2x4 da 5 m non stava nello spazio: il corridoio
-    esplorato era 12 x 5 m, e classificando i centri cella contro la mappa finale,
-    (0,1) aveva 144 celle occupate su 169 e (0,2) 123 su 130 -- due obiettivi DENTRO il
-    muro. Il robot ci ha provato comunque, da un lato dopo l'altro, perche'
+    Serve a non ritentare una cella il cui obiettivo e' fisicamente dentro un ostacolo
+    (per esempio quando la griglia di missione non sta nello spazio):
     finalize_or_defer_blocked_cell marca bloccata una cella solo dopo averne provati tutti
-    i lati: ma se l'obiettivo e' in un muro, i lati non c'entrano niente.
+    i lati, ma se l'obiettivo e' in un muro i lati non c'entrano niente.
 
     Si guarda solo cio' che e' stato VISTO: ignoto non e' occupato (e' la stessa regola del
     fronte, che distingue 'fine_dati' da 'ostacolo'). Quindi una cella mai vista risponde
@@ -4530,36 +4341,30 @@ def cell_has_reachable_target(env, sampler, global_map, row, col, safety_margin=
 
 def finalize_or_defer_blocked_cell(env, row, col, sampler=None, global_map=None):
     """
-    Call this right after env.mark_cell_side_explored(row, col, side_bit), whenever an
-    entry attempt into (row, col) has just failed from one side.
+    Da chiamare subito dopo env.mark_cell_side_explored(row, col, side_bit), quando un
+    tentativo di entrare in (row, col) e' appena fallito da un lato.
 
-    Only marks the cell permanently blocked (env.mark_cell_blocked -> value=-1) once
-    EVERY side that has an in-bounds neighbor has been tried and failed
-    (env.all_sides_explored). Otherwise the cell is deliberately left at its unvisited
-    value (0) -- it is NOT retried immediately. It simply stays a normal, legitimate
-    frontier candidate: get_adjacent_frontier_cells / get_lowest_rank_unexplored_cell /
-    get_lowest_rank_from_frontier_list already treat any value-0 cell as fair game,
-    ranked by its precomputed serpentine position, exactly like a cell that was never
-    attempted at all. That's the whole fix -- a cell that fails once should compete for
-    priority through the SAME frontier/rank logic as everything else, and only get
-    tried again later (from whichever side hasn't been tried yet) when its turn comes
-    up naturally, instead of being eagerly retried out-of-band right away or being
-    written off as blocked after a single failed side.
+    La cella si marca bloccata per sempre (env.mark_cell_blocked -> valore -1) solo quando
+    OGNI lato che ha un vicino dentro la griglia e' stato provato ed e' fallito
+    (env.all_sides_explored). Altrimenti resta al valore di non visitata (0) e NON si
+    ritenta subito: resta una candidata normale della frontiera.
+    get_adjacent_frontier_cells e get_lowest_rank_from_frontier_list trattano ogni cella a
+    0 allo stesso modo, ordinata per la sua posizione nella serpentina, come una cella mai
+    tentata. Cosi' una cella fallita una volta compete per la priorita' con la STESSA
+    logica di tutte le altre, e si ritenta quando tocca a lei, dal lato non ancora provato:
+    ne' subito fuori turno, ne' scartata dopo un solo lato.
     """
-    # 2026-10-08: se nella cella non esiste piu' un punto dove il robot possa stare, provare
-    # da un altro lato e' inutile -- l'obiettivo e' dentro un ostacolo, non dietro un varco
+    # Se nella cella non esiste piu' un punto dove il robot possa stare, provare da un
+    # altro lato e' inutile -- l'obiettivo e' dentro un ostacolo, non dietro un varco
     # che si apre da un'altra parte. Vedi cell_has_reachable_target.
     if sampler is not None and global_map is not None:
         ok, liberi, ignoti, occupati = cell_has_reachable_target(env, sampler, global_map, row, col)
-        # Diagnostica: e' la riga che nella missione delle 16:35 avrebbe detto subito che la
-        # griglia non stava nello spazio. Classificando i centri cella contro la mappa
-        # finale, (0,1) e (0,2) erano dentro il muro e tutta la riga 1 non era mai stata
-        # vista -- tre blocchi su quattro tentativi venivano da li', non dal pianificatore.
+        # Diagnostica: dice subito se la cella sta dentro un ostacolo o non e' mai stata
+        # vista, cioe' se la griglia di missione non sta nello spazio.
         # ATTENZIONE a come si legge: con il reticolo a 0.25 m i punti candidati per cella
-        # sono ~400, quindi "occupati" alto NON vuol dire cella irraggiungibile; vuol dire
-        # che gran parte della cella e' dentro un ostacolo. Il blocco immediato sotto scatta
-        # solo nel caso estremo in cui NON resta un solo punto libero o ignoto -- misurato
-        # sui dati del 16:35: non sarebbe scattato per nessuna delle otto celle.
+        # sono centinaia, quindi "occupati" alto NON vuol dire cella irraggiungibile; vuol
+        # dire che gran parte della cella e' dentro un ostacolo. Il blocco immediato sotto
+        # scatta solo nel caso estremo in cui NON resta un solo punto libero o ignoto.
         print(f"[CELLA] ({row},{col}) dopo il tentativo fallito: dei punti candidati, "
               f"{liberi} visti liberi, {ignoti} mai visti, {occupati} dentro un ostacolo "
               f"nella mappa globale.")
@@ -4594,7 +4399,7 @@ def easy_walk(options):
     recordingInterface.clear_map()
 
     with bosdyn.client.lease.LeaseKeepAlive(lease_client, must_acquire=True, return_at_exit=True):
-        # --- Cartelle di missione e log, create subito cosi' la copia dell'output su file
+        # --- Cartelle di missione e log, create subito, cosi' la copia dell'output su file
         # (mission_log.txt) cattura anche tutto l'avvio e la costruzione del grafo.
         mission_timestamp = datetime.now().strftime("Mission_%d-%m-%Y_%H-%M-%S")
         base_graph_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "graph")
@@ -4622,8 +4427,8 @@ def easy_walk(options):
             print(f"[CONFIG] GAIT: plain<{spotGrid.GAIT_PLAIN_SLOPE_MAX}/{spotGrid.GAIT_PLAIN_ROUGH_MAX}  "
                   f"moderate<{spotGrid.GAIT_MODERATE_SLOPE_MAX}/{spotGrid.GAIT_MODERATE_ROUGH_MAX}  "
                   f"mu={spotGrid.GAIT_MU_PLAIN}/{spotGrid.GAIT_MU_MODERATE}/{spotGrid.GAIT_MU_HARD}")
-            # 2026-10-07: le tre cose cambiate oggi, stampate per poter leggere i log senza
-            # dover indovinare con quale versione sono stati prodotti.
+            # Soglie di terreno, rotazione, ritorni e obiettivo, stampate per poter leggere i
+            # log sapendo con quali valori sono stati prodotti.
             print(f"[CONFIG] TERRENO: terrain_valid >= {spotGrid.TERRAIN_VALID_MIN} "
                   f"(era > 0.0, dipendeva dal segno di un residuo numerico)  "
                   f"celle mai scritte: plateau >= {spotGrid.UNWRITTEN_MIN_CELLS} celle, "
@@ -4674,10 +4479,7 @@ def easy_walk(options):
         robot.logger.info('Robot powered on.')
         blocking_stand(command_client)
 
-        # NOTA (2026-10-07): qui c'era un print "[INIT] Initializing Velodyne client...".
-        # Il Velodyne NON e' in uso -- griglie e mappe locali vengono tutte dalle telecamere
-        # di Spot (l'import di velodyneClient e' commentato in cima al file). La riga
-        # faceva solo credere, leggendo i log, che ci fosse un sensore in piu'.
+        # Griglie e mappe locali vengono tutte dalle telecamere di Spot (nessun Velodyne).
         recordingInterface.clear_map()
         recordingInterface.start_recording()
 
@@ -4686,9 +4488,9 @@ def easy_walk(options):
         start_row, start_col = 0, 0
         recordingInterface.create_default_waypoint(cell_row=start_row, cell_col=start_col)
 
-        # --- Mission Envoirment definition
+        # --- Griglia di missione
         # Dimensioni della griglia di missione. Default MISSION_GRID_ROWS x MISSION_GRID_COLS
-        # celle da MISSION_CELL_SIZE_M (da mission_graph.MISSION_*, o 2 x 4 da 5 m). Si cambiano
+        # celle da MISSION_CELL_SIZE_M (da mission_graph.MISSION_*). Si cambiano
         # SENZA toccare il codice, in ordine di precedenza:
         #   1. argomenti:  python3 easy_walk.py --rows 2 --cols 4 --cell 5
         #   2. variabile:  SPOT_MISSION_GRID="righe,colonne,lato_cella"   es. "2,3,3"
@@ -4716,15 +4518,14 @@ def easy_walk(options):
         print(f"[CONFIG] Reticolo: passo richiesto "
               f"{'suggerito' if MISSION_LATTICE_SPACING_M is None else '%.3f m' % MISSION_LATTICE_SPACING_M}, "
               f"anelli {MISSION_LATTICE_RINGS if MISSION_LATTICE_RINGS is not None else 'tutti'}")
-        env = environmentMap.EnvironmentMap(rows=grid_rows, cols=grid_cols, cell_size=grid_cell)  # cols in front, rows on the left
+        env = environmentMap.EnvironmentMap(rows=grid_rows, cols=grid_cols, cell_size=grid_cell)  # colonne davanti, righe a sinistra
 
-        # --- Mission-wide movement/gait parameters ---
-        # Empty by default: gait/swing-height/ground_mu_hint are now chosen dynamically
-        # PER SEGMENT based on sampled terrain difficulty (see select_mobility_params()),
-        # instead of one fixed profile for the whole mission. To force a fixed profile
-        # instead (e.g. for testing), set mobility_kwargs to a non-empty dict here --
-        # attempt_enter_cell_from_position() honors it as an explicit override and skips
-        # dynamic selection entirely when it's non-empty. Example fixed override:
+        # --- Andatura per tutta la missione ---
+        # Vuoto: andatura, altezza del passo e ground_mu_hint si scelgono TRATTO PER TRATTO
+        # in base al terreno (vedi select_mobility_params()). Per imporre un profilo fisso
+        # (per esempio in prova) basta un dict non vuoto qui:
+        # attempt_enter_cell_from_position() lo usa per tutti i tratti e salta la scelta
+        # automatica. Esempio:
         #   mobility_kwargs = dict(
         #       locomotion_hint=spot_command_pb2.HINT_CRAWL,
         #       ground_mu_hint=0.4,
@@ -4732,7 +4533,7 @@ def easy_walk(options):
         #   )
         mobility_kwargs = {}
 
-        # --- [FIX CRUCIALE] Ricaviamo la posizione di boot PRIMA di configurare ed elaborare il grafo PRM ---
+        # --- Posa di partenza, PRIMA di costruire il grafo: il reticolo e' riferito a questa ---
         x_boot, y_boot, z_boot, quat_boot = spotUtils.getPosition(robot_state_client)
         yaw_boot = np.arctan2(2.0 * (quat_boot.w * quat_boot.z + quat_boot.x * quat_boot.y),
                               1.0 - 2.0 * (quat_boot.y ** 2 + quat_boot.z ** 2))
@@ -4744,17 +4545,9 @@ def easy_walk(options):
         prm, gb_sampler, mission_lattice = _build_mission_prm(env)
         _MISSION_CTX['prm'] = prm  # per il riepilogo di fine missione (anche se interrotta)
 
-        # NON costruiamo il grafo qui. Questa chiamata era interamente sprecata:
-        # a questo punto non esiste ancora nessun dato di terreno (current_terrain_2d
-        # e' None, quindi ogni arco cadeva sul fallback statico dei nodi) e
-        # global_grid.global_occupancy_map e' ancora None (quindi nessun veto di
-        # occupazione veniva applicato). Il grafo prodotto era privo di informazione
-        # reale, e attempt_enter_cell_from_position() lo ricostruisce comunque da zero
-        # prima di qualunque uso: tra le due build il grafo non viene mai letto da
-        # nessuno. Restava solo il costo del ciclo O(N^2) sui nodi.
-        # Per ripristinare il comportamento precedente basta rimettere qui:
-        #   prm.build_graph(global_map=global_grid.global_occupancy_map,
-        #                   edge_safety_margin=spotGrid.PRM_EDGE_SAFETY_MARGIN_M)
+        # Gli ARCHI non si creano qui: non c'e' ancora nessun dato di terreno ne' di
+        # occupazione. Li crea attempt_enter_cell_from_position() alla prima scansione
+        # (vedi _rebuild_prm_edges).
         verification_tracker = arcVerification.ArcVerificationTracker(robot)
         _MISSION_CTX['tracker'] = verification_tracker
         verification_tracker.start()
@@ -4780,8 +4573,8 @@ def easy_walk(options):
             if len(borders_in_frontier) != 0:
                 selected_border = min(borders_in_frontier, key=lambda b: b[2])
                 # Cella da cui si tenta l'ingresso: serve dopo per segnare il LATO provato.
-                # Prima si usava la cella in cui il robot si trovava DOPO il tentativo, che una
-                # ritirata o un passo parziale possono aver cambiato (lato sbagliato o nullo).
+                # Non la cella in cui il robot si trova DOPO il tentativo, che una ritirata o
+                # un passo parziale possono aver cambiato (lato sbagliato o nullo).
                 origin_row, origin_col = robot_row, robot_col
                 check = attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client, command_client, env,
                                                          selected_border[0], selected_border[1], gb_sampler, prm,
@@ -4809,14 +4602,16 @@ def easy_walk(options):
                         env.mark_cell_visited(selected_border[0], selected_border[1])
                         frontier.extend(find_new_borders(env, robot_row, robot_col, path, frontier))
                     else:
+                        # RECUPERO subito dopo un tentativo fallito.
                         # 1. Gli archi scartati nel tentativo fallito (blocchi confermati da vicino,
-                        # fallimenti fisici) sono gia' nel PRM tramite mark_edge_invalid e
-                        # build_graph li rispetta: Dijkstra non riproporra' la stessa strada.
+                        # fallimenti fisici) sono gia' nel PRM tramite mark_edge_invalid, e la
+                        # ricostruzione degli archi li rispetta: Dijkstra non riproporra' la
+                        # stessa strada.
 
-                        # 2. Ricalcoliamo la posizione attuale (gestisce sia il fallimento in partenza che a metà strada)
+                        # 2. Posizione attuale (il fallimento puo' essere in partenza o a meta' strada)
                         x_curr, y_curr, _, _ = spotUtils.getPosition(robot_state_client)
 
-                        # 3. Estrapoliamo nuovamente i dati locali per trovare il target point corretto
+                        # 3. Scansione fresca, per scegliere il punto obiettivo da qui
                         grids_data_rec, main_proto_rec, _ = local_grid.return_local_grid(
                             ['obstacle_distance', 'terrain', 'terrain_valid'], robot_state_client
                         )
@@ -4885,15 +4680,13 @@ def easy_walk(options):
 
                             path_ids = prm.find_path_dijkstra(start_id, goal_id)
 
-                            # Il costo in questo PRM corrisponde al numero di archi (ovvero numero di nodi - 1)
+                            # Si riprova subito solo se il percorso ha al massimo COSTO_SOGLIA
+                            # archi (numero di nodi - 1)
                             COSTO_SOGLIA = 4
 
-                            # 2026-10-13 (missione 13-10 11:22): il recupero ritrovava lo
-                            # STESSO obiettivo appena fallito, raggiungibile "con 1 arco" (era
-                            # proprio quello della trappola), e rientrava subito nel tentativo:
-                            # stesso posto, stesso esito. Se l'obiettivo e' quello di prima, la
-                            # cella si rimanda e torna in coda come le altre (vedi
-                            # finalize_or_defer_blocked_cell): deciso una volta, si va avanti.
+                            # Se l'obiettivo e' lo STESSO del tentativo appena fallito, riprovare
+                            # subito vorrebbe dire stesso posto, stesso esito: la cella si rimanda
+                            # e torna in coda come le altre (vedi finalize_or_defer_blocked_cell).
                             last_goal = getattr(env, '_last_attempt_goal', None)
                             same_goal = (last_goal is not None and float(np.hypot(
                                 target_x - last_goal[0], target_y - last_goal[1])) <= RECOVERY_SAME_GOAL_M)
@@ -4956,9 +4749,11 @@ def easy_walk(options):
                                 frontier.append(selected_border)
 
             else:
-                # NOTE: a blocked cell (-1) can never have an unexplored side left, since
-                # finalize_or_defer_blocked_cell() only marks a cell blocked once every
-                # reachable side has already been tried and failed.
+                # Nessuna cella confinante in frontiera: si va con GraphNav verso il waypoint
+                # piu' vicino alla cella di rango piu' basso e si tenta da li'.
+                # Una cella bloccata (-1) non ha mai lati ancora da provare:
+                # finalize_or_defer_blocked_cell() la blocca solo dopo che ogni lato
+                # raggiungibile e' stato provato ed e' fallito.
                 already_skipped_this_round = set()
                 target_row = target_col = rank = nearest_cell = None
                 while True:
@@ -4972,8 +4767,8 @@ def easy_walk(options):
                         (candidate_row, candidate_col), waypoints_by_cell, env)
                     if candidate_nearest_cell is None or \
                             recordingInterface.get_manual_waypoint_by_cell(*candidate_nearest_cell) is None:
-                        # Nessuna cella visitata con waypoint da cui partire: prima qui il codice
-                        # andava in errore (indice su None) e la missione terminava.
+                        # Nessuna cella visitata con waypoint da cui partire: si passa alla
+                        # candidata successiva.
                         print(f"[SKIP-ROUND] Cella ({candidate_row},{candidate_col}): nessun waypoint "
                               f"GraphNav da cui avvicinarsi. Provo la successiva.")
                         already_skipped_this_round.add((candidate_row, candidate_col))
@@ -5040,8 +4835,8 @@ def easy_walk(options):
                             robot_row, robot_col = env.get_cell_from_world(x_final, y_final)
                             frontier.extend(find_new_borders(env, robot_row, robot_col, path, frontier))
                         else:
-                            # Mark this side explored; only remove from frontier if that was the
-                            # LAST untried side (cell is now truly blocked).
+                            # Lato segnato come provato; la cella esce dalla frontiera solo se era
+                            # l'ULTIMO lato non provato (cella davvero bloccata).
                             side_bit = env.get_side_bit_facing_origin(nearest_cell[0], nearest_cell[1],
                                                                       target_row, target_col)
                             env.mark_cell_side_explored(target_row, target_col, side_bit)
@@ -5050,8 +4845,8 @@ def easy_walk(options):
                             if env.is_cell_blocked(target_row, target_col):
                                 frontier.remove((target_row, target_col, rank))
                     else:
-                        # Navigation itself failed to even reach the staging waypoint -- same rule:
-                        # only drop from frontier if this was the last untried side.
+                        # GraphNav non e' nemmeno arrivato al waypoint di partenza -- stessa regola:
+                        # la cella esce dalla frontiera solo se era l'ultimo lato non provato.
                         recordingInterface.start_recording()
                         side_bit = env.get_side_bit_facing_origin(nearest_cell[0], nearest_cell[1],
                                                                   target_row, target_col)
@@ -5072,7 +4867,7 @@ def easy_walk(options):
         final_row, final_col = env.get_cell_from_world(x_final, y_final)
         recordingInterface.create_default_waypoint(cell_row=final_row, cell_col=final_col)
 
-        # --- FINAL SCAN: capture the area around the last position before walking away ---
+        # --- SCANSIONE FINALE: l'area attorno all'ultima posizione, prima di tornare ---
         print("[FINAL SCAN] Acquiring one last look-around before returning to start...")
         x_final, y_final, z_final, quat_final = spotUtils.getPosition(robot_state_client)
         final_yaw = np.arctan2(2.0 * (quat_final.w * quat_final.z + quat_final.x * quat_final.y),
@@ -5116,7 +4911,7 @@ def easy_walk(options):
                 rough_threshold=spotGrid.ROUGH_THRESHOLD
             )
 
-            # Fold this last scan into the persistent global maps, same as every other iteration
+            # Anche l'ultima scansione entra nelle mappe globali, come tutte le altre
             fold_scan_into_global_maps(
                 global_grid.global_occupancy_map, global_grid.global_terrain_map, pts_final,
                 terrain_real_final, obstacle_mask_final, is_valid_final, cells_obs_final,
@@ -5145,9 +4940,8 @@ def easy_walk(options):
         # ---------------------------------------------------------------------
         _emit_mission_summary_once()
 
-        # 2026-10-12: tutto cio' che segue avviene DOPO il riepilogo, quindi non entrava in
-        # nessuna voce di [TEMPO]: nella missione del 12-10 14:47 erano la fetta piu' grossa
-        # dei 212 s (26%) non attribuiti. Ora si misurano e si stampano in chiusura.
+        # Tutto cio' che segue avviene DOPO il riepilogo, quindi non entra in nessuna voce di
+        # [TEMPO]: si misura a parte e si stampa in chiusura.
         _t_close = {}
         _t = time.perf_counter()
         try:
@@ -5187,7 +4981,8 @@ def easy_walk(options):
 def _parse_args(argv=None):
     """
     Argomenti da riga di comando. Tutti facoltativi: senza argomenti la missione usa i
-    default di mission_graph (2 x 4 celle da 5 m, passo 0.25 m, 2 anelli).
+    valori di mission_graph (MISSION_ROWS, MISSION_COLS, MISSION_CELL_SIZE_M,
+    MISSION_SPACING_M) e gli anelli di MISSION_LATTICE_RINGS.
     """
     import argparse
     p = argparse.ArgumentParser(description="Missione di esplorazione autonoma con Spot")

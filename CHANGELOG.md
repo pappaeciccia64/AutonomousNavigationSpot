@@ -27,6 +27,10 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 - **L'allungamento di mezzo corpo (`ARC_BODY_EXTENSION_M`) vale anche per il veto del PRM**: il robot non deve potersi fermare su un nodo con le zampe su un pendio oltre soglia. Sulle mappe del 13-10 12:40: archi scartati dallo 0.77% all'1.19%, nodi isolati da 1 a 5. Il fronte resta sull'arco fra i nodi, quindi è più permissivo del PRM e non può bloccare un arco che il PRM ha accettato per pendenza.
 - Corretto un commento che dava la base della pendenza a ~25 cm: la differenza è centrata, 8 celle avanti e 8 indietro, cioè ~0.48 m (vedi anche 06-10 sera).
 
+### Navigazione (`easy_walk.py`)
+- **Scorciatoie GraphNav scelte sulla strada** (`plan_graphnav_shortcuts`). Prima si aggiungevano fino a 30 scorciatoie fra waypoint a meno di 2 m, le più corte per prime: con celle da 4 m e il giro a serpentina, fra una riga di celle e l'altra quasi nessuna coppia stava entro 2 m, e il ritorno a wp_0 del 13-10 12:40 ha ripercorso tutta la missione: 46.4 m (linea d'aria 13.1 m), 115 s. Ora si calcola la strada più corta verso la destinazione con tutte le scorciatoie possibili fino a 3 m e si creano solo quelle che la strada usa. Rigiocato sui grafi scaricati del 13-10: ritorno delle 12:40 da 46.4 a 13.4 m, 12:14 da 18.8 a 17.2 m, 12:27 da 17.9 a 15.7 m. Margine dalle celle occupate portato a 0.30 m (0.45 m dall'ostacolo), perché gli archi sono più lunghi.
+- **Un solo punto per mettere una scansione nelle mappe globali** (`fold_scan_into_global_maps`), usato dalla missione e da `test_replay.py`, così il rigioco verifica il codice vero. La mappa del terreno riceve la stessa maschera del calcolo dal vivo: prima salvava anche le quote delle celle ostacolo, e tronchi e muri diventavano pendenze. Rigiocando le scansioni del 13-10 12:40, sulle stesse 1885 coppie, archi oltre 0.6: 0.0% dal vivo contro 10.9% dalla mappa globale.
+
 ---
 
 ## 2026-10-13
@@ -43,6 +47,14 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 
 ### Movimenti (`movements.py`)
 - Messaggio esplicito dopo una rotazione sul posto. Prima diceva "Arrived at the goal (traveled 0.03m)", e i 3 cm (il centro del corpo che si sposta girando) sembravano un avanzamento minuscolo.
+
+### Navigazione (`easy_walk.py`)
+- **Localizzazione di GraphNav.** Missioni del 12-10 17:16 e 17:32, all'aperto: al primo uso di GraphNav il robot era già perso ("Cannot issue a navigation request when the robot is already lost"); nella prima questo ha chiuso l'esplorazione (tre spostamenti rifiutati). Sui grafi scaricati la mappa era sana: odometria delle zampe e visione differivano al massimo di 13–14 cm su 34–49 m (come nella missione delle 14:47, che è tornata), e le nostre scorciatoie coincidevano con la visione entro 6 cm. A perdersi è il localizzatore dal vivo. Aggiunti la riga `[LOCALIZZAZIONE]`, il riaggancio sul waypoint più vicino con stima dall'odometria (senza dichiarare l'arrivo), il rilevatore di perdita permissivo, e il controllo del localizzatore prima di partire, invece di farsi rifiutare il comando tre volte.
+- **Ritorni con memoria per il tentativo** (`_trap_backtrack`, `MAX_BACKTRACKS_PER_ATTEMPT` = 2). Missione 13-10 11:22, cella (1,2): dopo una trappola il robot tornava con GraphNav alla briciola precedente, ritrovava identico lo stesso percorso (nessun arco scartato, contatori azzerati) e rientrava nella stessa trappola: 6 giri prima che lo fermassimo a mano.
+- **Recupero: niente secondo tentativo sullo stesso obiettivo** (`RECOVERY_SAME_GOAL_M`). Stessa missione: il recupero ritrovava l'obiettivo appena fallito, raggiungibile "con 1 arco" (proprio quello della trappola), e rientrava subito nel tentativo.
+- **Regola del centro** (`find_best_point_in_cell`): il centro geometrico è l'obiettivo, libero o ignoto; si cambia solo se visto occupato o già scartato dal vivo. Prima bastava un punto già visto libero per battere il centro ignoto: era l'ultimo lembo scansionato dalla cella precedente, sul bordo, a ~2 m dal centro. Missioni del 13-10 12:14, 12:27 e 12:40: 20 ingressi su 38, con tre arrivi fuori dalla cella.
+- **Riscelta dell'obiettivo ad almeno 0.30 m dagli ostacoli**, guardando anche la scansione dal vivo e lo spazio libero imparato; a parità di distanza dal centro vince il punto più vicino al robot. 13-10 12:40: le riscelte cadevano a 0.35–0.50 m dal punto scartato, ancora dentro la siepe (`obstacle_distance` −0.04, 0.06, 0.27); in cella (2,0) c'erano due punti a 0.50 m dal centro, uno oltre la siepe e l'altro dal lato del robot, quello da cui poi è entrato.
+- La scansione entra nello scarto preliminare degli archi (`set_live_obstacles`): grezza all'inizio del tentativo, filtrata nel ciclo, tolta dopo un ritorno con GraphNav (era stata fatta da un altro punto).
 
 ---
 
@@ -87,6 +99,12 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 ### GraphNav (`navGraphUtils.py`)
 - **Niente scaricamenti del grafo solo per un nome.** Il numero del waypoint successivo si ricava dai waypoint creati da noi, e nome e id dell'ultimo arrivano dalla risposta del robot (`last_created_waypoint`). Missione 12-10 14:47: 41 scaricamenti completi su 60 servivano solo a questo, con un costo che cresce con la mappa (70 waypoint a fine missione).
 
+### Navigazione (`easy_walk.py`)
+- **Tempi di GraphNav e della chiusura nel riepilogo `[TEMPO]`.** Missione 12-10 14:47: 212 s su 806 di orologio (26%) non finivano in nessuna fase misurata; la fetta più grossa era GraphNav (83 s il solo ritorno a wp_0), il resto la chiusura dopo il riepilogo.
+- **Anche MODERATE in CRAWL** (era `HINT_AUTO`), richiesta dell'utente dopo la prima missione in esterno. Sul prato MODERATE prende ~60% dei passi, quindi il crawl diventa l'andatura prevalente e la missione rallenta.
+- **Nodi negli ostacoli giudicati anche sulla mappa dello spazio libero** (`prune_prm_nodes_in_obstacles`, quando `CLEARANCE_MAP_DECIDES`). La finestra della scansione contiene ~235 nodi su 3321 (7%), e lo scarto è soft: al refresh successivo gli archi tornavano, 336 scarti per 88 nodi davvero cattivi.
+- **Nei pacchetti di scansione la `obstacle_distance` filtrata e il latch**: senza, un rigioco offline non riproduce i blocchi che nascono dalle letture del thread durante il movimento (scansione 13 del 12-10 10:36).
+
 ---
 
 ## 2026-10-08
@@ -121,6 +139,27 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
   Le sei scansioni in trappola avevano le direzioni libere rifiutate a −0.12/−0.15 m. A 0.15 si accetta che il corpo entri di 15 cm nella nostra mappa: l'errore di registrazione della griglia è 5–10 cm, e GraphNav in quei punti ruota e passa. Se in prova si vedono sfioramenti durante le rotazioni, è il primo numero da riportare a 0.10.
 - (sera, dopo la revisione) **Rotazione: si misura la penetrazione nel corpo, non il minimo di `obstacle_distance`.** Dentro un ostacolo `obstacle_distance` non scende sotto metà del suo spessore, quindi con la tolleranza a 0.15 qualunque ostacolo più sottile di ~30 cm che entrava nel corpo veniva approvato (pali da 6, 10, 20 e 30 cm in prova sintetica). Le celle sotto il corpo adesso si escludono. Sui 47 scan della missione 08-10 16:35, 24 rotazioni per scan: stesso verdetto nel 97.8%, i 24 cambiati tutti da approvata a rifiutata, quasi tutti al limite (−0.150 → −0.151).
 
+### Navigazione (`easy_walk.py`)
+- **Archi fra 0.5 e 1.25 m** (`rings=None`, `PRM_MAX_EDGE_M` = 1.25), regola scelta dall'utente dopo la missione 08-10 16:35. Con il tetto a 0.707 m un ingresso cella diventava una catena di 16–19 waypoint, ognuno una rotazione, nel corridoio da 1.5 m in cui ruotare era proprio ciò che non si poteva fare (8 giri di ciclo in 3.2 s senza muoversi). Costo misurato sulla mappa globale vera di quella missione, 3321 nodi:
+
+  | archi | coppie | ammessi | costruzione | refresh |
+  |---|---|---|---|---|
+  | 0.5–0.707 m | 25 120 | 18 853 | 0.92 s | 0.12 s |
+  | **0.5–1.25 m** | **109 474** | **79 229** | **4.72 s** | **0.43 s** |
+
+  Sulla missione delle 16:35 (4 costruzioni, 47 scansioni) sono ~39 s invece di ~9 s: prezzo accettato, in parte restituito dal refresh a eventi. `PRM_MAX_EDGE_M` segue il reticolo e non resta a 2.0, perché il refresh ricostruisce le coppie con il `max_edge_length` del PRM e con 2.0 si riempirebbe di archi lunghi solo attorno al robot.
+- **Percorsi solo nelle celle visitate** (`PLAN_ONLY_EXPLORED_CELLS`). Missione 08-10 15:09: per entrare in (0,2) il pianificatore passava dalla riga 1, mai esplorata.
+- **Guardie anti-stallo.** Missione 08-10 16:35, iterazione 2: otto giri in 3.2 s con il robot immobile. Rigiocando: la rotazione chiedeva quasi 180 gradi (l'obiettivo stava dietro un muro), il settore la rifiutava (−0.17/−0.19 m), il cono non trovava direzioni, e le direzioni utilizzabili erano 3 su 24, quindi niente "trappola". `MAX_ROTATION_DISCARDS` conta per tentativo: `MAX_ROTATION_FAILS_SAME_EDGE`, indicizzato sulla coppia di nodi, ripartiva da 1 a ogni ripianificazione e non è mai scattato. `MAX_IDLE_LOOPS` è la rete generica. (sera, dopo la revisione) La prima versione diceva 12 "sopra ~8" ed era sotto la sequenza legittima più lunga a robot fermo: ricalcolata sui limiti del ciclo, 26 giri, quindi 30.
+- (sera) **Rifiuti di rotazione azzerati solo sui progressi** (20 cm più vicini all'obiettivo). Con l'azzeramento a ogni spostamento, nel banco di prova S11 (corridoio da 0.80 m con l'obiettivo dietro) il robot è andato un nodo a est dopo l'altro: 35 scansioni e 4.5 m allontanandosi, con il contatore sempre a zero.
+- **Avanzamento multinodo.** Il fronte percorre tutto il percorso, ma si guardava solo il primo nodo e il robot si fermava a riscansionare a ogni nodo. Missione 08-10 16:35: il fronte confermava 1.9–3.2 m con archi da 0.5–0.7 m, tre o quattro nodi avanti ignorati. (sera) Dopo ogni gamba si rilegge la posa vera: con l'orientamento della scansione iniziale il banco di prova misurava 18 cm di scarto su un solo movimento a 2 nodi.
+- **Refresh a eventi.** Prima il refresh degli archi girava a ogni giro di ciclo. Missione 08-10 16:35: 22 scansioni su 46 (48%) con uno spostamento sotto i 25 cm, ~9.5 s ricalcolati per riottenere gli stessi numeri.
+- **Il cono punta al percorso, non all'obiettivo** (`CONE_PATH_LOOKAHEAD_M` = 1.5). Missione 08-10 16:11, scansione `it001_cell0_2_007`: il percorso girava a ovest attorno a un blocco, l'obiettivo era a est oltre un vicolo cieco, e "avvicinarsi" all'obiettivo ha portato il robot 1.36 m dentro il vicolo cieco. Nella scansione 008 il bordo dei dati si è accorciato durante una rotazione (1.29 m su 1.38) senza nessun ostacolo: da qui `ABORT_IGNORE_DATA_EDGE_UNTIL_M`.
+- **Punto d'arrivo senza uscite e nessuna alternativa: si rinuncia al lato.** Prima si andava comunque. Missione 08-10 16:11, a (60.05, −31.06): 0/24 uscite viste in anticipo, il robot ci è entrato, si è trovato in trappola ed è tornato indietro con GraphNav per 3 waypoint.
+- **Zona attorno al corpo nella mappa globale** (nucleo libero, anello senza ostacoli). Missione 08-10 15:09, attorno a (58.6, −32.8): le stesse celle lette da 1–2 m avevano `obstacle_distance` 0.18–0.24 (libere), lette con il robot fermo lì accanto 0.09–0.15 (ostacolo), a 0.23–0.45 m dall'asse, all'altezza delle zampe posteriori. Due scansioni da fermo le confermavano, e il PRM scartava l'arco su cui il robot era appena passato.
+- **Scorciatoie nel grafo GraphNav** (`graphnav_add_shortcuts`). Il grafo era una catena e gli anelli si chiudevano solo a fine missione e solo con i fiducial ("Created 0 new edge(s)" nel log del 08-10 15:40). Missione 08-10 16:11: Spot accetta archi nuovi solo mentre registra ("NotRecordingError"), la chiusura d'anello va fatta a registrazione ferma e può rispondere "MapModifiedError" subito dopo.
+- **Cella bloccata subito se non resta un punto dove stare** (`cell_has_reachable_target`). Missione 08-10 16:35: la griglia 2×4 da 5 m non stava nello spazio (corridoio esplorato 12×5 m); classificando i centri contro la mappa finale, (0,1) aveva 144 celle occupate su 169 e (0,2) 123 su 130, due obiettivi dentro il muro, e tutta la riga 1 non era mai stata vista: tre blocchi su quattro tentativi venivano da lì. Con ~400 punti candidati per cella il blocco immediato non sarebbe scattato per nessuna delle otto celle.
+- Nodi di partenza e arrivo agganciati a nodi esistenti: lo scarto delle rotazioni rifiutate vale finché il robot è dove la rotazione è stata rifiutata, e sul primo tratto, se il robot non è sul nodo, un blocco confermato scarta l'arco solo per ora.
+
 ---
 
 ## 2026-10-07
@@ -137,6 +176,36 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 - **Rotazione: si controlla il settore che il corpo spazza davvero, non tutto il cerchio di 0.60 m.** Missione 07-10, iterazione 2, cella (1,0): 9 rotazioni rifiutate su 10, di cui 8 sicure; in tre casi (scansioni 8–10) il rifiuto ha prodotto un blocco su un percorso libero per 1.39 m.
 - **Aria sulla rotazione a 0** (scelta esplicita). Un falso "non posso ruotare" era costato 3.5 m di arretramento in catena, e 0.05 m era meno del rumore di `obstacle_distance`. Sugli 11 rifiuti della missione 07-10 14:0x sblocca un solo caso: gli altri sono veri (corpo dentro l'ostacolo di 4–19 cm in corridoi da ~60 cm). Non è la correzione del problema.
 - **Tolleranza sul rumore nella rotazione** (`ROTATION_NOISE_TOLERANCE_M`). Missione 07-10 16:50: dalla stessa posa, in cinque scansioni consecutive, `obstacle_distance` in un punto a 50 cm oscillava fra −0.03 e +0.15 m (+0.45 visto da 2 m); 5 rifiuti su 17 stavano dentro quel rumore. Nei passaggi fra i tavoli il margine vero è −0.16/−0.19.
+
+### Navigazione (`easy_walk.py`)
+- **Niente marcia di traverso** (decisione dell'utente): il robot punta sempre il muso verso il punto da raggiungere. Di traverso Spot è largo 1.10 m invece di 0.50 e il fronte pretende 0.59 m invece di 0.30: sei blocchi su percorsi che col muso in avanti erano liberi per 1.3–1.4 m sono nati solo così. Quando non può ruotare il robot arretra dritto lungo l'asse del corpo.
+- **Arretramenti contati per sequenza** (`MAX_STRAIGHT_RETREATS_IN_A_ROW`). Il limite per arco ripartiva da 1 perché ogni arretramento creava un nodo di sosta nuovo: nel log "tentativo 1/2" sette volte di fila. Sono nati così 3.5 m all'indietro.
+- **Cono di rotazione possibile** (`plan_cone_move`). Missione 07-10 14:0x, file `iteration_0_cell_0_1_replan_12_vis.npz`, robot in (−2.28, 1.84), obiettivo a 1.26 m: andare dritti, senza ruotare, portava a 0.50 m dall'obiettivo (−0.76); la rotazione voluta (+22 gradi) era impossibile; il codice ha arretrato sette volte di fila, 3.5 m, e da ogni punto d'arrivo la rotazione restava impossibile (margine −0.09 m). Corridoio con ~60 cm di corsia libera: girarsi richiede 1.21 m di diametro.
+- **Arretrare solo se serve** (`retreat_would_help`): nei due momenti esaminati la rotazione dopo l'arretramento restava impossibile (margine −0.09 m a (−2.28, 1.84), −0.00 m a (−3.91, 1.74)). L'arretramento dritto era invece disponibile in tutte e 12 le scansioni dell'iterazione 1, da 1.08 a 1.37 m.
+- **Ventaglio a 360 gradi per riconoscere la trappola** (`scan_escape_directions`, `is_trapped`). Missione 07-10 14:5x, file `iteration_2_cell_1_0_BLOCKED_vis.npz`, robot in (−1.69, 1.87), `obstacle_distance` sotto di lui 0.402: le due corsie aperte (1.30 m a −180 gradi, 1.09 m a 0) chiedevano rotazioni di −73 e +107 gradi, impossibili; le altre 21 direzioni avevano 0–0.24 m. Il codice ci era arrivato scartando otto archi uno per uno in una ventina di scansioni; lo stesso schema al nodo 281 e, con rotazioni di ±179 gradi, in cella (0,2), dove quattro archi sono stati condannati per sempre.
+- **Controllo della posa d'arrivo** (`arrival_has_exit`). Stessa missione: il robot è entrato in un angolo senza uscite con un ultimo passo di 23 cm, ricostruito dalla ritirata ((0.40, 1.76) → (−0.71, 1.70) → (−1.47, 1.79) → (−1.69, 1.87)).
+- **Ritorni con GraphNav invece che a zampe all'indietro** (decisione dell'utente): briciole (`graphnav_drop_breadcrumb`) ogni 0.75 m e all'ingresso di ogni cella, ritorno di un waypoint alla volta riprovando a pianificare, ritirata a zampe solo come ultima rete. Una briciola per ogni nodo di sosta sarebbe stata troppo: nella missione 14:5x erano 37, molti a 20–60 cm uno dall'altro.
+- **Niente ritorni inutili** (`backtracking_cannot_help`). Missione 07-10 16:50: 6 ritorni su 9 (celle (0,2) e (0,3)) per scoprire tre volte di fila che da lì il grafo non offriva percorsi; l'obiettivo era in un'altra componente già da diversi giri.
+- **Nodi PRM dentro gli ostacoli scartati** (`prune_prm_nodes_in_obstacles`). Missione 07-10 14:5x: il nodo obiettivo della cella (0,1) aveva `obstacle_distance` −0.21 m e i due ripieghi 0.12 m, i tre "obiettivi riscelti" della missione.
+- **Scarto soft per [SUBITO] e per le rotazioni rifiutate** (`mark_edge_blocked_soft`). Missione 07-10 14:5x: otto archi attorno al nodo 3164 sono finiti fuori dal grafo per tutto il resto della missione per un ostacolo marginale a 9 cm dal robot, e il nodo è rimasto isolato.
+- **Obiettivo riscelto se irraggiungibile sui dati freschi** (`goal_still_reachable`, parametro `exclude`). Missione 07-10, iterazione 1, cella (0,1): l'obiettivo aveva `obstacle_distance` 0.27 contro 0.30 richiesti, era stato scelto da 3 m con la zona ancora ignota, e il robot si è bloccato a 63 cm da esso dopo tre scansioni ferme, con 808 celle valide entro 80 cm.
+- **Tolleranza d'arrivo legata al fronte** (`GOAL_REACHED_TOLERANCE_M` = 0.65 invece di 0.60): con 0.60 restava una banda morta di 5 cm. Stessa iterazione: robot fermo con `path_len` 0.63–0.64 m, tre scansioni e blocco.
+- **Ripianificazione alla prima cella bloccante** ([SUBITO]). Prima si riguardava da fermo fino alla conferma, ma fra la scansione 003 e la 004, robot fermo e percorso identico, la stessa cella ha letto 0.296 e poi 0.336 su soglia 0.300: aspettare aggiungeva rumore. Ora il rumore è filtrato in `arcVerification`.
+- **Scorciatoie che rispettano gli archi scartati** (`shortcut_index`): ~40 giri identici sul nodo 225; nella missione 16:39 la scorciatoia ripuntava il nodo 218 subito dopo lo scarto di 3169→218 per rotazione.
+- **Archi rifiutati per rotazione fuori dal piano finché il robot non si sposta.** Missione 07-10 16:39, cella (1,1): robot fermo su 3169 alternando 3169→142 e 3169→218 per 112 giri ("tentativo 56/2"), senza mai arrivare alla ritirata.
+- **Pacchetto di scansione salvato prima del blocco rotazione.** Missione 07-10 16:50: nessuno dei 17 rifiuti di rotazione aveva lasciato una scansione su disco.
+- **Celle ostacolo escluse dalla pendenza** (`slope_usable_mask`, vedi anche Mappe e terreno). Rimisurato sulle 12 scansioni della missione 14:0x, 3607 archi nella finestra:
+
+  | | prima | dopo |
+  |---|---|---|
+  | archi vetati per pendenza | 40.3% | 0.1% |
+  | archi senza dati di pendenza | 4.9% | 42.5% |
+  | archi ammessi nel grafo | 59.7% | 99.9% |
+  | pendenza longitudinale massima | 2.2–3.3 | 0.03–0.10 |
+
+- **GraphNav: un errore RPC non abbandona più lo spostamento.** Il `return False` stava fuori dall'`if`: un solo errore transitorio abbandonava lo spostamento mentre il messaggio diceva "(1/3)".
+- **Diagnostica dell'impronta (questione A).** Sui dati del 07-10 si misuravano 190–191 celle ostacolo nel nucleo del corpo, tutte per rugosità: celle mai scritte alla quota del plateau, con un salto di ~0.93 m dal pavimento. Con `_cells_never_written` corretta scendono a zero, quindi la maschera dell'impronta resta una tantum.
+- Traiettoria reale campionata durante ogni movimento (`trajectory.csv`). Tolta la riga "[INIT] Initializing Velodyne client...": il Velodyne non è in uso e la riga faceva credere a un sensore in più.
 
 ---
 
@@ -174,6 +243,14 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 - Rilevazione delle cadute e raddrizzamento automatico (`check_fall`, `recover_from_fall`).
 - (sera, dopo la revisione) **Tempo massimo per movimento.** Il comando durava 6000 s: se Spot non riusciva ad arrivare, restava a provare fino a 100 minuti. (sera) **Errori di rete**: prima uscivano come eccezione e chiudevano la missione senza fermare il robot, che finiva la traiettoria da solo; ora si riprova 3 volte, poi si ferma il robot.
 
+### Navigazione (`easy_walk.py`)
+- **Spostamenti con GraphNav con tempo massimo** (`_graphnav_navigate_to`, sera, dopo la revisione). `navigate_to_waypoint` e `navigate_to_first_waypoint` di `navGraphUtils.py` non avevano tempo massimo (ripetevano all'infinito anche con il robot caduto, e la missione non arrivava mai a sedersi), usavano `TravelParams` vuoti (velocità di default di Spot) e su `STATUS_LOST` forzavano la localizzazione sulla destinazione e dichiaravano "arrivato".
+- (sera, revisione) **Ritirata solo in continuità** (`RETREAT_CONTINUITY_M`): dopo uno spostamento con GraphNav l'ultimo tratto registrato poteva stare a molti metri, e il robot ci andava camminando all'indietro, alla cieca.
+- **Scorciatoie del percorso** (`shortcut_index`), controllate dal fronte e dalla mappa globale (dove sta, per esempio, il punto di una caduta).
+- **Andature tarate per l'esterno**: PLAIN aveva `SWING_HEIGHT_LOW` (passo da pavimento) e nessun livello aveva un limite di velocità.
+- **Quota di riferimento della missione** (`mission_z0`): Spot misura le quote da dove è stato acceso, e portandolo alla zona di missione per le scale tutte le quote risultavano spostate (−3.2 m il 05-10).
+- Margine del punto obiettivo uguale a quello del PRM e del fronte (era 0.05 m).
+
 ---
 
 ## Prima del 2026-10-06
@@ -194,3 +271,11 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 
 ### Controllo pre-missione (`preflight.py`)
 - **Nato dalla missione del 05-10 15:55**, interrotta appena costruito il grafo da `AttributeError: 'GlobalGrid' object has no attribute 'is_known'`: `easy_walk.py` era aggiornato, `spotGrid.py` sul robot era una copia vecchia. Nessun rischio (prima di qualunque movimento), ma robot già acceso e in piedi.
+
+### Navigazione (`easy_walk.py`)
+- **Punto obiettivo scelto sui dati.** Prima `find_best_point_in_cell` restituiva sempre il centro geometrico, ignorando la scansione: in una stanza arredata il centro cadeva dentro o a ridosso di un mobile. Missione 05-10 13:12: percorso 176 → 211 → 3127, oltre il bersaglio di più di un metro e poi indietro, fino a una tasca stretta. (Dal 13-10 il centro torna a essere l'obiettivo, ma si cambia quando è visto occupato.)
+- **Ritirata all'indietro sui propri passi** (`retreat_along_traveled_path`). Missione 05-10 13:12: prima `[REPLAN FALLITO]`, poi l'arco successivo bloccato, in uno spazio in cui girarsi era impossibile.
+- **`navigate_to` restituisce il booleano**, non la tupla di `relative_move`: una tupla non vuota è sempre vera, e un movimento fallito risultava riuscito. Era impossibile accorgersi che il robot era bloccato.
+- **Il grafo non si costruisce più all'avvio**: senza dati di terreno né di occupazione era privo di informazione, e il primo tentativo di cella lo ricostruiva da zero prima di qualunque uso.
+- **Una cella fallita da un lato non si ritenta subito né si blocca** (`finalize_or_defer_blocked_cell`): resta candidata e si ritenta quando tocca a lei, dal lato non ancora provato.
+- Il lato provato è quello della cella da cui si tenta l'ingresso, non quella in cui il robot si trova dopo il tentativo. Senza waypoint da cui avvicinarsi la cella si salta (prima un indice su `None` terminava la missione).
