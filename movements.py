@@ -254,7 +254,7 @@ def stop_robot(robot_command_client, reason=""):
         return False
 
 
-def relative_move(dx, dy, dyaw, frame_name, robot_command_client, robot_state_client, stairs=False,
+def relative_move(dx, dy, dyaw, frame_name, robot_command_client, robot_state_client,
                    locomotion_hint=None, ground_mu_hint=None, swing_height=None,
                    disable_foot_obstacle_avoidance=None,
                    should_abort=None, poll_period_s=0.2,

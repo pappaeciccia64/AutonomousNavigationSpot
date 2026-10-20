@@ -6,6 +6,13 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 
 ---
 
+## 2026-10-20
+
+### Movimenti (`movements.py`)
+- Tolto il parametro `stairs` di `relative_move`: non veniva mai letto e nessuno lo passava, quindi faceva credere a una modalità scale che non esiste.
+
+---
+
 ## 2026-10-14
 
 ### Fronte sicuro (`arcVerification.py`)
