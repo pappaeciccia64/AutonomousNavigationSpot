@@ -26,6 +26,7 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 ### Strumenti
 - **Messaggi di log in italiano** in tutti i moduli (`easy_walk.py`, `environmentMap.py`, `navGraphUtils.py`, `spotGrid.py`, `spotLogInUtils.py`). Le etichette fra parentesi quadre restano le stesse, così le ricerche nei log continuano a funzionare. `mission_report.py` e `test_replay.py` leggono sia i messaggi nuovi sia quelli in inglese delle missioni registrate prima.
 - **Controlli della prova in `mission_report.py`**, con la lista `PROVA_CAMPO.md`: per ogni novità mai provata sul robot, se è scattata e se i numeri sono quelli attesi.
+- **Interruttori nel log e nel riepilogo**: riga `[CONFIG] INTERRUTTORI` all'avvio e voce `interruttori` in `mission_summary.json` (aggiornamento locale, pendenze in blocco a inizio cella e nel refresh, mappa dello spazio libero, scorciatoie GraphNav, …); il rapporto li mostra. Serve ai confronti acceso/spento sul campo.
 - **Riga "Fluidita'" nel rapporto**: velocità media e tempo fermo a ruotare o a partire. Missione 13-10 12:40: 0.14 m/s su 356 s di movimento, di cui 93 s (26%) fermo a ruotare o a partire.
 
 ---

@@ -1499,6 +1499,26 @@ def _log_footprint_diagnostic(local_grid, pts, robot_x, robot_y, robot_yaw,
         print(f"[FOOTPRINT-DIAG] diagnostica non disponibile: {e}")
 
 
+def mission_switches():
+    """
+    Gli interruttori che cambiano come lavora la missione, con il loro valore adesso. Vanno nel
+    log ([CONFIG] INTERRUTTORI) e in mission_summary.json, cosi' dopo una prova si sa con quali
+    impostazioni e' stata fatta ogni missione (per i confronti acceso/spento).
+    """
+    return {
+        'easy_walk.INCREMENTAL_GRAPH_UPDATE': INCREMENTAL_GRAPH_UPDATE,
+        'mission_graph.BATCH_SLOPES': mission_graph.BATCH_SLOPES,
+        'prm_graph.REFRESH_BATCH_SLOPES': prm_graph_module.REFRESH_BATCH_SLOPES,
+        'spotGrid.CLEARANCE_MAP_DECIDES': spotGrid.CLEARANCE_MAP_DECIDES,
+        'easy_walk.PLAN_ONLY_EXPLORED_CELLS': PLAN_ONLY_EXPLORED_CELLS,
+        'easy_walk.GRAPHNAV_SHORTCUTS': GRAPHNAV_SHORTCUTS,
+        'easy_walk.GRAPHNAV_SDK_LOOP_CLOSURE': GRAPHNAV_SDK_LOOP_CLOSURE,
+        'easy_walk.SAVE_SCAN_BUNDLES': SAVE_SCAN_BUNDLES,
+        'movements.DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT': movements.DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT,
+        'spotGrid.ARC_BODY_EXTENSION_M': spotGrid.ARC_BODY_EXTENSION_M,
+    }
+
+
 def _emit_mission_summary_once():
     """Stampa e salva il riepilogo di missione una sola volta. Viene chiamata sia a fine
     missione normale sia da main() in un blocco finally, cosi' esce anche se la missione
@@ -1574,6 +1594,7 @@ def _emit_mission_summary_once():
                 'min_arc_sample_fraction': spotGrid.MIN_ARC_SAMPLE_FRACTION,
                 'terrain_valid_min': spotGrid.TERRAIN_VALID_MIN,
                 'goal_reached_tolerance_m': GOAL_REACHED_TOLERANCE_M,
+                'interruttori': mission_switches(),
             }
             with open(os.path.join(folder, 'mission_summary.json'), 'w', encoding='utf-8') as f:
                 json.dump(summary, f, indent=2, default=str)
@@ -4417,6 +4438,8 @@ def easy_walk(options):
             _MISSION_CTX['segment_log'] = SegmentLog(os.path.join(mission_log_folder, "segments.csv"))
             _MISSION_CTX['summary_done'] = False
             print(f"[LOG] Cartella log: {mission_log_folder}  |  dati e immagini: {mission_map_folder}")
+            print("[CONFIG] INTERRUTTORI: " + "  ".join(
+                f"{k.split('.')[-1]}={v}" for k, v in mission_switches().items()))
             print(f"[CONFIG] SLOPE_THRESHOLD={spotGrid.SLOPE_THRESHOLD}  "
                   f"LATERAL_SLOPE_COST_MULTIPLIER={spotGrid.LATERAL_SLOPE_COST_MULTIPLIER}  "
                   f"OBSTACLE_THRESHOLD={spotGrid.OBSTACLE_THRESHOLD}  ROUGH_THRESHOLD={spotGrid.ROUGH_THRESHOLD}  "

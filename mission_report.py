@@ -364,6 +364,13 @@ def report(name):
     print(f"Griglia: {f'{g[0]} x {g[1]} celle da {g[2]:.1f} m' if g else 'non indicata nel log'}"
           f" | durata {c['duration_s'] / 60:.1f} min" if c['duration_s'] else "")
     print(f"Celle: {c['visited']} visitate, {c['blocked']} bloccate, {c['attempts']} tentativi")
+    # Interruttori della missione (dal 21-10): dal riepilogo, o dalla riga [CONFIG] del log.
+    sw = (summary or {}).get('interruttori')
+    if sw:
+        print("Interruttori: " + "  ".join(f"{k.split('.')[-1]}={v}" for k, v in sw.items()))
+    else:
+        m = re.search(r'\[CONFIG\] INTERRUTTORI: (.*)', log)
+        print("Interruttori: " + (m.group(1).strip() if m else "non registrati (missione prima del 21-10)"))
 
     t = section_times(log, summary)
     if t.get('ripartizione'):
