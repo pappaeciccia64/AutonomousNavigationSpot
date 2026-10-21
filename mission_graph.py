@@ -118,11 +118,11 @@ DEFAULT_LATTICE_SPACING_M = 0.25
 # grafo, quindi i due restano sempre uguali. Anche build_mission_graph() chiamata senza
 # argomenti usa questi. Gli argomenti di easy_walk (--rows --cols --cell --spacing) e
 # SPOT_MISSION_GRID restano piu' forti di questi valori.
-#   es. 4 x 4 celle da 4 m:  MISSION_ROWS = 4, MISSION_COLS = 4, MISSION_CELL_SIZE_M = 4.0
+# Oggi: 3 x 4 celle da 4 m = 12 m a sinistra x 16 m davanti al robot.
 # ----------------------------------------------------------------------------------------
-MISSION_ROWS = 3 #None
-MISSION_COLS = 4 #None
-MISSION_CELL_SIZE_M = 4 #None
+MISSION_ROWS = 3
+MISSION_COLS = 4
+MISSION_CELL_SIZE_M = 4.0
 MISSION_SPACING_M = None
 
 
