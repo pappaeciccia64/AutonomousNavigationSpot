@@ -8,6 +8,21 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 
 ## 2026-10-21
 
+### Pianificatore (`prm_graph.py`)
+- **Pendenze del refresh calcolate in blocco** (`REFRESH_BATCH_SLOPES`, come `mission_graph.BATCH_SLOPES` a inizio cella). Dopo il 14-10 il refresh a ogni scansione era diventato la parte più lenta del grafo: rigiocando la missione 13-10 12:40 col codice di oggi, 1.08 s per scansione contro 1.38 s per inizio cella. Grafo identico bit per bit al calcolo arco per arco (archi, pesi, validità, pendenze, cache della pendenza globale) a ogni scansione di cinque missioni, 340 su 340. Tempi sullo stesso rigioco (59 scansioni, 11 inizi di cella, una variante alla volta):
+
+  | variante | inizio cella | refresh | totale |
+  |---|---|---|---|
+  | tutto arco per arco, ricostruzione completa | 76.8 s | 62.7 s | 141 s |
+  | aggiornamento locale | 73.3 s | 62.6 s | 138 s |
+  | + pendenze in blocco a inizio cella (14-10) | 15.2 s | 63.5 s | 81 s |
+  | **+ pendenze in blocco nel refresh** | **15.2 s** | **17.4 s** | **34 s** |
+
+  In missione il refresh si fa a robot fermo fra un passo e l'altro: da ~1.1 a ~0.3 s di sosta per scansione.
+
+### Mappe e terreno (`spotGrid.py`)
+- **Lunghezza dell'arco calcolata con `x*x` invece di `**2`** nel profilo di pendenza arco per arco (dal vivo e dalla mappa globale). Su un numero singolo `**2` a volte differisce all'ultima cifra dall'operazione che numpy fa sugli array, e da lì passo e pendenza: sulla missione 12-10 14:47 sette archi avevano pendenze diverse di 1e-16 fra calcolo arco per arco e in blocco. Ora i due coincidono bit per bit anche lì (il 14-10 il confronto era stato fatto solo sulle missioni del 13-10).
+
 ### Strumenti
 - **Messaggi di log in italiano** in tutti i moduli (`easy_walk.py`, `environmentMap.py`, `navGraphUtils.py`, `spotGrid.py`, `spotLogInUtils.py`). Le etichette fra parentesi quadre restano le stesse, così le ricerche nei log continuano a funzionare. `mission_report.py` e `test_replay.py` leggono sia i messaggi nuovi sia quelli in inglese delle missioni registrate prima.
 - **Controlli della prova in `mission_report.py`**, con la lista `PROVA_CAMPO.md`: per ogni novità mai provata sul robot, se è scattata e se i numeri sono quelli attesi.
@@ -267,6 +282,7 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 ### Pianificatore (`prm_graph.py`)
 - **Costo con pendenza longitudinale e laterale separate.** Prima la pendenza era un valore unico, e un arco di traverso su un pendio costava quanto uno piano con lo stesso gradiente.
 - Il profilo di pendenza dell'arco si calcola una volta sola e passa dal veto al costo: prima due volte per arco, con gli stessi argomenti.
+- Gli archi percorsi dal robot non tornano più a forza nel grafo se dopo sono stati bloccati o passano sopra il punto di una caduta (`_traversed_edge_ok`): prima un arco percorso all'andata e poi bloccato tornava alla ricostruzione successiva.
 - `find_path_dijkstra` restituisce il piano in corso quando la stabilità lo tiene; il chiamante deve distinguerlo da `None`. Nelle missioni del 05-10 `[REPLAN WARNING]` scambiava un caso per l'altro.
 
 ### Mappe e terreno (`spotGrid.py`)

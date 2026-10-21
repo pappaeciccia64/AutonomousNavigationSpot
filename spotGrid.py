@@ -410,7 +410,10 @@ def compute_arc_slope_profile(terrain_2d, grid_origin_x, grid_origin_y, cell_siz
     if terrain_2d is None or grid_origin_x is None or cell_size is None:
         return _no_slope_data(body_ext_m)
 
-    dist = float(np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2))
+    # x*x e non **2: e' l'operazione che numpy fa sugli array, quindi la lunghezza (e da
+    # li' passo e pendenza) e' identica bit per bit a quella del calcolo in blocco
+    # (arc_slope_profiles_batch); **2 su un numero singolo a volte differisce all'ultima cifra.
+    dist = float(np.sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1)))
     if dist < 1e-6:
         return _no_slope_data(body_ext_m)
 
@@ -1874,7 +1877,10 @@ def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
     Returns:
         (longitudinal_slope, lateral_slope, has_data)
     """
-    dist = float(np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2))
+    # x*x e non **2: e' l'operazione che numpy fa sugli array, quindi la lunghezza (e da
+    # li' passo e pendenza) e' identica bit per bit a quella del calcolo in blocco
+    # (arc_slope_profiles_batch); **2 su un numero singolo a volte differisce all'ultima cifra.
+    dist = float(np.sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1)))
     if dist < 1e-6:
         return _no_slope_data(body_ext_m)
 

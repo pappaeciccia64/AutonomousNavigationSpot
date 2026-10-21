@@ -71,6 +71,11 @@ STOP_NODE_MAP_IGNORE_M = 0.70
 # intero nella zona rivalutata. None = nessun limite.
 REFRESH_RADIUS_M = 1.25
 
+# Pendenze delle coppie del refresh calcolate in blocco con le matrici (vedi
+# precompute_arc_slopes), come a inizio cella (mission_graph.BATCH_SLOPES).
+# False = arco per arco; il risultato e' identico.
+REFRESH_BATCH_SLOPES = True
+
 
 def body_slope(prof):
     """
@@ -449,7 +454,18 @@ class PRM:
                      if use_occ else np.zeros(len(pairs), dtype=bool))
         self._prefill_global_slope_nodata(pairs)
 
-        for (idx1, idx2, dist), occ_flag in zip(pairs, occ_flags):
+        # Pendenze dal vivo di tutte le coppie da valutare in un colpo solo (stessi numeri del
+        # calcolo arco per arco). Si saltano quelle che il ciclo sotto non valuta: scartate per
+        # occupazione, bloccate da vicino, percorse dal robot (se una di queste ultime risulta
+        # da rivalutare, il suo profilo si calcola arco per arco).
+        live_profs = [None] * len(pairs)
+        if REFRESH_BATCH_SLOPES and pairs:
+            skip = np.array([bool(o) or (min(a, b), max(a, b)) in self.tracker_blocked_edges
+                             or (min(a, b), max(a, b)) in self.traversed_edges
+                             for (a, b, _d), o in zip(pairs, occ_flags)], dtype=bool)
+            live_profs = self.precompute_arc_slopes(pairs, skip=skip)
+
+        for (idx1, idx2, dist), occ_flag, live_prof in zip(pairs, occ_flags, live_profs):
             x1, y1 = self.nodes[idx1]
             x2, y2 = self.nodes[idx2]
             key = (min(idx1, idx2), max(idx1, idx2))
@@ -477,7 +493,8 @@ class PRM:
             if not blocked:
                 # Una sola lettura del terreno; veto e costo usano lo stesso valore, quello
                 # col corpo (vedi body_slope e spotGrid.ARC_BODY_EXTENSION_M).
-                prof = self.compute_arc_slope_profile(x1, y1, x2, y2, body=True)
+                prof = (live_prof if live_prof is not None
+                        else self.compute_arc_slope_profile(x1, y1, x2, y2, body=True))
                 long_slope, lat_slope, has_slope_data = body_slope(prof)
                 if has_slope_data:
                     self.edge_slope_info[key] = (long_slope, lat_slope)  # per visualizzazione, no ricalcolo
@@ -819,8 +836,8 @@ class PRM:
         """
         Un arco percorso dal robot resta nel grafo senza controlli (e' libero per costruzione),
         TRANNE se e' stato bloccato dopo (blocco confermato o fallimento fisico) o se ora passa
-        sopra il punto di una caduta. Prima veniva rimesso sempre, a forza: un arco percorso
-        all'andata e poi bloccato tornava nel grafo alla ricostruzione successiva (verificato).
+        sopra il punto di una caduta: un arco percorso all'andata e poi bloccato non deve
+        tornare nel grafo alla ricostruzione successiva.
         """
         key = (min(a, b), max(a, b))
         if key in self.tracker_blocked_edges:
