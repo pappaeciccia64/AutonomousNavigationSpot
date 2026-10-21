@@ -983,7 +983,7 @@ class LocalGrid:
         # Determine the data type for the bytes data.
         data_type = self.get_numpy_data_type(local_grid_proto.local_grid)
         if data_type is None:
-            print('Cannot determine the dataformat for the local grid.')
+            print('[GRID] Formato dei dati della griglia locale non riconosciuto.')
             return None
         # Decode the local grid.
         if local_grid_proto.local_grid.encoding == local_grid_pb2.LocalGrid.ENCODING_RAW:

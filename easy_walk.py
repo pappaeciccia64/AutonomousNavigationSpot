@@ -2554,7 +2554,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
     """
     mobility_kwargs = mobility_kwargs or {}
 
-    print(f"\n[ATTEMPT] Trying to enter cell ({target_row},{target_col}) from current position...")
+    print(f"\n[ATTEMPT] Provo a entrare nella cella ({target_row},{target_col}) dalla posizione attuale...")
 
     # Il robot arriva qui da un altro movimento (navigazione fra celle, ritirata): se e'
     # caduto nel frattempo si rialza prima di tutto. Solleva RobotFallenError se non puo'.
@@ -2784,7 +2784,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
     env._last_attempt_goal = (None if target_x is None or target_y is None
                               else (float(target_x), float(target_y)))
     if target_x is None or target_y is None:
-        print(f"[FAIL] No clear path found to cell ({target_row},{target_col}) from current position")
+        print(f"[FAIL] Nessun obiettivo valido nella cella ({target_row},{target_col}) dalla posizione attuale")
         visualize_grid_with_candidates(
             pts=pts, terrain_real=terrain_real, obstacle_mask=obstacle_mask,
             robot_x=robot_x, robot_y=robot_y,
@@ -4121,7 +4121,7 @@ def select_mobility_params(gradient, roughness):
                       max_linear_vel=spotGrid.GAIT_VEL_HARD,
                       max_angular_vel=spotGrid.GAIT_ANG_HARD)
 
-    print(f"[GAIT] Terrain tier: {tier} (gradient={gradient:.3f}, roughness={roughness:.3f}) -> "
+    print(f"[GAIT] Livello del terreno: {tier} (pendenza={gradient:.3f}, rugosita'={roughness:.3f}) -> "
           f"locomotion_hint={params['locomotion_hint']}, swing_height={params['swing_height']}, "
           f"ground_mu_hint={params['ground_mu_hint']}, "
           f"vel_max={params['max_linear_vel']:.2f} m/s, rot_max={params['max_angular_vel']:.2f} rad/s")
@@ -4169,14 +4169,14 @@ def navigate_to(target_x, target_y, robot_x, robot_y, robot_state_client, comman
             target_x, target_y, "vision", command_client, robot_state_client,
             should_abort=should_abort, **mobility_kwargs)
     else:
-        print("[INFO] Step 1: Rotating to face target...")
+        print("[INFO] Passo 1: rotazione verso il punto...")
         rotate_success, _ = movements.relative_move(0, 0, dyaw, "vision", command_client, robot_state_client,
                                                     should_abort=should_abort, **mobility_kwargs)
         if not rotate_success:
-            print(f"[FAIL] Rotation step failed -- aborting before the forward move even started.")
+            print(f"[FAIL] Rotazione non riuscita: il movimento in avanti non parte.")
             return False, 0.0, distance
 
-        print(f"[INFO] Step 2: Moving forward {distance:.2f}m...")
+        print(f"[INFO] Passo 2: avanti di {distance:.2f} m...")
         move_success, distance_traveled = movements.relative_move(distance, 0, 0, "vision", command_client,
                                                                    robot_state_client,
                                                                    should_abort=should_abort, **mobility_kwargs)
@@ -4376,13 +4376,13 @@ def finalize_or_defer_blocked_cell(env, row, col, sampler=None, global_map=None)
             return
     if env.all_sides_explored(row, col):
         env.mark_cell_blocked(row, col)
-        print(f"[BLOCKED] Cell ({row},{col}) permanently blocked -- every reachable side "
-              f"has now been tried and failed.")
+        print(f"[BLOCKED] Cella ({row},{col}) bloccata per sempre: ogni lato raggiungibile "
+              f"e' stato provato senza successo.")
     else:
-        print(f"[DEFER] Cell ({row},{col}) not fully explored yet (sides tried so far: "
-              f"{bin(env.get_cell_sides_status(row, col))}) -- leaving it as an open "
-              f"frontier candidate; it will be retried later, in normal priority order, "
-              f"from a side that hasn't been tried yet.")
+        print(f"[DEFER] Cella ({row},{col}) non ancora provata da tutti i lati (lati provati: "
+              f"{bin(env.get_cell_sides_status(row, col))}): resta candidata della "
+              f"frontiera e si ritentera' piu' avanti, nell'ordine normale, "
+              f"da un lato non ancora provato.")
 
 
 def easy_walk(options):
@@ -4473,10 +4473,10 @@ def easy_walk(options):
 
         command_client = robot.ensure_client(RobotCommandClient.default_service_name)
         robot.time_sync.wait_for_sync()
-        robot.logger.info('Powering on robot...')
+        robot.logger.info('Accensione del robot...')
         robot.power_on()
-        assert robot.is_powered_on(), 'Robot power on failed.'
-        robot.logger.info('Robot powered on.')
+        assert robot.is_powered_on(), 'Accensione del robot non riuscita.'
+        robot.logger.info('Robot acceso.')
         blocking_stand(command_client)
 
         # Griglie e mappe locali vengono tutte dalle telecamere di Spot (nessun Velodyne).
@@ -4739,7 +4739,7 @@ def easy_walk(options):
                                     frontier.append(selected_border)
                         else:
                             print(
-                                "[SKIP] Impossibile trovare un target point valido nella cella. Continuo l'algoritmo normale.")
+                                "[SKIP] Nessun punto obiettivo valido nella cella. Continuo con l'esplorazione normale.")
                             side_bit = env.get_side_bit_facing_origin(origin_row, origin_col, selected_border[0],
                                                                       selected_border[1])
                             env.mark_cell_side_explored(selected_border[0], selected_border[1], side_bit)
@@ -4777,9 +4777,9 @@ def easy_walk(options):
                                                                         candidate_nearest_cell[1],
                                                                         candidate_row, candidate_col)
                     if env.get_cell_sides_status(candidate_row, candidate_col) & candidate_side_bit:
-                        print(f"[SKIP-ROUND] Cell ({candidate_row},{candidate_col}) would be approached "
-                              f"from the same side already tried and failed -- trying the next-lowest-rank "
-                              f"candidate instead for this pass.")
+                        print(f"[SKIP-ROUND] Cella ({candidate_row},{candidate_col}): ci arriverei dallo "
+                              f"stesso lato gia' provato senza successo. Per questo giro provo la "
+                              f"candidata successiva.")
                         already_skipped_this_round.add((candidate_row, candidate_col))
                         continue
                     target_row, target_col, rank = candidate_row, candidate_col, candidate_rank
@@ -4868,7 +4868,7 @@ def easy_walk(options):
         recordingInterface.create_default_waypoint(cell_row=final_row, cell_col=final_col)
 
         # --- SCANSIONE FINALE: l'area attorno all'ultima posizione, prima di tornare ---
-        print("[FINAL SCAN] Acquiring one last look-around before returning to start...")
+        print("[FINAL SCAN] Ultima scansione attorno al robot prima di tornare alla partenza...")
         x_final, y_final, z_final, quat_final = spotUtils.getPosition(robot_state_client)
         final_yaw = np.arctan2(2.0 * (quat_final.w * quat_final.z + quat_final.x * quat_final.y),
                                1.0 - 2.0 * (quat_final.y ** 2 + quat_final.z ** 2))
@@ -4931,9 +4931,9 @@ def easy_walk(options):
                 grad_values=grad_final, rough_values=rough_final
             )
             visualization_counter += 1
-            print("[FINAL SCAN] Done -- global map now includes the final look-around.")
+            print("[FINAL SCAN] Fatto: l'ultima scansione e' nelle mappe globali.")
         else:
-            print("[FINAL SCAN] WARNING: local grid fetch failed, proceeding without a final scan.")
+            print("[FINAL SCAN] ATTENZIONE: griglia locale non ricevuta, proseguo senza scansione finale.")
 
         # ---------------------------------------------------------------------
         # RIEPILOGO DI MISSIONE -- solo diagnostica, va letto dopo il volo.
@@ -5038,7 +5038,7 @@ def main():
         return False
     except Exception as exc:
         logger = bosdyn.client.util.get_logger()
-        logger.error('Hello, Spot! threw an exception: %r', exc)
+        logger.error('La missione si e\' interrotta per un\'eccezione: %r', exc)
         try:
             import traceback
             print(f"[LOG] La missione e' terminata con un'eccezione: {exc!r}")

@@ -106,8 +106,8 @@ def mission_setup(name):
     if not os.path.exists(log_path) or not scans:
         return None
     log = open(log_path, errors='replace').read()
-    ox, oy = map(float, re.search(r'Origin set at world coordinates \(([-\d.]+), ([-\d.]+)\)', log).groups())
-    yaw = float(re.search(r'Initial orientation: ([-\d.]+)', log).group(1))
+    ox, oy = map(float, re.search(r'(?:Origin set at world coordinates|Origine fissata alle coordinate) \(([-\d.]+), ([-\d.]+)\)', log).groups())
+    yaw = float(re.search(r'(?:Initial orientation|Orientamento iniziale): ([-\d.]+)', log).group(1))
     g = re.search(r'Griglia di missione: (\d+) x (\d+) celle da ([\d.]+) m', log)
     rows, cols, cell = (int(g.group(1)), int(g.group(2)), float(g.group(3))) if g else (2, 4, 5.0)
     s = re.search(r'Reticolo: passo richiesto ([\d.]+) m', log)

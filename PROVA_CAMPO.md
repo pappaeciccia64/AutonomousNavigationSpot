@@ -30,6 +30,7 @@ Le modifiche del 14-10 non sono mai andate sul robot. Alcune del 13-10 erano nel
 ## Durante la prova
 
 - Annotare l'**ora** di ogni cosa strana (il log ha l'ora a ogni riga): si ritrova subito nel log e nelle scansioni.
+- I messaggi di log sono in italiano dal 21-10; le etichette fra parentesi quadre (`[ATTEMPT]`, `[BLOCKED]`, …) sono rimaste le stesse.
 - Il robot non deve mai restare **fermo a girare a vuoto**: se succede, prima o poi compare `[STALLO]`; annotare quanto ci mette.
 - Sfioramenti durante le rotazioni: il primo numero da cambiare è `ROTATION_NOISE_TOLERANCE_M` in `spotGrid.py` (0.15 → 0.10, vedi CHANGELOG 08-10).
 
@@ -47,4 +48,4 @@ Le modifiche del 14-10 non sono mai andate sul robot. Alcune del 13-10 erano nel
 
 - **`CLEARANCE_MAP_DECIDES`** (`spotGrid.py`, oggi `False`): la mappa dello spazio libero impara ma non decide. Il rapporto dà quanti archi bloccherebbe in più o in meno (riga DECISIONE). Sulle missioni del 12-10 riconosceva il 52–86% delle fermate del fronte contro il 39–43% della mappa binaria. Da accendere se nella prova il pianificatore ripropone lo stesso varco stretto più volte (fermate "di striscio" nel rapporto, `[SUBITO]` ripetuti nello stesso punto).
 - **CRAWL in MODERATE**: il rapporto dà il beccheggio per andatura. Se i tratti MODERATE restano tranquilli (sotto ~8 gradi), si può tornare all'andatura normale (`HINT_AUTO` in `select_mobility_params`), che è più veloce.
-- **Fluidità del movimento**: oggi il robot cammina in media a 0.14 m/s (13-10 12:40), perché ogni tratto aspetta che il corpo sia fermo e ruota a parte. Se la modifica viene preparata prima della prova, va confrontata qui, con l'interruttore acceso e spento.
+- **Fluidità del movimento**: oggi il robot cammina in media a 0.14 m/s (13-10 12:40), perché ogni tratto aspetta che il corpo sia fermo e ruota a parte. Il rapporto lo misura nella riga **Fluidita'** (velocità media, tempo fermo a ruotare o a partire). Se la modifica viene preparata prima della prova, va confrontata qui, con l'interruttore acceso e spento.

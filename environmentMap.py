@@ -30,10 +30,10 @@ class EnvironmentMap(object):
         """Segna la cella come visitata (1). False se e' fuori dalla griglia."""
         if 0 <= row < self.rows and 0 <= col < self.cols:
             self.map[row][col] = 1
-            print(f"[VISITED] Cell ({row},{col}) marked as visited (value=1)")
+            print(f"[VISITED] Cella ({row},{col}) segnata come visitata (valore 1)")
             return True
         else:
-            print(f"[ERROR] Cannot mark cell ({row},{col}) as visited - out of bounds")
+            print(f"[ERROR] Impossibile segnare visitata la cella ({row},{col}): fuori dalla griglia")
             return False
 
     def is_cell_visited(self, row, col):
@@ -68,9 +68,9 @@ class EnvironmentMap(object):
         is_inside = (abs(local_x) <= half_size and abs(local_y) <= half_size)
 
         if is_inside:
-            print(f"[CHECK] Point ({x:.2f},{y:.2f}) IS inside cell ({target_row},{target_col})")
+            print(f"[CHECK] Il punto ({x:.2f},{y:.2f}) e' DENTRO la cella ({target_row},{target_col})")
         else:
-            print(f"[CHECK] Point ({x:.2f},{y:.2f}) is OUTSIDE cell ({target_row},{target_col}) by ({local_x:.2f},{local_y:.2f})")
+            print(f"[CHECK] Il punto ({x:.2f},{y:.2f}) e' FUORI dalla cella ({target_row},{target_col}) di ({local_x:.2f},{local_y:.2f})")
 
         return is_inside
 
@@ -78,9 +78,9 @@ class EnvironmentMap(object):
         """Segna la cella come bloccata (-1): provata e non raggiungibile."""
         if 0 <= row < self.rows and 0 <= col < self.cols:
             self.map[row][col] = -1
-            print(f"[BLOCKED] Cell ({row},{col}) marked as blocked (value=-1)")
+            print(f"[BLOCKED] Cella ({row},{col}) segnata come bloccata (valore -1)")
         else:
-            print(f"[ERROR] Cannot mark cell ({row},{col}) as blocked - out of bounds")
+            print(f"[ERROR] Impossibile segnare bloccata la cella ({row},{col}): fuori dalla griglia")
 
     def is_cell_blocked(self, row, col):
         """True se la cella e' bloccata (-1)."""
@@ -140,8 +140,8 @@ class EnvironmentMap(object):
         cell_key = (row, col)
         current = self.explored_sides.get(cell_key, 0b0000)
         self.explored_sides[cell_key] = current | side_bit
-        print(f"[SIDE] Cell ({row},{col}) side {bin(side_bit)} marked explored "
-              f"(now {bin(self.explored_sides[cell_key])})")
+        print(f"[SIDE] Cella ({row},{col}): lato {bin(side_bit)} segnato come provato "
+              f"(ora {bin(self.explored_sides[cell_key])})")
 
     def get_adjacent_frontier_cells(self, cell_row, cell_col, path):
         """
@@ -155,10 +155,10 @@ class EnvironmentMap(object):
         ce ne sono.
         """
         if path is None:
-            print(f"[ERROR] get_adjacent_frontier_cells requires path parameter")
+            print(f"[ERROR] get_adjacent_frontier_cells richiede il parametro path")
             return []
 
-        print(f"\n[ADJACENT] Searching for adjacent unexplored neighbors from cell ({cell_row},{cell_col})")
+        print(f"\n[ADJACENT] Cerco le celle confinanti non esplorate attorno a ({cell_row},{cell_col})")
 
         cell_to_rank = {cell: idx for idx, cell in enumerate(path)}
 
@@ -183,22 +183,22 @@ class EnvironmentMap(object):
                 # stesso tentativo: tornera' in gioco da un altro lato.
                 side_bit = self.get_side_bit_facing_origin(cell_row, cell_col, neighbor_row, neighbor_col)
                 if self.get_cell_sides_status(neighbor_row, neighbor_col) & side_bit:
-                    print(f"  ✗ Neighbor {direction}: ({neighbor_row},{neighbor_col}) already tried from "
-                          f"this side and failed -- skipping for now")
+                    print(f"  ✗ Vicina {direction}: ({neighbor_row},{neighbor_col}) gia' provata da "
+                          f"questo lato senza successo: per ora la salto")
                     continue
 
                 neighbor_cell = (neighbor_row, neighbor_col)
                 rank = cell_to_rank.get(neighbor_cell, float('inf'))
                 unexplored_neighbors.append((neighbor_row, neighbor_col, rank))
-                print(f"  ✓ Neighbor {direction}: ({neighbor_row},{neighbor_col}) with rank={rank}")
+                print(f"  ✓ Vicina {direction}: ({neighbor_row},{neighbor_col}) rango={rank}")
 
         if unexplored_neighbors:
             unexplored_neighbors.sort(key=lambda x: x[2])
-            print(f"[ADJACENT] ✓ Found {len(unexplored_neighbors)} unexplored neighbors")
-            print(f"[ADJACENT] Neighbor with lowest rank: ({unexplored_neighbors[0][0]},{unexplored_neighbors[0][1]}) rank={unexplored_neighbors[0][2]}")
+            print(f"[ADJACENT] ✓ {len(unexplored_neighbors)} celle confinanti non esplorate")
+            print(f"[ADJACENT] Quella di rango piu' basso: ({unexplored_neighbors[0][0]},{unexplored_neighbors[0][1]}) rango={unexplored_neighbors[0][2]}")
             return unexplored_neighbors
         else:
-            print(f"[ADJACENT] No adjacent unexplored neighbors found")
+            print(f"[ADJACENT] Nessuna cella confinante non esplorata")
             return []
 
     def get_lowest_rank_from_frontier_list(self, frontier_list, path):
@@ -208,14 +208,14 @@ class EnvironmentMap(object):
         se la lista e' vuota o manca path.
         """
         if path is None:
-            print(f"[ERROR] get_lowest_rank_from_frontier_list requires path parameter")
+            print(f"[ERROR] get_lowest_rank_from_frontier_list richiede il parametro path")
             return None
 
         if not frontier_list or len(frontier_list) == 0:
-            print(f"[FRONTIER_RANK] Empty frontier list")
+            print(f"[FRONTIER_RANK] Frontiera vuota")
             return None
 
-        print(f"\n[FRONTIER_RANK] Searching for cell with lowest rank among {len(frontier_list)} frontier cells")
+        print(f"\n[FRONTIER_RANK] Cerco la cella di rango piu' basso fra {len(frontier_list)} celle di frontiera")
 
         cell_to_rank = {cell: idx for idx, cell in enumerate(path)}
 
@@ -231,17 +231,17 @@ class EnvironmentMap(object):
 
                     rank = cell_to_rank.get(cell_tuple, float('inf'))
 
-                    print(f"  Cell ({row},{col}): rank={rank}")
+                    print(f"  Cella ({row},{col}): rango={rank}")
 
                     if rank < min_rank:
                         min_rank = rank
                         best_cell = (row, col, rank)
 
         if best_cell:
-            print(f"[FRONTIER_RANK] ✓ Cell with lowest rank: ({best_cell[0]},{best_cell[1]}) rank={best_cell[2]}")
+            print(f"[FRONTIER_RANK] ✓ Cella di rango piu' basso: ({best_cell[0]},{best_cell[1]}) rango={best_cell[2]}")
             return best_cell
         else:
-            print(f"[FRONTIER_RANK] ⚠️ No valid cell found in list")
+            print(f"[FRONTIER_RANK] ⚠️ Nessuna cella valida nella lista")
             return None
 
     def get_cell_sides_status(self, row, col):
@@ -262,9 +262,9 @@ class EnvironmentMap(object):
 
         self.map[start_row][start_col] = 1
 
-        print(f"[OK] Origin set at world coordinates ({x:.2f}, {y:.2f})")
-        print(f"[OK] Initial orientation: {np.rad2deg(yaw):.1f}°")
-        print(f"[OK] Starting cell ({start_row}, {start_col}) marked as visited")
+        print(f"[OK] Origine fissata alle coordinate ({x:.2f}, {y:.2f})")
+        print(f"[OK] Orientamento iniziale: {np.rad2deg(yaw):.1f}°")
+        print(f"[OK] Cella di partenza ({start_row}, {start_col}) segnata come visitata")
 
     def update_position(self, x, y):
         """
@@ -305,12 +305,12 @@ class EnvironmentMap(object):
             if 0 <= row < self.rows and 0 <= col < self.cols:
                 if self.map[row][col] == 0:
                     self.map[row][col] = 1
-                    print(f"[MAP] Cell ({row}, {col}) marked as visited (robot center inside)")
+                    print(f"[MAP] Cella ({row}, {col}) segnata come visitata (centro del robot dentro)")
 
                 self.current_cell = (row, col)
                 return (row, col)
 
-        print(f"[INFO] Robot center at ({x:.2f}, {y:.2f}) -> grid ({grid_x:.2f}, {grid_y:.2f}) is between cells or out of bounds")
+        print(f"[INFO] Centro del robot in ({x:.2f}, {y:.2f}) -> griglia ({grid_x:.2f}, {grid_y:.2f}): fra due celle o fuori dalla griglia")
         return None
 
     def get_cell_from_world(self, x, y):
@@ -403,13 +403,13 @@ class EnvironmentMap(object):
     def add_waypoint(self, x, y):
         """Registra un waypoint nel punto (x, y) del mondo."""
         self.waypoints.append((x, y))
-        print(f"[WAYPOINT] Registered waypoint #{len(self.waypoints)} at ({x:.3f}, {y:.3f})")
+        print(f"[WAYPOINT] Registrato il waypoint n. {len(self.waypoints)} in ({x:.3f}, {y:.3f})")
 
     def print_map(self):
         """Stampa la mappa delle celle."""
-        print("\n--- Environment Map ---")
+        print("\n--- Mappa delle celle ---")
         for row in self.map:
             print(" ".join(str(cell) for cell in row))
         if hasattr(self, 'current_cell'):
-            print(f"Current cell: {self.current_cell}")
+            print(f"Cella attuale: {self.current_cell}")
         print("-----------------------\n")

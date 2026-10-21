@@ -6,6 +6,15 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 
 ---
 
+## 2026-10-21
+
+### Strumenti
+- **Messaggi di log in italiano** in tutti i moduli (`easy_walk.py`, `environmentMap.py`, `navGraphUtils.py`, `spotGrid.py`, `spotLogInUtils.py`). Le etichette fra parentesi quadre restano le stesse, così le ricerche nei log continuano a funzionare. `mission_report.py` e `test_replay.py` leggono sia i messaggi nuovi sia quelli in inglese delle missioni registrate prima.
+- **Controlli della prova in `mission_report.py`**, con la lista `PROVA_CAMPO.md`: per ogni novità mai provata sul robot, se è scattata e se i numeri sono quelli attesi.
+- **Riga "Fluidita'" nel rapporto**: velocità media e tempo fermo a ruotare o a partire. Missione 13-10 12:40: 0.14 m/s su 356 s di movimento, di cui 93 s (26%) fermo a ruotare o a partire.
+
+---
+
 ## 2026-10-20
 
 ### Movimenti (`movements.py`)

@@ -48,9 +48,9 @@ class SimpleEstop:
     def stop(self):
         """Attiva l'E-Stop: il robot si ferma subito."""
         self.keepalive.stop()
-        print("[ESTOP] Robot stopped")
+        print("[ESTOP] Robot fermato")
 
     def allow(self):
         """Rilascia l'E-Stop: il robot puo' muoversi."""
         self.keepalive.allow()
-        print("[ESTOP] Robot allowed to move")
+        print("[ESTOP] Robot libero di muoversi")

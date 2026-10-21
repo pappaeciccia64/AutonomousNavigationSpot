@@ -72,10 +72,11 @@ def log_time(line):
 # Sezioni
 # --------------------------------------------------------------------------------------
 def section_cells(log):
+    # I messaggi delle celle sono in italiano dal 21-10; le missioni prima li hanno in inglese.
     grid = re.search(r'Griglia di missione: (\d+) x (\d+) celle da ([\d.]+) m', log)
-    attempts = re.findall(r'\[ATTEMPT\] Trying to enter cell \((\d+),(\d+)\)', log)
-    visited = re.findall(r'\[VISITED\] Cell \((\d+),(\d+)\) marked as visited', log)
-    blocked = set(re.findall(r'\[BLOCKED\] Cell \((\d+),(\d+)\) marked as blocked', log))
+    attempts = re.findall(r'\[ATTEMPT\] (?:Trying to enter cell|Provo a entrare nella cella) \((\d+),(\d+)\)', log)
+    visited = re.findall(r'\[VISITED\] Cell[a]? \((\d+),(\d+)\) (?:marked as visited|segnata come visitata)', log)
+    blocked = set(re.findall(r'\[BLOCKED\] Cell[a]? \((\d+),(\d+)\) (?:marked as blocked|segnata come bloccata)', log))
     times = [t for t in (log_time(l) for l in log.splitlines()) if t is not None]
     out = dict(grid=(int(grid.group(1)), int(grid.group(2)), float(grid.group(3))) if grid else None,
                attempts=len(attempts), visited=len(set(visited)), blocked=len(blocked),
@@ -114,6 +115,26 @@ def section_motion(segments, trajectory):
                     for lim in PITCH_LIMITS_DEG}
     out['max_pitch'] = max((p for p, _ in pitch), default=None)
     out['calm_hard'] = sum(p < 8 and t == 'HARD' for p, t in pitch)
+    # Fluidita': per ogni tratto, il tempo prima che il robot si sposti di 5 cm (rotazione sul
+    # posto e partenza) e il tempo di cammino; velocita' media sul totale dei tratti.
+    dur = [float(r['duration_s']) for r in segments if r.get('duration_s') not in (None, '')]
+    dist = [float(r['dist_traveled_m']) for r in segments if r.get('dist_traveled_m') not in (None, '')]
+    if dur and sum(dur) > 0:
+        out['speed'] = sum(dist) / sum(dur)
+        out['move_s'] = sum(dur)
+    if trajectory:
+        by_seg = {}
+        for r in trajectory:
+            key = (r['iteration'], r['loop_iter'], r['node_from'], r['node_to'])
+            by_seg.setdefault(key, []).append((float(r['time']), float(r['x']), float(r['y'])))
+        turn = walk = 0.0
+        for s in by_seg.values():
+            s.sort()
+            t0, x0, y0 = s[0]
+            t_go = next((t for t, x, y in s if math.hypot(x - x0, y - y0) > 0.05), s[-1][0])
+            turn += t_go - t0
+            walk += s[-1][0] - t_go
+        out['turn_s'], out['walk_s'] = turn, walk
     return out
 
 
@@ -362,6 +383,13 @@ def report(name):
     mo = section_motion(read_csv(f['segments']), read_csv(f['trajectory']))
     print(f"\nMovimento: {mo['segments']} tratti" + (f", {mo['ok']} riusciti" if 'ok' in mo else "")
           + (f", {mo['distance_m']:.0f} m percorsi" if 'distance_m' in mo else ""))
+    if 'speed' in mo:
+        line = f"Fluidita': {mo['speed']:.2f} m/s di media su {mo['move_s']:.0f} s di movimento"
+        if 'turn_s' in mo and mo['turn_s'] + mo['walk_s'] > 0:
+            tot = mo['turn_s'] + mo['walk_s']
+            line += (f"; fermo a ruotare o a partire {mo['turn_s']:.0f} s ({100 * mo['turn_s'] / tot:.0f}%), "
+                     f"in cammino {mo['walk_s']:.0f} s")
+        print(line)
     if 'tiers' in mo:
         print("Andature: " + ", ".join(f"{k} {v}" for k, v in sorted(mo['tiers'].items())))
         for lim, (n, hard) in mo['steep'].items():
