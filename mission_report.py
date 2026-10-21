@@ -215,6 +215,116 @@ def _graph_route(gdir, start_name):
     return None
 
 
+def section_checks(log, segments):
+    """
+    Controlli delle novita' mai provate sul robot (vedi PROVA_CAMPO.md): per ognuna
+    (nome, esito, dettaglio). Esito: 'OK', 'DA GUARDARE', 'NON SCATTATO' (la situazione non
+    si e' presentata: ne' bene ne' male) o 'DECISIONE' (un numero su cui decidere).
+    """
+    out = []
+
+    # 1. Aggiornamento locale del grafo e pendenze in blocco: tempi.
+    upd = [(k, float(s)) for k, s in re.findall(
+        r'\[TEMPO\] (aggiornamento locale|costruzione completa) del grafo: ([\d.]+) s', log)]
+    loc = [s for k, s in upd if k == 'aggiornamento locale']
+    full = [s for k, s in upd if k == 'costruzione completa']
+    if len(upd) < 2:
+        out.append(("Aggiornamento locale del grafo", 'NON SCATTATO',
+                    f"{len(upd)} aggiornamenti del grafo: ne servono almeno due"))
+    else:
+        det = (f"{len(full)} complete (media {np.mean(full):.1f} s), " if full else "") + \
+              f"{len(loc)} locali" + (f" (media {np.mean(loc):.1f} s, massimo {max(loc):.1f} s)" if loc else "")
+        ok = loc and len(full) <= 2 and np.mean(loc) <= 4.0
+        out.append(("Aggiornamento locale del grafo", 'OK' if ok else 'DA GUARDARE',
+                    det + "; atteso: una sola completa all'inizio, poi locali da 1-3 s"))
+
+    # 2. Obiettivo al centro della cella, ripieghi vicino al centro.
+    center = len(re.findall(r"\[TARGET\] Cella \(\d+,\d+\): uso il centro geometrico", log))
+    moved = [float(d) for d in re.findall(
+        r"\[TARGET\] Cella \(\d+,\d+\): centro [^,]+, uso il punto .*?a ([\d.]+) m dal centro", log)]
+    none = len(re.findall(r"\[TARGET\] Cella \(\d+,\d+\): centro .*Nessun obiettivo valido", log))
+    if center + len(moved) + none == 0:
+        out.append(("Obiettivo al centro della cella", 'NON SCATTATO', "nessuna riga [TARGET] del formato attuale"))
+    else:
+        det = f"centro {center} volte, ripiego {len(moved)}" + \
+              (f" (fino a {max(moved):.2f} m dal centro)" if moved else "") + \
+              (f", nessun obiettivo valido {none}" if none else "")
+        ok = not moved or max(moved) <= 1.5
+        out.append(("Obiettivo al centro della cella", 'OK' if ok else 'DA GUARDARE',
+                    det + "; atteso: quasi sempre il centro, ripieghi entro ~1 m"))
+
+    # 3. Pendenza col corpo e andature: i tratti ripidi devono essere HARD.
+    pitch = [(float(r['pitch_peak_abs_deg']), r.get('tier', '?')) for r in segments
+             if r.get('pitch_peak_abs_deg') not in (None, '', 'nan')]
+    if not pitch:
+        out.append(("Pendenza col corpo e andature", 'NON SCATTATO', "nessun tratto con l'inclinazione registrata"))
+    else:
+        steep = [(p, t) for p, t in pitch if p > 18.0]
+        miss = [p for p, t in steep if t != 'HARD']
+        veto = [int(a) + int(b) for a, b in re.findall(
+            r'\[PENDENZE\] costruzione: archi vetati per pendenza -- longitudinale (\d+) .*?laterale (\d+)', log)]
+        det = (f"{len(steep)} tratti col muso oltre 18 gradi, {len(miss)} non in HARD"
+               + (f"; archi vetati per pendenza alla costruzione: {veto[0]}" if veto else ""))
+        out.append(("Pendenza col corpo e andature", 'OK' if not miss else 'DA GUARDARE',
+                    det + "; atteso: tutti i tratti oltre 18 gradi in HARD"))
+
+    # 4. Scorciatoie GraphNav sulla strada.
+    roads = [(float(a), float(b), int(n)) for a, b, n in re.findall(
+        r'strada verso \S+ ([\d.]+) m -> ([\d.]+) m con (\d+) scorciatoie', log)]
+    refused = len(re.findall(r'\[GRAPHNAV\] Scorciatoia \S+ rifiutata', log))
+    ret = re.search(r'ritorno a wp_0: arrivato in (\d+) s', log)
+    wp0 = re.findall(r'strada verso wp_0 ([\d.]+) m -> ([\d.]+) m', log)
+    if not roads:
+        out.append(("Scorciatoie GraphNav sulla strada", 'NON SCATTATO', "nessuna riga 'strada verso'"))
+    else:
+        det = (f"{len(roads)} spostamenti, {sum(a for a, _, _ in roads):.0f} m -> "
+               f"{sum(b for _, b, _ in roads):.0f} m con {sum(n for _, _, n in roads)} scorciatoie")
+        if wp0:
+            det += f"; wp_0: {float(wp0[-1][0]):.1f} -> {float(wp0[-1][1]):.1f} m"
+        det += f", ritorno {'in ' + ret.group(1) + ' s' if ret else 'NON arrivato'}"
+        if refused:
+            det += f"; {refused} scorciatoie rifiutate da Spot"
+        out.append(("Scorciatoie GraphNav sulla strada", 'OK' if ret and not refused else 'DA GUARDARE',
+                    det + "; atteso: ritorno a wp_0 arrivato, nessuna scorciatoia rifiutata"))
+
+    # 5. Localizzazione di GraphNav: perdite e riagganci.
+    lost = len(re.findall(r'\[LOCALIZZAZIONE\] [^|]*: PERSO', log))
+    re_ok = len(re.findall(r'\[LOCALIZZAZIONE\] Riaggancio .*: riuscito su', log))
+    re_all = len(re.findall(r'\[LOCALIZZAZIONE\] Riaggancio ', log))
+    fatal = len(re.findall(r'ha perso la localizzazione\. Fermo il robot', log))
+    if lost == 0 and re_all == 0:
+        out.append(("Riaggancio di GraphNav", 'NON SCATTATO', "GraphNav non si e' mai perso"))
+    else:
+        out.append(("Riaggancio di GraphNav", 'OK' if re_ok == re_all and not fatal else 'DA GUARDARE',
+                    f"perso {lost} volte, riagganci {re_ok} riusciti su {re_all}, spostamenti falliti "
+                    f"per perdita {fatal}; atteso: ogni riaggancio riuscito"))
+
+    # 6. Ritorni con memoria e recupero sullo stesso obiettivo.
+    excl = len(re.findall(r'\[RITORNO\] Arco \d+->\d+ fuori dal piano', log))
+    giveup = len(re.findall(r'ritorni in questo tentativo: sono tornato indietro, ma non riprovo', log))
+    same = len(re.findall(r"\[RECOVERY\] L'obiettivo .* quello del tentativo appena fallito", log))
+    if excl + giveup + same == 0:
+        out.append(("Ritorni con memoria e recupero", 'NON SCATTATO', "nessun ritorno indietro da una trappola"))
+    else:
+        out.append(("Ritorni con memoria e recupero", 'OK',
+                    f"archi esclusi per il tentativo {excl}, celle rimandate dopo 2 ritorni {giveup}, "
+                    f"recuperi rimandati perche' stesso obiettivo {same}; guardare che non ci siano giri ripetuti"))
+
+    # 7. Mappa dello spazio libero: dato per decidere CLEARANCE_MAP_DECIDES.
+    gap = [(int(a), int(b), int(c), int(d)) for a, b, c, d in re.findall(
+        r'\[SPAZIO\] Archi su cui i due criteri non concordano: (\d+) su (\d+) .*? -- (\d+) bloccati '
+        r'solo dalla mappa binaria, (\d+) solo dallo spazio', log)]
+    if not gap:
+        out.append(("Spazio libero (CLEARANCE_MAP_DECIDES)", 'NON SCATTATO', "nessuna riga [SPAZIO]"))
+    else:
+        pct = [100.0 * a / b for a, b, _, _ in gap if b]
+        out.append(("Spazio libero (CLEARANCE_MAP_DECIDES)", 'DECISIONE',
+                    f"{len(gap)} giri con disaccordo, mediana {np.median(pct):.1f}% degli archi "
+                    f"(massimo {max(pct):.1f}%); in tutto {sum(c for *_, c, _ in gap)} archi bloccati "
+                    f"solo dalla binaria, {sum(d for *_, d in gap)} solo dallo spazio libero"))
+    return out
+
+
 # --------------------------------------------------------------------------------------
 # Stampa
 # --------------------------------------------------------------------------------------
@@ -286,6 +396,10 @@ def report(name):
         if r.get('grafo'):
             line += f" | nel grafo scaricato da {r['grafo']['da']}: {r['grafo']['metri']} m"
         print(line)
+
+    print("\nControlli della prova (novita' mai provate sul robot, vedi PROVA_CAMPO.md):")
+    for nome, esito, det in section_checks(log, read_csv(f['segments'])):
+        print(f"  [{esito:^12s}] {nome}: {det}")
 
 
 def one_line(name):
