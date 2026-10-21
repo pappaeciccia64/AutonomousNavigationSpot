@@ -1,6 +1,6 @@
 # Prova sul campo: cosa controllare
 
-Le modifiche del 14-10 non sono mai andate sul robot. Alcune del 13-10 erano nel codice delle missioni delle 12:14–12:40 ma non sono mai scattate, perché la situazione non si è presentata. Questa lista dice cosa guardare e cosa aspettarsi; `mission_report.py` fa gli stessi controlli da solo, nella sezione **Controlli della prova**.
+Le modifiche dal 14-10 in poi non sono mai andate sul robot. Alcune del 13-10 erano nel codice delle missioni delle 12:14–12:40 ma non sono mai scattate, perché la situazione non si è presentata. Questa lista dice cosa guardare e cosa aspettarsi; `mission_report.py` fa gli stessi controlli da solo, nella sezione **Controlli della prova**.
 
 ---
 
@@ -18,6 +18,7 @@ Le modifiche del 14-10 non sono mai andate sul robot. Alcune del 13-10 erano nel
 | Novità | Riga di log | Cosa aspettarsi | Se va male |
 |---|---|---|---|
 | **Aggiornamento locale del grafo** e **pendenze in blocco** (14-10) | `[TEMPO] aggiornamento locale del grafo: X s` (oppure `costruzione completa`) | Una sola costruzione completa, al primo tentativo; poi aggiornamenti locali da **1–3 s**. Il 13-10 12:40 erano 11 costruzioni complete da 7.7 s in media. | `INCREMENTAL_GRAPH_UPDATE = False` in `easy_walk.py`, `BATCH_SLOPES = False` in `mission_graph.py`: stessi risultati, solo più lenti. |
+| **Refresh con le pendenze in blocco** (21-10) | `[TEMPO] scansione … \| PRM X \| …` a ogni giro | PRM sotto ~0.5 s per giro (il 13-10 12:40 erano 1.35 s di media). | `REFRESH_BATCH_SLOPES = False` in `prm_graph.py`: stessi risultati, solo più lento. |
 | **Obiettivo al centro della cella** (14-10) | `[TARGET] Cella (r,c): uso il centro geometrico …` oppure `centro …, uso il punto … a D m dal centro` | Quasi sempre il centro; ripieghi entro ~1 m dal centro; nessun arrivo fuori dalla cella. | Annotare cella e ora: si guarda con `mission_viewer.py`. |
 | **Pendenza col corpo** nel veto e nell'andatura (14-10) | `[GAIT] Terrain tier: …`, `[PENDENZE] costruzione: …` | Ogni tratto in cui il robot si inclina di più di 18 gradi è **HARD** (il rapporto li conta). Qualche arco vetato in più vicino ai gradini. | `ARC_BODY_EXTENSION_M` in `spotGrid.py`. |
 | **Scorciatoie GraphNav sulla strada** (14-10) | `[GRAPHNAV] …: strada verso wp_X A m -> B m con N scorciatoie` | Ritorno a wp_0 molto più corto: il 13-10 12:40 erano 46.7 m e 115 s; rigiocato col codice di oggi, 18.5 m. Nessuna riga `Scorciatoia … rifiutata`. | `GRAPHNAV_SHORTCUTS = False` in `easy_walk.py` (si torna alla sola catena). |
