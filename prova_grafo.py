@@ -37,9 +37,10 @@ PASSO_RETICOLO_M = 0.5
 
 # Nodi casuali: nodi per m2 (in missione 16) e seme (None = estratto a caso, scritto
 # nel titolo dell'immagine e nel terminale).
-# DENSITA_NODI_M2 = None: lo STESSO numero di nodi del reticolo qui sopra (bordo compreso),
-# per un confronto a parita' di nodi.
-DENSITA_NODI_M2 = None
+# 4 nodi/m2 = la densita' del reticolo a passo 0.5: numero di nodi simile (il reticolo ne
+# ha qualcuno in piu', la fila sul bordo esterno: ~6% con 3 x 3 celle da 4 m).
+# DENSITA_NODI_M2 = None: esattamente lo stesso numero di nodi del reticolo.
+DENSITA_NODI_M2 = 4.0
 SEME = 7
 
 # Quali metodi mettere a confronto: togli quelli che non vuoi vedere.
