@@ -7,8 +7,8 @@
      0,
      1
     ],
-    "valid_arcs": 101043,
-    "discarded_arcs": 4207,
+    "valid_arcs": 100863,
+    "discarded_arcs": 4387,
     "path_found": true,
     "path_arcs": 4,
     "path_len_m": 4.09
@@ -19,8 +19,8 @@
      0,
      2
     ],
-    "valid_arcs": 101526,
-    "discarded_arcs": 3724,
+    "valid_arcs": 101206,
+    "discarded_arcs": 4044,
     "path_found": true,
     "path_arcs": 2,
     "path_len_m": 2.04
@@ -31,8 +31,8 @@
      0,
      3
     ],
-    "valid_arcs": 101526,
-    "discarded_arcs": 3724,
+    "valid_arcs": 101206,
+    "discarded_arcs": 4044,
     "path_found": true,
     "path_arcs": 6,
     "path_len_m": 6.03
@@ -43,8 +43,8 @@
      1,
      3
     ],
-    "valid_arcs": 101522,
-    "discarded_arcs": 3728,
+    "valid_arcs": 101202,
+    "discarded_arcs": 4048,
     "path_found": true,
     "path_arcs": 4,
     "path_len_m": 4.06
@@ -55,8 +55,8 @@
      1,
      2
     ],
-    "valid_arcs": 101525,
-    "discarded_arcs": 3725,
+    "valid_arcs": 101205,
+    "discarded_arcs": 4045,
     "path_found": true,
     "path_arcs": 6,
     "path_len_m": 4.85
@@ -67,8 +67,8 @@
      1,
      1
     ],
-    "valid_arcs": 100615,
-    "discarded_arcs": 4635,
+    "valid_arcs": 100179,
+    "discarded_arcs": 5071,
     "path_found": true,
     "path_arcs": 2,
     "path_len_m": 2.31
@@ -79,8 +79,8 @@
      1,
      0
     ],
-    "valid_arcs": 100615,
-    "discarded_arcs": 4635,
+    "valid_arcs": 100182,
+    "discarded_arcs": 5068,
     "path_found": true,
     "path_arcs": 6,
     "path_len_m": 5.91
@@ -91,8 +91,8 @@
      2,
      0
     ],
-    "valid_arcs": 96300,
-    "discarded_arcs": 8950,
+    "valid_arcs": 95221,
+    "discarded_arcs": 10029,
     "path_found": true,
     "path_arcs": 2,
     "path_len_m": 2.0
@@ -103,8 +103,8 @@
      2,
      1
     ],
-    "valid_arcs": 94644,
-    "discarded_arcs": 10606,
+    "valid_arcs": 93907,
+    "discarded_arcs": 11343,
     "path_found": true,
     "path_arcs": 4,
     "path_len_m": 4.24
@@ -115,8 +115,8 @@
      2,
      2
     ],
-    "valid_arcs": 94787,
-    "discarded_arcs": 10463,
+    "valid_arcs": 94131,
+    "discarded_arcs": 11119,
     "path_found": true,
     "path_arcs": 2,
     "path_len_m": 2.5
@@ -127,8 +127,8 @@
      2,
      2
     ],
-    "valid_arcs": 94787,
-    "discarded_arcs": 10463,
+    "valid_arcs": 94131,
+    "discarded_arcs": 11119,
     "path_found": true,
     "path_arcs": 2,
     "path_len_m": 1.79
@@ -139,8 +139,8 @@
      2,
      3
     ],
-    "valid_arcs": 93580,
-    "discarded_arcs": 11670,
+    "valid_arcs": 92730,
+    "discarded_arcs": 12520,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 4.77
@@ -151,8 +151,8 @@
      2,
      3
     ],
-    "valid_arcs": 93084,
-    "discarded_arcs": 12166,
+    "valid_arcs": 92369,
+    "discarded_arcs": 12881,
     "path_found": true,
     "path_arcs": 2,
     "path_len_m": 1.78
@@ -227,8 +227,8 @@
      0,
      1
     ],
-    "valid_arcs": 101372,
-    "discarded_arcs": 3878,
+    "valid_arcs": 101192,
+    "discarded_arcs": 4058,
     "path_found": true,
     "path_arcs": 4,
     "path_len_m": 4.09
@@ -239,8 +239,8 @@
      0,
      2
     ],
-    "valid_arcs": 101330,
-    "discarded_arcs": 3920,
+    "valid_arcs": 100981,
+    "discarded_arcs": 4269,
     "path_found": true,
     "path_arcs": 2,
     "path_len_m": 2.06
@@ -251,8 +251,8 @@
      0,
      3
     ],
-    "valid_arcs": 101331,
-    "discarded_arcs": 3919,
+    "valid_arcs": 100982,
+    "discarded_arcs": 4268,
     "path_found": true,
     "path_arcs": 6,
     "path_len_m": 6.06
@@ -263,8 +263,8 @@
      1,
      3
     ],
-    "valid_arcs": 100186,
-    "discarded_arcs": 5064,
+    "valid_arcs": 99731,
+    "discarded_arcs": 5519,
     "path_found": true,
     "path_arcs": 4,
     "path_len_m": 4.06
@@ -275,8 +275,8 @@
      1,
      2
     ],
-    "valid_arcs": 97499,
-    "discarded_arcs": 7751,
+    "valid_arcs": 96953,
+    "discarded_arcs": 8297,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 4.37
@@ -287,8 +287,8 @@
      1,
      1
     ],
-    "valid_arcs": 94082,
-    "discarded_arcs": 11168,
+    "valid_arcs": 93168,
+    "discarded_arcs": 12082,
     "path_found": true,
     "path_arcs": 4,
     "path_len_m": 3.95
@@ -299,8 +299,8 @@
      1,
      0
     ],
-    "valid_arcs": 94136,
-    "discarded_arcs": 11114,
+    "valid_arcs": 93220,
+    "discarded_arcs": 12030,
     "path_found": true,
     "path_arcs": 3,
     "path_len_m": 3.0
@@ -311,8 +311,8 @@
      2,
      0
     ],
-    "valid_arcs": 92838,
-    "discarded_arcs": 12412,
+    "valid_arcs": 91849,
+    "discarded_arcs": 13401,
     "path_found": true,
     "path_arcs": 6,
     "path_len_m": 6.3
@@ -323,8 +323,8 @@
      2,
      1
     ],
-    "valid_arcs": 85151,
-    "discarded_arcs": 20099,
+    "valid_arcs": 83681,
+    "discarded_arcs": 21569,
     "path_found": true,
     "path_arcs": 3,
     "path_len_m": 2.71
@@ -335,11 +335,11 @@
      2,
      2
     ],
-    "valid_arcs": 80410,
-    "discarded_arcs": 24840,
+    "valid_arcs": 78852,
+    "discarded_arcs": 26398,
     "path_found": true,
     "path_arcs": 6,
-    "path_len_m": 5.78
+    "path_len_m": 5.84
    },
    {
     "attempt": 10,
@@ -347,11 +347,11 @@
      2,
      3
     ],
-    "valid_arcs": 75532,
-    "discarded_arcs": 29718,
+    "valid_arcs": 73679,
+    "discarded_arcs": 31571,
     "path_found": true,
     "path_arcs": 4,
-    "path_len_m": 3.93
+    "path_len_m": 4.09
    }
   ],
   "ritorno": {
@@ -428,8 +428,8 @@
      0,
      1
     ],
-    "valid_arcs": 104630,
-    "discarded_arcs": 4844,
+    "valid_arcs": 104450,
+    "discarded_arcs": 5024,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 5.0
@@ -440,8 +440,8 @@
      0,
      2
     ],
-    "valid_arcs": 93600,
-    "discarded_arcs": 15874,
+    "valid_arcs": 92838,
+    "discarded_arcs": 16636,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 5.0
@@ -452,11 +452,11 @@
      1,
      1
     ],
-    "valid_arcs": 86939,
-    "discarded_arcs": 22535,
+    "valid_arcs": 86199,
+    "discarded_arcs": 23275,
     "path_found": true,
     "path_arcs": 7,
-    "path_len_m": 6.85
+    "path_len_m": 6.92
    },
    {
     "attempt": 3,
@@ -464,11 +464,11 @@
      1,
      0
     ],
-    "valid_arcs": 82538,
-    "discarded_arcs": 26936,
+    "valid_arcs": 81770,
+    "discarded_arcs": 27704,
     "path_found": true,
     "path_arcs": 6,
-    "path_len_m": 5.59
+    "path_len_m": 5.74
    }
   ],
   "ritorno": null,
@@ -507,8 +507,8 @@
      0,
      1
     ],
-    "valid_arcs": 104230,
-    "discarded_arcs": 5244,
+    "valid_arcs": 103958,
+    "discarded_arcs": 5516,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 5.0
@@ -519,8 +519,8 @@
      0,
      2
     ],
-    "valid_arcs": 94525,
-    "discarded_arcs": 14949,
+    "valid_arcs": 93799,
+    "discarded_arcs": 15675,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 5.0
@@ -531,11 +531,11 @@
      0,
      3
     ],
-    "valid_arcs": 87054,
-    "discarded_arcs": 22420,
+    "valid_arcs": 85873,
+    "discarded_arcs": 23601,
     "path_found": true,
-    "path_arcs": 14,
-    "path_len_m": 11.56
+    "path_arcs": 15,
+    "path_len_m": 11.62
    },
    {
     "attempt": 5,
@@ -543,8 +543,8 @@
      1,
      0
     ],
-    "valid_arcs": 82012,
-    "discarded_arcs": 27462,
+    "valid_arcs": 80783,
+    "discarded_arcs": 28691,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 5.06
@@ -582,8 +582,8 @@
      0,
      1
     ],
-    "valid_arcs": 105095,
-    "discarded_arcs": 4379,
+    "valid_arcs": 104863,
+    "discarded_arcs": 4611,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 5.0
@@ -594,8 +594,8 @@
      0,
      2
     ],
-    "valid_arcs": 107703,
-    "discarded_arcs": 1771,
+    "valid_arcs": 107523,
+    "discarded_arcs": 1951,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 5.06
@@ -606,8 +606,8 @@
      0,
      3
     ],
-    "valid_arcs": 107304,
-    "discarded_arcs": 2170,
+    "valid_arcs": 107054,
+    "discarded_arcs": 2420,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 5.12
@@ -618,8 +618,8 @@
      1,
      3
     ],
-    "valid_arcs": 106335,
-    "discarded_arcs": 3139,
+    "valid_arcs": 106027,
+    "discarded_arcs": 3447,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 5.07
@@ -630,8 +630,8 @@
      1,
      2
     ],
-    "valid_arcs": 106155,
-    "discarded_arcs": 3319,
+    "valid_arcs": 105664,
+    "discarded_arcs": 3810,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 5.0
@@ -642,11 +642,11 @@
      1,
      1
     ],
-    "valid_arcs": 101590,
-    "discarded_arcs": 7884,
+    "valid_arcs": 100997,
+    "discarded_arcs": 8477,
     "path_found": true,
     "path_arcs": 8,
-    "path_len_m": 6.55
+    "path_len_m": 6.65
    },
    {
     "attempt": 6,
@@ -654,8 +654,8 @@
      1,
      0
     ],
-    "valid_arcs": 99773,
-    "discarded_arcs": 9701,
+    "valid_arcs": 98948,
+    "discarded_arcs": 10526,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 5.0
@@ -726,8 +726,8 @@
      0,
      1
     ],
-    "valid_arcs": 128190,
-    "discarded_arcs": 3940,
+    "valid_arcs": 127710,
+    "discarded_arcs": 4420,
     "path_found": true,
     "path_arcs": 4,
     "path_len_m": 4.09
@@ -738,8 +738,8 @@
      0,
      2
     ],
-    "valid_arcs": 129453,
-    "discarded_arcs": 2677,
+    "valid_arcs": 129124,
+    "discarded_arcs": 3006,
     "path_found": true,
     "path_arcs": 3,
     "path_len_m": 2.19
@@ -750,8 +750,8 @@
      0,
      3
     ],
-    "valid_arcs": 129456,
-    "discarded_arcs": 2674,
+    "valid_arcs": 129127,
+    "discarded_arcs": 3003,
     "path_found": true,
     "path_arcs": 6,
     "path_len_m": 6.22
@@ -762,8 +762,8 @@
      0,
      4
     ],
-    "valid_arcs": 128492,
-    "discarded_arcs": 3638,
+    "valid_arcs": 128096,
+    "discarded_arcs": 4034,
     "path_found": true,
     "path_arcs": 2,
     "path_len_m": 2.0
@@ -774,8 +774,8 @@
      1,
      4
     ],
-    "valid_arcs": 128492,
-    "discarded_arcs": 3638,
+    "valid_arcs": 128096,
+    "discarded_arcs": 4034,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 4.51
@@ -786,8 +786,8 @@
      1,
      3
     ],
-    "valid_arcs": 127797,
-    "discarded_arcs": 4333,
+    "valid_arcs": 127282,
+    "discarded_arcs": 4848,
     "path_found": true,
     "path_arcs": 3,
     "path_len_m": 3.31
@@ -798,8 +798,8 @@
      1,
      2
     ],
-    "valid_arcs": 127797,
-    "discarded_arcs": 4333,
+    "valid_arcs": 127282,
+    "discarded_arcs": 4848,
     "path_found": true,
     "path_arcs": 6,
     "path_len_m": 5.08
@@ -810,8 +810,8 @@
      1,
      1
     ],
-    "valid_arcs": 127797,
-    "discarded_arcs": 4333,
+    "valid_arcs": 127282,
+    "discarded_arcs": 4848,
     "path_found": true,
     "path_arcs": 3,
     "path_len_m": 2.56
@@ -822,8 +822,8 @@
      1,
      0
     ],
-    "valid_arcs": 127797,
-    "discarded_arcs": 4333,
+    "valid_arcs": 127282,
+    "discarded_arcs": 4848,
     "path_found": true,
     "path_arcs": 6,
     "path_len_m": 5.98
@@ -834,8 +834,8 @@
      2,
      0
     ],
-    "valid_arcs": 124936,
-    "discarded_arcs": 7194,
+    "valid_arcs": 124049,
+    "discarded_arcs": 8081,
     "path_found": true,
     "path_arcs": 2,
     "path_len_m": 2.5
@@ -846,11 +846,11 @@
      2,
      1
     ],
-    "valid_arcs": 123892,
-    "discarded_arcs": 8238,
+    "valid_arcs": 122903,
+    "discarded_arcs": 9227,
     "path_found": true,
     "path_arcs": 6,
-    "path_len_m": 5.44
+    "path_len_m": 5.48
    },
    {
     "attempt": 11,
@@ -858,8 +858,8 @@
      2,
      2
     ],
-    "valid_arcs": 119599,
-    "discarded_arcs": 12531,
+    "valid_arcs": 118453,
+    "discarded_arcs": 13677,
     "path_found": true,
     "path_arcs": 2,
     "path_len_m": 1.82
@@ -870,8 +870,8 @@
      2,
      3
     ],
-    "valid_arcs": 118463,
-    "discarded_arcs": 13667,
+    "valid_arcs": 117188,
+    "discarded_arcs": 14942,
     "path_found": true,
     "path_arcs": 8,
     "path_len_m": 6.84
@@ -942,8 +942,8 @@
      0,
      1
     ],
-    "valid_arcs": 74969,
-    "discarded_arcs": 3401,
+    "valid_arcs": 74716,
+    "discarded_arcs": 3654,
     "path_found": true,
     "path_arcs": 3,
     "path_len_m": 2.94
@@ -954,8 +954,8 @@
      0,
      2
     ],
-    "valid_arcs": 74341,
-    "discarded_arcs": 4029,
+    "valid_arcs": 74010,
+    "discarded_arcs": 4360,
     "path_found": true,
     "path_arcs": 7,
     "path_len_m": 6.01
@@ -966,8 +966,8 @@
      1,
      2
     ],
-    "valid_arcs": 73729,
-    "discarded_arcs": 4641,
+    "valid_arcs": 73237,
+    "discarded_arcs": 5133,
     "path_found": true,
     "path_arcs": 3,
     "path_len_m": 3.08
@@ -978,8 +978,8 @@
      1,
      1
     ],
-    "valid_arcs": 72487,
-    "discarded_arcs": 5883,
+    "valid_arcs": 71870,
+    "discarded_arcs": 6500,
     "path_found": true,
     "path_arcs": 3,
     "path_len_m": 3.15
@@ -990,8 +990,8 @@
      1,
      0
     ],
-    "valid_arcs": 69628,
-    "discarded_arcs": 8742,
+    "valid_arcs": 68937,
+    "discarded_arcs": 9433,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 4.29
@@ -1002,8 +1002,8 @@
      2,
      0
     ],
-    "valid_arcs": 65809,
-    "discarded_arcs": 12561,
+    "valid_arcs": 64771,
+    "discarded_arcs": 13599,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 5.03
@@ -1014,8 +1014,8 @@
      2,
      1
     ],
-    "valid_arcs": 65270,
-    "discarded_arcs": 13100,
+    "valid_arcs": 64134,
+    "discarded_arcs": 14236,
     "path_found": true,
     "path_arcs": 2,
     "path_len_m": 2.5
@@ -1026,8 +1026,8 @@
      2,
      2
     ],
-    "valid_arcs": 62927,
-    "discarded_arcs": 15443,
+    "valid_arcs": 61645,
+    "discarded_arcs": 16725,
     "path_found": true,
     "path_arcs": 6,
     "path_len_m": 5.8
@@ -1081,8 +1081,8 @@
      0,
      1
     ],
-    "valid_arcs": 100618,
-    "discarded_arcs": 4632,
+    "valid_arcs": 100282,
+    "discarded_arcs": 4968,
     "path_found": true,
     "path_arcs": 4,
     "path_len_m": 4.0
@@ -1093,8 +1093,8 @@
      0,
      2
     ],
-    "valid_arcs": 94126,
-    "discarded_arcs": 11124,
+    "valid_arcs": 93534,
+    "discarded_arcs": 11716,
     "path_found": true,
     "path_arcs": 4,
     "path_len_m": 4.0
@@ -1105,11 +1105,11 @@
      0,
      3
     ],
-    "valid_arcs": 86358,
-    "discarded_arcs": 18892,
+    "valid_arcs": 85376,
+    "discarded_arcs": 19874,
     "path_found": true,
-    "path_arcs": 5,
-    "path_len_m": 4.74
+    "path_arcs": 6,
+    "path_len_m": 4.82
    },
    {
     "attempt": 3,
@@ -1117,11 +1117,11 @@
      1,
      2
     ],
-    "valid_arcs": 84708,
-    "discarded_arcs": 20542,
+    "valid_arcs": 83837,
+    "discarded_arcs": 21413,
     "path_found": true,
-    "path_arcs": 5,
-    "path_len_m": 4.73
+    "path_arcs": 6,
+    "path_len_m": 5.43
    },
    {
     "attempt": 4,
@@ -1129,8 +1129,8 @@
      1,
      2
     ],
-    "valid_arcs": 81730,
-    "discarded_arcs": 23520,
+    "valid_arcs": 80922,
+    "discarded_arcs": 24328,
     "path_found": true,
     "path_arcs": 2,
     "path_len_m": 1.0
@@ -1182,8 +1182,8 @@
      0,
      1
     ],
-    "valid_arcs": 100801,
-    "discarded_arcs": 4449,
+    "valid_arcs": 100472,
+    "discarded_arcs": 4778,
     "path_found": true,
     "path_arcs": 4,
     "path_len_m": 4.0
@@ -1194,8 +1194,8 @@
      0,
      2
     ],
-    "valid_arcs": 92658,
-    "discarded_arcs": 12592,
+    "valid_arcs": 92083,
+    "discarded_arcs": 13167,
     "path_found": true,
     "path_arcs": 4,
     "path_len_m": 3.41
@@ -1206,11 +1206,11 @@
      0,
      3
     ],
-    "valid_arcs": 87312,
-    "discarded_arcs": 17938,
+    "valid_arcs": 86805,
+    "discarded_arcs": 18445,
     "path_found": true,
     "path_arcs": 6,
-    "path_len_m": 5.56
+    "path_len_m": 5.57
    },
    {
     "attempt": 3,
@@ -1218,8 +1218,8 @@
      1,
      2
     ],
-    "valid_arcs": 83923,
-    "discarded_arcs": 21327,
+    "valid_arcs": 83123,
+    "discarded_arcs": 22127,
     "path_found": true,
     "path_arcs": 6,
     "path_len_m": 5.65
@@ -1230,8 +1230,8 @@
      1,
      0
     ],
-    "valid_arcs": 82080,
-    "discarded_arcs": 23170,
+    "valid_arcs": 81127,
+    "discarded_arcs": 24123,
     "path_found": true,
     "path_arcs": 4,
     "path_len_m": 4.25
@@ -1273,8 +1273,8 @@
      0,
      1
     ],
-    "valid_arcs": 101385,
-    "discarded_arcs": 3865,
+    "valid_arcs": 100818,
+    "discarded_arcs": 4432,
     "path_found": true,
     "path_arcs": 4,
     "path_len_m": 4.09
@@ -1285,8 +1285,8 @@
      0,
      2
     ],
-    "valid_arcs": 102672,
-    "discarded_arcs": 2578,
+    "valid_arcs": 102199,
+    "discarded_arcs": 3051,
     "path_found": true,
     "path_arcs": 2,
     "path_len_m": 2.15
@@ -1297,8 +1297,8 @@
      0,
      3
     ],
-    "valid_arcs": 102672,
-    "discarded_arcs": 2578,
+    "valid_arcs": 102199,
+    "discarded_arcs": 3051,
     "path_found": true,
     "path_arcs": 6,
     "path_len_m": 6.06
@@ -1309,8 +1309,8 @@
      1,
      3
     ],
-    "valid_arcs": 101723,
-    "discarded_arcs": 3527,
+    "valid_arcs": 101201,
+    "discarded_arcs": 4049,
     "path_found": true,
     "path_arcs": 4,
     "path_len_m": 4.0
@@ -1321,8 +1321,8 @@
      1,
      2
     ],
-    "valid_arcs": 101091,
-    "discarded_arcs": 4159,
+    "valid_arcs": 100459,
+    "discarded_arcs": 4791,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 4.77
@@ -1333,8 +1333,8 @@
      1,
      1
     ],
-    "valid_arcs": 100260,
-    "discarded_arcs": 4990,
+    "valid_arcs": 99681,
+    "discarded_arcs": 5569,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 4.31
@@ -1345,8 +1345,8 @@
      1,
      0
     ],
-    "valid_arcs": 100123,
-    "discarded_arcs": 5127,
+    "valid_arcs": 99572,
+    "discarded_arcs": 5678,
     "path_found": true,
     "path_arcs": 2,
     "path_len_m": 2.31
@@ -1357,11 +1357,11 @@
      2,
      0
     ],
-    "valid_arcs": 99033,
-    "discarded_arcs": 6217,
+    "valid_arcs": 98222,
+    "discarded_arcs": 7028,
     "path_found": true,
-    "path_arcs": 3,
-    "path_len_m": 2.25
+    "path_arcs": 2,
+    "path_len_m": 2.28
    },
    {
     "attempt": 8,
@@ -1369,8 +1369,8 @@
      2,
      1
     ],
-    "valid_arcs": 95609,
-    "discarded_arcs": 9641,
+    "valid_arcs": 94676,
+    "discarded_arcs": 10574,
     "path_found": true,
     "path_arcs": 5,
     "path_len_m": 3.6
@@ -1381,8 +1381,8 @@
      2,
      2
     ],
-    "valid_arcs": 93963,
-    "discarded_arcs": 11287,
+    "valid_arcs": 92850,
+    "discarded_arcs": 12400,
     "path_found": true,
     "path_arcs": 6,
     "path_len_m": 5.3
@@ -1393,11 +1393,11 @@
      2,
      3
     ],
-    "valid_arcs": 88996,
-    "discarded_arcs": 16254,
+    "valid_arcs": 87503,
+    "discarded_arcs": 17747,
     "path_found": true,
-    "path_arcs": 6,
-    "path_len_m": 5.26
+    "path_arcs": 5,
+    "path_len_m": 4.87
    },
    {
     "attempt": 11,
@@ -1405,8 +1405,8 @@
      2,
      3
     ],
-    "valid_arcs": 88921,
-    "discarded_arcs": 16329,
+    "valid_arcs": 87287,
+    "discarded_arcs": 17963,
     "path_found": true,
     "path_arcs": 2,
     "path_len_m": 2.18
