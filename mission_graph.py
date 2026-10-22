@@ -969,7 +969,7 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
             mission_settings() (MISSION_*, o i DEFAULT_*). Ignorati se si passa `env`.
         spacing_m: FLAG DELLA SPAZIATURA, in metri; viene arrotondata a cell_size/n (vedi
             align_spacing). Puo' essere sotto min_edge_length (vedi SPAZIATURA). Se non
-            passato: quello di mission_settings() (MISSION_SPACING_M, o 0.25 m); None =
+            passato: quello di mission_settings() (MNoneISSION_SPACING_M, o 0.25 m); None =
             suggested_spacing().
         rings: FLAG DELLE CONNESSIONI -- k = tutti i nodi entro la diagonale del k-esimo
             anello (k*passo*sqrt(2)), con archi >= min_edge_length (vedi ANELLI). None =
@@ -1217,12 +1217,15 @@ def compare(rows=DEFAULT_MISSION_ROWS, cols=DEFAULT_MISSION_COLS,
     return out
 
 
-def compare_methods_png(path, zoom=(-2.0, 2.0, -2.0, 2.0), seed=None, **kw):
+def compare_methods_png(path, zoom=(-2.0, 2.0, -2.0, 2.0), seed=None,
+                        methods=('reticolo',) + RANDOM_DISTRIBUTIONS, verbose=False, **kw):
     """
-    Il reticolo e le quattro distribuzioni casuali affiancati nello stesso riquadro, con gli
-    stessi parametri (missione, archi, densita') e lo stesso seme, per vederne la differenza
-    a colpo d'occhio. Sotto ogni grafo i numeri: nodi, archi, copertura massima e al 95%.
-    Seme None = estratto a caso, scritto nel titolo.
+    I metodi dei nodi affiancati (default: il reticolo e le quattro distribuzioni casuali),
+    con gli stessi parametri (missione, archi, densita') e lo stesso seme, per vederne la
+    differenza a colpo d'occhio. In fondo la tabella: nodi, archi, grado medio, copertura
+    massima e al 95%. zoom None = tutta l'area. Seme None = estratto a caso, scritto nel
+    titolo. verbose: stampa anche il riepilogo [GRAFO] di ogni grafo.
+    Restituisce (path, grafi).
     """
     import matplotlib
     matplotlib.use('Agg')
@@ -1230,17 +1233,36 @@ def compare_methods_png(path, zoom=(-2.0, 2.0, -2.0, 2.0), seed=None, **kw):
 
     seed = draw_seed() if seed is None else int(seed)
     kw = {k: v for k, v in kw.items() if k not in ('sampling', 'distribution')}
-    graphs = [build_mission_graph(sampling='reticolo', verbose=False, **kw)]
-    graphs += [build_mission_graph(sampling='casuale', distribution=d, seed=seed,
-                                   verbose=False, **kw) for d in RANDOM_DISTRIBUTIONS]
-    fig, axes = plt.subplots(2, 3, figsize=(17, 12.5))
+    graphs = []
+    for m in methods:
+        if verbose:
+            print(f"\n--- {m}")
+        if m == 'reticolo':
+            graphs.append(build_mission_graph(sampling='reticolo', verbose=verbose, **kw))
+        else:
+            graphs.append(build_mission_graph(sampling='casuale', distribution=m, seed=seed,
+                                              verbose=verbose, **kw))
+    n_cols = 3 if len(graphs) >= 3 else len(graphs) + 1
+    n_rows = int(math.ceil((len(graphs) + 1) / n_cols))
+    if zoom:
+        panel_w, panel_h = 5.6, 5.6
+    else:                          # tutta l'area: riquadri con le proporzioni della missione
+        g0 = graphs[0]
+        ratio = (g0.rows * g0.cell_size_m) / (g0.cols * g0.cell_size_m)
+        panel_w, panel_h = 6.4, max(3.0, 6.4 * ratio) + 1.0
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(panel_w * n_cols, panel_h * n_rows + 0.8),
+                             squeeze=False)
     for k, (ax, mg) in enumerate(zip(axes.ravel(), graphs)):
-        # Archi chiari e sottili (sono decine di migliaia), e in evidenza quelli che partono
+        # Archi grigi, piu' chiari e sottili quando sono tanti; in evidenza quelli che partono
         # dal nodo di partenza: si vede quali vicini sono collegati.
-        mg.draw(ax, zoom=zoom, legend=(k == 0), title_size=10, edge_color='0.88',
-                edge_width=0.2, highlight=mg.origin_node_id)
-    # Ultimo riquadro: la tabella dei numeri.
-    ax = axes.ravel()[-1]
+        many = mg.n_edges > 20000
+        mg.draw(ax, zoom=zoom, legend=(k == 0), title_size=10,
+                edge_color='0.88' if many else '0.70', edge_width=0.2 if many else 0.35,
+                highlight=mg.origin_node_id)
+    for ax in axes.ravel()[len(graphs) + 1:]:
+        ax.axis('off')
+    # Riquadro dopo l'ultimo grafo: la tabella dei numeri.
+    ax = axes.ravel()[len(graphs)]
     ax.axis('off')
     rows = []
     for mg in graphs:
@@ -1261,15 +1283,18 @@ def compare_methods_png(path, zoom=(-2.0, 2.0, -2.0, 2.0), seed=None, **kw):
     tab.auto_set_column_width(list(range(6)))
     tab.scale(1.0, 2.4)
     g0 = graphs[0]
+    rnd = [g for g in graphs if g.is_random]
+    lat = [g for g in graphs if not g.is_random]
     fig.suptitle(f"Missione {g0.rows}x{g0.cols} celle da {g0.cell_size_m:g} m, archi "
-                 f"{g0.min_edge_m:g}-{g0.reach_m:g} m, densita' casuale "
-                 f"{graphs[1].density_per_m2:g} nodi/m2, seme {seed}"
+                 f"{g0.min_edge_m:g}-{g0.reach_m:g} m"
+                 + (f", reticolo passo {lat[0].spacing_m:g} m" if lat else "")
+                 + (f", casuali {rnd[0].density_per_m2:g} nodi/m2, seme {seed}" if rnd else "")
                  + (f" -- riquadro x {zoom[0]:g}..{zoom[1]:g}, y {zoom[2]:g}..{zoom[3]:g} m"
                     if zoom else ""), fontsize=12)
     fig.tight_layout(rect=(0, 0, 1, 0.96), h_pad=3.0)
     fig.savefig(path, dpi=110)
     plt.close(fig)
-    return path
+    return path, graphs
 
 
 def timing(path=None, **kw):
@@ -1348,7 +1373,7 @@ def _main():
         common.pop('distribution')
         common.pop('seed')
         print(f"[GRAFO] confronto salvato in "
-              f"{compare_methods_png(a.confronta_metodi, zoom=tuple(a.zoom) if a.zoom else (-2.0, 2.0, -2.0, 2.0), seed=a.seme, spacing_m=a.spacing, rings=rings, **common)}")
+              f"{compare_methods_png(a.confronta_metodi, zoom=tuple(a.zoom) if a.zoom else (-2.0, 2.0, -2.0, 2.0), seed=a.seme, spacing_m=a.spacing, rings=rings, **common)[0]}")
         return
     if a.confronto:
         compare(rows=a.rows, cols=a.cols, cell_size_m=a.cell, min_edge_length=a.min_edge,
