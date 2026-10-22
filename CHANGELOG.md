@@ -57,6 +57,7 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
   | perturbata | 82/82 | 4.30 m | 4.67 | 487 s |
   | halton | 82/82 | 4.30 m | 4.62 | 512 s |
 
+- **`mission_viewer.py`, vista di fine missione: la mappa globale vera** (`global_occupancy_map.pkl`, quella del pianificatore) al posto del mosaico delle scansioni salvate. Le scansioni d'inizio tentativo non finiscono in `scans/`, e un tentativo che fallisce prima di muoversi non ne lascia nessuna. Nella prova al chiuso del 22-10 15:24, il muro in fondo al corridoio, visto ai tentativi su (0,5) e (1,4), era nella mappa (1285 celle occupate) ma non nella figura. Le viste scansione per scansione restano col mosaico, e il titolo dice quale delle due si sta guardando.
 - `test_e2e_loop.py`: scenario S13, il corridoio di S9 con il reticolo e con le quattro distribuzioni. Il robot arriva in tutti i casi senza sfiorare il muro.
 - `mission_report.py` mostra il grafo della missione (metodo, distribuzione, seme).
 - `mission_graph.py --preview` con lo zoom non dà più l'avviso di matplotlib: le etichette delle celle fuori dal riquadro vengono tagliate.

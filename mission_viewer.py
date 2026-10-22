@@ -33,6 +33,7 @@ File letti:
 """
 import glob
 import os
+import pickle
 import sys
 
 import threading
@@ -215,6 +216,36 @@ class MissionContext:
             self.nx = int(np.ceil((x1 - self.x0) / self.res))
             self.ny = int(np.ceil((y1 - self.y0) / self.res))
         self._mosaic, self._mosaic_upto = None, -1
+        self.final_map = self._load_global_map(folder)
+
+    @staticmethod
+    def _load_global_map(folder):
+        """
+        La mappa globale degli ostacoli di fine missione (global_occupancy_map.pkl), come
+        immagine 0/1/2 (ignoto/libero/ostacolo) con la sua estensione, o None. E' la mappa che
+        ha usato il pianificatore: contiene anche cio' che il robot ha visto nelle scansioni
+        d'inizio tentativo, che in scans/ non si salvano (un tentativo che fallisce prima di
+        muoversi non lascia scansioni, e il mosaico non lo vede).
+        """
+        path = os.path.join(folder, "global_occupancy_map.pkl")
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, 'rb') as f:
+                g = pickle.load(f)
+            grid, res = g['grid'], float(g['resolution'])
+            if not grid:
+                return None
+            keys = np.array(list(grid.keys()), dtype=np.int64)
+            vals = np.array(list(grid.values()), dtype=float)
+            gx0, gy0 = keys.min(axis=0)
+            gx1, gy1 = keys.max(axis=0)
+            img = np.zeros((gy1 - gy0 + 1, gx1 - gx0 + 1), dtype=np.uint8)
+            img[keys[:, 1] - gy0, keys[:, 0] - gx0] = np.where(vals < 0, 2, 1)
+            return img, [gx0 * res, (gx1 + 1) * res, gy0 * res, (gy1 + 1) * res]
+        except Exception as e:
+            print(f"[viewer] mappa globale non leggibile ({path}): {e}")
+            return None
 
     @staticmethod
     def _load_trajectory(folder):
@@ -533,9 +564,14 @@ def draw_global(ax, ctx, i, final=False):
     upto = len(ctx.scans) - 1 if final else i
     d = ctx.scans[upto]
     t_now = float(d['time']) if 'time' in d else None
-    mos = ctx.mosaic(upto)
-    ax.imshow(mos, origin='lower', cmap=MOSAIC_CMAP, vmin=0, vmax=2, interpolation='nearest',
-              extent=[ctx.x0, ctx.x0 + ctx.nx * ctx.res, ctx.y0, ctx.y0 + ctx.ny * ctx.res], zorder=0)
+    if final and ctx.final_map is not None:
+        # Fine missione: la mappa globale vera (vedi MissionContext._load_global_map).
+        ax.imshow(ctx.final_map[0], origin='lower', cmap=MOSAIC_CMAP, vmin=0, vmax=2,
+                  interpolation='nearest', extent=ctx.final_map[1], zorder=0)
+    else:
+        mos = ctx.mosaic(upto)
+        ax.imshow(mos, origin='lower', cmap=MOSAIC_CMAP, vmin=0, vmax=2, interpolation='nearest',
+                  extent=[ctx.x0, ctx.x0 + ctx.nx * ctx.res, ctx.y0, ctx.y0 + ctx.ny * ctx.res], zorder=0)
 
     vis = ctx.vis_before(None if final else t_now)
     vd = vis[1] if vis else None
@@ -583,7 +619,9 @@ def draw_global(ax, ctx, i, final=False):
     ax.set_aspect('equal')
     ax.grid(alpha=0.2)
     n_blk = sum(str(s['decision_kind']) == 'blocked' for s in ctx.scans[:upto + 1])
-    title = ("Fine missione" if final else f"Mappa globale alla scansione {upto + 1}/{len(ctx.scans)}")
+    title = (("Fine missione: mappa globale del pianificatore" if ctx.final_map is not None
+              else "Fine missione: mosaico delle scansioni salvate") if final
+             else f"Mosaico delle scansioni salvate, alla {upto + 1}/{len(ctx.scans)}")
     ax.set_title(f"{title}\nrosso = ostacolo visto, verde chiaro = libero, bianco = mai visto; "
                  f"quadrati rossi = blocchi ({n_blk})" + (f"\ngrafo: {vis[0]}" if vis else ""), fontsize=8)
     ax.set_xlabel("X [m] (VISION)")
