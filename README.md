@@ -31,16 +31,16 @@ La riga `[CONFIG] Griglia di missione` del log dice quale valore è stato usato 
 
 **Grafo della missione.** I nodi si generano in due modi (`--grafo`, default in `mission_graph.GRAPH_SAMPLING`):
 ```bash
-python3 easy_walk.py --grafo reticolo --spacing 0.25                                   # reticolo (default)
-python3 easy_walk.py --grafo casuale --distribuzione poisson --densita 16 --seme 7      # nodi casuali
+python3 easy_walk.py --grafo reticolo --spacing 0.5                                    # reticolo (default)
+python3 easy_walk.py --grafo casuale --distribuzione poisson --densita 4 --seme 7       # nodi casuali
 ```
 | Argomento | Default | Cosa fa |
 |---|---|---|
 | `--min-edge`, `--max-edge` | 0.5, 1.25 m | Lunghezza minima e massima degli archi, per tutti e due i metodi |
-| `--spacing` | 0.25 m | Reticolo: passo fra i nodi, arrotondato a lato cella / n |
+| `--spacing` | 0.5 m | Reticolo: passo fra i nodi, arrotondato a lato cella / n |
 | `--rings` | tutti | Reticolo: anelli di vicini collegati (dentro min e max) |
 | `--distribuzione` | `poisson` | Nodi casuali: `uniforme` (PRM classico, con buchi e grumi), `poisson` (distanza minima fra i nodi), `perturbata` (un punto a caso in ogni quadretto), `halton` (quasi casuale, molto uniforme) |
-| `--densita` | 16 nodi/m² | Nodi casuali: quanti per m² (16 = la densità del reticolo a 0.25 m) |
+| `--densita` | 4 nodi/m² | Nodi casuali: quanti per m² (4 = la densità del reticolo a 0.5 m) |
 | `--seme` | a caso | Nodi casuali: stesso seme, stesso grafo. Se manca se ne estrae uno; quello usato è nel log (`[GRAFO] Nodi casuali`, con il comando per ripetere) e in `mission_summary.json` |
 
 Con i nodi casuali i centri delle celle e il punto di partenza restano comunque nodi. La copertura (quanto può distare un punto dell'area dal nodo più vicino) è misurata e scritta nel log. Per guardare i grafi prima di uscire, il modo più semplice: cambiare i numeri in cima a `prova_grafo.py` (area, archi, passo, densità, seme, metodi, zoom) e lanciare `python3 prova_grafo.py`. Si apre un'immagine con i metodi affiancati e una tabella; i parametri valgono solo per la prova. Da riga di comando, con gli stessi default della missione:
@@ -59,7 +59,7 @@ L'area è una griglia di celle (`environmentMap.py`) riferita alla posa del robo
 ### Un tentativo di cella (`attempt_enter_cell_from_position` in `easy_walk.py`)
 1. **Scansione** della griglia locale di Spot (obstacle_distance, terrain, terrain_valid): terreno corretto, celle mai scritte scartate, pendenza e rugosità, maschera degli ostacoli (`spotGrid.py`).
 2. **Mappe globali** accumulate per tutta la missione: occupazione (un ostacolo conta solo dopo più osservazioni), terreno, spazio libero (`spotGrid.GlobalGrid`, `GlobalTerrainGrid`).
-3. **Grafo** (`mission_graph.py`, `prm_graph.py`): i nodi sono un reticolo regolare a passo 0.25 m, deterministico, con il centro di ogni cella come nodo, oppure nodi casuali con i centri cella compresi (vedi *Grafo della missione*); gli archi vanno da 0.5 a 1.25 m. Ogni arco viene vetato o pesato con occupazione, pendenza longitudinale e laterale (misurata anche oltre i nodi, di mezzo corpo per parte) e scarto preliminare sulla scansione dal vivo. A inizio cella si rivalutano solo gli archi vicini ai dati nuovi.
+3. **Grafo** (`mission_graph.py`, `prm_graph.py`): i nodi sono un reticolo regolare a passo 0.5 m, deterministico, con il centro di ogni cella come nodo, oppure nodi casuali con i centri cella compresi (vedi *Grafo della missione*); gli archi vanno da 0.5 a 1.25 m. Ogni arco viene vetato o pesato con occupazione, pendenza longitudinale e laterale (misurata anche oltre i nodi, di mezzo corpo per parte) e scarto preliminare sulla scansione dal vivo. A inizio cella si rivalutano solo gli archi vicini ai dati nuovi.
 4. **Obiettivo**: il centro della cella, cambiato solo se visto occupato. **Percorso** con Dijkstra, solo sulle celle già visitate, con un tetto alla deviazione.
 5. **Ciclo di navigazione** con il **fronte sicuro** (`arcVerification.py`): a ogni giro una scansione fresca dice fin dove il percorso è libero adesso, e il robot avanza fino a lì, anche per più nodi di fila. Durante il movimento un thread ricalcola il fronte circa 5 volte al secondo e ferma il robot se si accorcia.
    - Il robot punta sempre il muso verso il punto da raggiungere (niente marcia di traverso). Se non può ruotare: avanza dentro il cono di rotazione possibile, oppure arretra dritto se da lì la rotazione diventa possibile, altrimenti scarta il tratto.
@@ -103,6 +103,7 @@ Ognuno permette un confronto acceso/spento sul campo; il log li riporta nella ri
 | `easy_walk.INCREMENTAL_GRAPH_UPDATE` | `True` | A inizio cella rivaluta solo gli archi vicini ai dati nuovi (stesso risultato della ricostruzione completa) |
 | `mission_graph.BATCH_SLOPES` | `True` | Pendenze a inizio cella calcolate in blocco (stesso risultato, più veloce) |
 | `prm_graph.REFRESH_BATCH_SLOPES` | `True` | Pendenze del refresh calcolate in blocco (stesso risultato, più veloce) |
+| `spotGrid.ROBOT_CLEARANCE_AIR_M` | `0.0` | Aria fra corpo e ostacoli: la linea del percorso sta a 0.25 m + questo valore dagli ostacoli (fronte e veto degli archi). 0.05 = con margine |
 | `spotGrid.CLEARANCE_MAP_DECIDES` | `False` | La mappa dello spazio libero decide la percorribilità al posto della mappa binaria |
 | `easy_walk.PLAN_ONLY_EXPLORED_CELLS` | `True` | I percorsi passano solo dalle celle già visitate |
 | `easy_walk.GRAPHNAV_SHORTCUTS` | `True` | Scorciatoie nel grafo GraphNav prima di ogni spostamento |

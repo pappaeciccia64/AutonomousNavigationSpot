@@ -31,7 +31,8 @@ PERCHE' RETTANGOLARE E NON TRIANGOLARE
 SPAZIATURA
   Il passo richiesto viene SEMPRE arrotondato a cell_size/n con n intero: e' la condizione
   che rende ogni centro cella un nodo del reticolo. La riga [GRAFO] del log dice il passo
-  effettivo. Default: DEFAULT_LATTICE_SPACING_M = 0.25 m (= 5/20).
+  effettivo. Default della missione: MISSION_SPACING_M = 0.5 m (= 4/8); senza, 0.25 m
+  (DEFAULT_LATTICE_SPACING_M).
   Il passo puo' essere piu' corto di min_edge_length: i vicini troppo vicini semplicemente
   non si collegano, e gli archi partono dagli anelli piu' esterni. La soglia sugli archi
   serve alla pendenza (un arco troppo corto non dice nulla del terreno); il passo fitto
@@ -61,10 +62,12 @@ ANCORAGGIO
 
 ALIASING -- il limite da conoscere
   Se un corridoio cade fra due file di nodi, nel grafo non esiste. Il fronte sicuro
-  pretende spotGrid.FRONTIER_CLEARANCE_M = 0.30 m dalla linea centrale, quindi un corridoio
-  utile e' largo almeno 0.60 m e le linee centrali ammesse sono una striscia larga
-  (larghezza - 0.60 m): perche' ci cada sempre una fila di nodi il passo deve essere piu'
-  corto di quella striscia. A passo 0.25 ogni striscia piu' larga di 0.25 m ne contiene una.
+  pretende spotGrid.FRONTIER_CLEARANCE_M = c dalla linea centrale (0.25 m senza aria, 0.30
+  con 5 cm), quindi un corridoio utile e' largo almeno 2c e le linee centrali ammesse sono
+  una striscia larga (larghezza - 2c): perche' ci cada sempre una fila di nodi il passo deve
+  essere piu' corto della striscia. Per i nodi casuali basta copertura <= striscia / 2.
+  Passaggio garantito: reticolo 2c + passo, nodi casuali 2c + 2 * copertura. A passo 0.25
+  ogni striscia piu' larga di 0.25 m contiene una fila di nodi.
 
 NODI CASUALI (GRAPH_SAMPLING = 'casuale')
   In alternativa al reticolo, i nodi si possono spargere a caso nell'area della missione,
@@ -150,12 +153,15 @@ DEFAULT_LATTICE_SPACING_M = 0.25
 # grafo, quindi i due restano sempre uguali. Anche build_mission_graph() chiamata senza
 # argomenti usa questi. Gli argomenti di easy_walk (--rows --cols --cell --spacing) e
 # SPOT_MISSION_GRID restano piu' forti di questi valori.
-# Oggi: 3 x 4 celle da 4 m = 12 m a sinistra x 16 m davanti al robot.
+# Oggi: 3 x 4 celle da 4 m = 12 m a sinistra x 16 m davanti al robot, reticolo a 0.5 m
+# (4 nodi/m2): grafo piu' leggero, adatto anche all'esterno; garantisce i passaggi da 1.0 m
+# in su (2 * spotGrid.FRONTIER_CLEARANCE_M + passo), quelli piu' stretti solo se ci cade una
+# fila di nodi.
 # ----------------------------------------------------------------------------------------
 MISSION_ROWS = 3
 MISSION_COLS = 4
 MISSION_CELL_SIZE_M = 4.0
-MISSION_SPACING_M = None
+MISSION_SPACING_M = 0.5
 
 # ----------------------------------------------------------------------------------------
 # COME SI GENERANO I NODI (vedi NODI CASUALI nel commento in cima).
@@ -168,9 +174,9 @@ GRAPH_SAMPLINGS = ('reticolo', 'casuale')
 RANDOM_DISTRIBUTIONS = ('uniforme', 'poisson', 'perturbata', 'halton')
 GRAPH_SAMPLING = 'reticolo'
 RANDOM_DISTRIBUTION = 'poisson'
-# 16 nodi/m^2 = la densita' del reticolo a passo 0.25 m: a parita' di nodi i due metodi
-# si confrontano sulla sola disposizione.
-RANDOM_DENSITY_PER_M2 = 16.0
+# 4 nodi/m^2 = la densita' del reticolo a passo 0.5 m (MISSION_SPACING_M): con un numero
+# di nodi simile i due metodi si confrontano sulla sola disposizione.
+RANDOM_DENSITY_PER_M2 = 4.0
 RANDOM_SEED = None              # None = estratto a caso, e scritto nel log
 POISSON_MIN_DIST_M = None       # None = 0.75 / sqrt(densita')
 
@@ -485,6 +491,15 @@ def _prm_dirty_margin():
         return prm_graph.DIRTY_MARGIN_M
     except Exception:
         return 1.2
+
+
+def _frontier_clearance():
+    """spotGrid.FRONTIER_CLEARANCE_M, importato solo quando serve (questo modulo gira anche senza SDK)."""
+    try:
+        import spotGrid
+        return spotGrid.FRONTIER_CLEARANCE_M
+    except Exception:
+        return 0.25
 
 
 def _connected_components(n_nodes, pairs):
@@ -831,7 +846,7 @@ class MissionGraph:
             density = self.n_nodes / self.area_m2
             cover = (f"[GRAFO] Copertura misurata {self.covering[0]:.2f} m (95% dell'area entro "
                      f"{self.covering[1]:.2f} m; un corridoio utile al fronte e' largo almeno "
-                     f"0.60 m)")
+                     f"{2 * _frontier_clearance():.2f} m)")
         else:
             n_div = int(round(self.cell_size_m / self.spacing_m))
             head = [
@@ -842,7 +857,7 @@ class MissionGraph:
             ]
             density = node_density(self.spacing_m)
             cover = (f"[GRAFO] Copertura {self.covering_m:.2f} m (un corridoio utile al fronte e' "
-                     f"largo almeno 0.60 m)")
+                     f"largo almeno {2 * _frontier_clearance():.2f} m)")
         out = head + [
             f"[GRAFO] {self.n_nodes} nodi, {density:.2f} nodi/m2, "
             f"{self.n_edges} archi, grado medio {self.degrees.mean():.1f} "
@@ -978,7 +993,7 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
             mission_settings() (MISSION_*, o i DEFAULT_*). Ignorati se si passa `env`.
         spacing_m: FLAG DELLA SPAZIATURA, in metri; viene arrotondata a cell_size/n (vedi
             align_spacing). Puo' essere sotto min_edge_length (vedi SPAZIATURA). Se non
-            passato: quello di mission_settings() (MNoneISSION_SPACING_M, o 0.25 m); None =
+            passato: quello di mission_settings() (MISSION_SPACING_M, o 0.25 m); None =
             suggested_spacing().
         rings: FLAG DELLE CONNESSIONI -- k = tutti i nodi entro la diagonale del k-esimo
             anello (k*passo*sqrt(2)), con archi >= min_edge_length (vedi ANELLI). None =

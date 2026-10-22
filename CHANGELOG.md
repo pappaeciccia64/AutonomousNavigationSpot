@@ -22,6 +22,22 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 
   Il reticolo ha più nodi perché comprende le file sul bordo dell'area.
 
+### Grafo di missione: default più leggero
+- **Reticolo a 0.5 m** (`MISSION_SPACING_M`, prima 0.25) e **nodi casuali a 4 nodi/m²** (`RANDOM_DENSITY_PER_M2`, prima 16), con un numero di nodi simile: grafo molto più leggero, adatto anche all'esterno. Con il margine a 0.25 m il reticolo garantisce i passaggi da 1.0 m in su; quelli più stretti si trovano solo se ci cade una fila di nodi (scelta dell'utente: "se abbiamo sfiga e non passa per ora ci sta").
+- Rigioco delle 10 missioni (`test_replay.py --tutte --veloce --passo 0.5`, e `--grafo casuale --distribuzione poisson --densita 4 --seme 7`), confrontato con il reticolo a 0.25 m e il margine a 0.25 m:
+
+  | grafo | percorsi trovati | lunghezza media | archi per percorso | tempo del grafo |
+  |---|---|---|---|---|
+  | reticolo 0.25 m | 82/82 | 4.29 m | 4.5 | 425 s |
+  | **reticolo 0.5 m** | 79/82 | 4.31 m | 4.8 | **74 s** |
+  | poisson 4 nodi/m² | 80/82 | 4.30 m | 4.8 | 98 s |
+
+  I percorsi mancanti sono passaggi stretti veri. Missioni 12-10 14:10 e 14:23, stesso punto: il percorso del reticolo a 0.25 m passa a 0.28 m dagli ostacoli vicino a (-6.0, 1.0), un varco di circa 0.6–0.7 m in cui a 0.5 m non cade nessuna fila di nodi. Missione 13-10 11:22: robot in uno spazio stretto, con un solo arco valido, e obiettivo di ripiego a 1 m. In missione il robot rinuncerebbe a quel lato e proverebbe la cella da un altro.
+- `test_replay.py --passo`: rigioca con un altro passo del reticolo. Senza, ogni missione usa il passo scritto nel suo log, e il riferimento resta quello delle missioni registrate a 0.25 m.
+
+### Mappe e terreno (`spotGrid.py`)
+- **Margine attorno al corpo da 0.30 a 0.25 m** (`ROBOT_CLEARANCE_AIR_M` da 0.05 a 0): la linea del percorso deve stare a mezza larghezza di Spot dagli ostacoli, senza aria in più, nel fronte sicuro e nel veto degli archi (margine sugli archi da 0.15 a 0.10 m). Il robot continua a non pianificare dove il corpo non entra; il corridoio utile scende da 0.60 a 0.50 m, e il reticolo a 0.25 m garantisce i passaggi da 0.75 m invece che da 0.85. Rigiocando le 10 missioni: nessun invariante violato, archi validi +0.75% in media (fino a +2.4%), su 9 percorsi cambiati 8 più corti e uno più lungo (in tutto -1.4 m), andature e ritorno a wp_0 invariati. Riferimento del rigioco aggiornato. Da guardare sul campo: senza aria, gli errori di mappa (celle da ~3 cm) e di posizione non hanno più margine, e l'anticollisione del corpo di Spot, che resta accesa, potrebbe fermarlo nei passaggi al limite. Si torna indietro con 0.05.
+
 ### Navigazione (`easy_walk.py`)
 - Argomenti nuovi: `--grafo`, `--distribuzione`, `--densita`, `--seme`, `--min-edge`, `--max-edge` (prima la lunghezza degli archi si cambiava solo nel codice). Riga `[CONFIG] Grafo` all'avvio; `MISSION_GRAPH_SAMPLING` fra gli interruttori.
 

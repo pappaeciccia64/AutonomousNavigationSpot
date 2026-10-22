@@ -385,7 +385,7 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
         elif obstacle[k]:
             reason, value = 'ostacolo', float(od[k])
             # La soglia EFFETTIVA in quel punto e se ha deciso l'isteresi, per il log: senza,
-            # "ostacolo a 0.32 m (minimo 0.30 m)" sembrerebbe una contraddizione.
+            # "ostacolo a 0.27 m (minimo 0.25 m)" sembrerebbe una contraddizione.
             result['stop_threshold'] = float(thr[k])
             result['stop_by_latch'] = bool(
                 snap.blocked_latch is not None and use_latch

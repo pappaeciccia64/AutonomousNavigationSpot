@@ -31,11 +31,11 @@ LATO_CELLA_M = 4.0
 ARCO_MIN_M = 0.5
 ARCO_MAX_M = 1.25
 
-# Reticolo: passo fra i nodi, arrotondato a LATO_CELLA_M / n (in missione 0.25).
+# Reticolo: passo fra i nodi, arrotondato a LATO_CELLA_M / n (in missione 0.5).
 # Passo 0.5 = 4 nodi/m2, come DENSITA_NODI_M2 qui sotto: a parita' di nodi.
 PASSO_RETICOLO_M = 0.5
 
-# Nodi casuali: nodi per m2 (in missione 16) e seme (None = estratto a caso, scritto
+# Nodi casuali: nodi per m2 (in missione 4) e seme (None = estratto a caso, scritto
 # nel titolo dell'immagine e nel terminale).
 # 4 nodi/m2 = la densita' del reticolo a passo 0.5: numero di nodi simile (il reticolo ne
 # ha qualcuno in piu', la fila sul bordo esterno: ~6% con 3 x 3 celle da 4 m).

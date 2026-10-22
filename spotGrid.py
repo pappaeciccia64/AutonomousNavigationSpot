@@ -68,7 +68,12 @@ UNWRITTEN_MIN_SPOT_INVALID = 0.80  # frazione del plateau che Spot deve marcare 
 # =========================================================================
 # INGOMBRO DEL ROBOT E FRONTE SICURO (vedi arcVerification.compute_safe_frontier)
 #   FRONTIER_CLEARANCE_M: distanza minima da un ostacolo per la LINEA CENTRALE del percorso:
-#     mezza larghezza (0.25) + aria (0.05). Si legge direttamente da obstacle_distance.
+#     mezza larghezza (0.25) + aria (ROBOT_CLEARANCE_AIR_M). Si legge direttamente da
+#     obstacle_distance. Da qui viene anche il veto degli archi (PRM_EDGE_SAFETY_MARGIN_M).
+#   ROBOT_CLEARANCE_AIR_M: l'aria fra corpo e ostacolo. 0 = solo l'ingombro del corpo: il
+#     robot non pianifica ne' parte dove il corpo non entra, ma senza margine. Un corridoio
+#     utile e' largo almeno 2 * FRONTIER_CLEARANCE_M, e piu' e' piccolo il margine piu' rado
+#     puo' essere il grafo per trovare i passaggi stretti (vedi mission_graph, ALIASING).
 #   FRONTIER_BODY_HALF_LENGTH_M: il muso sta 0.55 m davanti al centro; il centro si ferma a
 #     meta' lunghezza + FRONTIER_MARGIN_M prima del primo punto non libero.
 #   FRONTIER_MIN_CLEARANCE_M / FRONTIER_ESCAPE_DIST_M: se il robot e' GIA' piu' vicino di
@@ -76,14 +81,14 @@ UNWRITTEN_MIN_SPOT_INVALID = 0.80  # frazione del plateau che Spot deve marcare 
 #     avvicinarsi di piu', mai sotto FRONTIER_MIN_CLEARANCE_M: cosi' puo' uscirne.
 #   FRONTIER_ROBOT_RADIUS_M: entro questo raggio le celle "non viste" non fermano il fronte
 #     (e' il terreno sotto il robot, coperto dal corpo).
-#   FRONTIER_ABORT_AIR_M: si PARTE con FRONTIER_CLEARANCE_M (0.30) ai lati; a movimento in
-#     corso ci si ferma solo sotto ROBOT_HALF_WIDTH_M + FRONTIER_ABORT_AIR_M (0.25), cioe' se
+#   FRONTIER_ABORT_AIR_M: si PARTE con FRONTIER_CLEARANCE_M ai lati; a movimento in corso ci
+#     si ferma solo sotto ROBOT_HALF_WIDTH_M + FRONTIER_ABORT_AIR_M (0.25), cioe' se
 #     qualcosa entra davvero nell'ingombro (decisione dell'utente: "se lo vede libero va").
 # =========================================================================
 ROBOT_HALF_LENGTH_M = 0.55          # Spot: 1.10 x 0.50 m
 ROBOT_HALF_WIDTH_M = 0.25
-ROBOT_CLEARANCE_AIR_M = 0.05        # aria lasciata fra corpo e ostacolo, ovunque
-FRONTIER_CLEARANCE_M = ROBOT_HALF_WIDTH_M + ROBOT_CLEARANCE_AIR_M      # = 0.30
+ROBOT_CLEARANCE_AIR_M = 0.0         # aria fra corpo e ostacolo (0.05 = con margine)
+FRONTIER_CLEARANCE_M = ROBOT_HALF_WIDTH_M + ROBOT_CLEARANCE_AIR_M      # = 0.25
 FRONTIER_MIN_CLEARANCE_M = 0.05
 FRONTIER_ESCAPE_DIST_M = 1.0
 FRONTIER_BODY_HALF_LENGTH_M = ROBOT_HALF_LENGTH_M                       # = 0.55
@@ -211,7 +216,7 @@ def rotation_is_clear(obstacle_dist, origin_x, origin_y, cell_size, robot_x, rob
 # ad almeno OBSTACLE_THRESHOLD + margine = FRONTIER_CLEARANCE_M dall'ostacolo: la stessa
 # distanza che pretende il fronte, cosi' il pianificatore non disegna percorsi che il fronte
 # poi rifiuta.
-PRM_EDGE_SAFETY_MARGIN_M = FRONTIER_CLEARANCE_M - OBSTACLE_THRESHOLD   # = 0.15
+PRM_EDGE_SAFETY_MARGIN_M = FRONTIER_CLEARANCE_M - OBSTACLE_THRESHOLD   # = 0.10
 
 # =========================================================================
 # MAPPA GLOBALE DEGLI OSTACOLI (vedi GlobalGrid.update)

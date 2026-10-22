@@ -125,8 +125,8 @@ def _timing_add(phase, seconds):
 #     di cella e' il centro geometrico ESATTO (non un punto vicino);
 #   - il punto di accensione e' il centro della cella di partenza ed e' anch'esso un nodo.
 #
-#   MISSION_LATTICE_SPACING_M  passo fra i nodi, da mission_graph.MISSION_SPACING_M (None =
-#                              0.25 m). Puo' stare sotto PRM_MIN_EDGE_M: i vicini piu'
+#   MISSION_LATTICE_SPACING_M  passo fra i nodi, da mission_graph.MISSION_SPACING_M (oggi
+#                              0.5 m; None = 0.25 m). Puo' stare sotto PRM_MIN_EDGE_M: i vicini piu'
 #                              corti di PRM_MIN_EDGE_M non si collegano (vedi mission_graph,
 #                              SPAZIATURA e ANELLI). None = mission_graph.suggested_spacing().
 #                              Arrotondato a cell_size/n. Da riga di comando: --spacing.
@@ -147,7 +147,7 @@ def _timing_add(phase, seconds):
 #   PRM_MIN_EDGE_M, PRM_MAX_EDGE_M  lunghezza minima e massima degli archi, per entrambi
 #                              i metodi. Da riga di comando: --min-edge --max-edge.
 #
-# Regola degli archi (scelta dell'utente): nodi a 0.25 m, ma un arco esiste SOLO fra nodi
+# Regola degli archi (scelta dell'utente): nodi fitti, ma un arco esiste SOLO fra nodi
 # distanti fra 0.5 e 1.25 m -- cioe' `rings=None` (nessun limite per gusci) con
 # PRM_MAX_EDGE_M = 1.25. Un arco salta fino a cinque passi di reticolo: con archi piu' corti
 # l'ingresso in una cella diventa una catena di molti waypoint, e ogni waypoint e' una
@@ -1533,6 +1533,7 @@ def mission_switches():
         'easy_walk.SAVE_SCAN_BUNDLES': SAVE_SCAN_BUNDLES,
         'movements.DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT': movements.DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT,
         'spotGrid.ARC_BODY_EXTENSION_M': spotGrid.ARC_BODY_EXTENSION_M,
+        'spotGrid.ROBOT_CLEARANCE_AIR_M': spotGrid.ROBOT_CLEARANCE_AIR_M,
     }
 
 
@@ -1689,7 +1690,7 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
         return cell_center_x, cell_center_y, sampled, []
 
     # Il centro e' occupato: si cerca il punto piu' vicino al centro dove il robot CI STA,
-    # cioe' ad almeno FRONTIER_CLEARANCE_M (0.30 m) dagli ostacoli, la stessa distanza che
+    # cioe' ad almeno FRONTIER_CLEARANCE_M dagli ostacoli, la stessa distanza che
     # pretende il fronte. La mappa globale puo' non aver ancora visto tutto l'ostacolo, e un
     # punto a mezzo metro dal centro scartato puo' cadere ancora dentro: per questo si guarda
     # anche la scansione dal vivo (pts, cells_obstacle_dist) e lo spazio libero imparato
@@ -1740,8 +1741,8 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
     def _d2_from_center(p):
         return (p[0] - cell_center_x) ** 2 + (p[1] - cell_center_y) ** 2
 
-    # A parita' di distanza dal centro (a meno di un passo di reticolo) vince il punto piu'
-    # vicino al ROBOT: e' quello dalla sua parte dell'ostacolo, non quello oltre.
+    # A parita' di distanza dal centro (entro 0.25 m, qualunque sia il grafo) vince il punto
+    # piu' vicino al ROBOT: e' quello dalla sua parte dell'ostacolo, non quello oltre.
     step = 0.25
     best_x, best_y = min(pool, key=lambda p: (round(np.sqrt(_d2_from_center(p)) / step),
                                               np.hypot(p[0] - robot_x, p[1] - robot_y)))
@@ -2036,8 +2037,8 @@ def plan_straight_retreat(robot_xy, robot_yaw, snap, max_dist=ROTATION_RETREAT_M
     Quanto puo' arretrare il robot IN LINEA RETTA, all'indietro, senza girarsi.
 
     Non e' marcia obliqua: muovendosi lungo il proprio asse l'ingombro resta 0.50 m di
-    larghezza e il fronte applica la soglia normale di 0.30 m, non i 0.59 della marcia di
-    traverso. E' la via d'uscita quando la rotazione verso il prossimo punto non e'
+    larghezza e il fronte applica la soglia normale FRONTIER_CLEARANCE_M, non i 0.59 della
+    marcia di traverso. E' la via d'uscita quando la rotazione verso il prossimo punto non e'
     possibile: ci si stacca da cio' che impedisce di girarsi e al giro dopo si riprova da
     una posizione diversa.
 
@@ -4402,8 +4403,8 @@ def finalize_or_defer_blocked_cell(env, row, col, sampler=None, global_map=None)
         ok, liberi, ignoti, occupati = cell_has_reachable_target(env, sampler, global_map, row, col)
         # Diagnostica: dice subito se la cella sta dentro un ostacolo o non e' mai stata
         # vista, cioe' se la griglia di missione non sta nello spazio.
-        # ATTENZIONE a come si legge: con il reticolo a 0.25 m i punti candidati per cella
-        # sono centinaia, quindi "occupati" alto NON vuol dire cella irraggiungibile; vuol
+        # ATTENZIONE a come si legge: i punti candidati per cella sono decine (reticolo a
+        # 0.5 m) o centinaia (a 0.25 m), quindi "occupati" alto NON vuol dire cella irraggiungibile; vuol
         # dire che gran parte della cella e' dentro un ostacolo. Il blocco immediato sotto
         # scatta solo nel caso estremo in cui NON resta un solo punto libero o ignoto.
         print(f"[CELLA] ({row},{col}) dopo il tentativo fallito: dei punti candidati, "

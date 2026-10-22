@@ -39,8 +39,8 @@ Uso:
     python3 test_replay.py --aggiorna-riferimento
     python3 test_replay.py --tutte --grafo casuale --distribuzione poisson --seme 7
 
-CONFRONTO FRA GRAFI -- con --grafo (e --distribuzione, --densita, --seme, --min-edge,
-  --max-edge) le missioni si rigiocano con un grafo diverso da quello che avevano in
+CONFRONTO FRA GRAFI -- con --grafo, --passo (e --distribuzione, --densita, --seme,
+  --min-edge, --max-edge) le missioni si rigiocano con un grafo diverso da quello che avevano in
   missione, sulle stesse scansioni. Il confronto col riferimento non ha senso e si salta;
   gli invarianti valgono ancora. In fondo una tabella per missione (percorsi trovati,
   lunghezza e numero di archi dei percorsi, tempo del grafo) da mettere accanto a quella
@@ -523,6 +523,7 @@ def main():
                     help="rigioca con questo metodo dei nodi (vedi CONFRONTO FRA GRAFI)")
     ap.add_argument('--distribuzione', choices=mission_graph.RANDOM_DISTRIBUTIONS)
     ap.add_argument('--densita', type=float, help="nodi casuali per m2")
+    ap.add_argument('--passo', type=float, help="passo del reticolo in m")
     ap.add_argument('--seme', type=int, help="seme dei nodi casuali (default: estratto a caso)")
     ap.add_argument('--min-edge', type=float, help="lunghezza minima degli archi in m")
     ap.add_argument('--max-edge', type=float, help="lunghezza massima degli archi in m")
@@ -535,6 +536,8 @@ def main():
         override['MISSION_RANDOM_DISTRIBUTION'] = args.distribuzione
     if args.densita is not None:
         override['MISSION_RANDOM_DENSITY'] = args.densita
+    if args.passo is not None:
+        override['MISSION_LATTICE_SPACING_M'] = args.passo
     if args.min_edge is not None:
         override['PRM_MIN_EDGE_M'] = args.min_edge
     if args.max_edge is not None:
