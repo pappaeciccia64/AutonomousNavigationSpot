@@ -75,8 +75,9 @@ NODI CASUALI (GRAPH_SAMPLING = 'casuale')
     'poisson'    Poisson-disk: punti uniformi scartati se piu' vicini di una distanza
                  minima a un nodo gia' messo (POISSON_MIN_DIST_M; None = 0.75/sqrt(densita'),
                  che lascia raggiungere la densita' chiesta): niente grumi;
-    'perturbata' l'area divisa in quadretti da 1/densita' m^2, un punto a caso in ognuno:
-                 nessuna zona resta vuota piu' di un quadretto;
+    'perturbata' l'area divisa in quadretti da 1/densita' m^2, un punto a caso in ognuno
+                 (pochi quadretti tolti o punti aggiunti a caso per arrivare al numero
+                 esatto): nessuna zona resta vuota piu' di un quadretto;
     'halton'     sequenza di Halton in basi 2 e 3, quasi casuale e molto uniforme; il
                  seme la trasla (rotazione di Cranley-Patterson), cosi' semi diversi danno
                  insiemi diversi.
@@ -411,8 +412,16 @@ def _random_points(distribution, density_per_m2, box, fixed_xy, rng, min_dist=No
         hx, hy = w / nx, h / ny                   # quadretti che coprono il rettangolo esatto
         jj, ii = np.meshgrid(np.arange(nx), np.arange(ny))
         u = rng.random((ny * nx, 2))
-        return np.column_stack((x0 + (jj.ravel() + u[:, 0]) * hx,
-                                y0 + (ii.ravel() + u[:, 1]) * hy)), ""
+        xy = np.column_stack((x0 + (jj.ravel() + u[:, 0]) * hx,
+                              y0 + (ii.ravel() + u[:, 1]) * hy))
+        # I quadretti sono interi e non danno sempre esattamente n punti: si tolgono a caso
+        # quelli in piu', o si aggiungono punti uniformi, cosi' il totale e' quello chiesto.
+        if len(xy) > n:
+            xy = xy[np.sort(rng.choice(len(xy), n, replace=False))]
+        elif len(xy) < n:
+            e = rng.random((n - len(xy), 2))
+            xy = np.vstack((xy, np.column_stack((x0 + e[:, 0] * w, y0 + e[:, 1] * h))))
+        return xy, ""
     if distribution == 'halton':
         shift = rng.random(2)
         u = (np.column_stack((_halton(n, 2), _halton(n, 3))) + shift) % 1.0
@@ -926,7 +935,7 @@ class MissionGraph:
         ax.set_aspect('equal', 'box')
         ax.set_xlabel('x griglia [m] -- colonne, davanti al robot')
         ax.set_ylabel('y griglia [m] -- righe, a sinistra del robot')
-        what = (f"casuale {self.distribution}, {self.density_per_m2:g} nodi/m2, seme {self.seed}"
+        what = (f"casuale {self.distribution}, {self.density_per_m2:.3g} nodi/m2, seme {self.seed}"
                 if self.is_random else
                 f"passo {self.spacing_m:.4f} m, anelli "
                 f"{self.rings if self.rings is not None else 'tutti'}")
@@ -1217,6 +1226,51 @@ def compare(rows=DEFAULT_MISSION_ROWS, cols=DEFAULT_MISSION_COLS,
     return out
 
 
+def nodes_per_cell(mg):
+    """
+    Nodi in ogni cella, (righe, colonne), contando un nodo che sta esattamente sul confine
+    fra due celle per meta' in ognuna (un quarto negli incroci). Il conteggio di node_cell
+    invece assegna quei nodi tutti a una delle due celle (stessa regola della missione), e
+    per il reticolo, che ha intere file sui confini, fa sembrare piu' piene alcune celle.
+    I nodi sul bordo esterno dell'area contano per intero nella loro cella.
+    """
+    out = np.zeros((mg.rows, mg.cols), dtype=np.float64)
+    eps = 1e-9
+
+    def owners(u, n):
+        # u: posizione in unita' di cella, con i centri sugli interi; confini a k + 0.5.
+        b = u - 0.5
+        if abs(b - round(b)) < eps:
+            cand = [int(round(b)), int(round(b)) + 1]
+        else:
+            cand = [int(round(u))]
+        return [k for k in cand if 0 <= k < n] or [min(max(int(round(u)), 0), n - 1)]
+
+    for x, y in mg.xy_local:
+        cs = owners(x / mg.cell_size_m + mg.start_cell[1], mg.cols)
+        rs = owners(y / mg.cell_size_m + mg.start_cell[0], mg.rows)
+        w = 1.0 / (len(cs) * len(rs))
+        for r in rs:
+            for c in cs:
+                out[r, c] += w
+    return out
+
+
+def lattice_matched_density(**kw):
+    """
+    La densita' dei nodi casuali che da' lo STESSO numero totale di nodi del reticolo con
+    questi parametri (bordo esterno compreso, centri cella a parte, come li conta
+    _build_random_graph). Serve a confrontare i metodi a parita' di nodi.
+    """
+    kw = {k: v for k, v in kw.items()
+          if k not in ('sampling', 'distribution', 'density_per_m2', 'seed', 'verbose')}
+    ref = build_mission_graph(sampling='reticolo', verbose=False, **kw)
+    margin = float(kw.get('border_margin_m', 0.0))
+    x0, x1, y0, y1 = _mission_extent(ref.rows, ref.cols, ref.cell_size_m, ref.start_cell)
+    area = (x1 - x0 - 2 * margin) * (y1 - y0 - 2 * margin)
+    return (ref.n_nodes - len(ref.cell_center_ids)) / area
+
+
 def compare_methods_png(path, zoom=(-2.0, 2.0, -2.0, 2.0), seed=None,
                         methods=('reticolo',) + RANDOM_DISTRIBUTIONS, verbose=False, **kw):
     """
@@ -1225,6 +1279,8 @@ def compare_methods_png(path, zoom=(-2.0, 2.0, -2.0, 2.0), seed=None,
     differenza a colpo d'occhio. In fondo la tabella: nodi, archi, grado medio, copertura
     massima e al 95%. zoom None = tutta l'area. Seme None = estratto a caso, scritto nel
     titolo. verbose: stampa anche il riepilogo [GRAFO] di ogni grafo.
+    density_per_m2 None = la densita' che da' lo stesso numero di nodi del reticolo
+    (lattice_matched_density).
     Restituisce (path, grafi).
     """
     import matplotlib
@@ -1233,6 +1289,8 @@ def compare_methods_png(path, zoom=(-2.0, 2.0, -2.0, 2.0), seed=None,
 
     seed = draw_seed() if seed is None else int(seed)
     kw = {k: v for k, v in kw.items() if k not in ('sampling', 'distribution')}
+    if kw.get('density_per_m2') is None:
+        kw['density_per_m2'] = lattice_matched_density(**kw)
     graphs = []
     for m in methods:
         if verbose:
@@ -1273,14 +1331,17 @@ def compare_methods_png(path, zoom=(-2.0, 2.0, -2.0, 2.0), seed=None,
                 mg.rows, mg.cols, mg.cell_size_m, mg.start_cell))[1])
         else:
             cov = mg.covering
-        rows.append([name, f"{mg.n_nodes}", f"{mg.n_edges}", f"{mg.degrees.mean():.1f}",
+        per_cell = nodes_per_cell(mg)
+        rows.append([name, f"{mg.n_nodes}", f"{per_cell.min():.0f}-{per_cell.max():.0f}",
+                     f"{mg.n_edges}", f"{mg.degrees.mean():.1f}",
                      f"{cov[0]:.2f}", f"{cov[1]:.2f}"])
-    tab = ax.table(cellText=rows, colLabels=['metodo', 'nodi', 'archi', 'grado medio',
-                                             'copertura\nmassima [m]', '95% area\nentro [m]'],
+    tab = ax.table(cellText=rows, colLabels=['metodo', 'nodi', 'per cella\n(min-max)', 'archi',
+                                             'grado\nmedio', 'copertura\nmassima [m]',
+                                             '95% area\nentro [m]'],
                    loc='center', cellLoc='center')
     tab.auto_set_font_size(False)
     tab.set_fontsize(10)
-    tab.auto_set_column_width(list(range(6)))
+    tab.auto_set_column_width(list(range(7)))
     tab.scale(1.0, 2.4)
     g0 = graphs[0]
     rnd = [g for g in graphs if g.is_random]
@@ -1288,7 +1349,7 @@ def compare_methods_png(path, zoom=(-2.0, 2.0, -2.0, 2.0), seed=None,
     fig.suptitle(f"Missione {g0.rows}x{g0.cols} celle da {g0.cell_size_m:g} m, archi "
                  f"{g0.min_edge_m:g}-{g0.reach_m:g} m"
                  + (f", reticolo passo {lat[0].spacing_m:g} m" if lat else "")
-                 + (f", casuali {rnd[0].density_per_m2:g} nodi/m2, seme {seed}" if rnd else "")
+                 + (f", casuali {rnd[0].density_per_m2:.2f} nodi/m2, seme {seed}" if rnd else "")
                  + (f" -- riquadro x {zoom[0]:g}..{zoom[1]:g}, y {zoom[2]:g}..{zoom[3]:g} m"
                     if zoom else ""), fontsize=12)
     fig.tight_layout(rect=(0, 0, 1, 0.96), h_pad=3.0)

@@ -23,13 +23,13 @@ import mission_graph
 # ======================================================================================
 # Area della missione: righe (a sinistra del robot) x colonne (davanti) x lato della cella.
 RIGHE = 3
-COLONNE = 4
+COLONNE = 3
 LATO_CELLA_M = 4.0
 
 # Archi: si collegano tutte le coppie di nodi distanti fra ARCO_MIN_M e ARCO_MAX_M.
 # In missione: 0.5 e 1.25.
 ARCO_MIN_M = 0.5
-ARCO_MAX_M = 1.0
+ARCO_MAX_M = 1.25
 
 # Reticolo: passo fra i nodi, arrotondato a LATO_CELLA_M / n (in missione 0.25).
 # Passo 0.5 = 4 nodi/m2, come DENSITA_NODI_M2 qui sotto: a parita' di nodi.
@@ -37,7 +37,9 @@ PASSO_RETICOLO_M = 0.5
 
 # Nodi casuali: nodi per m2 (in missione 16) e seme (None = estratto a caso, scritto
 # nel titolo dell'immagine e nel terminale).
-DENSITA_NODI_M2 = 4.0
+# DENSITA_NODI_M2 = None: lo STESSO numero di nodi del reticolo qui sopra (bordo compreso),
+# per un confronto a parita' di nodi.
+DENSITA_NODI_M2 = None
 SEME = 7
 
 # Quali metodi mettere a confronto: togli quelli che non vuoi vedere.
@@ -60,6 +62,15 @@ def main():
         spacing_m=PASSO_RETICOLO_M, rings=None,
         min_edge_length=ARCO_MIN_M, max_edge_length=ARCO_MAX_M,
         density_per_m2=DENSITA_NODI_M2)
+    # Nodi per cella, con i nodi sui confini contati a meta' (vedi nodes_per_cell).
+    print("\nNodi per cella (righe dall'alto, come nell'immagine; i nodi sui confini fra "
+          "celle contano a meta'):")
+    for g in graphs:
+        name = g.distribution if g.is_random else 'reticolo'
+        counts = mission_graph.nodes_per_cell(g)
+        print(f"  {name:11s} totale {g.n_nodes:5d}, per cella {counts.min():.0f}-{counts.max():.0f}")
+        for r in reversed(range(counts.shape[0])):
+            print("              " + " ".join(f"{v:6.1f}" for v in counts[r]))
     print(f"\nImmagine salvata in {os.path.abspath(path)}")
     if APRI:
         try:
