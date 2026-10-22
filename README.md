@@ -43,7 +43,11 @@ python3 easy_walk.py --grafo casuale --distribuzione poisson --densita 16 --seme
 | `--densita` | 16 nodi/m² | Nodi casuali: quanti per m² (16 = la densità del reticolo a 0.25 m) |
 | `--seme` | a caso | Nodi casuali: stesso seme, stesso grafo. Se manca se ne estrae uno; quello usato è nel log (`[GRAFO] Nodi casuali`, con il comando per ripetere) e in `mission_summary.json` |
 
-Con i nodi casuali i centri delle celle e il punto di partenza restano comunque nodi. La copertura (quanto può distare un punto dell'area dal nodo più vicino) è misurata e scritta nel log. Per guardare un grafo prima di uscire: `python3 mission_graph.py --grafo casuale --seme 7 --max-edge 1.25 --preview grafo.png --zoom -2 2 -2 2`.
+Con i nodi casuali i centri delle celle e il punto di partenza restano comunque nodi. La copertura (quanto può distare un punto dell'area dal nodo più vicino) è misurata e scritta nel log. Per guardare i grafi prima di uscire (`mission_graph.py` usa gli stessi default della missione):
+```bash
+python3 mission_graph.py --confronta-metodi metodi.png --seme 7 --zoom -2 2 -2 2       # i cinque metodi affiancati, con i numeri
+python3 mission_graph.py --grafo casuale --distribuzione halton --seme 7 --preview halton.png --zoom -2 2 -2 2   # uno solo
+```
 
 ---
 

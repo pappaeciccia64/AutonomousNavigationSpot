@@ -113,6 +113,7 @@ Da riga di comando:
     python3 mission_graph.py --confronto
     python3 mission_graph.py --spacing 0.25 --rings 2 --preview p.png --zoom -2 2 -2 2
     python3 mission_graph.py --grafo casuale --distribuzione poisson --densita 16 --seme 7 --preview p.png
+    python3 mission_graph.py --confronta-metodi metodi.png --seme 7 --zoom -2 2 -2 2
     python3 mission_graph.py --rows 2 --cols 3 --cell 3
     python3 mission_graph.py --save reticolo_2x4x5.npz
     python3 mission_graph.py --tempi
@@ -124,10 +125,11 @@ from collections import deque
 import numpy as np
 
 # ----------------------------------------------------------------------------------------
-# La flag di default sugli anelli. La spaziatura, per default, la deriva
-# suggested_spacing() dai parametri del PRM e dal lato della cella.
+# La flag di default sugli anelli, la stessa della missione (easy_walk la importa come
+# MISSION_LATTICE_RINGS). None = nessun limite per anelli: si collegano tutti i nodi fra
+# DEFAULT_MIN_EDGE_M e DEFAULT_MAX_EDGE_M.
 # ----------------------------------------------------------------------------------------
-LATTICE_RINGS = 2
+LATTICE_RINGS = None
 
 # La missione e il passo di default, in UN solo posto: easy_walk li importa da qui, quindi
 # la missione sul robot e le prove da riga di comando (python3 mission_graph.py) partono
@@ -191,11 +193,14 @@ def mission_settings(rows=None, cols=None, cell_size_m=None, spacing_m=None):
 # Non e' None perche' None vuol gia' dire suggested_spacing().
 _FROM_SETTINGS = "settings"
 
-# Stessi default del PRM in uso (prm_graph.PRM(min_edge_length=0.5, max_edge_length=2,
-# connection_radius=3)). Passati come argomenti, non importati, per non trascinarsi dietro
-# l'SDK: se li cambi nel PRM, cambiali anche nella chiamata.
+# Lunghezza minima e massima degli archi della missione, in UN solo posto: easy_walk le
+# importa da qui (PRM_MIN_EDGE_M, PRM_MAX_EDGE_M) e le passa al PRM, quindi anche le prove
+# da riga di comando (python3 mission_graph.py) danno lo stesso grafo della missione. Archi
+# fino a 1.25 m: vedi il commento GRAFO DI MISSIONE in easy_walk. Il raggio di connessione e'
+# quello del PRM (prm_graph.PRM(connection_radius=3)), passato come argomento per non
+# trascinarsi dietro l'SDK.
 DEFAULT_MIN_EDGE_M = 0.5
-DEFAULT_MAX_EDGE_M = 2.0
+DEFAULT_MAX_EDGE_M = 1.25
 DEFAULT_CONNECTION_RADIUS_M = 3.0
 
 
@@ -864,18 +869,36 @@ class MissionGraph:
 
     def preview_png(self, path, show_cells=True, zoom=None):
         """
-        Disegna il reticolo e i suoi archi in un PNG, per guardarlo prima di uscire.
+        Disegna il grafo e i suoi archi in un PNG, per guardarlo prima di uscire.
         zoom: (x_min, x_max, y_min, y_max) nel frame della griglia, per i dettagli.
         """
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
-        from matplotlib.collections import LineCollection
 
         fig, ax = plt.subplots(figsize=(9.5, 9.5))
+        self.draw(ax, show_cells=show_cells, zoom=zoom)
+        fig.tight_layout()
+        fig.savefig(path, dpi=130)
+        plt.close(fig)
+        return path
+
+    def draw(self, ax, show_cells=True, zoom=None, legend=True, title_size=None,
+             edge_color='0.78', edge_width=0.45, highlight=None):
+        """
+        Disegna nodi, archi, obiettivi di cella e celle su un riquadro matplotlib.
+        highlight: id di un nodo di cui disegnare gli archi in evidenza (i suoi vicini).
+        """
+        import matplotlib.pyplot as plt
+        from matplotlib.collections import LineCollection
+
         segs = [[(self.xy_local[a, 0], self.xy_local[a, 1]),
                  (self.xy_local[b, 0], self.xy_local[b, 1])] for a, b in self.pairs]
-        ax.add_collection(LineCollection(segs, colors='0.78', linewidths=0.45, zorder=1))
+        ax.add_collection(LineCollection(segs, colors=edge_color, linewidths=edge_width, zorder=1))
+        if highlight is not None:
+            mine = [s for s, (a, b) in zip(segs, self.pairs) if highlight in (a, b)]
+            ax.add_collection(LineCollection(mine, colors='tab:blue', linewidths=0.8, alpha=0.7,
+                                             zorder=2, label=f"archi del nodo {highlight}"))
         ax.plot(self.xy_local[:, 0], self.xy_local[:, 1], 'k.', ms=2.6, zorder=3)
         ids = sorted(set(self.cell_center_ids.values()))
         if ids:
@@ -898,6 +921,8 @@ class MissionGraph:
         if zoom:
             ax.set_xlim(zoom[0], zoom[1])
             ax.set_ylim(zoom[2], zoom[3])
+        else:
+            ax.autoscale_view()
         ax.set_aspect('equal', 'box')
         ax.set_xlabel('x griglia [m] -- colonne, davanti al robot')
         ax.set_ylabel('y griglia [m] -- righe, a sinistra del robot')
@@ -906,12 +931,9 @@ class MissionGraph:
                 f"passo {self.spacing_m:.4f} m, anelli "
                 f"{self.rings if self.rings is not None else 'tutti'}")
         ax.set_title(f"{what}\n{self.n_nodes} nodi, {self.n_edges} archi, "
-                     f"copertura {self.covering_m:.2f} m")
-        ax.legend(loc='upper right', fontsize=8)
-        fig.tight_layout()
-        fig.savefig(path, dpi=130)
-        plt.close(fig)
-        return path
+                     f"copertura {self.covering_m:.2f} m", fontsize=title_size)
+        if legend:
+            ax.legend(loc='upper right', fontsize=8)
 
 
 class LatticeSampler:
@@ -1195,6 +1217,61 @@ def compare(rows=DEFAULT_MISSION_ROWS, cols=DEFAULT_MISSION_COLS,
     return out
 
 
+def compare_methods_png(path, zoom=(-2.0, 2.0, -2.0, 2.0), seed=None, **kw):
+    """
+    Il reticolo e le quattro distribuzioni casuali affiancati nello stesso riquadro, con gli
+    stessi parametri (missione, archi, densita') e lo stesso seme, per vederne la differenza
+    a colpo d'occhio. Sotto ogni grafo i numeri: nodi, archi, copertura massima e al 95%.
+    Seme None = estratto a caso, scritto nel titolo.
+    """
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    seed = draw_seed() if seed is None else int(seed)
+    kw = {k: v for k, v in kw.items() if k not in ('sampling', 'distribution')}
+    graphs = [build_mission_graph(sampling='reticolo', verbose=False, **kw)]
+    graphs += [build_mission_graph(sampling='casuale', distribution=d, seed=seed,
+                                   verbose=False, **kw) for d in RANDOM_DISTRIBUTIONS]
+    fig, axes = plt.subplots(2, 3, figsize=(17, 12.5))
+    for k, (ax, mg) in enumerate(zip(axes.ravel(), graphs)):
+        # Archi chiari e sottili (sono decine di migliaia), e in evidenza quelli che partono
+        # dal nodo di partenza: si vede quali vicini sono collegati.
+        mg.draw(ax, zoom=zoom, legend=(k == 0), title_size=10, edge_color='0.88',
+                edge_width=0.2, highlight=mg.origin_node_id)
+    # Ultimo riquadro: la tabella dei numeri.
+    ax = axes.ravel()[-1]
+    ax.axis('off')
+    rows = []
+    for mg in graphs:
+        name = 'reticolo' if not mg.is_random else mg.distribution
+        if mg.covering is None:
+            # Reticolo: la massima dalla formula (la griglia di misura puo' mancarne il punto).
+            cov = (mg.covering_m, measured_covering(mg.xy_local, _mission_extent(
+                mg.rows, mg.cols, mg.cell_size_m, mg.start_cell))[1])
+        else:
+            cov = mg.covering
+        rows.append([name, f"{mg.n_nodes}", f"{mg.n_edges}", f"{mg.degrees.mean():.1f}",
+                     f"{cov[0]:.2f}", f"{cov[1]:.2f}"])
+    tab = ax.table(cellText=rows, colLabels=['metodo', 'nodi', 'archi', 'grado medio',
+                                             'copertura\nmassima [m]', '95% area\nentro [m]'],
+                   loc='center', cellLoc='center')
+    tab.auto_set_font_size(False)
+    tab.set_fontsize(10)
+    tab.auto_set_column_width(list(range(6)))
+    tab.scale(1.0, 2.4)
+    g0 = graphs[0]
+    fig.suptitle(f"Missione {g0.rows}x{g0.cols} celle da {g0.cell_size_m:g} m, archi "
+                 f"{g0.min_edge_m:g}-{g0.reach_m:g} m, densita' casuale "
+                 f"{graphs[1].density_per_m2:g} nodi/m2, seme {seed}"
+                 + (f" -- riquadro x {zoom[0]:g}..{zoom[1]:g}, y {zoom[2]:g}..{zoom[3]:g} m"
+                    if zoom else ""), fontsize=12)
+    fig.tight_layout(rect=(0, 0, 1, 0.96), h_pad=3.0)
+    fig.savefig(path, dpi=110)
+    plt.close(fig)
+    return path
+
+
 def timing(path=None, **kw):
     """Quanto costa costruire il reticolo da zero contro ricaricarlo da file."""
     import os
@@ -1231,7 +1308,7 @@ def _main():
                         f"{s_spacing:g}; 0 = suggested_spacing)")
     p.add_argument('--rings', default=str(LATTICE_RINGS),
                    help="anelli di vicini collegati (k = entro la diagonale dell'anello k), "
-                        "o 'tutti' (default 2)")
+                        "o 'tutti' (default: tutti, come in missione)")
     p.add_argument('--grafo', choices=GRAPH_SAMPLINGS, default=GRAPH_SAMPLING,
                    help=f"come si generano i nodi (default {GRAPH_SAMPLING})")
     p.add_argument('--distribuzione', choices=RANDOM_DISTRIBUTIONS, default=RANDOM_DISTRIBUTION,
@@ -1251,6 +1328,9 @@ def _main():
                    help="riquadro del disegno, in coordinate griglia")
     p.add_argument('--save', metavar='NPZ', help="salva il reticolo (si ricarica con load_npz)")
     p.add_argument('--confronto', action='store_true', help="tabella passo x anelli")
+    p.add_argument('--confronta-metodi', metavar='PNG',
+                   help="reticolo e le quattro distribuzioni casuali affiancati in un PNG "
+                        "(stessi parametri e seme; riquadro --zoom, default -2 2 -2 2)")
     p.add_argument('--tempi', nargs='?', const=True, metavar='NPZ',
                    help="misura costruzione da zero contro ricarica da file")
     a = p.parse_args()
@@ -1263,6 +1343,13 @@ def _main():
                   border_margin_m=a.margin, sampling=a.grafo, distribution=a.distribuzione,
                   density_per_m2=a.densita, seed=a.seme, poisson_min_dist_m=a.dist_min)
 
+    if a.confronta_metodi:
+        common.pop('sampling')
+        common.pop('distribution')
+        common.pop('seed')
+        print(f"[GRAFO] confronto salvato in "
+              f"{compare_methods_png(a.confronta_metodi, zoom=tuple(a.zoom) if a.zoom else (-2.0, 2.0, -2.0, 2.0), seed=a.seme, spacing_m=a.spacing, rings=rings, **common)}")
+        return
     if a.confronto:
         compare(rows=a.rows, cols=a.cols, cell_size_m=a.cell, min_edge_length=a.min_edge,
                 sampling='reticolo',

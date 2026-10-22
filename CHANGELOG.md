@@ -14,7 +14,7 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 
   | metodo | nodi | coppie | copertura massima | 95% dell'area entro |
   |---|---|---|---|---|
-  | reticolo 0.25 m | 3185 | 105250 | 0.18 m | 0.18 m |
+  | reticolo 0.25 m | 3185 | 105250 | 0.18 m | 0.14 m |
   | uniforme | 3084 | 94299 | 0.56 m | 0.25 m |
   | poisson | 3084 | 92194 | 0.25 m | 0.17 m |
   | perturbata | 3084 | 93509 | 0.32 m | 0.19 m |
@@ -40,6 +40,8 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 - `test_e2e_loop.py`: scenario S13, il corridoio di S9 con il reticolo e con le quattro distribuzioni. Il robot arriva in tutti i casi senza sfiorare il muro.
 - `mission_report.py` mostra il grafo della missione (metodo, distribuzione, seme).
 - `mission_graph.py --preview` con lo zoom non dà più l'avviso di matplotlib: le etichette delle celle fuori dal riquadro vengono tagliate.
+- **`mission_graph.py --confronta-metodi PNG`**: il reticolo e le quattro distribuzioni affiancati, con gli stessi parametri e lo stesso seme, gli archi del nodo di partenza in evidenza e una tabella (nodi, archi, grado medio, copertura).
+- **Default di `mission_graph.py` uguali a quelli della missione**: archi fino a 1.25 m (prima 2.0) e tutti i vicini fra 0.5 e 1.25 m (prima 2 anelli, archi fino a 0.71 m). Da riga di comando si vedeva un grafo diverso da quello del robot. Ora `easy_walk` legge `PRM_MIN_EDGE_M`, `PRM_MAX_EDGE_M` e `MISSION_LATTICE_RINGS` da `mission_graph` (`DEFAULT_MIN_EDGE_M`, `DEFAULT_MAX_EDGE_M`, `LATTICE_RINGS`), come già la dimensione della missione: i valori stanno in un solo posto.
 
 ---
 

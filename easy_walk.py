@@ -170,13 +170,13 @@ MISSION_GRID_ROWS = _MISSION[0]
 MISSION_GRID_COLS = _MISSION[1]
 MISSION_CELL_SIZE_M = _MISSION[2]
 MISSION_LATTICE_SPACING_M = _MISSION[3]
-MISSION_LATTICE_RINGS = None    # nessun limite per gusci: decide PRM_MAX_EDGE_M
+MISSION_LATTICE_RINGS = mission_graph.LATTICE_RINGS   # None: nessun limite per gusci, decide PRM_MAX_EDGE_M
 MISSION_GRAPH_SAMPLING = mission_graph.GRAPH_SAMPLING
 MISSION_RANDOM_DISTRIBUTION = mission_graph.RANDOM_DISTRIBUTION
 MISSION_RANDOM_DENSITY = mission_graph.RANDOM_DENSITY_PER_M2
 MISSION_RANDOM_SEED = mission_graph.RANDOM_SEED
-PRM_MIN_EDGE_M = 0.5
-PRM_MAX_EDGE_M = 1.25           # tetto degli archi (vedi sopra)
+PRM_MIN_EDGE_M = mission_graph.DEFAULT_MIN_EDGE_M     # 0.5 m
+PRM_MAX_EDGE_M = mission_graph.DEFAULT_MAX_EDGE_M     # 1.25 m, tetto degli archi (vedi sopra)
 PRM_CONNECTION_RADIUS_M = 3.0
 
 # --- Dove puo' passare il pianificatore -------------------------------------------------
