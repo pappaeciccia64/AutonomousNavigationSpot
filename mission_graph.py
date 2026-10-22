@@ -153,14 +153,14 @@ DEFAULT_LATTICE_SPACING_M = 0.25
 # grafo, quindi i due restano sempre uguali. Anche build_mission_graph() chiamata senza
 # argomenti usa questi. Gli argomenti di easy_walk (--rows --cols --cell --spacing) e
 # SPOT_MISSION_GRID restano piu' forti di questi valori.
-# Oggi: 3 x 4 celle da 4 m = 12 m a sinistra x 16 m davanti al robot, reticolo a 0.5 m
-# (4 nodi/m2): grafo piu' leggero, adatto anche all'esterno; garantisce i passaggi da 1.0 m
-# in su (2 * spotGrid.FRONTIER_CLEARANCE_M + passo), quelli piu' stretti solo se ci cade una
-# fila di nodi.
+# Oggi: 10 x 10 celle da 2 m = 20 m a sinistra x 20 m davanti al robot (prova al chiuso,
+# nodi casuali poisson, vedi GRAPH_SAMPLING). Il reticolo, quando si usa, e' a 0.5 m
+# (4 nodi/m2): garantisce i passaggi da 1.0 m in su (2 * spotGrid.FRONTIER_CLEARANCE_M +
+# passo), quelli piu' stretti solo se ci cade una fila di nodi.
 # ----------------------------------------------------------------------------------------
-MISSION_ROWS = 3
-MISSION_COLS = 4
-MISSION_CELL_SIZE_M = 4.0
+MISSION_ROWS = 10
+MISSION_COLS = 10
+MISSION_CELL_SIZE_M = 2.0
 MISSION_SPACING_M = 0.5
 
 # ----------------------------------------------------------------------------------------
@@ -172,11 +172,11 @@ MISSION_SPACING_M = 0.5
 # ----------------------------------------------------------------------------------------
 GRAPH_SAMPLINGS = ('reticolo', 'casuale')
 RANDOM_DISTRIBUTIONS = ('uniforme', 'poisson', 'perturbata', 'halton')
-GRAPH_SAMPLING = 'reticolo'
+GRAPH_SAMPLING = 'casuale'          # prova al chiuso; 'reticolo' per il reticolo
 RANDOM_DISTRIBUTION = 'poisson'
-# 4 nodi/m^2 = la densita' del reticolo a passo 0.5 m (MISSION_SPACING_M): con un numero
-# di nodi simile i due metodi si confrontano sulla sola disposizione.
-RANDOM_DENSITY_PER_M2 = 4.0
+# 5 nodi/m^2: poco piu' del reticolo a passo 0.5 m (4 nodi/m2, MISSION_SPACING_M), per i
+# passaggi piu' stretti al chiuso; con 4 il numero di nodi e' quello del reticolo.
+RANDOM_DENSITY_PER_M2 = 5.0
 RANDOM_SEED = None              # None = estratto a caso, e scritto nel log
 POISSON_MIN_DIST_M = None       # None = 0.75 / sqrt(densita')
 

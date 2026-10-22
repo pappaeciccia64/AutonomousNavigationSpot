@@ -22,6 +22,10 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 
   Il reticolo ha più nodi perché comprende le file sul bordo dell'area.
 
+### Prova al chiuso: nuovi default (`mission_graph.py`)
+- **Missione 10 × 10 celle da 2 m** (20 × 20 m) e **nodi casuali poisson a 5 nodi/m²** (`GRAPH_SAMPLING = 'casuale'`), seme estratto a caso e scritto nel log. Sulla missione di default: 2100 nodi, 20861 archi (il reticolo a 0.25 m sulla 3 × 4 × 4 ne aveva 105 mila), costruiti in 0.6 s, connessi, 17–24 nodi per cella, copertura 0.44 m (95% dell'area entro 0.29 m).
+- `test_e2e_loop.py` costruisce il grafo con `sampling='reticolo'` esplicito: gli scenari sono tarati sul reticolo e non devono cambiare col default.
+
 ### Grafo di missione: default più leggero
 - **Reticolo a 0.5 m** (`MISSION_SPACING_M`, prima 0.25) e **nodi casuali a 4 nodi/m²** (`RANDOM_DENSITY_PER_M2`, prima 16), con un numero di nodi simile: grafo molto più leggero, adatto anche all'esterno. Con il margine a 0.25 m il reticolo garantisce i passaggi da 1.0 m in su; quelli più stretti si trovano solo se ci cade una fila di nodi (scelta dell'utente: "se abbiamo sfiga e non passa per ora ci sta").
 - Rigioco delle 10 missioni (`test_replay.py --tutte --veloce --passo 0.5`, e `--grafo casuale --distribuzione poisson --densita 4 --seme 7`), confrontato con il reticolo a 0.25 m e il margine a 0.25 m:

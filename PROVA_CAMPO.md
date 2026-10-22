@@ -8,8 +8,9 @@ Le modifiche dal 14-10 in poi non sono mai andate sul robot. Alcune del 13-10 er
 
 1. **Copiare tutta la cartella** sul PC che comanda il robot, non solo `easy_walk.py`. Il 05-10 una copia vecchia di `spotGrid.py` ha fermato la missione appena costruito il grafo.
 2. Sul PC del robot: `python3 preflight.py` → deve dire **"Tutti i file sono allineati fra loro."**
-3. **Dimensione della missione.** Oggi è fissata in `mission_graph.py`: `MISSION_ROWS = 3`, `MISSION_COLS = 4`, `MISSION_CELL_SIZE_M = 4`, cioè **12 m a sinistra × 16 m davanti** al robot. Se l'area è diversa, senza toccare il codice: `python3 easy_walk.py --rows 2 --cols 3 --cell 4`. La prima riga `[CONFIG] Griglia di missione` del log la conferma.
-4. Facoltativo: il tag **549** a circa 1 m davanti al robot alla partenza. Senza, la missione parte lo stesso (l'origine è il primo waypoint), come il 13-10.
+3. **Dimensione della missione.** Oggi è fissata in `mission_graph.py`: `MISSION_ROWS = 10`, `MISSION_COLS = 10`, `MISSION_CELL_SIZE_M = 2`, cioè **20 m a sinistra × 20 m davanti** al robot, 100 celle. Se l'area è diversa, senza toccare il codice: `python3 easy_walk.py --rows 6 --cols 6 --cell 2`. La prima riga `[CONFIG] Griglia di missione` del log la conferma. Le missioni del 13-10 hanno impiegato circa 1 minuto per cella: 100 celle possono superare la batteria.
+4. **Grafo.** Default: nodi casuali poisson, 5 nodi/m², seme estratto a caso. Le righe `[CONFIG] Grafo` e `[GRAFO] Nodi casuali` del log riportano il seme e il comando per rifare lo stesso grafo.
+5. Facoltativo: il tag **549** a circa 1 m davanti al robot alla partenza. Senza, la missione parte lo stesso (l'origine è il primo waypoint), come il 13-10.
 
 ---
 
@@ -18,6 +19,8 @@ Le modifiche dal 14-10 in poi non sono mai andate sul robot. Alcune del 13-10 er
 | Novità | Riga di log | Cosa aspettarsi | Se va male |
 |---|---|---|---|
 | **Aggiornamento locale del grafo** e **pendenze in blocco** (14-10) | `[TEMPO] aggiornamento locale del grafo: X s` (oppure `costruzione completa`) | Una sola costruzione completa, al primo tentativo; poi aggiornamenti locali da **1–3 s**. Il 13-10 12:40 erano 11 costruzioni complete da 7.7 s in media. | `INCREMENTAL_GRAPH_UPDATE = False` in `easy_walk.py`, `BATCH_SLOPES = False` in `mission_graph.py`: stessi risultati, solo più lenti. |
+| **Nodi casuali poisson** (22-10, prima volta sul robot) | `[GRAFO] Nodi casuali …`, `[TEMPO] … grafo …` | Grafo da ~2100 nodi e ~21 mila archi sulla 10 × 10 da 2 m, costruito in meno di un secondo; aggiornamenti locali molto più brevi di quelli del reticolo a 0.25 m. Qualche passaggio stretto (sotto ~1 m) può non avere nodi: il robot rinuncia a quel lato e prova la cella da un altro. | `--grafo reticolo --spacing 0.5` (o `0.25` per i passaggi stretti, più lento). |
+| **Celle da 2 m** (22-10) | `[ATTEMPT]`, `[TARGET]` | Tentativi più corti; obiettivo quasi sempre il centro. | `--cell 4` con meno righe e colonne. |
 | **Margine attorno al corpo 0.25 m** (22-10, `ROBOT_CLEARANCE_AIR_M = 0`) | `[FRONTE]`, `[BLOCCO]`, fermate di Spot vicino agli ostacoli | Il robot passa più vicino agli ostacoli (linea a 0.25 m invece di 0.30) senza toccarli; nessuna fermata di Spot stesso nei passaggi stretti. | `ROBOT_CLEARANCE_AIR_M = 0.05` in `spotGrid.py`. Annotare dove ha sfiorato o si è fermato. |
 | **Refresh con le pendenze in blocco** (21-10) | `[TEMPO] scansione … \| PRM X \| …` a ogni giro | PRM sotto ~0.5 s per giro (il 13-10 12:40 erano 1.35 s di media). | `REFRESH_BATCH_SLOPES = False` in `prm_graph.py`: stessi risultati, solo più lento. |
 | **Obiettivo al centro della cella** (14-10) | `[TARGET] Cella (r,c): uso il centro geometrico …` oppure `centro …, uso il punto … a D m dal centro` | Quasi sempre il centro; ripieghi entro ~1 m dal centro; nessun arrivo fuori dalla cella. | Annotare cella e ora: si guarda con `mission_viewer.py`. |

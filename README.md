@@ -22,7 +22,7 @@ La storia delle modifiche, con le misure delle missioni che le hanno motivate, s
    ```
    L'indirizzo del robot è in `main()` di `easy_walk.py` (`192.168.80.3`). Le credenziali le gestisce l'SDK (`bosdyn.client.util.authenticate`): con l'SDK originale si danno con le variabili `BOSDYN_CLIENT_USERNAME` e `BOSDYN_CLIENT_PASSWORD`, altrimenti le chiede da terminale. Attenzione: sul computer di sviluppo quel file dell'SDK è stato modificato per usare credenziali fisse; su un computer nuovo, con l'SDK appena installato, servono le variabili.
 
-**Dimensione della missione.** Il default è in `mission_graph.py` (`MISSION_ROWS`, `MISSION_COLS`, `MISSION_CELL_SIZE_M`): oggi 3 × 4 celle da 4 m, cioè 12 m a sinistra e 16 m davanti al robot. Per una sola missione, senza toccare il codice (in ordine di precedenza):
+**Dimensione della missione.** Il default è in `mission_graph.py` (`MISSION_ROWS`, `MISSION_COLS`, `MISSION_CELL_SIZE_M`): oggi 10 × 10 celle da 2 m, cioè 20 m a sinistra e 20 m davanti al robot. Per una sola missione, senza toccare il codice (in ordine di precedenza):
 ```bash
 python3 easy_walk.py --rows 2 --cols 3 --cell 4      # argomenti
 SPOT_MISSION_GRID="2,3,4" python3 easy_walk.py       # variabile d'ambiente
@@ -31,8 +31,8 @@ La riga `[CONFIG] Griglia di missione` del log dice quale valore è stato usato 
 
 **Grafo della missione.** I nodi si generano in due modi (`--grafo`, default in `mission_graph.GRAPH_SAMPLING`):
 ```bash
-python3 easy_walk.py --grafo reticolo --spacing 0.5                                    # reticolo (default)
-python3 easy_walk.py --grafo casuale --distribuzione poisson --densita 4 --seme 7       # nodi casuali
+python3 easy_walk.py --grafo casuale --distribuzione poisson --densita 5 --seme 7       # nodi casuali (default: poisson, 5 nodi/m², seme a caso)
+python3 easy_walk.py --grafo reticolo --spacing 0.5                                    # reticolo
 ```
 | Argomento | Default | Cosa fa |
 |---|---|---|
@@ -40,7 +40,7 @@ python3 easy_walk.py --grafo casuale --distribuzione poisson --densita 4 --seme 
 | `--spacing` | 0.5 m | Reticolo: passo fra i nodi, arrotondato a lato cella / n |
 | `--rings` | tutti | Reticolo: anelli di vicini collegati (dentro min e max) |
 | `--distribuzione` | `poisson` | Nodi casuali: `uniforme` (PRM classico, con buchi e grumi), `poisson` (distanza minima fra i nodi), `perturbata` (un punto a caso in ogni quadretto), `halton` (quasi casuale, molto uniforme) |
-| `--densita` | 4 nodi/m² | Nodi casuali: quanti per m² (4 = la densità del reticolo a 0.5 m) |
+| `--densita` | 5 nodi/m² | Nodi casuali: quanti per m² (4 = la densità del reticolo a 0.5 m) |
 | `--seme` | a caso | Nodi casuali: stesso seme, stesso grafo. Se manca se ne estrae uno; quello usato è nel log (`[GRAFO] Nodi casuali`, con il comando per ripetere) e in `mission_summary.json` |
 
 Con i nodi casuali i centri delle celle e il punto di partenza restano comunque nodi. La copertura (quanto può distare un punto dell'area dal nodo più vicino) è misurata e scritta nel log. Per guardare i grafi prima di uscire, il modo più semplice: cambiare i numeri in cima a `prova_grafo.py` (area, archi, passo, densità, seme, metodi, zoom) e lanciare `python3 prova_grafo.py`. Si apre un'immagine con i metodi affiancati e una tabella; i parametri valgono solo per la prova. Da riga di comando, con gli stessi default della missione:
@@ -99,7 +99,7 @@ Ognuno permette un confronto acceso/spento sul campo; il log li riporta nella ri
 
 | Interruttore | Default | Cosa fa |
 |---|---|---|
-| `easy_walk.MISSION_GRAPH_SAMPLING` | `reticolo` | Come si generano i nodi: `reticolo` o `casuale` (vedi *Grafo della missione*) |
+| `easy_walk.MISSION_GRAPH_SAMPLING` | `casuale` | Come si generano i nodi: `reticolo` o `casuale` (vedi *Grafo della missione*) |
 | `easy_walk.INCREMENTAL_GRAPH_UPDATE` | `True` | A inizio cella rivaluta solo gli archi vicini ai dati nuovi (stesso risultato della ricostruzione completa) |
 | `mission_graph.BATCH_SLOPES` | `True` | Pendenze a inizio cella calcolate in blocco (stesso risultato, più veloce) |
 | `prm_graph.REFRESH_BATCH_SLOPES` | `True` | Pendenze del refresh calcolate in blocco (stesso risultato, più veloce) |

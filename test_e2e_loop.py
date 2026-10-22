@@ -342,7 +342,8 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
         rows=2, cols=2, cell_size_m=5.0, spacing_m=0.25, rings=None,
         origin_xy=(3.5, 3.5), origin_yaw=0.0, min_edge_length=easy_walk.PRM_MIN_EDGE_M,
         max_edge_length=easy_walk.PRM_MAX_EDGE_M,
-        connection_radius=easy_walk.PRM_CONNECTION_RADIUS_M, verbose=False, **GRAPH_KW)
+        connection_radius=easy_walk.PRM_CONNECTION_RADIUS_M, verbose=False,
+        **dict({'sampling': 'reticolo'}, **GRAPH_KW))
     prm = prm_graph.PRM(min_edge_length=easy_walk.PRM_MIN_EDGE_M,
                         max_edge_length=easy_walk.PRM_MAX_EDGE_M,
                         connection_radius=easy_walk.PRM_CONNECTION_RADIUS_M)
