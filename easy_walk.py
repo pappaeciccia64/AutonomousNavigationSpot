@@ -137,6 +137,15 @@ def _timing_add(phase, seconds):
 #   MISSION_GRID_ROWS/COLS, MISSION_CELL_SIZE_M  dimensione della missione, da
 #                              mission_graph.MISSION_*. Si cambiano con
 #                              --rows --cols --cell oppure SPOT_MISSION_GRID (vedi easy_walk).
+#   MISSION_GRAPH_SAMPLING     'reticolo' (quello descritto qui) o 'casuale': nodi sparsi con
+#                              una distribuzione, centri cella sempre compresi (vedi
+#                              mission_graph, NODI CASUALI). Da riga di comando: --grafo.
+#   MISSION_RANDOM_*           distribuzione, densita' e seme dei nodi casuali, da
+#                              mission_graph.RANDOM_*. Seme None = estratto a caso; quello
+#                              usato va nel log e in mission_summary.json. Da riga di
+#                              comando: --distribuzione --densita --seme.
+#   PRM_MIN_EDGE_M, PRM_MAX_EDGE_M  lunghezza minima e massima degli archi, per entrambi
+#                              i metodi. Da riga di comando: --min-edge --max-edge.
 #
 # Regola degli archi (scelta dell'utente): nodi a 0.25 m, ma un arco esiste SOLO fra nodi
 # distanti fra 0.5 e 1.25 m -- cioe' `rings=None` (nessun limite per gusci) con
@@ -162,6 +171,10 @@ MISSION_GRID_COLS = _MISSION[1]
 MISSION_CELL_SIZE_M = _MISSION[2]
 MISSION_LATTICE_SPACING_M = _MISSION[3]
 MISSION_LATTICE_RINGS = None    # nessun limite per gusci: decide PRM_MAX_EDGE_M
+MISSION_GRAPH_SAMPLING = mission_graph.GRAPH_SAMPLING
+MISSION_RANDOM_DISTRIBUTION = mission_graph.RANDOM_DISTRIBUTION
+MISSION_RANDOM_DENSITY = mission_graph.RANDOM_DENSITY_PER_M2
+MISSION_RANDOM_SEED = mission_graph.RANDOM_SEED
 PRM_MIN_EDGE_M = 0.5
 PRM_MAX_EDGE_M = 1.25           # tetto degli archi (vedi sopra)
 PRM_CONNECTION_RADIUS_M = 3.0
@@ -183,17 +196,20 @@ ANCHOR_ON_NODE_M = prm_graph.ANCHOR_ON_NODE_M
 
 def _build_mission_prm(env, verbose=True):
     """
-    Crea il reticolo della missione e il PRM con i suoi nodi, dalla dimensione della missione
-    e dalla posa di partenza che `env` ha gia' dentro (set_origin va fatto PRIMA).
+    Crea il grafo della missione (reticolo o nodi casuali, vedi MISSION_GRAPH_SAMPLING) e il
+    PRM con i suoi nodi, dalla dimensione della missione e dalla posa di partenza che `env`
+    ha gia' dentro (set_origin va fatto PRIMA).
 
-    Restituisce (prm, sampler, mission_lattice): `sampler` da' i punti del reticolo cella per
-    cella (vedi mission_graph.LatticeSampler), `mission_lattice` e' il MissionGraph.
+    Restituisce (prm, sampler, mission_lattice): `sampler` da' i nodi cella per cella (vedi
+    mission_graph.LatticeSampler), `mission_lattice` e' il MissionGraph.
     Gli ARCHI non vengono creati qui: servono i dati di terreno, vedi _rebuild_prm_edges.
     """
     mg = mission_graph.build_mission_graph(
         env=env, spacing_m=MISSION_LATTICE_SPACING_M, rings=MISSION_LATTICE_RINGS,
         min_edge_length=PRM_MIN_EDGE_M, max_edge_length=PRM_MAX_EDGE_M,
-        connection_radius=PRM_CONNECTION_RADIUS_M, verbose=verbose)
+        connection_radius=PRM_CONNECTION_RADIUS_M, verbose=verbose,
+        sampling=MISSION_GRAPH_SAMPLING, distribution=MISSION_RANDOM_DISTRIBUTION,
+        density_per_m2=MISSION_RANDOM_DENSITY, seed=MISSION_RANDOM_SEED)
     prm = prm_graph.PRM(min_edge_length=PRM_MIN_EDGE_M, max_edge_length=mg.reach_m,
                         connection_radius=PRM_CONNECTION_RADIUS_M)
     prm.mission_graph = mg          # lo rilegge _rebuild_prm_edges
@@ -1506,6 +1522,7 @@ def mission_switches():
     impostazioni e' stata fatta ogni missione (per i confronti acceso/spento).
     """
     return {
+        'easy_walk.MISSION_GRAPH_SAMPLING': MISSION_GRAPH_SAMPLING,
         'easy_walk.INCREMENTAL_GRAPH_UPDATE': INCREMENTAL_GRAPH_UPDATE,
         'mission_graph.BATCH_SLOPES': mission_graph.BATCH_SLOPES,
         'prm_graph.REFRESH_BATCH_SLOPES': prm_graph_module.REFRESH_BATCH_SLOPES,
@@ -1596,6 +1613,9 @@ def _emit_mission_summary_once():
                 'goal_reached_tolerance_m': GOAL_REACHED_TOLERANCE_M,
                 'interruttori': mission_switches(),
             }
+            mg = getattr(prm, 'mission_graph', None)
+            if mg is not None:
+                summary['grafo'] = mg.describe()
             with open(os.path.join(folder, 'mission_summary.json'), 'w', encoding='utf-8') as f:
                 json.dump(summary, f, indent=2, default=str)
     except Exception as e:
@@ -4541,6 +4561,13 @@ def easy_walk(options):
         print(f"[CONFIG] Reticolo: passo richiesto "
               f"{'suggerito' if MISSION_LATTICE_SPACING_M is None else '%.3f m' % MISSION_LATTICE_SPACING_M}, "
               f"anelli {MISSION_LATTICE_RINGS if MISSION_LATTICE_RINGS is not None else 'tutti'}")
+        # test_replay legge metodo e archi da questa riga; distribuzione, densita' e seme
+        # dalla riga [GRAFO] Nodi casuali, scritta quando il grafo e' costruito.
+        print(f"[CONFIG] Grafo: nodi {MISSION_GRAPH_SAMPLING}"
+              + (f" ({MISSION_RANDOM_DISTRIBUTION}, {MISSION_RANDOM_DENSITY:g} nodi/m2, seme "
+                 f"{'a caso' if MISSION_RANDOM_SEED is None else MISSION_RANDOM_SEED})"
+                 if MISSION_GRAPH_SAMPLING == 'casuale' else "")
+              + f"; archi da {PRM_MIN_EDGE_M:g} a {PRM_MAX_EDGE_M:g} m")
         env = environmentMap.EnvironmentMap(rows=grid_rows, cols=grid_cols, cell_size=grid_cell)  # colonne davanti, righe a sinistra
 
         # --- Andatura per tutta la missione ---
@@ -4563,8 +4590,8 @@ def easy_walk(options):
         env.set_origin(x_boot, y_boot, yaw_boot, start_row=start_row, start_col=start_col)
         _set_mission_z0(robot_state_client, z_boot)
 
-        # Nodi del PRM: il reticolo della missione (vedi _build_mission_prm e mission_graph.py).
-        # Il punto di accensione e i centri cella sono nodi del reticolo.
+        # Nodi del PRM: il grafo della missione (vedi _build_mission_prm e mission_graph.py).
+        # Il punto di accensione e i centri cella sono nodi del grafo, con entrambi i metodi.
         prm, gb_sampler, mission_lattice = _build_mission_prm(env)
         _MISSION_CTX['prm'] = prm  # per il riepilogo di fine missione (anche se interrotta)
 
@@ -5021,17 +5048,50 @@ def _parse_args(argv=None):
                         f"0 = suggerito)")
     p.add_argument('--rings', default=None,
                    help=f"anelli di vicini collegati, o 'tutti' (default {MISSION_LATTICE_RINGS})")
+    p.add_argument('--grafo', choices=mission_graph.GRAPH_SAMPLINGS, default=None,
+                   help=f"come si generano i nodi (default {MISSION_GRAPH_SAMPLING})")
+    p.add_argument('--distribuzione', choices=mission_graph.RANDOM_DISTRIBUTIONS, default=None,
+                   help=f"nodi casuali: distribuzione (default {MISSION_RANDOM_DISTRIBUTION})")
+    p.add_argument('--densita', type=float, default=None,
+                   help=f"nodi casuali: nodi per m2 (default {MISSION_RANDOM_DENSITY:g})")
+    p.add_argument('--seme', type=int, default=None,
+                   help="nodi casuali: seme, per ripetere un grafo (default: estratto a caso, "
+                        "scritto nel log)")
+    p.add_argument('--min-edge', type=float, default=None,
+                   help=f"lunghezza minima degli archi in m (default {PRM_MIN_EDGE_M:g})")
+    p.add_argument('--max-edge', type=float, default=None,
+                   help=f"lunghezza massima degli archi in m (default {PRM_MAX_EDGE_M:g})")
     a = p.parse_args(argv)
     if a.rows is not None and a.rows < 1 or a.cols is not None and a.cols < 1:
         p.error("--rows e --cols devono essere almeno 1")
     if a.cell is not None and a.cell <= 0:
         p.error("--cell deve essere positivo")
+    if a.densita is not None and a.densita <= 0:
+        p.error("--densita deve essere positiva")
+    lo = PRM_MIN_EDGE_M if a.min_edge is None else a.min_edge
+    hi = PRM_MAX_EDGE_M if a.max_edge is None else a.max_edge
+    if lo <= 0 or hi < lo:
+        p.error("serve 0 < --min-edge <= --max-edge")
     return a
 
 
 def main():
-    global MISSION_LATTICE_SPACING_M, MISSION_LATTICE_RINGS
+    global MISSION_LATTICE_SPACING_M, MISSION_LATTICE_RINGS, PRM_MIN_EDGE_M, PRM_MAX_EDGE_M
+    global MISSION_GRAPH_SAMPLING, MISSION_RANDOM_DISTRIBUTION, MISSION_RANDOM_DENSITY
+    global MISSION_RANDOM_SEED
     args = _parse_args()
+    if args.grafo is not None:
+        MISSION_GRAPH_SAMPLING = args.grafo
+    if args.distribuzione is not None:
+        MISSION_RANDOM_DISTRIBUTION = args.distribuzione
+    if args.densita is not None:
+        MISSION_RANDOM_DENSITY = float(args.densita)
+    if args.seme is not None:
+        MISSION_RANDOM_SEED = int(args.seme)
+    if args.min_edge is not None:
+        PRM_MIN_EDGE_M = float(args.min_edge)
+    if args.max_edge is not None:
+        PRM_MAX_EDGE_M = float(args.max_edge)
     if args.spacing is not None:
         MISSION_LATTICE_SPACING_M = None if args.spacing <= 0 else float(args.spacing)
     if args.rings is not None:

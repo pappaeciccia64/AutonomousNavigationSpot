@@ -371,6 +371,17 @@ def report(name):
     else:
         m = re.search(r'\[CONFIG\] INTERRUTTORI: (.*)', log)
         print("Interruttori: " + (m.group(1).strip() if m else "non registrati (missione prima del 21-10)"))
+    # Grafo della missione (dal 22-10): metodo dei nodi e, per i nodi casuali, il seme.
+    g = (summary or {}).get('grafo')
+    if g:
+        extra = (f"{g.get('distribuzione')}, {g.get('densita_nodi_m2'):g} nodi/m2, seme {g.get('seme')}"
+                 if g.get('metodo') == 'casuale' else f"passo {g.get('passo_m')} m")
+        print(f"Grafo: {g.get('metodo')} ({extra}), {g.get('nodi')} nodi, archi "
+              f"{g.get('arco_min_m'):g}-{g.get('arco_max_m'):g} m, copertura {g.get('copertura_m')} m")
+    else:
+        m = re.search(r'\[CONFIG\] Grafo: (.*)', log)
+        r = re.search(r"\[GRAFO\] Nodi casuali: (.*?) \(per ripetere", log)
+        print("Grafo: " + (r.group(1) if r else m.group(1).strip() if m else "reticolo (missione prima del 22-10)"))
 
     t = section_times(log, summary)
     if t.get('ripartizione'):

@@ -96,6 +96,8 @@ class Robot:
 
 
 WORLD, ROBOT = None, None
+# Parametri in piu' per build_mission_graph negli scenari: vuoto = il reticolo.
+GRAPH_KW = {}
 
 
 def quat(yaw):
@@ -334,13 +336,13 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
     FALL.update(armed=fall is not None, fallen=False, recoverable=(fall == 'recuperabile'), where=None)
     easy_walk.MISSION_STATS['falls'] = easy_walk.MISSION_STATS['self_rights'] = 0
     # Il reticolo vero della missione: passo 0.25 m, archi 0.5-1.25 m, sulle 2 x 2 celle da
-    # 5 m di FakeEnv, per tutti gli scenari.
+    # 5 m di FakeEnv, per tutti gli scenari. GRAPH_KW sceglie i nodi casuali (confronto in fondo).
     import mission_graph
     mg = mission_graph.build_mission_graph(
         rows=2, cols=2, cell_size_m=5.0, spacing_m=0.25, rings=None,
         origin_xy=(3.5, 3.5), origin_yaw=0.0, min_edge_length=easy_walk.PRM_MIN_EDGE_M,
         max_edge_length=easy_walk.PRM_MAX_EDGE_M,
-        connection_radius=easy_walk.PRM_CONNECTION_RADIUS_M, verbose=False)
+        connection_radius=easy_walk.PRM_CONNECTION_RADIUS_M, verbose=False, **GRAPH_KW)
     prm = prm_graph.PRM(min_edge_length=easy_walk.PRM_MIN_EDGE_M,
                         max_edge_length=easy_walk.PRM_MAX_EDGE_M,
                         connection_radius=easy_walk.PRM_CONNECTION_RADIUS_M)
@@ -532,6 +534,21 @@ if __name__ == '__main__':
         print(f"  {k:<34} {c:2d} comandi, {w:4.1f} m -> {w / max(1, c):.2f} m/comando; "
               f"rotazioni oltre 10 gradi: {tn} ({td:.0f} gradi in tutto); "
               f"multinodo {mm} ({mn} nodi); {sc} scansioni; arrivato: {ok}")
+
+    print("\n--- Confronto: reticolo e nodi casuali (16 nodi/m2, seme 7), corridoio di S9 ---")
+    for etichetta, kw in [("reticolo", {})] + [
+            (f"casuale {d}", dict(sampling='casuale', distribution=d, density_per_m2=16.0, seed=7))
+            for d in ("uniforme", "poisson", "perturbata", "halton")]:
+        GRAPH_KW.clear()
+        GRAPH_KW.update(kw)
+        r = run(f"S13. {etichetta}", [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)],
+                (3.5, 3.5, 0.0), (0, 1))
+        check(r['err'] is None and r['ok'], f"{etichetta}: arrivato nella cella senza eccezioni")
+        check(r['min_clear'] >= spotGrid.FRONTIER_CLEARANCE_M - 0.10,
+              f"{etichetta}: non sfiora il muro (distanza minima {r['min_clear']:.2f} m)")
+        print(f"       {r['commands']} comandi, {r['walked']:.1f} m, rotazioni oltre 10 gradi "
+              f"{r['turns']} ({r['turn_deg']:.0f} gradi), {r['scans']} scansioni")
+    GRAPH_KW.clear()
 
     for d in [x for x in os.listdir(tempfile.gettempdir()) if x.startswith("missione_e2e_")]:
         shutil.rmtree(os.path.join(tempfile.gettempdir(), d), ignore_errors=True)

@@ -37,6 +37,16 @@ Uso:
     python3 test_replay.py --veloce              # invariante 1 solo su 3 inizi di cella sparsi
     python3 test_replay.py --missioni 13-10-2026_12-40-38
     python3 test_replay.py --aggiorna-riferimento
+    python3 test_replay.py --tutte --grafo casuale --distribuzione poisson --seme 7
+
+CONFRONTO FRA GRAFI -- con --grafo (e --distribuzione, --densita, --seme, --min-edge,
+  --max-edge) le missioni si rigiocano con un grafo diverso da quello che avevano in
+  missione, sulle stesse scansioni. Il confronto col riferimento non ha senso e si salta;
+  gli invarianti valgono ancora. In fondo una tabella per missione (percorsi trovati,
+  lunghezza e numero di archi dei percorsi, tempo del grafo) da mettere accanto a quella
+  dello stesso comando senza --grafo. Il robot si aggancia al nodo piu' vicino, l'obiettivo
+  e' il nodo piu' vicino con almeno un arco valido, e i blocchi confermati in missione (dati
+  come archi del reticolo) non si rigiocano.
 
 Le scansioni stanno in MissionMap/ e i log in MissionLogs/, che NON sono nel repository: una
 missione che manca su questo PC viene saltata, con un avviso.
@@ -100,7 +110,8 @@ with _quiet():
 # Lettura della missione
 # --------------------------------------------------------------------------------------
 def mission_setup(name):
-    """Origine, orientamento, griglia e passo del reticolo dal log; scansioni in ordine."""
+    """Origine, orientamento, griglia e grafo (passo, oppure nodi casuali e seme) dal log;
+    scansioni in ordine."""
     log_path = os.path.join(HERE, 'MissionLogs', f'Mission_{name}', 'mission_log.txt')
     scans = glob.glob(os.path.join(HERE, 'MissionMap', f'Mission_{name}', 'scans', '*.npz'))
     if not os.path.exists(log_path) or not scans:
@@ -112,9 +123,21 @@ def mission_setup(name):
     rows, cols, cell = (int(g.group(1)), int(g.group(2)), float(g.group(3))) if g else (2, 4, 5.0)
     s = re.search(r'Reticolo: passo richiesto ([\d.]+) m', log)
     spacing = float(s.group(1)) if s else 0.25
+    # Dal 22-10: metodo dei nodi e lunghezza degli archi; per i nodi casuali distribuzione,
+    # densita' e seme effettivo. Le missioni precedenti sono tutte a reticolo, archi 0.5-1.25.
+    gr = re.search(r'\[CONFIG\] Grafo: nodi (\w+).*; archi da ([\d.]+) a ([\d.]+) m', log)
+    sampling, min_edge, max_edge = ((gr.group(1), float(gr.group(2)), float(gr.group(3)))
+                                    if gr else ('reticolo', 0.5, 1.25))
+    rnd = re.search(r"\[GRAFO\] Nodi casuali: distribuzione (\w+), densita' ([\d.]+) nodi/m2, "
+                    r"seme (\d+)", log)
+    graph = dict(sampling=sampling, min_edge=min_edge, max_edge=max_edge,
+                 distribution=rnd.group(1) if rnd else None,
+                 density=float(rnd.group(2)) if rnd else None,
+                 seed=int(rnd.group(3)) if rnd else None)
     scans.sort(key=lambda f: float(np.load(f)['time']))
     seg_path = os.path.join(HERE, 'MissionLogs', f'Mission_{name}', 'segments.csv')
     return dict(origin=(ox, oy), yaw_deg=yaw, rows=rows, cols=cols, cell=cell, spacing=spacing,
+                graph=graph,
                 scans=scans, segments=seg_path if os.path.exists(seg_path) else None)
 
 
@@ -159,18 +182,31 @@ def edges_of(prm):
 # Rigioco di una missione
 # --------------------------------------------------------------------------------------
 def replay_mission(job):
-    name, fast = job
+    name, fast, override = job
     m = mission_setup(name)
     if m is None:
         return name, None
     t_start = time.perf_counter()
     rng = np.random.default_rng(0)
-    out = dict(cell_starts=[], invariants={}, notes=[])
+    out = dict(cell_starts=[], invariants={}, notes=[], tempo_grafo_s=0.0)
     with _quiet():
         env = environmentMap.EnvironmentMap(rows=m['rows'], cols=m['cols'], cell_size=m['cell'])
         env.set_origin(m['origin'][0], m['origin'][1], math.radians(m['yaw_deg']))
         ew.MISSION_LATTICE_SPACING_M = m['spacing']
+        g = m['graph']
+        ew.MISSION_GRAPH_SAMPLING = g['sampling']
+        ew.PRM_MIN_EDGE_M, ew.PRM_MAX_EDGE_M = g['min_edge'], g['max_edge']
+        if g['sampling'] == 'casuale':
+            ew.MISSION_RANDOM_DISTRIBUTION = g['distribution']
+            ew.MISSION_RANDOM_DENSITY = g['density']
+            ew.MISSION_RANDOM_SEED = g['seed']
+        # Confronto fra grafi: il grafo chiesto da riga di comando al posto di quello della
+        # missione. Gli id dei nodi salvati nelle scansioni allora non valgono piu'.
+        foreign = bool(override)
+        for k, v in (override or {}).items():
+            setattr(ew, k, v)
         prm, _sampler, mg = ew._build_mission_prm(env, verbose=False)
+        out['grafo'] = mg.describe()
         gm = sg.GlobalGrid()
         tm = sg.GlobalTerrainGrid()
         tm.update_rects = []
@@ -197,7 +233,7 @@ def replay_mission(job):
         rx, ry, _ = a['robot']
         with _quiet():
             feed_scan(a, prm, gm, tm)
-            robot_node = int(d['robot_node_id']) if int(d['robot_node_id']) in prm.nodes else \
+            robot_node = int(d['robot_node_id']) if not foreign and int(d['robot_node_id']) in prm.nodes else \
                 min(prm.nodes, key=lambda k: math.hypot(prm.nodes[k][0] - rx, prm.nodes[k][1] - ry))
             prm.set_robot_node(robot_node, 0.0)
             # Come in missione: arco percorso quando il robot passa da un nodo al vicino
@@ -208,14 +244,16 @@ def replay_mission(job):
                     prm.traversed_edges.add(key)
             prev_node = robot_node
             nxt = [int(n) for n in np.ravel(d['path_node_ids'])] if 'path_node_ids' in d.files else []
-            if str(d['decision_kind']) == 'blocked' and nxt and \
+            if not foreign and str(d['decision_kind']) == 'blocked' and nxt and \
                     (min(robot_node, nxt[0]), max(robot_node, nxt[0])) in lattice_pairs:
                 prm.mark_edge_invalid(robot_node, nxt[0])
             if it != prev_it:
                 # --- inizio di un tentativo: aggiornamento del grafo come in missione ----
                 do_full = (not fast) or it in fast_pick
                 twin = copy.deepcopy((prm, gm)) if do_full and prev_it is not None else None
+                t_g = time.perf_counter()
                 ew._rebuild_prm_edges(prm, gm)
+                out['tempo_grafo_s'] += time.perf_counter() - t_g
                 if prev_it is not None:
                     local_expected += 1
                     local_used += bool(mg.last_update and mg.last_update[2])
@@ -233,7 +271,12 @@ def replay_mission(job):
                 cells = set(done_cells) | {(tr, tc)} | {tuple(int(v) for v in env.get_cell_from_world(rx, ry))}
                 prm.set_allowed_nodes([n for n, c in node_cells.items() if c in cells])
                 gx, gy = map(float, d['goal_xy'])
-                goal = min(prm.nodes, key=lambda k: math.hypot(prm.nodes[k][0] - gx, prm.nodes[k][1] - gy))
+                # Con un altro grafo l'obiettivo salvato puo' non essere un nodo: se la missione
+                # l'aveva spostato dal centro (occupato), il nodo piu' vicino puo' stare contro
+                # l'ostacolo, senza archi. In missione il ripiego sceglierebbe fra i nodi di quel
+                # grafo, quindi qui si prende il piu' vicino che ha almeno un arco valido.
+                cand = [k for k in prm.nodes if prm.edges.get(k)] if foreign else prm.nodes
+                goal = min(cand, key=lambda k: math.hypot(prm.nodes[k][0] - gx, prm.nodes[k][1] - gy))
                 path = prm.find_path_dijkstra(robot_node, goal)
                 prm.set_allowed_nodes(None)
                 ev = prm.edge_validity
@@ -249,7 +292,9 @@ def replay_mission(job):
                 prev_it = it
                 done_cells.append((tr, tc))
             else:
+                t_g = time.perf_counter()
                 prm.refresh_local_edge_weights(global_map=gm, edge_safety_margin=sg.PRM_EDGE_SAFETY_MARGIN_M)
+                out['tempo_grafo_s'] += time.perf_counter() - t_g
         # --- invariante 2: mappa globale contro dal vivo, su archi a caso nella finestra --
         span = a['nx'] * a['cs']
         usable = ew.slope_usable_mask(a['valid'].ravel(), a['od_raw'].ravel(), (a['ny'], a['nx']))
@@ -438,6 +483,31 @@ def compare_reference(name, now, ref):
     return diffs
 
 
+def graph_table(names, results):
+    """Una riga per missione: il grafo usato, i percorsi a inizio cella e il tempo del grafo."""
+    print("\n" + "=" * 70)
+    print(f"{'missione':22s}{'nodi':>7}{'coppie':>8}{'percorsi':>10}{'lungh.media':>13}"
+          f"{'archi medi':>12}{'tempo grafo':>13}")
+    tot_t, lens, arcs = 0.0, [], []
+    for name in names:
+        out = results.get(name)
+        if out is None:
+            continue
+        cs = [c for c in out['cell_starts'] if c['path_found']]
+        g = out.get('grafo', {})
+        ml = np.mean([c['path_len_m'] for c in cs]) if cs else float('nan')
+        ma = np.mean([c['path_arcs'] for c in cs]) if cs else float('nan')
+        lens += [c['path_len_m'] for c in cs]
+        arcs += [c['path_arcs'] for c in cs]
+        tot_t += out['tempo_grafo_s']
+        print(f"{name:22s}{g.get('nodi', 0):>7}{g.get('coppie', 0):>8}"
+              f"{len(cs):>6}/{len(out['cell_starts']):<3}{ml:>11.2f} m{ma:>12.1f}"
+              f"{out['tempo_grafo_s']:>11.1f} s")
+    if lens:
+        print(f"{'TOTALE':22s}{'':>15}{len(lens):>10}{np.mean(lens):>11.2f} m"
+              f"{np.mean(arcs):>12.1f}{tot_t:>11.1f} s")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Rigioco delle missioni salvate (vedi docstring)")
     ap.add_argument('--missioni', nargs='+', default=DEFAULT_MISSIONS,
@@ -448,14 +518,43 @@ def main():
                     help=f"confronto col grafo completo solo su {FAST_FULL_CHECKS} inizi di cella sparsi")
     ap.add_argument('--aggiorna-riferimento', action='store_true',
                     help="salva il comportamento di adesso come nuovo riferimento")
+    import mission_graph
+    ap.add_argument('--grafo', choices=mission_graph.GRAPH_SAMPLINGS,
+                    help="rigioca con questo metodo dei nodi (vedi CONFRONTO FRA GRAFI)")
+    ap.add_argument('--distribuzione', choices=mission_graph.RANDOM_DISTRIBUTIONS)
+    ap.add_argument('--densita', type=float, help="nodi casuali per m2")
+    ap.add_argument('--seme', type=int, help="seme dei nodi casuali (default: estratto a caso)")
+    ap.add_argument('--min-edge', type=float, help="lunghezza minima degli archi in m")
+    ap.add_argument('--max-edge', type=float, help="lunghezza massima degli archi in m")
     args = ap.parse_args()
+
+    override = {}
+    if args.grafo is not None:
+        override['MISSION_GRAPH_SAMPLING'] = args.grafo
+    if args.distribuzione is not None:
+        override['MISSION_RANDOM_DISTRIBUTION'] = args.distribuzione
+    if args.densita is not None:
+        override['MISSION_RANDOM_DENSITY'] = args.densita
+    if args.min_edge is not None:
+        override['PRM_MIN_EDGE_M'] = args.min_edge
+    if args.max_edge is not None:
+        override['PRM_MAX_EDGE_M'] = args.max_edge
+    if override and override.get('MISSION_GRAPH_SAMPLING', ew.MISSION_GRAPH_SAMPLING) == 'casuale':
+        # Un solo seme per tutte le missioni, scritto qui sotto per poter ripetere il confronto.
+        override['MISSION_RANDOM_SEED'] = (args.seme if args.seme is not None
+                                           else mission_graph.draw_seed())
+    if override and args.aggiorna_riferimento:
+        ap.error("--aggiorna-riferimento non si usa con un grafo diverso da quello della missione")
 
     if args.tutte:
         args.missioni = ALL_MISSIONS
     t0 = time.perf_counter()
     print(f"Rigioco di {len(args.missioni)} missioni{' (veloce)' if args.veloce else ''}, in parallelo...")
+    if override:
+        print("Grafo diverso da quello delle missioni: " +
+              ", ".join(f"{k}={v}" for k, v in override.items()))
     with Pool(min(len(args.missioni), os.cpu_count() or 1)) as pool:
-        results = dict(pool.map(replay_mission, [(n, args.veloce) for n in args.missioni]))
+        results = dict(pool.map(replay_mission, [(n, args.veloce, override) for n in args.missioni]))
 
     ref_all = json.load(open(REFERENCE_FILE)) if os.path.exists(REFERENCE_FILE) else {}
     fails, diffs, new_ref = [], [], dict(ref_all)
@@ -468,8 +567,13 @@ def main():
         print(f"  rigiocata in {out['seconds']:.0f} s: {len(out['cell_starts'])} inizi di cella")
         fails += check_invariants(name, out)
         now = summary_for_reference(out)
-        diffs += [f"{name}: {x}" for x in compare_reference(name, now, ref_all.get(name))]
+        if override:
+            print("  [-- ] grafo diverso da quello della missione: confronto col riferimento saltato")
+        else:
+            diffs += [f"{name}: {x}" for x in compare_reference(name, now, ref_all.get(name))]
         new_ref[name] = now
+
+    graph_table(args.missioni, results)
 
     print("\n" + "=" * 70)
     if args.aggiorna_riferimento and not fails:

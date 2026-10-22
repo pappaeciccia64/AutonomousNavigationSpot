@@ -1,9 +1,12 @@
 """
-mission_graph.py -- il grafo di missione: un RETICOLO rettangolare di nodi equidistanziati,
-costruito in forma chiusa dalla DIMENSIONE DELLA MISSIONE (righe, colonne, lato cella: gli
-stessi tre numeri di SPOT_MISSION_GRID e di environmentMap.EnvironmentMap).
-
-Due flag per l'utente: la SPAZIATURA fra i nodi e gli ANELLI di collegamento.
+mission_graph.py -- il grafo di missione, costruito dalla DIMENSIONE DELLA MISSIONE (righe,
+colonne, lato cella: gli stessi tre numeri di SPOT_MISSION_GRID e di
+environmentMap.EnvironmentMap). I nodi si generano in due modi (GRAPH_SAMPLING):
+  - 'reticolo' (default): un RETICOLO rettangolare di nodi equidistanziati, in forma
+    chiusa. Due flag: la SPAZIATURA fra i nodi e gli ANELLI di collegamento.
+  - 'casuale': nodi sparsi con una distribuzione scelta, per confrontare i due metodi
+    (vedi NODI CASUALI).
+Quasi tutto il commento qui sotto parla del reticolo.
 
 PERCHE' UN RETICOLO
   1. Riproducibilita'. Il grafo dipende solo dai parametri: stessi parametri, stesso grafo,
@@ -63,6 +66,30 @@ ALIASING -- il limite da conoscere
   (larghezza - 0.60 m): perche' ci cada sempre una fila di nodi il passo deve essere piu'
   corto di quella striscia. A passo 0.25 ogni striscia piu' larga di 0.25 m ne contiene una.
 
+NODI CASUALI (GRAPH_SAMPLING = 'casuale')
+  In alternativa al reticolo, i nodi si possono spargere a caso nell'area della missione,
+  per confrontare i due metodi. I centri delle celle restano SEMPRE nodi (sono gli
+  obiettivi, e il centro della cella di partenza e' il punto di accensione); gli altri
+  nodi seguono una di queste distribuzioni, con RANDOM_DENSITY_PER_M2 nodi per m^2:
+    'uniforme'   punti indipendenti e uniformi: il PRM classico, con buchi e grumi;
+    'poisson'    Poisson-disk: punti uniformi scartati se piu' vicini di una distanza
+                 minima a un nodo gia' messo (POISSON_MIN_DIST_M; None = 0.75/sqrt(densita'),
+                 che lascia raggiungere la densita' chiesta): niente grumi;
+    'perturbata' l'area divisa in quadretti da 1/densita' m^2, un punto a caso in ognuno:
+                 nessuna zona resta vuota piu' di un quadretto;
+    'halton'     sequenza di Halton in basi 2 e 3, quasi casuale e molto uniforme; il
+                 seme la trasla (rotazione di Cranley-Patterson), cosi' semi diversi danno
+                 insiemi diversi.
+  Gli archi collegano ogni coppia di nodi distante fra min_edge_length e
+  min(max_edge_length, connection_radius); passo e anelli non contano.
+  SEME: RANDOM_SEED fisso ripete lo stesso grafo bit per bit; None = un seme estratto a
+  caso. In entrambi i casi il seme usato va nel log (riga [GRAFO] Nodi casuali) e in
+  mission_summary.json, cosi' la missione si puo' ripetere e test_replay la rigioca con
+  lo stesso grafo.
+  La copertura (distanza massima fra un punto dell'area e il nodo piu' vicino) qui non ha
+  una formula: si misura su una griglia fitta e va nel log, perche' e' il numero che dice
+  se un corridoio stretto puo' restare senza nodi (vedi ALIASING).
+
 COME SI USA
       mg = mission_graph.build_mission_graph(env=env)   # ~0.2 s: nodi + adiacenza
       mg.into_prm(prm)                                  # i nodi, id 0..N-1
@@ -79,11 +106,13 @@ COME SI USA
   ricaricare ~70 ms (python3 mission_graph.py --tempi).
 
 Il modulo dipende SOLO da numpy: si importa e si prova fuori dal robot, senza l'SDK.
-environmentMap, prm_graph e matplotlib sono importati dentro le funzioni che li usano.
+environmentMap, prm_graph, scipy (solo per i nodi casuali) e matplotlib sono importati
+dentro le funzioni che li usano.
 
 Da riga di comando:
     python3 mission_graph.py --confronto
     python3 mission_graph.py --spacing 0.25 --rings 2 --preview p.png --zoom -2 2 -2 2
+    python3 mission_graph.py --grafo casuale --distribuzione poisson --densita 16 --seme 7 --preview p.png
     python3 mission_graph.py --rows 2 --cols 3 --cell 3
     python3 mission_graph.py --save reticolo_2x4x5.npz
     python3 mission_graph.py --tempi
@@ -124,6 +153,23 @@ MISSION_ROWS = 3
 MISSION_COLS = 4
 MISSION_CELL_SIZE_M = 4.0
 MISSION_SPACING_M = None
+
+# ----------------------------------------------------------------------------------------
+# COME SI GENERANO I NODI (vedi NODI CASUALI nel commento in cima).
+#   'reticolo' il reticolo rettangolare, deterministico (default);
+#   'casuale'  nodi sparsi con RANDOM_DISTRIBUTION, centri cella sempre compresi.
+# Si cambiano per una sola missione con gli argomenti di easy_walk.py (--grafo,
+# --distribuzione, --densita, --seme).
+# ----------------------------------------------------------------------------------------
+GRAPH_SAMPLINGS = ('reticolo', 'casuale')
+RANDOM_DISTRIBUTIONS = ('uniforme', 'poisson', 'perturbata', 'halton')
+GRAPH_SAMPLING = 'reticolo'
+RANDOM_DISTRIBUTION = 'poisson'
+# 16 nodi/m^2 = la densita' del reticolo a passo 0.25 m: a parita' di nodi i due metodi
+# si confrontano sulla sola disposizione.
+RANDOM_DENSITY_PER_M2 = 16.0
+RANDOM_SEED = None              # None = estratto a caso, e scritto nel log
+POISSON_MIN_DIST_M = None       # None = 0.75 / sqrt(densita')
 
 
 def mission_settings(rows=None, cols=None, cell_size_m=None, spacing_m=None):
@@ -259,6 +305,153 @@ def _lattice_pairs(spacing, ij, xy, min_edge_m, reach_m):
     return pairs[order], lengths[order], n_short
 
 
+# ----------------------------------------------------------------------------------------
+# NODI CASUALI
+# ----------------------------------------------------------------------------------------
+
+def draw_seed():
+    """Un seme nuovo, quando non ne e' stato chiesto uno: 31 bit dal sistema."""
+    import random
+    return random.SystemRandom().randrange(2 ** 31)
+
+
+def poisson_min_dist(density_per_m2):
+    """
+    Distanza minima del Poisson-disk per arrivare alla densita' chiesta. Spargendo punti a
+    caso con distanza minima r ci si ferma a circa 0.70/r^2 punti per m^2 (saturazione);
+    con r = 0.75/sqrt(densita') la saturazione sta a ~1.24 volte la densita' chiesta, che
+    resta raggiungibile.
+    """
+    return 0.75 / math.sqrt(float(density_per_m2))
+
+
+def _halton(n, base, start=1):
+    """I primi n termini della sequenza di van der Corput in `base`, dall'indice start."""
+    out = np.zeros(n, dtype=np.float64)
+    for k in range(n):
+        i, f, x = start + k, 1.0, 0.0
+        while i > 0:
+            f /= base
+            x += f * (i % base)
+            i //= base
+        out[k] = x
+    return out
+
+
+def _poisson_points(n_target, box, fixed_xy, min_dist, rng, max_tries_per_point=50):
+    """
+    Poisson-disk per lancio di freccette: punti uniformi nel rettangolo, scartati se piu'
+    vicini di min_dist a un punto gia' messo (centri cella compresi). Si ferma a n_target
+    punti o quando i tentativi falliti di fila diventano troppi (area satura). Una griglia
+    di appoggio con lato min_dist/sqrt(2) tiene al massimo un punto per casella, cosi'
+    ogni controllo guarda solo le 5 x 5 caselle attorno.
+    """
+    x0, x1, y0, y1 = box
+    h = min_dist / math.sqrt(2.0)
+    nx, ny = max(1, int(math.ceil((x1 - x0) / h))), max(1, int(math.ceil((y1 - y0) / h)))
+    grid = -np.ones((ny, nx), dtype=np.int64)
+    pts = [tuple(p) for p in fixed_xy]
+    r2 = min_dist * min_dist
+
+    def cell_of(x, y):
+        return (min(ny - 1, max(0, int((y - y0) / h))), min(nx - 1, max(0, int((x - x0) / h))))
+
+    for k, (x, y) in enumerate(pts):
+        grid[cell_of(x, y)] = k
+    added, fails, limit = 0, 0, max_tries_per_point * max(1, n_target)
+    while added < n_target and fails < limit:
+        batch = rng.random((256, 2))
+        for u, v in batch:
+            x, y = x0 + u * (x1 - x0), y0 + v * (y1 - y0)
+            gi, gj = cell_of(x, y)
+            ok = True
+            for a in range(max(0, gi - 2), min(ny, gi + 3)):
+                for b in range(max(0, gj - 2), min(nx, gj + 3)):
+                    k = grid[a, b]
+                    if k >= 0:
+                        dx, dy = pts[k][0] - x, pts[k][1] - y
+                        if dx * dx + dy * dy < r2:
+                            ok = False
+                            break
+                if not ok:
+                    break
+            if not ok:
+                fails += 1
+                if fails >= limit:
+                    break
+                continue
+            grid[gi, gj] = len(pts)
+            pts.append((x, y))
+            added += 1
+            if added >= n_target:
+                break
+    return np.array(pts[len(fixed_xy):], dtype=np.float64).reshape(-1, 2)
+
+
+def _random_points(distribution, density_per_m2, box, fixed_xy, rng, min_dist=None):
+    """
+    I nodi casuali nel rettangolo box = (x_min, x_max, y_min, y_max), senza i nodi fissi
+    (centri cella), che il poisson pero' rispetta. Restituisce (xy, note): note e' una
+    stringa per il log quando la densita' chiesta non e' stata raggiunta.
+    """
+    x0, x1, y0, y1 = box
+    w, h = x1 - x0, y1 - y0
+    n = int(round(float(density_per_m2) * w * h))
+    if distribution == 'uniforme':
+        u = rng.random((n, 2))
+        return np.column_stack((x0 + u[:, 0] * w, y0 + u[:, 1] * h)), ""
+    if distribution == 'perturbata':
+        side = 1.0 / math.sqrt(float(density_per_m2))
+        nx, ny = max(1, int(round(w / side))), max(1, int(round(h / side)))
+        hx, hy = w / nx, h / ny                   # quadretti che coprono il rettangolo esatto
+        jj, ii = np.meshgrid(np.arange(nx), np.arange(ny))
+        u = rng.random((ny * nx, 2))
+        return np.column_stack((x0 + (jj.ravel() + u[:, 0]) * hx,
+                                y0 + (ii.ravel() + u[:, 1]) * hy)), ""
+    if distribution == 'halton':
+        shift = rng.random(2)
+        u = (np.column_stack((_halton(n, 2), _halton(n, 3))) + shift) % 1.0
+        return np.column_stack((x0 + u[:, 0] * w, y0 + u[:, 1] * h)), ""
+    if distribution == 'poisson':
+        r = float(min_dist) if min_dist else poisson_min_dist(density_per_m2)
+        xy = _poisson_points(n, box, fixed_xy, r, rng)
+        note = ("" if len(xy) >= n else
+                f"area satura a {len(xy)} nodi su {n} chiesti con distanza minima {r:.3f} m")
+        return xy, note
+    raise ValueError(f"distribuzione sconosciuta {distribution!r}: una di {RANDOM_DISTRIBUTIONS}")
+
+
+def _radius_pairs(xy, min_edge_m, reach_m):
+    """
+    Le coppie di nodi distanti fra min_edge_m e reach_m, con la lunghezza, ordinate come
+    quelle del reticolo. Restituisce (pairs, lengths, n_sotto_soglia).
+    """
+    from scipy.spatial import cKDTree
+    found = cKDTree(xy).query_pairs(r=float(reach_m), output_type='ndarray')
+    if len(found) == 0:
+        return np.zeros((0, 2), np.int64), np.zeros(0), 0
+    found = np.sort(found.astype(np.int64), axis=1)
+    d = xy[found[:, 1]] - xy[found[:, 0]]
+    lengths = np.sqrt(d[:, 0] * d[:, 0] + d[:, 1] * d[:, 1])
+    keep = lengths >= float(min_edge_m) - 1e-12
+    pairs, lengths = found[keep], lengths[keep]
+    order = np.lexsort((pairs[:, 1], pairs[:, 0]))
+    return pairs[order], lengths[order], int((~keep).sum())
+
+
+def measured_covering(xy, box, step=0.05):
+    """
+    Copertura misurata: (massima, 95-esimo percentile) della distanza fra i punti di una
+    griglia fitta nel rettangolo e il nodo piu' vicino. Per il reticolo c'e' la formula
+    (covering_radius); per i nodi casuali serve misurarla.
+    """
+    from scipy.spatial import cKDTree
+    x0, x1, y0, y1 = box
+    gx, gy = np.meshgrid(np.arange(x0, x1 + 1e-9, step), np.arange(y0, y1 + 1e-9, step))
+    d, _ = cKDTree(xy).query(np.column_stack((gx.ravel(), gy.ravel())))
+    return float(d.max()), float(np.percentile(d, 95))
+
+
 # Pendenze delle coppie calcolate in blocco con le matrici (vedi PRM.precompute_arc_slopes).
 # False = arco per arco; il risultato e' identico.
 BATCH_SLOPES = True
@@ -318,7 +511,9 @@ class MissionGraph:
 
     def __init__(self, spacing_m, rows, cols, cell_size_m, start_cell, origin_xy, origin_yaw,
                  ij, xy_local, pairs, lengths, node_cell, cell_center_ids, origin_node_id,
-                 min_edge_m, reach_m, rings, n_short_pairs):
+                 min_edge_m, reach_m, rings, n_short_pairs, sampling='reticolo',
+                 distribution=None, density_per_m2=None, seed=None, covering=None,
+                 sampling_note=""):
         self.spacing_m = float(spacing_m)
         self.rows, self.cols = int(rows), int(cols)
         self.cell_size_m = float(cell_size_m)
@@ -336,6 +531,14 @@ class MissionGraph:
         self.cell_center_ids = cell_center_ids    # {(riga, col): id del nodo nel centro}
         self.origin_node_id = origin_node_id      # nodo sotto il robot all'avvio
         self.n_short_pairs = int(n_short_pairs)
+        # Come sono stati generati i nodi (vedi NODI CASUALI). Per i nodi casuali ij vale
+        # -1 e spacing_m e' il passo medio 1/sqrt(densita'); la copertura e' misurata.
+        self.sampling = str(sampling)
+        self.distribution = distribution
+        self.density_per_m2 = None if density_per_m2 is None else float(density_per_m2)
+        self.seed = None if seed is None else int(seed)
+        self.covering = covering                  # (massima, 95-esimo percentile) o None
+        self.sampling_note = sampling_note
 
         c, s = math.cos(self.origin_yaw), math.sin(self.origin_yaw)
         self.xy = np.column_stack((
@@ -369,8 +572,26 @@ class MissionGraph:
         return self.n_components == 1
 
     @property
+    def is_random(self):
+        return self.sampling == 'casuale'
+
+    @property
     def covering_m(self):
+        if self.covering is not None:
+            return float(self.covering[0])
         return covering_radius(self.spacing_m)
+
+    def describe(self):
+        """Il metodo dei nodi in un dict, per mission_summary.json e per rigiocare la missione."""
+        out = dict(metodo=self.sampling, nodi=self.n_nodes, coppie=self.n_edges,
+                   arco_min_m=self.min_edge_m, arco_max_m=round(self.reach_m, 6),
+                   copertura_m=round(self.covering_m, 4))
+        if self.is_random:
+            out.update(distribuzione=self.distribution, densita_nodi_m2=self.density_per_m2,
+                       seme=self.seed)
+        else:
+            out.update(passo_m=self.spacing_m, anelli=self.rings)
+        return out
 
     def node_ids(self):
         """Gli id dei nodi, 0..N-1: gli stessi che useranno PRM.nodes."""
@@ -494,9 +715,11 @@ class MissionGraph:
             print(f"[GRAFO] Aggiornamento locale: rivalutate {len(todo)} coppie su {len(todo_all)} "
                   f"(vicine alle zone con dati nuovi), {added} ammesse; le altre restano come erano.")
         elif verbose:
-            print(f"[GRAFO] {added} archi ammessi su {self.n_edges} coppie del reticolo "
-                  f"({self.n_nodes} nodi, passo {self.spacing_m:.4f} m); {n_fast} in zona senza "
-                  f"dati, con il solo costo geometrico")
+            where = (f"nodi casuali {self.distribution}" if self.is_random
+                     else f"passo {self.spacing_m:.4f} m")
+            print(f"[GRAFO] {added} archi ammessi su {self.n_edges} coppie del "
+                  f"{'grafo' if self.is_random else 'reticolo'} ({self.n_nodes} nodi, {where}); "
+                  f"{n_fast} in zona senza dati, con il solo costo geometrico")
         return added
 
     def _dirty_pairs(self, prm, global_map, todo):
@@ -563,7 +786,13 @@ class MissionGraph:
             min_edge_m=self.min_edge_m, reach_m=self.reach_m,
             rings=(-1 if self.rings is None else self.rings),
             origin_node_id=(-1 if self.origin_node_id is None else self.origin_node_id),
-            cell_center_keys=keys, cell_center_vals=vals, n_short_pairs=self.n_short_pairs)
+            cell_center_keys=keys, cell_center_vals=vals, n_short_pairs=self.n_short_pairs,
+            sampling=self.sampling, distribution=str(self.distribution or ''),
+            density_per_m2=(-1.0 if self.density_per_m2 is None else self.density_per_m2),
+            seed=(-1 if self.seed is None else self.seed),
+            covering=(np.array([-1.0, -1.0]) if self.covering is None
+                      else np.array(self.covering, dtype=np.float64)),
+            sampling_note=self.sampling_note)
         return path
 
     def report(self):
@@ -572,21 +801,44 @@ class MissionGraph:
         hi = float(self.lengths.max()) if self.n_edges else float('nan')
         uniq = sorted(set(np.round(self.lengths, 3).tolist()))
         rings = ", ".join(f"{v:.2f}" for v in uniq[:6]) + (" ..." if len(uniq) > 6 else "")
-        n_div = int(round(self.cell_size_m / self.spacing_m))
-        out = [
-            f"[GRAFO] Missione {self.rows}x{self.cols} celle da {self.cell_size_m:.1f} m "
-            f"= {self.area_m2:.0f} m2; reticolo rettangolare, passo {self.spacing_m:.4f} m "
-            f"(= {self.cell_size_m:.1f}/{n_div}), anelli "
-            f"{'tutti entro %.2f m' % self.reach_m if self.rings is None else self.rings}",
-            f"[GRAFO] {self.n_nodes} nodi, {node_density(self.spacing_m):.2f} nodi/m2, "
+        if self.is_random:
+            head = [
+                f"[GRAFO] Missione {self.rows}x{self.cols} celle da {self.cell_size_m:.1f} m "
+                f"= {self.area_m2:.0f} m2; nodi CASUALI, archi fra {self.min_edge_m:.2f} e "
+                f"{self.reach_m:.2f} m",
+                # test_replay legge distribuzione, densita' e seme da questa riga.
+                f"[GRAFO] Nodi casuali: distribuzione {self.distribution}, densita' "
+                f"{self.density_per_m2:.2f} nodi/m2, seme {self.seed} "
+                f"(per ripetere: --grafo casuale --distribuzione {self.distribution} "
+                f"--densita {self.density_per_m2:g} --seme {self.seed})",
+            ]
+            if self.sampling_note:
+                head.append(f"[GRAFO] ATTENZIONE: {self.sampling_note}")
+            density = self.n_nodes / self.area_m2
+            cover = (f"[GRAFO] Copertura misurata {self.covering[0]:.2f} m (95% dell'area entro "
+                     f"{self.covering[1]:.2f} m; un corridoio utile al fronte e' largo almeno "
+                     f"0.60 m)")
+        else:
+            n_div = int(round(self.cell_size_m / self.spacing_m))
+            head = [
+                f"[GRAFO] Missione {self.rows}x{self.cols} celle da {self.cell_size_m:.1f} m "
+                f"= {self.area_m2:.0f} m2; reticolo rettangolare, passo {self.spacing_m:.4f} m "
+                f"(= {self.cell_size_m:.1f}/{n_div}), anelli "
+                f"{'tutti entro %.2f m' % self.reach_m if self.rings is None else self.rings}",
+            ]
+            density = node_density(self.spacing_m)
+            cover = (f"[GRAFO] Copertura {self.covering_m:.2f} m (un corridoio utile al fronte e' "
+                     f"largo almeno 0.60 m)")
+        out = head + [
+            f"[GRAFO] {self.n_nodes} nodi, {density:.2f} nodi/m2, "
             f"{self.n_edges} archi, grado medio {self.degrees.mean():.1f} "
             f"(min {int(self.degrees.min()) if self.n_nodes else 0}, "
             f"max {int(self.degrees.max()) if self.n_nodes else 0})",
-            f"[GRAFO] Lunghezze degli archi {lo:.2f}-{hi:.2f} m [{rings}], "
+            f"[GRAFO] Lunghezze degli archi {lo:.2f}-{hi:.2f} m"
+            f"{'' if self.is_random else ' [%s]' % rings}, "
             f"min_edge_length={self.min_edge_m:.2f} m, "
             f"{self.n_short_pairs} coppie di vicini troppo vicini, non collegate",
-            f"[GRAFO] Copertura {self.covering_m:.2f} m (un corridoio utile al fronte e' "
-            f"largo almeno 0.60 m)",
+            cover,
             f"[GRAFO] Obiettivi di cella: {len(self.cell_center_ids)} su "
             f"{self.rows * self.cols}, tutti nel centro geometrico esatto",
             f"[GRAFO] Connessione geometrica: "
@@ -599,9 +851,15 @@ class MissionGraph:
             out.append(f"[GRAFO] Accensione = centro della cella di partenza = nodo "
                        f"{self.origin_node_id} (nessun nodo di boot da aggiungere)")
         if not self.is_connected or self.n_isolated:
-            out.append(f"[GRAFO] ATTENZIONE: il reticolo non e' connesso con questi parametri "
-                       f"(passo {self.spacing_m:.4f} m, archi {self.min_edge_m:.2f}-"
-                       f"{self.reach_m:.2f} m): aumenta gli anelli.")
+            if self.is_random:
+                out.append(f"[GRAFO] ATTENZIONE: il grafo casuale non e' connesso con questi "
+                           f"parametri (densita' {self.density_per_m2:g} nodi/m2, archi "
+                           f"{self.min_edge_m:.2f}-{self.reach_m:.2f} m): aumenta la densita' "
+                           f"o la lunghezza massima degli archi.")
+            else:
+                out.append(f"[GRAFO] ATTENZIONE: il reticolo non e' connesso con questi parametri "
+                           f"(passo {self.spacing_m:.4f} m, archi {self.min_edge_m:.2f}-"
+                           f"{self.reach_m:.2f} m): aumenta gli anelli.")
         return "\n".join(out)
 
     def preview_png(self, path, show_cells=True, zoom=None):
@@ -636,16 +894,18 @@ class MissionGraph:
                                                self.cell_size_m, fill=False, ec='tab:green',
                                                ls='--', lw=1.0, alpha=0.65, zorder=2))
                     ax.text(cx, cy - half + 0.35, f"{r},{c}", ha='center', va='bottom',
-                            fontsize=7, color='tab:green', zorder=6)
+                            fontsize=7, color='tab:green', zorder=6, clip_on=True)
         if zoom:
             ax.set_xlim(zoom[0], zoom[1])
             ax.set_ylim(zoom[2], zoom[3])
         ax.set_aspect('equal', 'box')
         ax.set_xlabel('x griglia [m] -- colonne, davanti al robot')
         ax.set_ylabel('y griglia [m] -- righe, a sinistra del robot')
-        ax.set_title(f"passo {self.spacing_m:.4f} m, anelli "
-                     f"{self.rings if self.rings is not None else 'tutti'} -- "
-                     f"{self.n_nodes} nodi, {self.n_edges} archi, "
+        what = (f"casuale {self.distribution}, {self.density_per_m2:g} nodi/m2, seme {self.seed}"
+                if self.is_random else
+                f"passo {self.spacing_m:.4f} m, anelli "
+                f"{self.rings if self.rings is not None else 'tutti'}")
+        ax.set_title(f"{what}\n{self.n_nodes} nodi, {self.n_edges} archi, "
                      f"copertura {self.covering_m:.2f} m")
         ax.legend(loc='upper right', fontsize=8)
         fig.tight_layout()
@@ -676,7 +936,9 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
                         min_edge_length=DEFAULT_MIN_EDGE_M,
                         max_edge_length=DEFAULT_MAX_EDGE_M,
                         connection_radius=DEFAULT_CONNECTION_RADIUS_M,
-                        border_margin_m=0.0, env=None, verbose=True):
+                        border_margin_m=0.0, env=None, verbose=True,
+                        sampling=None, distribution=None, density_per_m2=None, seed=None,
+                        poisson_min_dist_m=None):
     """
     Costruisce il grafo di missione.
 
@@ -699,6 +961,11 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
         env: una EnvironmentMap gia' creata e con set_origin() fatto. Se passata, dimensione
             e posa vengono da lei: e' il modo di garantire che grafo e mappa delle celle non
             possano andare fuori sincrono.
+        sampling: 'reticolo' o 'casuale' (vedi NODI CASUALI); None = GRAPH_SAMPLING. Con
+            'casuale' spacing_m e rings non contano.
+        distribution, density_per_m2, seed, poisson_min_dist_m: i parametri dei nodi
+            casuali; None = RANDOM_DISTRIBUTION, RANDOM_DENSITY_PER_M2, RANDOM_SEED,
+            POISSON_MIN_DIST_M. Seme None anche li' = estratto a caso (e scritto nel log).
 
     Returns:
         MissionGraph.
@@ -713,6 +980,18 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
         spacing_m = chosen_spacing
     if rows < 1 or cols < 1 or cell_size_m <= 0:
         raise ValueError("dimensione della missione non valida")
+    sampling = GRAPH_SAMPLING if sampling is None else sampling
+    if sampling not in GRAPH_SAMPLINGS:
+        raise ValueError(f"metodo dei nodi sconosciuto {sampling!r}: uno di {GRAPH_SAMPLINGS}")
+    if sampling == 'casuale':
+        return _build_random_graph(
+            rows, cols, cell_size_m, start_cell, origin_xy, origin_yaw,
+            float(min_edge_length), min(float(connection_radius), float(max_edge_length)),
+            float(border_margin_m), verbose,
+            RANDOM_DISTRIBUTION if distribution is None else distribution,
+            RANDOM_DENSITY_PER_M2 if density_per_m2 is None else density_per_m2,
+            RANDOM_SEED if seed is None else seed,
+            POISSON_MIN_DIST_M if poisson_min_dist_m is None else poisson_min_dist_m)
 
     if spacing_m is None:
         spacing_m = suggested_spacing(cell_size_m, min_edge_length)
@@ -780,16 +1059,77 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
     d0 = np.hypot(xy_local[:, 0], xy_local[:, 1])
     origin_node_id = int(np.argmin(d0)) if d0.min() < 1e-9 else None
 
-    # Cella di appartenenza di ogni nodo: stessa regola di env.get_cell_from_world (round).
-    cols_idx = np.clip(np.round(xy_local[:, 0] / cell_size_m).astype(np.int64) + start_cell[1],
-                       0, cols - 1)
-    rows_idx = np.clip(np.round(xy_local[:, 1] / cell_size_m).astype(np.int64) + start_cell[0],
-                       0, rows - 1)
-    node_cell = np.column_stack((rows_idx, cols_idx))
+    node_cell = _node_cells_of(xy_local, rows, cols, cell_size_m, start_cell)
 
     mg = MissionGraph(spacing_m, rows, cols, cell_size_m, start_cell, origin_xy, origin_yaw,
                       ij, xy_local, pairs, lengths, node_cell, cell_center_ids,
                       origin_node_id, float(min_edge_length), reach_m, rings, n_short)
+    if verbose:
+        print(mg.report())
+    return mg
+
+
+def _node_cells_of(xy_local, rows, cols, cell_size_m, start_cell):
+    """Cella (riga, colonna) di ogni nodo: stessa regola di env.get_cell_from_world (round)."""
+    cols_idx = np.clip(np.round(xy_local[:, 0] / cell_size_m).astype(np.int64) + start_cell[1],
+                       0, cols - 1)
+    rows_idx = np.clip(np.round(xy_local[:, 1] / cell_size_m).astype(np.int64) + start_cell[0],
+                       0, rows - 1)
+    return np.column_stack((rows_idx, cols_idx))
+
+
+def _build_random_graph(rows, cols, cell_size_m, start_cell, origin_xy, origin_yaw,
+                        min_edge_m, reach_m, border_margin_m, verbose,
+                        distribution, density_per_m2, seed, poisson_min_dist_m):
+    """
+    Il grafo con nodi casuali (vedi NODI CASUALI): prima i centri cella, nell'ordine delle
+    righe e delle colonne, poi i nodi della distribuzione. Stesso seme, stesso grafo.
+    """
+    if distribution not in RANDOM_DISTRIBUTIONS:
+        raise ValueError(f"distribuzione sconosciuta {distribution!r}: una di {RANDOM_DISTRIBUTIONS}")
+    if density_per_m2 is None or float(density_per_m2) <= 0:
+        raise ValueError("la densita' dei nodi deve essere positiva")
+    if reach_m < min_edge_m:
+        raise ValueError(f"lunghezza massima degli archi {reach_m:.2f} m sotto la minima "
+                         f"{min_edge_m:.2f} m: nessun arco sarebbe ammesso")
+    seed = draw_seed() if seed is None else int(seed)
+    rng = np.random.default_rng(seed)
+
+    x_min, x_max, y_min, y_max = _mission_extent(rows, cols, cell_size_m, start_cell)
+    box = (x_min + border_margin_m, x_max - border_margin_m,
+           y_min + border_margin_m, y_max - border_margin_m)
+    if box[1] <= box[0] or box[3] <= box[2]:
+        raise ValueError("margine di bordo troppo largo: nessuna area per i nodi")
+
+    # Centri cella: nodi fissi, gli obiettivi dell'esplorazione. Il centro della cella di
+    # partenza e' l'origine, cioe' il punto di accensione.
+    centers, keys = [], []
+    for r in range(rows):
+        for c in range(cols):
+            x, y = (c - start_cell[1]) * cell_size_m, (r - start_cell[0]) * cell_size_m
+            if box[0] <= x <= box[1] and box[2] <= y <= box[3]:
+                centers.append((x, y))
+                keys.append((r, c))
+    centers = np.array(centers, dtype=np.float64).reshape(-1, 2)
+    rand_xy, note = _random_points(distribution, density_per_m2, box, centers, rng,
+                                   poisson_min_dist_m)
+    xy_local = np.vstack((centers, rand_xy))
+    cell_center_ids = {key: k for k, key in enumerate(keys)}
+    if verbose and len(cell_center_ids) < rows * cols:
+        print(f"[GRAFO] {rows * cols - len(cell_center_ids)} centri cella fuori dall'area "
+              f"(margine di bordo {border_margin_m:.2f} m): quelle celle non hanno obiettivo.")
+    d0 = np.hypot(xy_local[:, 0], xy_local[:, 1])
+    origin_node_id = int(np.argmin(d0)) if len(d0) and d0.min() < 1e-9 else None
+
+    pairs, lengths, n_short = _radius_pairs(xy_local, min_edge_m, reach_m)
+    node_cell = _node_cells_of(xy_local, rows, cols, cell_size_m, start_cell)
+    mg = MissionGraph(1.0 / math.sqrt(float(density_per_m2)), rows, cols, cell_size_m,
+                      start_cell, origin_xy, origin_yaw,
+                      -np.ones((len(xy_local), 2), dtype=np.int64), xy_local, pairs, lengths,
+                      node_cell, cell_center_ids, origin_node_id, min_edge_m, reach_m, None,
+                      n_short, sampling='casuale', distribution=distribution,
+                      density_per_m2=float(density_per_m2), seed=seed,
+                      covering=measured_covering(xy_local, box), sampling_note=note)
     if verbose:
         print(mg.report())
     return mg
@@ -813,7 +1153,14 @@ def load_npz(path, origin_xy=(0.0, 0.0), origin_yaw=0.0, env=None):
         tuple(int(v) for v in d['start_cell']), origin_xy, origin_yaw, d['ij'], d['xy_local'],
         d['pairs'], d['lengths'], d['node_cell'], cc_ids, None if oid < 0 else oid,
         float(d['min_edge_m']), float(d['reach_m']), None if rings < 0 else rings,
-        int(d['n_short_pairs']))
+        int(d['n_short_pairs']),
+        # file salvati prima dei nodi casuali: reticolo
+        **({} if 'sampling' not in d.files else dict(
+            sampling=str(d['sampling']), distribution=(str(d['distribution']) or None),
+            density_per_m2=(None if float(d['density_per_m2']) < 0 else float(d['density_per_m2'])),
+            seed=(None if int(d['seed']) < 0 else int(d['seed'])),
+            covering=(None if float(d['covering'][0]) < 0 else tuple(float(v) for v in d['covering'])),
+            sampling_note=str(d['sampling_note']))))
 
 
 def compare(rows=DEFAULT_MISSION_ROWS, cols=DEFAULT_MISSION_COLS,
@@ -885,6 +1232,16 @@ def _main():
     p.add_argument('--rings', default=str(LATTICE_RINGS),
                    help="anelli di vicini collegati (k = entro la diagonale dell'anello k), "
                         "o 'tutti' (default 2)")
+    p.add_argument('--grafo', choices=GRAPH_SAMPLINGS, default=GRAPH_SAMPLING,
+                   help=f"come si generano i nodi (default {GRAPH_SAMPLING})")
+    p.add_argument('--distribuzione', choices=RANDOM_DISTRIBUTIONS, default=RANDOM_DISTRIBUTION,
+                   help=f"nodi casuali: distribuzione (default {RANDOM_DISTRIBUTION})")
+    p.add_argument('--densita', type=float, default=RANDOM_DENSITY_PER_M2,
+                   help=f"nodi casuali: nodi per m2 (default {RANDOM_DENSITY_PER_M2:g})")
+    p.add_argument('--seme', type=int, default=RANDOM_SEED,
+                   help="nodi casuali: seme (default: estratto a caso e scritto nel riepilogo)")
+    p.add_argument('--dist-min', type=float, default=POISSON_MIN_DIST_M,
+                   help="nodi poisson: distanza minima fra i nodi in m (default 0.75/sqrt(densita'))")
     p.add_argument('--min-edge', type=float, default=DEFAULT_MIN_EDGE_M)
     p.add_argument('--max-edge', type=float, default=DEFAULT_MAX_EDGE_M)
     p.add_argument('--radius', type=float, default=DEFAULT_CONNECTION_RADIUS_M)
@@ -903,10 +1260,12 @@ def _main():
         a.spacing = None                 # 0 = passo suggerito da suggested_spacing()
     common = dict(rows=a.rows, cols=a.cols, cell_size_m=a.cell, min_edge_length=a.min_edge,
                   max_edge_length=a.max_edge, connection_radius=a.radius,
-                  border_margin_m=a.margin)
+                  border_margin_m=a.margin, sampling=a.grafo, distribution=a.distribuzione,
+                  density_per_m2=a.densita, seed=a.seme, poisson_min_dist_m=a.dist_min)
 
     if a.confronto:
         compare(rows=a.rows, cols=a.cols, cell_size_m=a.cell, min_edge_length=a.min_edge,
+                sampling='reticolo',
                 max_edge_length=a.max_edge, connection_radius=a.radius,
                 border_margin_m=a.margin)
         return

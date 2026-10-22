@@ -6,6 +6,43 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 
 ---
 
+## 2026-10-22
+
+### Grafo di missione (`mission_graph.py`)
+- **Scelta del metodo dei nodi**: `GRAPH_SAMPLING = 'reticolo'` (default, invariato) oppure `'casuale'`, con quattro distribuzioni (`uniforme`, `poisson`, `perturbata`, `halton`), densità in nodi/m² (default 16, come il reticolo a 0.25 m) e seme. Seme non indicato = estratto a caso; quello usato va sempre nel log, con il comando per ripetere il grafo, e in `mission_summary.json` (voce `grafo`). I centri delle celle restano nodi fissi anche con i nodi casuali. Gli archi collegano le coppie fra lunghezza minima e massima; un tetto ai vicini per nodo si valuterà più avanti. La copertura dei nodi casuali è misurata su una griglia da 5 cm. Serve a confrontare i due metodi; il reticolo è identico bit per bit a prima.
+- Sulla missione di default (3 × 4 celle da 4 m, archi 0.5–1.25 m, seme 7):
+
+  | metodo | nodi | coppie | copertura massima | 95% dell'area entro |
+  |---|---|---|---|---|
+  | reticolo 0.25 m | 3185 | 105250 | 0.18 m | 0.18 m |
+  | uniforme | 3084 | 94299 | 0.56 m | 0.25 m |
+  | poisson | 3084 | 92194 | 0.25 m | 0.17 m |
+  | perturbata | 3084 | 93509 | 0.32 m | 0.19 m |
+  | halton | 3084 | 93732 | 0.36 m | 0.19 m |
+
+  Il reticolo ha più nodi perché comprende le file sul bordo dell'area.
+
+### Navigazione (`easy_walk.py`)
+- Argomenti nuovi: `--grafo`, `--distribuzione`, `--densita`, `--seme`, `--min-edge`, `--max-edge` (prima la lunghezza degli archi si cambiava solo nel codice). Riga `[CONFIG] Grafo` all'avvio; `MISSION_GRAPH_SAMPLING` fra gli interruttori.
+
+### Strumenti
+- **`test_replay.py --grafo …`** rigioca le scansioni vere con un altro grafo, e stampa per ogni missione percorsi trovati, lunghezza media, archi per percorso e tempo del grafo. Con un grafo diverso da quello della missione il robot si aggancia al nodo più vicino, l'obiettivo è il nodo più vicino con almeno un arco valido, e il confronto col riferimento si salta. La missione 13-10 11:22 aveva l'obiettivo spostato dal centro (occupato): il nodo casuale più vicino a quel punto stava contro l'ostacolo, senza archi.
+- Rigioco di tutte le 10 missioni, 82 inizi di cella, seme 7. I tempi vengono da 10 processi in parallelo e sono solo indicativi; la differenza segue soprattutto il numero di coppie:
+
+  | metodo | percorsi trovati | lunghezza media | archi per percorso | tempo del grafo |
+  |---|---|---|---|---|
+  | reticolo | 82/82 | 4.30 m | 4.51 | 582 s |
+  | uniforme | 82/82 | 4.32 m | 4.68 | 543 s |
+  | poisson | 82/82 | 4.33 m | 4.76 | 505 s |
+  | perturbata | 82/82 | 4.30 m | 4.67 | 487 s |
+  | halton | 82/82 | 4.30 m | 4.62 | 512 s |
+
+- `test_e2e_loop.py`: scenario S13, il corridoio di S9 con il reticolo e con le quattro distribuzioni. Il robot arriva in tutti i casi senza sfiorare il muro.
+- `mission_report.py` mostra il grafo della missione (metodo, distribuzione, seme).
+- `mission_graph.py --preview` con lo zoom non dà più l'avviso di matplotlib: le etichette delle celle fuori dal riquadro vengono tagliate.
+
+---
+
 ## 2026-10-21
 
 ### Pianificatore (`prm_graph.py`)

@@ -67,15 +67,19 @@ REQUIRED = {
                      "DEFAULT_CONNECTION_RADIUS_M",
                      # dimensione della missione e passo di default, letti da easy_walk
                      "DEFAULT_MISSION_ROWS", "DEFAULT_MISSION_COLS", "DEFAULT_CELL_SIZE_M",
-                     "DEFAULT_LATTICE_SPACING_M"],
+                     "DEFAULT_LATTICE_SPACING_M",
+                     # metodo dei nodi e nodi casuali, letti da easy_walk e test_replay
+                     "GRAPH_SAMPLINGS", "GRAPH_SAMPLING", "RANDOM_DISTRIBUTIONS",
+                     "RANDOM_DISTRIBUTION", "RANDOM_DENSITY_PER_M2", "RANDOM_SEED"],
         "funzioni": ["build_mission_graph", "load_npz", "align_spacing", "suggested_spacing",
-                     "covering_radius", "node_density"],
+                     "covering_radius", "node_density", "draw_seed"],
         "metodi": [
             ("MissionGraph", "into_prm"),
             ("MissionGraph", "add_edges_to_prm"),
             ("MissionGraph", "as_sampler"),
             ("MissionGraph", "save_npz"),
             ("MissionGraph", "report"),
+            ("MissionGraph", "describe"),
             ("LatticeSampler", "get_point_in_cell"),
         ],
     },
@@ -145,6 +149,8 @@ REQUIRED = {
                      # grafo di missione
                      "MISSION_LATTICE_SPACING_M", "MISSION_LATTICE_RINGS",
                      "PRM_MIN_EDGE_M", "PRM_MAX_EDGE_M", "PRM_CONNECTION_RADIUS_M",
+                     "MISSION_GRAPH_SAMPLING", "MISSION_RANDOM_DISTRIBUTION",
+                     "MISSION_RANDOM_DENSITY", "MISSION_RANDOM_SEED",
                      # guardie anti-stallo e avanzamento multinodo
                      "MAX_ROTATION_DISCARDS", "MAX_IDLE_LOOPS", "IDLE_MOVE_M",
                      "MISSION_GRID_ROWS", "MISSION_GRID_COLS", "MISSION_CELL_SIZE_M",
