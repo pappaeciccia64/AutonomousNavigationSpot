@@ -21,8 +21,9 @@ except Exception:          # scipy c'e' gia' (spotGrid usa scipy.ndimage); ripie
 
 # Campioni per metro con cui si controlla l'occupazione lungo un arco (minimo 5), uguali
 # ovunque. Ogni campione controlla un disco di raggio spotGrid.PRM_EDGE_SAFETY_MARGIN_M
-# (0.15): con un campione ogni 10 cm, a meta' fra due campioni il disco copre ancora 0.14 m,
-# cioe' la linea dell'arco resta a ~0.29 m dagli ostacoli, coerente col fronte (0.30).
+# (0.13): con un campione ogni 10 cm, a meta' fra due campioni il disco copre ancora 0.12 m,
+# cioe' la linea dell'arco resta a ~0.27 m dagli ostacoli (spotGrid.PLAN_CLEARANCE_M = 0.28;
+# il fronte ne pretende 0.25).
 OCCUPANCY_SAMPLES_PER_M = 10
 OCCUPANCY_SAMPLES_MIN = 5
 
@@ -31,13 +32,17 @@ OCCUPANCY_SAMPLES_MIN = 5
 # scansione di un posto non sa ancora niente. Prima di tutto il resto, un arco si scarta se
 # un suo campione (ogni 10 cm) cade su una cella VISTA nella scansione attuale con
 # obstacle_distance sotto LIVE_PREFILTER_OD_M e non sotto il corpo del robot.
-#   - 0.20 m = mezza larghezza (0.25) meno 5 cm di rumore: il fianco del robot ci entrerebbe.
-#     Il fronte ne pretende 0.30, quindi questo scarto toglie solo archi che il fronte
-#     rifiuterebbe comunque.
+#   - La soglia e' la distanza del fronte (spotGrid.FRONTIER_CLEARANCE_M, 0.25 m): toglie
+#     gli archi che il fronte rifiuterebbe. Prima del 22-10 era 0.20 m, sotto il fronte, e il
+#     pianificatore sceglieva archi a 0.20-0.25 m che il fronte poi rifiutava.
+#   - NON la distanza di pianificazione (0.28, quella della mappa globale): da un punto
+#     stretto gli archi d'uscita passano per forza vicino agli ostacoli, e il fronte li
+#     ammette (nel primo metro basta non avvicinarsi, vedi FRONTIER_ESCAPE_DIST_M). A 0.28
+#     il rigioco della missione 13-10 11:22 perdeva il percorso dall'ultimo inizio di cella.
 #   - E' una lettura vettoriale, costa pochissimo, e viene prima della pendenza.
 #   - Non e' permanente: si rifa' a ogni refresh con la scansione nuova.
 # None = disattivato.
-LIVE_PREFILTER_OD_M = spotGrid.ROBOT_HALF_WIDTH_M - 0.05     # = 0.20
+LIVE_PREFILTER_OD_M = spotGrid.FRONTIER_CLEARANCE_M     # = 0.25
 
 # False: per i veti di pendenza si stampa UNA riga riassuntiva [PENDENZE] per ogni
 # costruzione o refresh (vedi flush_slope_log) invece di una per arco; i valori arco per arco

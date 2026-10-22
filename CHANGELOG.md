@@ -6,6 +6,28 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 
 ---
 
+## 2026-10-22 (pomeriggio, dopo le prove al chiuso delle 15:24 e 15:50)
+
+### Pianificatore e mappe (`spotGrid.py`, `prm_graph.py`)
+- **Il pianificatore lascia 3 cm più del fronte** (`spotGrid.PLAN_CLEARANCE_EXTRA_M = 0.03`, quindi `PLAN_CLEARANCE_M = 0.28`). Vale per il veto degli archi sulla mappa globale (margine da 0.10 a 0.13 m), per la scelta del punto obiettivo e per l'aggancio dei nodi. Prova delle 15:24: 18 giri del fronte su 25 fermati da un ostacolo a 0.23–0.24 m con minimo 0.25, perché i percorsi passavano esattamente al limite e bastava il rumore della scansione. Anche il 13-10 12:40 tutte le fermate per ostacolo erano entro 3 cm dal minimo.
+- **Scarto dal vivo degli archi da 0.20 a 0.25 m** (`prm_graph.LIVE_PREFILTER_OD_M`, uguale alla distanza del fronte): prima lasciava passare archi a 0.20–0.25 m, che il fronte poi rifiutava. Non 0.28: da un punto stretto gli archi d'uscita passano per forza vicino agli ostacoli, e il fronte li ammette (nel primo metro basta non avvicinarsi). Con 0.28 il rigioco della missione 13-10 11:22 perdeva il percorso dall'ultimo inizio di cella (4/5); con 0.25 tutti gli 82 si trovano. La prova delle 15:50 è partita con 0.28.
+- Rigioco delle 10 missioni: nessun invariante violato, archi validi −0.7% in media (fino a −2.5%), 11 percorsi un po' più lunghi (+1.5 m in tutto), andature e ritorno a wp_0 invariati. Riferimento aggiornato.
+
+### Navigazione (`easy_walk.py`)
+- **Il centro della cella si scarta anche se la scansione dal vivo lo vede a meno di 0.28 m da un ostacolo**, non solo se è occupato nella mappa globale (che conferma un ostacolo dopo due osservazioni). Prova delle 15:50: il centro della cella (0,2) era a 0.15 m da un ostacolo appena visto e "libero" per la mappa. Il suo nodo era senza archi, il tentativo è fallito in un secondo con "GRAFO DISCONNESSO" e il robot non è più andato avanti nel corridoio. Con la regola nuova, sugli stessi dati, si sceglie un punto a 0.36 m dal centro, collegato e raggiungibile. Lo spazio libero imparato per il centro non si usa, perché è ancora in prova.
+- **Se all'inizio del tentativo il grafo non arriva all'obiettivo, si provano fino a 3 altri punti della cella** (`MAX_BLOCK_REPLANS`) prima di rinunciare, come già faceva il ciclo di navigazione.
+- **L'arrivo per tolleranza vale solo dentro la cella obiettivo.** Prova delle 15:24, primo tentativo su (1,1): punto di ripiego a 0.83 m dal centro, robot fermo 0.39 m prima, "obiettivo raggiunto" ma fuori dalla cella di 6 cm, e tentativo fallito. Con celle da 2 m un ripiego può stare vicino al bordo. Fuori dalla cella si prosegue come per un fronte bloccato.
+- **Controllo sul grafo prima dello spostamento GraphNav** verso il waypoint da cui tentare una cella (`GRAPHNAV_PRECHECK`, riga `[PRECHECK]`): se da lì il grafo non arriva a nessun nodo della cella, il lato si segna come provato senza muoversi. Prova delle 15:24: 3 spostamenti su 6 finivano in un fallimento in meno di un secondo, circa 25 s su 3 minuti. Provato sui grafi salvati: dice "non raggiungibile" esattamente per quei 3 e "raggiungibile" per i 2 che hanno portato a un tentativo vero. Nella prova delle 15:50 è scattato una volta.
+- Nuovi interruttori `PLAN_CLEARANCE_EXTRA_M` e `GRAPHNAV_PRECHECK` in `mission_switches()`; statistica `graphnav_trips_avoided`.
+
+### Strumenti
+- `mission_report.py` classifica le fermate del fronte con le distanze della missione (dagli interruttori registrati: fronte 0.25 + aria, scarto dal vivo), non più con 0.30 e 0.20 scritti a mano; mostra gli spostamenti GraphNav evitati.
+
+### Da discutere (movimento)
+- Prova delle 15:50: per entrare in (1,1) e in (1,0) servivano rotazioni di 60–150 gradi dentro un corridoio largo circa 1 m. Girandosi sul posto Spot spazza un cerchio di circa 1.2 m, quindi le rotazioni erano impossibili, e ne sono seguiti 3 ritorni col GraphNav. Girarsi camminando lo risolverebbe.
+
+---
+
 ## 2026-10-22
 
 ### Grafo di missione (`mission_graph.py`)

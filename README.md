@@ -104,8 +104,10 @@ Ognuno permette un confronto acceso/spento sul campo; il log li riporta nella ri
 | `mission_graph.BATCH_SLOPES` | `True` | Pendenze a inizio cella calcolate in blocco (stesso risultato, più veloce) |
 | `prm_graph.REFRESH_BATCH_SLOPES` | `True` | Pendenze del refresh calcolate in blocco (stesso risultato, più veloce) |
 | `spotGrid.ROBOT_CLEARANCE_AIR_M` | `0.0` | Aria fra corpo e ostacoli: la linea del percorso sta a 0.25 m + questo valore dagli ostacoli (fronte e veto degli archi). 0.05 = con margine |
+| `spotGrid.PLAN_CLEARANCE_EXTRA_M` | `0.03` | Sulla mappa globale e nella scelta dell'obiettivo, il pianificatore tiene gli archi a (distanza del fronte + questo valore) dagli ostacoli, così il rumore della scansione non fa rifiutare dal fronte i tratti appena scelti. 0 = stessa distanza del fronte |
 | `spotGrid.CLEARANCE_MAP_DECIDES` | `False` | La mappa dello spazio libero decide la percorribilità al posto della mappa binaria |
 | `easy_walk.PLAN_ONLY_EXPLORED_CELLS` | `True` | I percorsi passano solo dalle celle già visitate |
+| `easy_walk.GRAPHNAV_PRECHECK` | `True` | Prima di andare col GraphNav al waypoint da cui tentare una cella, controlla sul grafo che da lì si arrivi alla cella; se no, segna il lato come provato senza muoversi |
 | `easy_walk.GRAPHNAV_SHORTCUTS` | `True` | Scorciatoie nel grafo GraphNav prima di ogni spostamento |
 
 ---

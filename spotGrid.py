@@ -211,12 +211,19 @@ def rotation_is_clear(obstacle_dist, origin_x, origin_y, cell_size, robot_x, rob
             worst = min(worst, float(window[in_body].min()))
     return worst >= -ROTATION_NOISE_TOLERANCE_M, worst
 
+# Distanza dagli ostacoli con cui il PIANIFICATORE sceglie gli archi: quella del fronte piu'
+# PLAN_CLEARANCE_EXTRA_M. Con la stessa distanza del fronte i percorsi passavano esattamente
+# al limite, e il rumore della scansione dal vivo (1-2 cm) li faceva rifiutare: nella prova
+# del 22-10 15:24, 18 giri del fronte su 25 fermati da un ostacolo a 0.23-0.24 m con minimo
+# 0.25, con avanzamenti da 0.2-0.5 m. Il passaggio piu' stretto lo decide sempre il fronte;
+# il pianificatore lascia qualche centimetro in piu'. 0 = stessa distanza del fronte.
+PLAN_CLEARANCE_EXTRA_M = 0.03
+PLAN_CLEARANCE_M = FRONTIER_CLEARANCE_M + PLAN_CLEARANCE_EXTRA_M          # = 0.28
+
 # Margine con cui il PRM scarta gli archi vicini a celle occupate della mappa globale. Le
 # celle occupate hanno obstacle_distance <= OBSTACLE_THRESHOLD, quindi un arco ammesso passa
-# ad almeno OBSTACLE_THRESHOLD + margine = FRONTIER_CLEARANCE_M dall'ostacolo: la stessa
-# distanza che pretende il fronte, cosi' il pianificatore non disegna percorsi che il fronte
-# poi rifiuta.
-PRM_EDGE_SAFETY_MARGIN_M = FRONTIER_CLEARANCE_M - OBSTACLE_THRESHOLD   # = 0.10
+# ad almeno OBSTACLE_THRESHOLD + margine = PLAN_CLEARANCE_M dall'ostacolo.
+PRM_EDGE_SAFETY_MARGIN_M = PLAN_CLEARANCE_M - OBSTACLE_THRESHOLD   # = 0.13
 
 # =========================================================================
 # MAPPA GLOBALE DEGLI OSTACOLI (vedi GlobalGrid.update)

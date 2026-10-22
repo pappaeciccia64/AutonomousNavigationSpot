@@ -33,9 +33,32 @@ MAPS = os.path.join(HERE, 'MissionMap')
 GRAPHS = os.path.join(HERE, 'graph')
 
 # Come in spotGrid / easy_walk: copiate qui perche' il rapporto non importa il codice di missione.
-FRONTIER_CLEARANCE_M = 0.30        # spotGrid.FRONTIER_CLEARANCE_M
 INTRUSION_M = 0.25                 # mezza larghezza del corpo (spotGrid.ROBOT_HALF_WIDTH_M)
-LIVE_PREFILTER_OD_M = 0.20         # prm_graph.LIVE_PREFILTER_OD_M
+
+
+def mission_thresholds(summary, log):
+    """
+    (fronte, scarto dal vivo): le distanze dagli ostacoli con cui ha lavorato QUESTA missione,
+    dagli interruttori registrati (dal 21-10). Fronte = 0.25 + spotGrid.ROBOT_CLEARANCE_AIR_M;
+    scarto dal vivo degli archi = fronte dal 22-10 (quando c'e' PLAN_CLEARANCE_EXTRA_M).
+    Senza interruttori registrati: 0.30 e 0.20, i valori delle missioni di prima.
+    """
+    sw = dict((summary or {}).get('interruttori') or {})
+    if not sw:
+        m = re.search(r'\[CONFIG\] INTERRUTTORI: (.*)', log)
+        if m:
+            sw = {f"x.{k}": v for k, v in re.findall(r'(\w+)=(\S+)', m.group(1))}
+    by_name = {k.split('.')[-1]: v for k, v in sw.items()}
+
+    def num(name):
+        try:
+            return float(by_name[name])
+        except (KeyError, TypeError, ValueError):
+            return None
+    air, extra = num('ROBOT_CLEARANCE_AIR_M'), num('PLAN_CLEARANCE_EXTRA_M')
+    frontier = INTRUSION_M + (0.05 if air is None else air)
+    live = 0.20 if extra is None else frontier
+    return frontier, live
 TERRAIN_VALID_MIN = 0.5            # spotGrid.TERRAIN_VALID_MIN
 PITCH_LIMITS_DEG = (14.0, 18.0)    # tratti "ripidi" per il controllo delle andature
 
@@ -156,8 +179,12 @@ def _seen_value(d, x, y):
     return float(np.asarray(d['obstacle_distance_filtered']).reshape(z.shape)[r, c])
 
 
-def section_frontier(scans):
-    """Fermate del fronte, dalle scansioni salvate: perche' e, per gli ostacoli, se si vedevano gia'."""
+def section_frontier(scans, thresholds=(0.30, 0.20)):
+    """
+    Fermate del fronte, dalle scansioni salvate: perche' e, per gli ostacoli, se si vedevano
+    gia'. thresholds = (fronte, scarto dal vivo) della missione (vedi mission_thresholds).
+    """
+    FRONTIER_CLEARANCE_M, LIVE_PREFILTER_OD_M = thresholds
     if not scans:
         return None
     data = [np.load(f) for f in scans]
@@ -179,13 +206,15 @@ def section_frontier(scans):
     bands = Counter()
     origin = Counter()
     for value, before in events:
+        f, lv = FRONTIER_CLEARANCE_M, LIVE_PREFILTER_OD_M
         bands['intrusione vera (sotto 0.25 m)' if value < INTRUSION_M else
-              'di striscio (0.25-0.30 m)' if value < FRONTIER_CLEARANCE_M else
-              "tenuta dall'isteresi (0.30 m o piu')"] += 1
+              f'di striscio (0.25-{f:.2f} m)' if value < f else
+              f"tenuta dall'isteresi ({f:.2f} m o piu')"] += 1
+        lo, hi = min(f, lv), max(f, lv)
         origin['mai visto prima' if before is None else
-               'visto prima sotto 0.20 m' if before < LIVE_PREFILTER_OD_M else
-               'visto prima fra 0.20 e 0.30 m' if before < FRONTIER_CLEARANCE_M else
-               'visto prima sopra 0.30 m (letto da lontano)'] += 1
+               f'visto prima sotto {lo:.2f} m' if before < lo else
+               f'visto prima fra {lo:.2f} e {hi:.2f} m' if before < hi else
+               f'visto prima sopra {hi:.2f} m (letto da lontano)'] += 1
     return dict(reasons=reasons, stops=len(events), bands=bands, origin=origin)
 
 
@@ -415,7 +444,7 @@ def report(name):
         if mo['max_pitch'] is not None:
             print(f"  beccheggio massimo {mo['max_pitch']:.1f} gradi; HARD su tratti tranquilli (sotto 8 gradi): {mo['calm_hard']}")
 
-    fr = section_frontier(f['scans'])
+    fr = section_frontier(f['scans'], mission_thresholds(summary, log))
     if fr:
         print(f"\nFronte, motivo per scansione: " + ", ".join(f"{k} {v}" for k, v in fr['reasons'].most_common()))
         if fr['stops']:
@@ -431,7 +460,9 @@ def report(name):
         print(f"\nRipianificazioni {stats.get('replan_count', '?')}, ripianificazioni immediate "
               f"{stats.get('early_replans', '?')}, blocchi confermati {stats.get('frontier_blocks', '?')}, "
               f"obiettivi riscelti {stats.get('goal_repicks', '?')}, ritorni con GraphNav "
-              f"{stats.get('graphnav_backtracks', '?')}, cadute {stats.get('falls', 0)}")
+              f"{stats.get('graphnav_backtracks', '?')}, cadute {stats.get('falls', 0)}"
+              + (f", spostamenti GraphNav evitati (il grafo non arrivava alla cella) "
+                 f"{stats['graphnav_trips_avoided']}" if 'graphnav_trips_avoided' in stats else ""))
 
     r = section_return(log, f['graph'])
     if r.get('tempo_s') is not None or r.get('grafo'):
