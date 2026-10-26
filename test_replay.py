@@ -50,7 +50,7 @@ CONFRONTO FRA GRAFI -- con --grafo, --passo (e --distribuzione, --densita, --sem
 
 Le scansioni stanno in MissionMap/ e i log in MissionLogs/, ignorati da git. Dal 26-10 le
 missioni di validazione (le 10 di ALL_MISSIONS e le tre del 22-10) sono nel repository, aggiunte
-a mano: log, scans/, global_occupancy_map.pkl e il file graph di GraphNav (senza istantanee).
+a mano: log, scans/, le due mappe globali e la mappa GraphNav completa (con le istantanee).
 Una missione che manca su questo PC viene saltata, con un avviso.
 
 Limiti noti del rigioco (non del codice di missione):
