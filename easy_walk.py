@@ -2126,6 +2126,9 @@ def _save_visualization_bundle(save_path, pts, terrain_real, obstacle_mask, robo
             obstacle_distance=_arr(cells_obstacle_dist), terrain_valid=_arr(valid_values),
             gradient=_arr(grad_values), roughness=_arr(rough_values),
             robot_xy=np.array([robot_x, robot_y], dtype=np.float64), mission_z0=_mission_z0(),
+            # istante della vista: mission_viewer abbina la vista alle scansioni con questo, non
+            # con la data del file (dopo un git clone o pull e' quella del download)
+            time=time.time(),
             chosen_point=np.array([np.nan if v is None else v for v in (chosen_point or (None, None))],
                                   dtype=np.float64),
             chosen_path=_pts(chosen_path), iteration=iteration,

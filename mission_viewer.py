@@ -42,6 +42,7 @@ File letti:
 """
 import glob
 import os
+import re
 import pickle
 import sys
 
@@ -362,6 +363,68 @@ def load_navgraph(folder):
         return None
 
 
+_VIS_NAME = re.compile(r'iteration_(\d+)(?:_cell_\d+_\d+)?(?:_replan_(\d+)|_(BLOCKED)|_(FINAL_SCAN))?_vis\.npz$')
+
+
+def _vis_times(vis, scans):
+    """
+    Istante di ogni vista PRM, per abbinarla alle scansioni (vedi vis_before), e lista
+    ordinata. Dal 2026-10-26 la vista ha il campo 'time'. Prima no, e la data del file non
+    serve: dopo un git clone o un pull e' quella del download, uguale per tutte, e si vedeva
+    sempre la prima vista. Allora l'istante si ricostruisce dal nome e dalla posizione:
+      iteration_I_cell_R_C          inizio del tentativo I: poco prima della sua prima scansione
+      ..._replan_K                  ripianificazione durante il giro: la scansione dell'iterazione
+                                    I in cui il robot stava dove dice la vista (robot_xy)
+      ..._BLOCKED                   fine del tentativo bloccato: dopo la sua ultima scansione
+      iteration_I_FINAL_SCAN        scansione finale della missione: dopo tutte
+    Un tentativo senza scansioni (fallito prima di muoversi) va dopo l'ultima scansione
+    precedente. Gli istanti sono resi crescenti nell'ordine dei nomi.
+    """
+    if not scans:
+        return sorted(vis, key=lambda v: v[1])
+    t_sc = np.array([float(d['time']) if 'time' in d else np.nan for d in scans])
+    it_sc = np.array([int(d['iteration']) if 'iteration' in d else -1 for d in scans])
+    xy_sc = np.array([np.asarray(d['robot_xyz'], float)[:2] for d in scans])
+    if not np.isfinite(t_sc).all():
+        return sorted(vis, key=lambda v: v[1])
+    keyed, last_match = [], {}
+    for _t, name, d in vis:
+        m = _VIS_NAME.search(name)
+        it = int(m.group(1)) if m else -1
+        phase, sub = ((3, 0) if m and m.group(4) else (2, 0) if m and m.group(3)
+                      else (1, int(m.group(2))) if m and m.group(2) else (0, 0))
+        keyed.append(((it, phase, sub, name), name, d))
+    keyed.sort(key=lambda k: k[0])
+    out, t_prev = [], -np.inf
+    for (it, phase, sub, _n), name, d in keyed:
+        if 'time' in d and np.isfinite(_scalar(d, 'time', np.nan)):
+            t = _scalar(d, 'time', np.nan)
+        else:
+            idx = np.flatnonzero(it_sc == it)
+            before = t_sc[it_sc < it]
+            t_after_prev = (before.max() if before.size else t_sc[0] - 1.0) + 0.01
+            if phase == 3:
+                t = t_sc.max() + 1.0
+            elif not idx.size:
+                t = t_after_prev
+            elif phase == 0:
+                t = max(t_sc[idx[0]] - 0.5, min(t_after_prev, t_sc[idx[0]] - 1e-3))
+            elif phase == 2:
+                t = t_sc[idx[-1]] + 0.01
+            else:
+                # la scansione dell'iterazione piu' vicina a robot_xy, non prima di quella
+                # della ripianificazione precedente
+                idx = idx[idx >= last_match.get(it, -1)]
+                rxy = _arr(d, 'robot_xy').astype(float).ravel()
+                k = idx[int(np.argmin(np.hypot(*(xy_sc[idx] - rxy).T)))] if rxy.size == 2 else idx[0]
+                last_match[it] = k
+                t = t_sc[k]
+        t = max(t, t_prev + 1e-3)
+        t_prev = t
+        out.append((t, name, d))
+    return out
+
+
 class MissionContext:
     """Dati di tutta la missione, caricati una volta: scansioni, viste PRM, traiettoria."""
 
@@ -370,10 +433,10 @@ class MissionContext:
         self.vis = []
         for f in vis_files:
             try:
-                self.vis.append((os.path.getmtime(f), os.path.basename(f), _load(f)))
+                self.vis.append((np.nan, os.path.basename(f), _load(f)))
             except Exception as e:
                 print(f"[viewer] vista PRM non leggibile {os.path.basename(f)}: {e}")
-        self.vis.sort(key=lambda t: t[0])
+        self.vis = _vis_times(self.vis, scans)
         self.traj = self._load_trajectory(folder)
         occ = self._load_pkl_cells(folder, "global_occupancy_map.pkl", 'grid')
         ter = self._load_pkl_cells(folder, "global_terrain_map.pkl", 'height_count')
@@ -618,10 +681,10 @@ class MissionContext:
         return self._terrain_norm
 
     def vis_before(self, t):
-        """Ultima vista PRM salvata prima dell'istante t (None se nessuna)."""
+        """Ultima vista PRM salvata entro l'istante t (None se nessuna). Vedi _vis_times."""
         best = None
         for mt, name, d in self.vis:
-            if t is None or mt <= t + 2.0:
+            if t is None or not (mt > t):
                 best = (name, d)
         return best if best is not None else ((self.vis[0][1], self.vis[0][2]) if self.vis else None)
 
