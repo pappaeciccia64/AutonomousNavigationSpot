@@ -22,9 +22,9 @@ import mission_graph
 # PARAMETRI: cambia questi
 # ======================================================================================
 # Area della missione: righe (a sinistra del robot) x colonne (davanti) x lato della cella.
-RIGHE = 3
-COLONNE = 3
-LATO_CELLA_M = 4.0
+RIGHE = 10
+COLONNE = 10
+LATO_CELLA_M = 2.0
 
 # Archi: si collegano tutte le coppie di nodi distanti fra ARCO_MIN_M e ARCO_MAX_M.
 # In missione: 0.5 e 1.25.
@@ -40,7 +40,7 @@ PASSO_RETICOLO_M = 0.5
 # 4 nodi/m2 = la densita' del reticolo a passo 0.5: numero di nodi simile (il reticolo ne
 # ha qualcuno in piu', la fila sul bordo esterno: ~6% con 3 x 3 celle da 4 m).
 # DENSITA_NODI_M2 = None: esattamente lo stesso numero di nodi del reticolo.
-DENSITA_NODI_M2 = 4.0
+DENSITA_NODI_M2 = 5.0
 SEME = 7
 
 # Quali metodi mettere a confronto: togli quelli che non vuoi vedere.

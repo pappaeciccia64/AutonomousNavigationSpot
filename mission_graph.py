@@ -158,8 +158,8 @@ DEFAULT_LATTICE_SPACING_M = 0.25
 # (4 nodi/m2): garantisce i passaggi da 1.0 m in su (2 * spotGrid.FRONTIER_CLEARANCE_M +
 # passo), quelli piu' stretti solo se ci cade una fila di nodi.
 # ----------------------------------------------------------------------------------------
-MISSION_ROWS = 10
-MISSION_COLS = 10
+MISSION_ROWS = 8
+MISSION_COLS = 8
 MISSION_CELL_SIZE_M = 2.0
 MISSION_SPACING_M = 0.5
 

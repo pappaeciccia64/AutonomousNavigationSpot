@@ -8,7 +8,7 @@ Le modifiche del 26-10 (righe con quella data) non sono mai andate sul robot; qu
 
 1. **Copiare tutta la cartella** sul PC che comanda il robot, non solo `easy_walk.py`. Il 05-10 una copia vecchia di `spotGrid.py` ha fermato la missione appena costruito il grafo.
 2. Sul PC del robot: `python3 preflight.py` → deve dire **"Tutti i file sono allineati fra loro."**
-3. **Dimensione della missione.** Oggi è fissata in `mission_graph.py`: `MISSION_ROWS = 10`, `MISSION_COLS = 10`, `MISSION_CELL_SIZE_M = 2`, cioè **20 m a sinistra × 20 m davanti** al robot, 100 celle. Se l'area è diversa, senza toccare il codice: `python3 easy_walk.py --rows 6 --cols 6 --cell 2`. La prima riga `[CONFIG] Griglia di missione` del log la conferma. Le missioni del 13-10 hanno impiegato circa 1 minuto per cella: 100 celle possono superare la batteria.
+3. **Dimensione della missione.** Oggi è fissata in `mission_graph.py`: `MISSION_ROWS = 8`, `MISSION_COLS = 8`, `MISSION_CELL_SIZE_M = 2`, cioè **16 m a sinistra × 16 m davanti** al robot, 64 celle, come la prova all'aperto del 22-10 16:04 (42 minuti di missione più 6 di chiusura). Se l'area è diversa, senza toccare il codice: `python3 easy_walk.py --rows 6 --cols 6 --cell 2`. La prima riga `[CONFIG] Griglia di missione` del log la conferma.
 4. **Grafo.** Default: nodi casuali poisson, 5 nodi/m², seme estratto a caso. Le righe `[CONFIG] Grafo` e `[GRAFO] Nodi casuali` del log riportano il seme e il comando per rifare lo stesso grafo.
 5. Facoltativo: il tag **549** a circa 1 m davanti al robot alla partenza. Senza, la missione parte lo stesso (l'origine è il primo waypoint), come il 13-10.
 
