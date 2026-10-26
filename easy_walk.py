@@ -551,9 +551,11 @@ GRAPHNAV_SDK_LOOP_CLOSURE = True
 # in 5.2, 7.0, 7.3, 12.3 s, poi la RPC scaduta. Prima di ogni spostamento costerebbe 5-12 s
 # per ~1 arco; le scorciatoie dalla mappa globale ne danno di piu' (25 il 22-10). Una volta a
 # fine missione, 20 s -> 12 archi verificati sulle scansioni: servono soprattutto
-# all'ancoraggio della mappa scaricata (correggono la deriva).
+# all'ancoraggio della mappa scaricata (correggono la deriva). A fine missione 60 s: al banco
+# 20 s -> 12 archi, 32 s -> 15 (Spot si era fermato da solo); oltre non e' misurato, e se Spot
+# si ferma prima restituisce prima. Il robot e' fermo comunque.
 GRAPHNAV_SDK_LOOP_BUDGET_S = 0.0
-GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S = 20.0
+GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S = 60.0
 # Limiti sulla distanza lungo il grafo fra i due waypoint di un anello candidato
 # (max/min_loop_closure_path_length). None = valori di Spot. Da scegliere con prova_anelli.py.
 GRAPHNAV_SDK_LOOP_MAX_PATH_M = None
