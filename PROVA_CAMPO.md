@@ -1,6 +1,6 @@
 # Prova sul campo: cosa controllare
 
-Le modifiche dal 14-10 in poi non sono mai andate sul robot. Alcune del 13-10 erano nel codice delle missioni delle 12:14–12:40 ma non sono mai scattate, perché la situazione non si è presentata. Questa lista dice cosa guardare e cosa aspettarsi; `mission_report.py` fa gli stessi controlli da solo, nella sezione **Controlli della prova**.
+Le modifiche del 26-10 (righe con quella data) non sono mai andate sul robot; quelle dal 14-10 al 22-10 sono andate sul robot il 22-10 al chiuso e all'aperto. Alcune del 13-10 erano nel codice delle missioni delle 12:14–12:40 ma non sono mai scattate, perché la situazione non si è presentata. Questa lista dice cosa guardare e cosa aspettarsi; `mission_report.py` fa gli stessi controlli da solo, nella sezione **Controlli della prova**.
 
 ---
 
@@ -19,8 +19,10 @@ Le modifiche dal 14-10 in poi non sono mai andate sul robot. Alcune del 13-10 er
 | Novità | Riga di log | Cosa aspettarsi | Se va male |
 |---|---|---|---|
 | **Aggiornamento locale del grafo** e **pendenze in blocco** (14-10) | `[TEMPO] aggiornamento locale del grafo: X s` (oppure `costruzione completa`) | Una sola costruzione completa, al primo tentativo; poi aggiornamenti locali da **1–3 s**. Il 13-10 12:40 erano 11 costruzioni complete da 7.7 s in media. | `INCREMENTAL_GRAPH_UPDATE = False` in `easy_walk.py`, `BATCH_SLOPES = False` in `mission_graph.py`: stessi risultati, solo più lenti. |
-| **Centro della cella scartato anche dal vivo** e **riscelta dell'obiettivo all'inizio del tentativo** (22-10 sera) | `[TARGET] … centro a X m da un ostacolo nella scansione dal vivo`, `[TARGET] Il grafo non arriva all'obiettivo …: ne provo un altro` | Nessun tentativo fallito in un secondo con "GRAFO DISCONNESSO" se nella cella ci sono punti liberi collegati. | Annotare cella e ora. |
-| **Arrivo solo dentro la cella** (22-10 sera) | `[OBIETTIVO] … ma il robot e' ancora fuori dalla cella` | Nessun "obiettivo raggiunto" seguito da `[CHECK] … FUORI dalla cella`. | — |
+| **Attesa prima di GraphNav** (26-10, `GRAPHNAV_SDK_LOOP_CLOSURE = False`) | `[GRAPHNAV] …: avvio` subito dopo `[GRAPHNAV] prima dello spostamento …` | Partenza 1–2 s dopo la preparazione; nessuna riga `Chiusura d'anello di Spot non riuscita`. Il 22-10 16:04 erano 30 s a spostamento. | — |
+| **Scelta dell'obiettivo** (26-10: raggiungibile, 0.33 m, 0.30 m dal bordo, rifiutati esclusi) | `[TARGET] Cella (r,c): …`, `[TARGET] Obiettivo … escluso per il resto della missione`, `NESSUN punto della cella e' raggiungibile` | Pochi "GRAFO DISCONNESSO" all'inizio del tentativo; mai lo stesso obiettivo riscelto dopo l'esclusione (il rapporto li conta). | Annotare cella e ora; `test_obiettivi.py --missioni <nome> --dettaglio`. |
+| **Arrivo appena fuori dalla cella** (26-10, fino a 0.35 m) | `[OBIETTIVO] Il robot e' fuori dalla cella … vale come arrivo` | Pochi `ancora fuori dalla cella` (il 22-10 erano 44). | `ARRIVAL_OUTSIDE_CELL_M = 0` in `easy_walk.py` torna alla regola del 22-10. |
+| **Ritorno senza movimento** (26-10) | `[RITORNO] Torno a wp_N, a X m dal robot`, `… non mi muovo, ripianifico da qui` | Nessun ritorno GraphNav di 0 m. | — |
 | **Controllo prima del GraphNav** (22-10 sera, `GRAPHNAV_PRECHECK`) | `[PRECHECK] Cella (r,c): dal waypoint …` | Nessuno spostamento GraphNav seguito da un fallimento immediato con "GRAFO DISCONNESSO". | `GRAPHNAV_PRECHECK = False` in `easy_walk.py`. |
 | **Pianificazione a 0.28 m** (22-10 sera, `PLAN_CLEARANCE_EXTRA_M = 0.03`) | `[FRONTE] … ostacolo a 0.2x m (minimo 0.25 m)` | Molte meno fermate del fronte a 0.23–0.24 m (alle 15:24 erano 18 giri su 25). | `PLAN_CLEARANCE_EXTRA_M = 0` in `spotGrid.py`. |
 | **Nodi casuali poisson** (22-10, prima volta sul robot) | `[GRAFO] Nodi casuali …`, `[TEMPO] … grafo …` | Grafo da ~2100 nodi e ~21 mila archi sulla 10 × 10 da 2 m, costruito in meno di un secondo; aggiornamenti locali molto più brevi di quelli del reticolo a 0.25 m. Qualche passaggio stretto (sotto ~1 m) può non avere nodi: il robot rinuncia a quel lato e prova la cella da un altro. | `--grafo reticolo --spacing 0.5` (o `0.25` per i passaggi stretti, più lento). |

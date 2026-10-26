@@ -323,7 +323,8 @@ class _NoTilt:
 easy_walk.BodyTiltRecorder = _NoTilt
 
 
-def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, second_attempt=False):
+def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, second_attempt=False,
+        memory=None):
     global WORLD, ROBOT
     WORLD, ROBOT = World(rects, ghosts), Robot(*start)
     # Il filtro temporale degli ostacoli (arcVerification.OBSTACLE_HISTORY) e' allineato al
@@ -357,6 +358,18 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
         if k in easy_walk.MISSION_STATS:
             easy_walk.MISSION_STATS[k] = 0
     gg = NS(global_occupancy_map=None, global_terrain_map=None)
+    if memory:
+        # Ostacoli gia' nella mappa globale da osservazioni precedenti (in missione: le celle
+        # gia' visitate). Occupate le celle con obstacle_distance <= OBSTACLE_THRESHOLD, come
+        # le scrive fold_scan_into_global_maps.
+        gm0 = spotGrid.GlobalGrid(resolution=CS)
+        t = spotGrid.OBSTACLE_THRESHOLD
+        for x0, x1, y0, y1 in memory:
+            for gx in range(int(np.floor((x0 - t) / CS)), int(np.ceil((x1 + t) / CS))):
+                for gy in range(int(np.floor((y0 - t) / CS)), int(np.ceil((y1 + t) / CS))):
+                    gm0.obs_count[(gx, gy)] = spotGrid.GLOBAL_OCC_MAX_COUNT
+                    gm0._set_state((gx, gy), -1.0)
+        gg.global_occupancy_map = gm0
     out = io.StringIO()
     err = None
     t0 = time.time()
@@ -518,6 +531,26 @@ if __name__ == '__main__':
           f"ogni gamba arriva dove e' stata comandata: scarto massimo {r['endpoint_error']:.3f} m")
     check(r['min_clear'] >= spotGrid.FRONTIER_CLEARANCE_M - 0.10,
           f"non sfiora il muro (distanza minima {r['min_clear']:.2f} m)")
+
+    # S14: della cella obiettivo e' libera solo una striscia lungo il bordo vicino al robot; il
+    # resto e' gia' noto occupato (memory: con celle da 5 m il centro e' fuori dalla finestra
+    # di scansione, e senza memoria resterebbe ignoto e verrebbe scelto). Davanti
+    # all'ostacolo il fronte ferma il centro mezzo corpo prima, appena fuori dalla cella:
+    # deve valere come arrivo (ARRIVAL_OUTSIDE_CELL_M). Il 22-10 16:04 lo stesso caso dava
+    # "Mancano 0.06 m ... ancora fuori dalla cella" fino al blocco.
+    r = run("S14. cella occupata salvo una striscia lungo il bordo: arrivo appena fuori",
+            [(6.75, 12.0, 0.0, 12.0)], (5.0, 3.5, 0.0), (0, 1), memory=[(6.75, 12.0, 0.0, 12.0)])
+    check(r['err'] is None, "nessuna eccezione")
+    tgt = [l for l in r['log'].splitlines() if l.startswith('[TARGET] Cella (0,1)')]
+    check(bool(tgt) and 'uso il centro' not in tgt[0],
+          f"obiettivo nella striscia libera: {tgt[0][:120] if tgt else 'nessuna riga [TARGET]'}")
+    check('GRAFO DISCONNESSO' not in r['log'], "il grafo arriva all'obiettivo scelto")
+    check(r['ok'] is True, f"la cella vale come raggiunta (posizione finale "
+                           f"({r['final'][0]:.2f}, {r['final'][1]:.2f}), bordo a x = 6.00)")
+    check(r['final'][0] >= 6.0 - easy_walk.ARRIVAL_OUTSIDE_CELL_M - 0.02,
+          f"il robot e' fuori dalla cella al massimo di {easy_walk.ARRIVAL_OUTSIDE_CELL_M:.2f} m "
+          f"({max(0.0, 6.0 - r['final'][0]):.2f} m)")
+    check(r['min_clear'] > 0.0, f"non entra nel muro (distanza minima {r['min_clear']:.2f} m)")
 
     print("\n--- Confronto: quanto cammina il robot per ogni comando di movimento ---")
     confronto = {}

@@ -56,6 +56,10 @@ MISSION_STATS = {
     'rotation_refusals': 0,   # rotazioni rifiutate dal controllo sul settore
     'straight_retreats': 0,   # arretramenti dritti dopo un rifiuto di rotazione
     'goal_repicks': 0,        # punti obiettivo riscelti dentro il ciclo
+    'goals_refused': 0,       # obiettivi esclusi per il resto della missione (_refuse_goal)
+    'goals_unreachable': 0,   # scelte d'obiettivo senza nessun punto raggiungibile nel grafo
+    'arrivals_near_goal': 0,  # arrivi accettati con il robot appena fuori dalla cella
+    'backtracks_in_place': 0, # ritorni senza movimento: nessuna briciola abbastanza lontana
     'graphnav_trips_avoided': 0,  # spostamenti GraphNav evitati: dal waypoint il grafo non arriva alla cella
     'cone_moves': 0,          # avanzamenti dentro il cono di rotazione possibile
     'retreats_suppressed': 0,  # arretramenti evitati perche' inutili
@@ -531,7 +535,10 @@ GRAPHNAV_MAX_BACKTRACK_HOPS = 3          # poi si rimanda la cella e si passa al
 # GRAPHNAV_SHORTCUT_MARGIN_M: margine dalle celle occupate (che sono gia' a obstacle_distance
 # <= 0.15): 0.30 + 0.15 = 0.45 m dall'ostacolo, largo perche' gli archi sono lunghi.
 GRAPHNAV_SHORTCUTS = True
-GRAPHNAV_SDK_LOOP_CLOSURE = True
+# Spento dal 26-10: all'aperto (22-10 16:04) oltre ~100 waypoint la chiamata ha sempre
+# superato i 30 s della RPC (20 volte, 603 s di attesa) e in tutta la missione ha creato 1
+# arco. Da riaccendere solo dopo averne misurato i tempi al banco.
+GRAPHNAV_SDK_LOOP_CLOSURE = False
 GRAPHNAV_SHORTCUT_MAX_M = 3.0
 GRAPHNAV_SHORTCUT_MARGIN_M = 0.30
 # Lunghezza massima degli archi che crea la chiusura d'anello di Spot.
@@ -549,6 +556,30 @@ MAX_EARLY_REPLANS = 4
 MAX_BACKTRACKS_PER_ATTEMPT = 2
 # Entro questa distanza l'obiettivo del recupero e' "lo stesso" di quello appena fallito.
 RECOVERY_SAME_GOAL_M = 0.30
+
+# --- SCELTA DELL'OBIETTIVO DELLA CELLA (vedi find_best_point_in_cell) -----------------
+# TARGET_CLEARANCE_M: spazio libero PREFERITO attorno all'obiettivo, sulla mappa globale e
+# sulla scansione dal vivo. Il fronte pretende FRONTIER_CLEARANCE_M (0.25) e l'isteresi del
+# fronte e' 0.04 m: un obiettivo scelto a 0.28 (PLAN_CLEARANCE_M, che resta il minimo
+# assoluto) oscilla attorno alla soglia. All'aperto (22-10 16:04) gli obiettivi scelti a
+# 0.28 sono stati rifiutati dal vivo a 0.24, al bordo dell'erba.
+TARGET_CLEARANCE_M = 0.33
+# TARGET_CELL_BORDER_M: l'obiettivo si sceglie preferibilmente ad almeno questa distanza dal
+# bordo della cella. Un obiettivo sul bordo lascia il robot, fermo entro la tolleranza
+# d'arrivo, fuori dalla cella ("Mancano 0.06 m ... ancora fuori dalla cella", 44 volte il
+# 22-10 16:04).
+TARGET_CELL_BORDER_M = 0.30
+# Arrivo per tolleranza con il robot appena FUORI dalla cella: vale se il centro e' fuori di
+# al massimo ARRIVAL_OUTSIDE_CELL_M (il muso, 0.55 m avanti, e' comunque dentro). E' la
+# tolleranza d'arrivo meno il margine dal bordo: un obiettivo scelto a TARGET_CELL_BORDER_M
+# dentro la cella, con il robot fermo a GOAL_REACHED_TOLERANCE_M da lui, vale sempre. Il
+# 22-10 16:04, a ogni rifiuto "fuori dalla cella" il robot era a 0.5-0.65 m dall'obiettivo,
+# fuori di 0.01-0.61 m.
+ARRIVAL_OUTSIDE_CELL_M = GOAL_REACHED_TOLERANCE_M - TARGET_CELL_BORDER_M      # = 0.35
+# Un obiettivo rifiutato dal fronte (spazio libero dal vivo sotto la soglia, o blocco
+# confermato entro questa distanza da lui) resta escluso per la sua cella fino alla fine
+# della missione: vedi _refuse_goal.
+REFUSED_GOAL_BLOCK_M = 0.35
 
 # ==================================================================
 # DATI DI MISSIONE.
@@ -1618,6 +1649,10 @@ def _emit_mission_summary_once():
         print(f"Ritorni con GraphNav: {MISSION_STATS['graphnav_backtracks']} riusciti, "
               f"{MISSION_STATS['graphnav_backtrack_fail']} falliti (ripiego a zampe); "
               f"nodi PRM scartati perche' dentro ostacoli: {MISSION_STATS['nodes_pruned']}")
+        print(f"Obiettivi esclusi per la missione: {MISSION_STATS['goals_refused']}, scelte senza "
+              f"punti raggiungibili: {MISSION_STATS['goals_unreachable']}, arrivi con il robot appena "
+              f"fuori dalla cella: {MISSION_STATS['arrivals_near_goal']}, ritorni senza "
+              f"movimento: {MISSION_STATS['backtracks_in_place']}")
         print(f"Trappole riconosciute dal ventaglio: {MISSION_STATS['traps_detected']}, "
               f"passi rifiutati per mancanza di uscite all'arrivo: {MISSION_STATS['arrival_refusals']}")
         tot_r = MISSION_STATS['prm_refresh'] + MISSION_STATS['prm_refresh_skipped']
@@ -1675,40 +1710,83 @@ def _emit_mission_summary_once():
 # TODO: verificare se si puo' evitare la pausa dopo ogni comando di movimento
 # TODO: cambiare la cartella in cui si scarica il grafo
 
-def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cells_obstacle_dist,
-                            sampler, global_map=None, safety_margin=None, exclude=None):
+def cell_border_distance(env, row, col, x, y):
     """
-    Sceglie il punto obiettivo dentro la cella: il piu' CENTRALE fra quelli non occupati.
+    Distanza di (x, y) dal bordo della cella (row, col), nel frame ruotato della griglia:
+    positiva dentro, negativa fuori. None se la cella non esiste.
+    """
+    center = env.get_world_position_from_cell(row, col)
+    if center is None:
+        return None
+    dx, dy = x - center[0], y - center[1]
+    yaw = float(getattr(env, 'origin_yaw', 0.0))
+    c, s = np.cos(-yaw), np.sin(-yaw)
+    lx, ly = dx * c - dy * s, dx * s + dy * c
+    return env.cell_size / 2.0 - max(abs(lx), abs(ly))
 
-    Regola: il CENTRO GEOMETRICO e' l'obiettivo, libero o ignoto che sia.
-    Si cambia solo se si VEDE che e' occupato (mappa globale con safety_margin, oppure
-    scansione dal vivo a meno di spotGrid.PLAN_CLEARANCE_M da un ostacolo) o se il ciclo di
-    navigazione lo ha gia' scartato sui dati dal vivo (`exclude`). In quel caso:
-      1. punti OSSERVATI liberi ad almeno spotGrid.PLAN_CLEARANCE_M dagli ostacoli (scansione
-         dal vivo, spazio libero imparato, mappa globale), il piu' vicino al centro
-      2. se non ce ne sono, punti MAI OSSERVATI, il piu' vicino al centro
-      3. (mai scelti) punti occupati o troppo vicini a un ostacolo
+
+def _refused_goals(env, row, col):
+    """Gli obiettivi della cella rifiutati dal fronte in questa missione (lista di (x, y))."""
+    store = getattr(env, '_refused_goals', None)
+    if store is None:
+        store = env._refused_goals = {}
+    return store.setdefault((int(row), int(col)), [])
+
+
+def _refuse_goal(env, row, col, x, y, why):
+    """
+    Esclude l'obiettivo (x, y) della cella fino alla fine della missione. Il 22-10 16:04 il
+    nodo 548 della cella (7,4) e' stato riscelto a ogni tentativo e bloccato tre volte nello
+    stesso punto: la mappa globale lo dava libero a 0.28 m, il fronte dal vivo a 0.24.
+    """
+    lst = _refused_goals(env, row, col)
+    if any(np.hypot(x - ex, y - ey) < RECOVERY_SAME_GOAL_M for ex, ey in lst):
+        return
+    lst.append((float(x), float(y)))
+    MISSION_STATS['goals_refused'] = MISSION_STATS.get('goals_refused', 0) + 1
+    print(f"[TARGET] Obiettivo ({x:.2f}, {y:.2f}) della cella ({row},{col}) escluso per il "
+          f"resto della missione: {why}.")
+
+
+def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cells_obstacle_dist,
+                            sampler, global_map=None, safety_margin=None, exclude=None,
+                            reachable=None):
+    """
+    Sceglie il punto obiettivo dentro la cella fra il centro geometrico e i nodi del grafo
+    nella cella.
+
+    Scartati sempre (mai scelti): i punti in `exclude` (gia' provati in questo tentativo),
+    quelli occupati nella mappa globale (con safety_margin) e quelli a meno di
+    spotGrid.PLAN_CLEARANCE_M (0.28) da un ostacolo nella scansione dal vivo o nello spazio
+    libero imparato. Fra i rimasti, nell'ordine:
+      1. non rifiutati dal fronte in questa missione (_refuse_goal); i rifiutati tornano
+         solo se non c'e' altro;
+      2. RAGGIUNGIBILI dal robot nel grafo (reachable(x, y) -> bool, provato nell'ordine
+         dei criteri seguenti finche' uno risponde si'). Prima dal 22-10 si sceglieva il piu'
+         vicino al centro e, se il grafo non ci arrivava, i tre successivi: stavano nella
+         stessa zona isolata e la riserva e' fallita 9 volte su 10. Se nessun punto e'
+         raggiungibile si sceglie comunque il migliore: il tentativo fallisce come prima;
+      3. con almeno TARGET_CLEARANCE_M (0.33) di spazio libero;
+      4. il centro geometrico, libero o ignoto che sia (REGOLA DEL CENTRO: un punto gia'
+         visto libero di solito e' l'ultimo lembo scansionato dalla cella precedente, cioe'
+         sul bordo);
+      5. visti liberi prima che mai visti: se il centro e' scartato la zona e' nota, e
+         tornare a guardare un ignoto accanto all'ostacolo sarebbe un giro a vuoto;
+      6. ad almeno TARGET_CELL_BORDER_M dal bordo della cella;
+      7. piu' vicino al centro (a passi di 0.25 m), poi piu' vicino al robot: a parita',
+         quello dalla sua parte dell'ostacolo.
+
     Se non resta nessun punto la cella non ha un obiettivo valido e la funzione
     restituisce (None, None, ...): il chiamante lo tratta gia' come fallimento di
     ingresso e passa alla logica dei lati non ancora provati.
 
-    exclude: lista di punti gia' provati e risultati irraggiungibili, da non
-    riproporre. Serve alla riscelta dentro il ciclo di navigazione (vedi
-    attempt_enter_cell_from_position): il punto scelto all'inizio del tentativo viene
-    deciso da lontano, quando la cella e' ancora tutta ignota, e puo' rivelarsi a ridosso
-    di un muro quando ci si arriva. Senza escluderlo, la riscelta ripescherebbe lo stesso.
-
-    global_map: spotGrid.GlobalGrid accumulata. Viene aggiornata con la scansione
-    corrente appena prima di questa chiamata, quindi e' la fonte piu' completa
-    disponibile -- piu' della sola griglia locale, che copre ~3.8 m e in genere non
-    arriva al centro della cella bersaglio. Se None si usa il centro senza controlli.
+    global_map: spotGrid.GlobalGrid accumulata, aggiornata con la scansione corrente appena
+    prima di questa chiamata. Se None si usa il centro senza controlli.
 
     Returns:
         (target_x, target_y, valid_samples, rejected_samples)
         Le due liste alimentano la visualizzazione (gialli = ammessi, rossi = scartati).
     """
-    # Stesso margine del PRM e del fronte sicuro: un punto obiettivo piu' vicino agli
-    # ostacoli di quanto il fronte accetti non verrebbe mai raggiunto.
     if safety_margin is None:
         safety_margin = spotGrid.PRM_EDGE_SAFETY_MARGIN_M
     cell_center = env.get_world_position_from_cell(cell_row, cell_col)
@@ -1722,23 +1800,13 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
         # Nessuna informazione di occupazione: il centro della cella.
         return cell_center_x, cell_center_y, sampled, []
 
-    # REGOLA DEL CENTRO. Il centro geometrico e' l'obiettivo e si cambia SOLO se si VEDE
-    # che e' occupato: nella mappa globale, nella scansione dal vivo (a meno di min_clear da
-    # un ostacolo), o perche' il ciclo di navigazione lo ha gia' scartato (e' in `exclude`). Se e' ignoto ci si va vicino e si
-    # guarda; se e' libero resta lui. Un punto gia' visto libero non batte il centro ignoto:
-    # di solito e' l'ultimo lembo scansionato dalla cella precedente, cioe' sul bordo.
-    def _near_tried(p):
-        return bool(exclude) and any(np.hypot(p[0] - ex, p[1] - ey) < 0.30 for ex, ey in exclude)
-
-    # "Si vede occupato" vuol dire: nella mappa globale, OPPURE nella scansione dal vivo o
-    # nello spazio libero imparato, a meno di min_clear da un ostacolo. La mappa globale
-    # dichiara occupata una cella solo dopo due osservazioni, quindi un ostacolo appena
-    # visto c'e' solo nella scansione: nella prova del 22-10 15:50 il centro della cella
-    # (0,2) era a 0.15 m da un ostacolo, "libero" per la mappa, senza archi nel grafo; il
-    # tentativo e' fallito subito e il robot non e' piu' andato avanti nel corridoio.
     # min_clear e' la distanza con cui si pianificano gli archi (spotGrid.PLAN_CLEARANCE_M):
-    # un obiettivo piu' vicino agli ostacoli non avrebbe archi.
+    # un obiettivo piu' vicino agli ostacoli non avrebbe archi. La mappa globale dichiara
+    # occupata una cella solo dopo due osservazioni, quindi un ostacolo appena visto c'e'
+    # solo nella scansione dal vivo (22-10 15:50, cella (0,2)).
     min_clear = spotGrid.PLAN_CLEARANCE_M
+    pref_margin = max(safety_margin, TARGET_CLEARANCE_M - spotGrid.OBSTACLE_THRESHOLD)
+    refused = _refused_goals(env, cell_row, cell_col)
     live_od = None
     if pts is not None and cells_obstacle_dist is not None:
         try:
@@ -1757,66 +1825,106 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
         d, i = live_od[0].query((px, py))
         return float(live_od[1][i]) if d <= 0.05 else None
 
-    center = (cell_center_x, cell_center_y)
-    center_tried = _near_tried(center)
-    center_occupied = global_map.is_occupied(cell_center_x, cell_center_y,
-                                             safety_margin=safety_margin)
-    # Per il centro conta la sola scansione dal vivo: lo spazio libero imparato e' ancora in
-    # prova (spotGrid.CLEARANCE_MAP_DECIDES) e cambierebbe il centro piu' spesso del dovuto.
-    c_live_center = _live_clearance(cell_center_x, cell_center_y)
-    center_too_close = c_live_center is not None and c_live_center < min_clear
-    if not center_tried and not center_occupied and not center_too_close:
-        state = "libero" if global_map.is_known(cell_center_x, cell_center_y) else "ignoto"
-        print(f"[TARGET] Cella ({cell_row},{cell_col}): uso il centro geometrico "
-              f"({cell_center_x:.2f}, {cell_center_y:.2f}), {state}.")
-        return cell_center_x, cell_center_y, sampled, []
+    def _near(p, pts_list):
+        return bool(pts_list) and any(np.hypot(p[0] - ex, p[1] - ey) < RECOVERY_SAME_GOAL_M
+                                      for ex, ey in pts_list)
 
-    # Il centro e' occupato: si cerca il punto piu' vicino al centro dove il robot CI STA,
-    # cioe' ad almeno min_clear dagli ostacoli (vedi sopra).
-    free, unknown, blocked = [], [], []
-    for (px, py) in sampled:
-        if _near_tried((px, py)) or global_map.is_occupied(px, py, safety_margin=safety_margin):
-            blocked.append((px, py))
+    center = (cell_center_x, cell_center_y)
+    candidates = [center] + [p for p in sampled
+                             if np.hypot(p[0] - cell_center_x, p[1] - cell_center_y) > 0.01]
+    rows, blocked = [], []
+    center_reason = None
+    for p in candidates:
+        px, py = p
+        is_center = p is center
+        if _near(p, exclude):
+            blocked.append(p)
+            center_reason = center_reason or ("gia' scartato dal vivo" if is_center else None)
+            continue
+        if global_map.is_occupied(px, py, safety_margin=safety_margin):
+            blocked.append(p)
+            center_reason = center_reason or ("occupato nella mappa" if is_center else None)
             continue
         c_live = _live_clearance(px, py)
-        c_mem = global_map.clearance(px, py) if hasattr(global_map, 'clearance') else None
-        if (c_live is not None and c_live < min_clear) or (c_mem is not None and c_mem < min_clear):
-            blocked.append((px, py))
-        elif c_live is not None or global_map.is_known(px, py):
-            free.append((px, py))
-        else:
-            unknown.append((px, py))
+        # Per il centro conta la sola scansione dal vivo: lo spazio libero imparato e' ancora
+        # in prova (spotGrid.CLEARANCE_MAP_DECIDES) e cambierebbe il centro piu' del dovuto.
+        c_mem = None if is_center else (global_map.clearance(px, py)
+                                        if hasattr(global_map, 'clearance') else None)
+        known_c = [c for c in (c_live, c_mem) if c is not None]
+        if known_c and min(known_c) < min_clear:
+            blocked.append(p)
+            if is_center:
+                center_reason = f"a {min(known_c):.2f} m da un ostacolo nella scansione dal vivo"
+            continue
+        tight = (global_map.is_occupied(px, py, safety_margin=pref_margin)
+                 or (bool(known_c) and min(known_c) < TARGET_CLEARANCE_M))
+        border = cell_border_distance(env, cell_row, cell_col, px, py)
+        rows.append(dict(
+            p=(float(px), float(py)), center=is_center, refused=_near(p, refused),
+            seen=(c_live is not None or global_map.is_known(px, py)), tight=tight,
+            clear=(min(known_c) if known_c else None),
+            edge=(border is not None and border < TARGET_CELL_BORDER_M),
+            dc=float(np.hypot(px - cell_center_x, py - cell_center_y)),
+            dr=float(np.hypot(px - robot_x, py - robot_y))))
 
-    # Prima i punti VISTI liberi con spazio sufficiente: il centro e' gia' risultato
-    # occupato, quindi la zona e' nota e tornare a "guardare" un ignoto accanto all'ostacolo
-    # sarebbe un giro a vuoto. Solo se non ce n'e' nessuno, l'ignoto.
-    pool = free if free else unknown
-    if center_tried:
-        reason = "gia' scartato dal vivo"
-    elif center_occupied:
-        reason = "occupato nella mappa"
-    else:
-        reason = f"a {c_live_center:.2f} m da un ostacolo nella scansione dal vivo"
-    if not pool:
-        print(f"[TARGET] Cella ({cell_row},{cell_col}): centro {reason} e nessun punto della "
-              f"cella ad almeno {min_clear:.2f} m dagli ostacoli. Nessun obiettivo valido.")
+    valid = [r['p'] for r in rows]
+    if not rows:
+        print(f"[TARGET] Cella ({cell_row},{cell_col}): centro {center_reason or 'scartato'} e "
+              f"nessun punto della cella ad almeno {min_clear:.2f} m dagli ostacoli. "
+              f"Nessun obiettivo valido.")
         return None, None, [], blocked
 
-    def _d2_from_center(p):
-        return (p[0] - cell_center_x) ** 2 + (p[1] - cell_center_y) ** 2
-
-    # A parita' di distanza dal centro (entro 0.25 m, qualunque sia il grafo) vince il punto
-    # piu' vicino al ROBOT: e' quello dalla sua parte dell'ostacolo, non quello oltre.
     step = 0.25
-    best_x, best_y = min(pool, key=lambda p: (round(np.sqrt(_d2_from_center(p)) / step),
-                                              np.hypot(p[0] - robot_x, p[1] - robot_y)))
-    dist_from_center = float(np.sqrt(_d2_from_center((best_x, best_y))))
-    print(f"[TARGET] Cella ({cell_row},{cell_col}): centro {reason}, uso il punto "
-          f"{'libero' if free else 'ignoto'} piu' vicino al centro ad almeno {min_clear:.2f} m "
-          f"dagli ostacoli ({best_x:.2f}, {best_y:.2f}), a {dist_from_center:.2f} m dal centro  "
-          f"[liberi={len(free)} ignoti={len(unknown)} scartati={len(blocked)}]")
+    rows.sort(key=lambda r: (r['tight'], not r['center'], not r['seen'], r['edge'],
+                             round(r['dc'] / step), r['dr']))
+    fresh = [r for r in rows if not r['refused']]
+    pool = fresh if fresh else rows
+    chosen, reach_note = None, ""
+    if reachable is None:
+        chosen = pool[0]
+    else:
+        for r in pool:
+            if reachable(*r['p']):
+                chosen = r
+                break
+        if chosen is None:
+            chosen = pool[0]
+            reach_note = "; NESSUN punto della cella e' raggiungibile dal robot nel grafo"
+            MISSION_STATS['goals_unreachable'] = MISSION_STATS.get('goals_unreachable', 0) + 1
+    if not fresh:
+        reach_note += "; tutti i punti erano gia' stati rifiutati dal fronte, riprovo il migliore"
 
-    return best_x, best_y, free + unknown, blocked
+    bx, by = chosen['p']
+    flags = []
+    if chosen['tight']:
+        flags.append(f"meno di {TARGET_CLEARANCE_M:.2f} m di spazio libero")
+    if chosen['edge']:
+        flags.append(f"a meno di {TARGET_CELL_BORDER_M:.2f} m dal bordo della cella")
+    flag_txt = f" -- {', '.join(flags)}" if flags else ""
+    if chosen['center']:
+        state = "libero" if chosen['seen'] else "ignoto"
+        print(f"[TARGET] Cella ({cell_row},{cell_col}): uso il centro geometrico "
+              f"({bx:.2f}, {by:.2f}), {state}{flag_txt}{reach_note}.")
+        return bx, by, valid, blocked
+
+    if center_reason is None:
+        crow = next((r for r in rows if r['center']), None)
+        if crow is None:
+            center_reason = "scartato"
+        elif crow['refused']:
+            center_reason = "rifiutato dal fronte in questa missione"
+        elif crow['tight'] and not chosen['tight']:
+            center_reason = (f"con solo {crow['clear']:.2f} m di spazio libero"
+                             if crow['clear'] is not None else "troppo vicino a un ostacolo nella mappa")
+        else:
+            center_reason = "non raggiungibile dal robot nel grafo"
+    n_seen = sum(1 for r in rows if r['seen'])
+    print(f"[TARGET] Cella ({cell_row},{cell_col}): centro {center_reason}, uso il punto "
+          f"{'libero' if chosen['seen'] else 'ignoto'} ({bx:.2f}, {by:.2f}), a {chosen['dc']:.2f} m "
+          f"dal centro{flag_txt}{reach_note}  [liberi={n_seen} ignoti={len(rows) - n_seen} "
+          f"scartati={len(blocked)} stretti={sum(r['tight'] for r in rows)} "
+          f"sul bordo={sum(r['edge'] for r in rows)} rifiutati={sum(r['refused'] for r in rows)}]")
+    return bx, by, valid, blocked
 
 
 def goal_still_reachable(snap, goal_x, goal_y):
@@ -1942,10 +2050,11 @@ def decide_next_move(robot_xy, path_waypoints, frontier, no_progress_count, in_t
     frontier: risultato di arcVerification.compute_safe_frontier sul percorso
         [robot] + waypoint.
     no_progress_count: scansioni consecutive in cui non si e' potuto avanzare.
-    in_target_cell: il robot e' gia' dentro la cella obiettivo. L'arrivo per tolleranza vale
-        solo li': un obiettivo di ripiego puo' stare vicino al bordo della cella (fino a
-        ~0.9 m dal centro su celle da 2 m), e fermarsi 0.65 m prima puo' voler dire restarne
-        fuori. Fuori dalla cella si prosegue come per un fronte bloccato (attesa, poi blocco).
+    in_target_cell: il robot e' gia' dentro la cella obiettivo, o fuori al massimo di
+        ARRIVAL_OUTSIDE_CELL_M (lo decide il chiamante). L'arrivo per tolleranza vale solo
+        li': fermarsi 0.65 m prima di un obiettivo vicino al bordo puo' voler dire restare
+        nella cella precedente. Altrimenti si prosegue come per un fronte bloccato (attesa,
+        poi blocco).
 
     Restituisce un dict con 'kind':
       'reached_node'  il prossimo nodo e' gia' sotto il robot (< 5 cm): consumarlo e basta
@@ -2252,6 +2361,15 @@ def graphnav_step_back(env, recordingInterface, robot_state_client, command_clie
         idx = 0
     hop = len(trail) - 1 - idx
     crumb = trail[idx]
+    d_crumb = float(np.hypot(crumb['x'] - rx, crumb['y'] - ry))
+    if d_crumb < min_dist_m:
+        # Tutte le briciole sono qui attorno (22-10 16:22: il robot stava SU wp_138): GraphNav
+        # non sposterebbe il robot. Si ripianifica da dove si e', senza muoversi.
+        MISSION_STATS['backtracks_in_place'] += 1
+        print(f"[RITORNO] La briciola piu' lontana dietro, {crumb['wp_name']}, e' a {d_crumb:.2f} m "
+              f"(meno di {min_dist_m:.2f}): non mi muovo, ripianifico da qui.")
+        return True, dict(crumb, in_place=True)
+    print(f"[RITORNO] Torno a {crumb['wp_name']}, a {d_crumb:.2f} m dal robot.")
     recording_stopped = False
     graphnav_add_shortcuts(recordingInterface, "prima del ritorno", map_edges=True, sdk=False,
                            target_wp_id=crumb['wp_id'], robot_xy=(rx, ry))
@@ -2392,7 +2510,8 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
                                         pts=pts, obstacle_mask=obstacle_mask)
             return {'ok': False, 'ids': None, 'robot_node': None, 'how': 'ritirata a zampe'}
 
-        MISSION_STATS['graphnav_backtracks'] += 1
+        if not crumb.get('in_place'):
+            MISSION_STATS['graphnav_backtracks'] += 1
         prm_graph.needs_refresh = True       # il robot si e' spostato: vedi REFRESH A EVENTI
         # La scansione dello scarto preliminare e' stata fatta da un altro punto (e
         # l'esclusione del corpo starebbe dove il robot era): via, fino alla prossima scansione.
@@ -2415,8 +2534,10 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
             return {'ok': True, 'ids': ids, 'robot_node': new_node, 'how': 'ripianificato'}
         print(f"[RITORNO] {label}: tornato a {crumb['wp_name']} ({hop}/{max_hops}) ma da qui il "
               f"grafo non offre percorsi verso l'obiettivo.")
+        if crumb.get('in_place'):
+            break           # non ci sono briciole piu' lontane: altri giri sarebbero uguali
 
-    print(f"[RITORNO] {label}: {max_hops} ritorni senza trovare un percorso. Rimando la cella.")
+    print(f"[RITORNO] {label}: {hop} ritorni senza trovare un percorso. Rimando la cella.")
     return {'ok': False, 'ids': None, 'robot_node': None, 'how': 'cella rimandata'}
 
 
@@ -2885,10 +3006,27 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
 
     # ================================================================== #
 
+    # Solo celle visitate + cella del robot + cella obiettivo (vedi PLAN_ONLY_EXPLORED_CELLS).
+    _restrict_planning_to_explored_cells(prm_graph, env, target_row, target_col,
+                                         (robot_x, robot_y))
+
+    # --- Nodi di partenza e di arrivo: nodi ESISTENTI del grafo ---------------------------
+    # add_stop_node aggancia la posizione al nodo adatto invece di crearne uno. Il nodo del
+    # robot serve PRIMA della scelta dell'obiettivo: si sceglie fra i punti che il grafo
+    # collega al robot (vedi find_best_point_in_cell, criterio 2).
+    robot_node_id = prm_graph.add_stop_node(
+        robot_x, robot_y, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
+        label="partenza tentativo")
+    prm_graph.set_robot_node(robot_node_id, 0.0)
+
+    def _reachable_from_robot(px, py):
+        nid = prm_graph.anchor_node(px, py, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M)
+        return nid is not None and prm_graph.find_path_dijkstra(robot_node_id, nid) is not None
+
     # Ricerca del punto target e pianificazione
     target_x, target_y, valid_samples, rejected_samples = find_best_point_in_cell(
         robot_x, robot_y, env, target_row, target_col, pts, cells_obstacle_dist, sampler,
-        global_map=global_map)
+        global_map=global_map, reachable=_reachable_from_robot)
 
     # L'obiettivo di questo tentativo, per il recupero subito dopo un fallimento
     # (vedi RECOVERY_SAME_GOAL_M nel ciclo principale).
@@ -2907,50 +3045,17 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         )
         return False
 
-    # Solo celle visitate + cella del robot + cella obiettivo (vedi PLAN_ONLY_EXPLORED_CELLS).
-    _restrict_planning_to_explored_cells(prm_graph, env, target_row, target_col,
-                                         (robot_x, robot_y))
-
-    # --- Nodi di partenza e di arrivo: nodi ESISTENTI del grafo ---------------------------
-    # add_stop_node aggancia la posizione al nodo adatto invece di crearne uno.
-    # L'obiettivo e' gia' un nodo del reticolo (lo sceglie find_best_point_in_cell fra i
-    # punti del campionatore).
-    robot_node_id = prm_graph.add_stop_node(
-        robot_x, robot_y, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
-        label="partenza tentativo")
-    prm_graph.set_robot_node(robot_node_id, 0.0)
     # Briciola GraphNav del punto di partenza del tentativo: e' quello a cui serve poter
     # tornare se la cella si rivela un vicolo cieco.
     graphnav_drop_breadcrumb(env, recordingInterface, robot_state_client, robot_node_id,
                              target_row, target_col, force=True)
+    # L'obiettivo e' il centro o un nodo del reticolo (lo sceglie find_best_point_in_cell fra
+    # i punti del campionatore).
     goal_id = prm_graph.add_stop_node(
         target_x, target_y, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
         label=f"obiettivo cella ({target_row},{target_col})", is_robot=False)
     prm_graph.set_robot_node(robot_node_id, 0.0)
     path_ids = prm_graph.find_path_dijkstra(robot_node_id, goal_id)
-
-    # Il grafo non arriva all'obiettivo: prima di rinunciare al tentativo si provano altri
-    # punti della cella (gli stessi criteri, escludendo quelli gia' provati), come fa il
-    # ciclo di navigazione quando l'obiettivo si rivela irraggiungibile. Spesso il punto
-    # scelto e' un nodo isolato vicino a un ostacolo mentre il resto della cella e'
-    # collegato.
-    start_tried = []
-    while path_ids is None and len(start_tried) < MAX_BLOCK_REPLANS:
-        start_tried.append((float(target_x), float(target_y)))
-        print(f"[TARGET] Il grafo non arriva all'obiettivo ({target_x:.2f}, {target_y:.2f}) "
-              f"della cella ({target_row},{target_col}): ne provo un altro "
-              f"({len(start_tried)}/{MAX_BLOCK_REPLANS}).")
-        new_tx, new_ty, _vs, _rs = find_best_point_in_cell(
-            robot_x, robot_y, env, target_row, target_col, pts, cells_obstacle_dist, sampler,
-            global_map=global_map, exclude=start_tried)
-        if new_tx is None or new_ty is None:
-            break
-        target_x, target_y = new_tx, new_ty
-        env._last_attempt_goal = (float(target_x), float(target_y))
-        goal_id = prm_graph.add_stop_node(
-            target_x, target_y, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
-            label=f"obiettivo riscelto cella ({target_row},{target_col})", is_robot=False)
-        path_ids = prm_graph.find_path_dijkstra(robot_node_id, goal_id)
 
     if path_ids is None:
         print(
@@ -3018,6 +3123,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
     arrival_refusals = 0    # passi rifiutati perche' la posa d'arrivo non ha uscite
     goal_repicks = 0        # quante volte si e' riscelto il punto obiettivo
     tried_goals = []        # punti obiettivo gia' provati e risultati irraggiungibili
+    arrived_near_goal = False   # arrivo accettato con il robot appena fuori dalla cella
     trap_state = {'n': 0}   # ritorni indietro in QUESTO tentativo, mai azzerato (vedi _trap_backtrack)
 
     while path_waypoints and len(path_waypoints) > 0:
@@ -3294,9 +3400,21 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
 
         in_target_cell = (tuple(int(v) for v in env.get_cell_from_world(robot_x, robot_y))
                           == (int(target_row), int(target_col)))
+        # Appena fuori dalla cella vale come dentro, per l'arrivo per tolleranza (vedi
+        # ARRIVAL_OUTSIDE_CELL_M). Il 22-10 16:04: "Mancano 0.06 m ... ancora fuori dalla
+        # cella (2,7)", con il robot fuori di 0.01 m.
+        robot_border = cell_border_distance(env, target_row, target_col, robot_x, robot_y)
+        near_goal = (not in_target_cell and robot_border is not None
+                     and -robot_border <= ARRIVAL_OUTSIDE_CELL_M)
         decision = decide_next_move((robot_x, robot_y), path_waypoints, frontier, no_progress,
-                                    in_target_cell=in_target_cell)
-        if (decision['kind'] in ('wait', 'blocked') and not in_target_cell
+                                    in_target_cell=in_target_cell or near_goal)
+        if decision['kind'] == 'arrived' and near_goal:
+            arrived_near_goal = True
+            MISSION_STATS['arrivals_near_goal'] += 1
+            print(f"[OBIETTIVO] Il robot e' fuori dalla cella ({target_row},{target_col}) di "
+                  f"{-robot_border:.2f} m, a {frontier['path_len']:.2f} m dall'obiettivo: vale come "
+                  f"arrivo (fuori al massimo di {ARRIVAL_OUTSIDE_CELL_M:.2f} m, il muso e' dentro).")
+        if (decision['kind'] in ('wait', 'blocked') and not in_target_cell and not near_goal
                 and frontier['path_len'] <= GOAL_REACHED_TOLERANCE_M):
             print(f"[OBIETTIVO] Mancano {frontier['path_len']:.2f} m, entro la tolleranza di "
                   f"{GOAL_REACHED_TOLERANCE_M:.2f} m, ma il robot e' ancora fuori dalla cella "
@@ -3595,9 +3713,12 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                       f"raggiungibile da nessuna direzione. Ne cerco un altro nella cella "
                       f"({goal_repicks}/{MAX_BLOCK_REPLANS}).")
                 tried_goals.append((float(target_x), float(target_y)))
+                _refuse_goal(env, target_row, target_col, target_x, target_y,
+                             f"spazio libero dal vivo {od_goal:.2f} m")
                 new_tx, new_ty, _vs, _rs = find_best_point_in_cell(
                     robot_x, robot_y, env, target_row, target_col, pts_up, cells_obs_up,
-                    sampler, global_map=global_map, exclude=tried_goals)
+                    sampler, global_map=global_map, exclude=tried_goals,
+                    reachable=_reachable_from_robot)
                 if new_tx is not None and new_ty is not None:
                     target_x, target_y = new_tx, new_ty
                     best_goal_dist = float('inf')    # nuovo obiettivo: progressi da capo
@@ -3701,6 +3822,12 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                   f"senza poter avanzare. Motivo: {frontier['reason']} in ({sx:.2f}, {sy:.2f}), "
                   f"sul tratto {edge_a}->{edge_b}.")
             MISSION_STATS['frontier_blocks'] += 1
+            # Bloccato a ridosso dell'obiettivo: e' l'obiettivo a non andare, non la strada.
+            if (frontier['reason'] in ('ostacolo', 'rugosita', 'pendenza')
+                    and float(np.hypot(sx - target_x, sy - target_y)) <= REFUSED_GOAL_BLOCK_M):
+                _refuse_goal(env, target_row, target_col, target_x, target_y,
+                             f"blocco confermato a {float(np.hypot(sx - target_x, sy - target_y)):.2f} m "
+                             f"da lui ({frontier['reason']})")
 
             if mission_folder is not None:
                 try:
@@ -4217,6 +4344,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
 
     # Controllo finale della posizione a fine percorso
     robot_x, robot_y, _, _ = spotUtils.getPosition(robot_state_client)
+    if arrived_near_goal:
+        return True
     return env.is_point_in_cell(robot_x, robot_y, target_row, target_col)
 
 def select_mobility_params(gradient, roughness):
@@ -4613,6 +4742,11 @@ def easy_walk(options):
                   f"(= meta' corpo + margine del fronte), riscelta del punto fino a "
                   f"{MAX_BLOCK_REPLANS} volte se risulta irraggiungibile; ripianificazione alla "
                   f"PRIMA cella bloccante, fino a {MAX_EARLY_REPLANS} volte per tentativo")
+            print(f"[CONFIG] SCELTA OBIETTIVO: solo punti raggiungibili dal robot nel grafo (se ce "
+                  f"ne sono), spazio libero preferito {TARGET_CLEARANCE_M:.2f} m (minimo "
+                  f"{spotGrid.PLAN_CLEARANCE_M:.2f}), almeno {TARGET_CELL_BORDER_M:.2f} m dal bordo "
+                  f"della cella, obiettivi rifiutati dal fronte esclusi per la missione; arrivo "
+                  f"valido anche col robot fuori dalla cella fino a {ARRIVAL_OUTSIDE_CELL_M:.2f} m")
         except Exception as e:
             print(f"[LOG] Impossibile inizializzare il CSV dei segmenti: {e}")
 

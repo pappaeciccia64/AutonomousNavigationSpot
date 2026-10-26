@@ -372,6 +372,72 @@ def section_checks(log, segments):
                     f"{len(gap)} giri con disaccordo, mediana {np.median(pct):.1f}% degli archi "
                     f"(massimo {max(pct):.1f}%); in tutto {sum(c for *_, c, _ in gap)} archi bloccati "
                     f"solo dalla binaria, {sum(d for *_, d in gap)} solo dallo spazio libero"))
+
+    # 8. Attesa prima degli spostamenti GraphNav: dalla preparazione (scorciatoie, chiusura
+    #    d'anello di Spot) alla partenza. Il 22-10 16:04 la chiusura d'anello e' andata in
+    #    timeout 20 volte, 30 s l'una: 603 s di attesa contro 257 s di viaggio.
+    waits, trips, prep = [], [], None
+    for line in log.splitlines():
+        t = log_time(line)
+        if t is None:
+            continue
+        if re.search(r'\[GRAPHNAV\] prima (?:dello|del) ', line):
+            prep = t
+        elif re.search(r'\[GRAPHNAV\] .*: avvio \(massimo', line) and prep is not None:
+            waits.append(t - prep)
+            prep = None
+        m = re.search(r'\[GRAPHNAV\] .*: arrivato in (\d+) s', line)
+        if m:
+            trips.append(int(m.group(1)))
+    timeouts = len(re.findall(r"Chiusura d'anello di Spot non riuscita \(TimedOut", log))
+    if not waits:
+        out.append(("Attesa prima di GraphNav", 'NON SCATTATO', "nessuno spostamento GraphNav"))
+    else:
+        long_w = sum(1 for w in waits if w > 5.0)
+        out.append(("Attesa prima di GraphNav", 'OK' if not long_w and not timeouts else 'DA GUARDARE',
+                    f"{len(waits)} spostamenti: attesa {sum(waits):.0f} s in tutto (massimo {max(waits):.1f} s, "
+                    f"{long_w} oltre 5 s), viaggio {sum(trips)} s; timeout della chiusura d'anello "
+                    f"{timeouts}; atteso: attese di 1-2 s, nessun timeout"))
+
+    # 9. Scelta dell'obiettivo e arrivo appena fuori dalla cella (dal 26-10).
+    refused = len(re.findall(r'\[TARGET\] Obiettivo .* escluso per il resto della missione', log))
+    unreach = len(re.findall(r"NESSUN punto della cella e' raggiungibile dal robot nel grafo", log))
+    outside_ok = len(re.findall(r"\[OBIETTIVO\] Il robot e' fuori dalla cella .* vale come arrivo", log))
+    outside_no = len(re.findall(r"ancora fuori dalla cella .*: non vale come arrivo", log))
+    disc = len(re.findall(r'\[GRAFO DISCONNESSO\]', log))
+    chosen = re.findall(r"\[TARGET\] Cella \((\d+),(\d+)\): .*?\((-?[\d.]+), (-?[\d.]+)\)", log)
+    repeat = 0
+    excl = {}
+    for line in log.splitlines():
+        m = re.search(r'\[TARGET\] Obiettivo \((-?[\d.]+), (-?[\d.]+)\) della cella \((\d+),(\d+)\) escluso', line)
+        if m:
+            excl.setdefault((m.group(3), m.group(4)), []).append((float(m.group(1)), float(m.group(2))))
+            continue
+        m = re.search(r"\[TARGET\] Cella \((\d+),(\d+)\): .*?\((-?[\d.]+), (-?[\d.]+)\)", line)
+        if m and "rifiutati dal fronte, riprovo" not in line:
+            p = (float(m.group(3)), float(m.group(4)))
+            repeat += any(math.dist(p, q) < 0.30 for q in excl.get((m.group(1), m.group(2)), []))
+    if not chosen:
+        out.append(("Scelta dell'obiettivo e arrivo", 'NON SCATTATO', "nessuna riga [TARGET]"))
+    else:
+        ok = repeat == 0 and outside_no <= 3
+        out.append(("Scelta dell'obiettivo e arrivo", 'OK' if ok else 'DA GUARDARE',
+                    f"{len(chosen)} scelte; obiettivi esclusi per la missione {refused}, riproposti dopo "
+                    f"l'esclusione {repeat}; scelte senza punti raggiungibili {unreach}, grafo disconnesso "
+                    f"all'inizio {disc}; arrivi con il robot appena fuori {outside_ok}, rifiuti "
+                    f"'fuori dalla cella' {outside_no}; atteso: nessun riproposto, pochi rifiuti fuori "
+                    f"cella (il 22-10 erano 44)"))
+
+    # 10. Ritorni con GraphNav: quanto si sposta davvero il robot.
+    d_ret = [float(d) for d in re.findall(r"\[RITORNO\] Torno a \S+, a ([\d.]+) m dal robot", log)]
+    in_place = len(re.findall(r"\[RITORNO\] La briciola piu' lontana dietro.*non mi muovo", log))
+    if not d_ret and not in_place:
+        out.append(("Ritorni con GraphNav", 'NON SCATTATO', "nessun ritorno"))
+    else:
+        out.append(("Ritorni con GraphNav", 'OK',
+                    f"{len(d_ret)} ritorni" + (f" di {min(d_ret):.2f}-{max(d_ret):.2f} m" if d_ret else "")
+                    + f", {in_place} senza movimento (briciole tutte a meno di 0.40 m: si ripianifica da "
+                    f"fermo)"))
     return out
 
 

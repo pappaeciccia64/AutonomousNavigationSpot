@@ -6,6 +6,36 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 
 ---
 
+## 2026-10-26 (dopo la prova all'aperto del 22-10 16:04)
+
+Prova all'aperto: 8 × 8 celle da 2 m, 59 celle su 64 in 42 minuti, nessuna caduta. Tre problemi.
+
+### GraphNav (`easy_walk.py`)
+- **Chiusura d'anello di Spot spenta** (`GRAPHNAV_SDK_LOOP_CLOSURE = False`). Oltre ~100 waypoint la chiamata ha sempre superato i 30 s della RPC: 20 timeout, **603 s di attesa prima degli spostamenti contro 257 s di viaggio**. In tutta la missione ha creato 1 arco; le 25 scorciatoie usate venivano dalla mappa globale. Dopo il timeout Spot probabilmente continuava a elaborare la mappa mentre il robot partiva. Da riaccendere solo dopo averne misurato i tempi al banco (`timeout_seconds`, `max_loop_closure_path_length`).
+- Le scorciatoie dalla mappa globale restano: 23 viaggi riusciti su 23, localizzazioni rifiutate da Spot passate da 641 a 644 in tutta la missione. L'odometria degli archi e il frame VISION della mappa differiscono al massimo di 2.7 cm su 251 waypoint. La deriva rispetto al mondo, stimata dagli archi di localizzazione di GraphNav, arriva a 0.39–0.47 m fra waypoint creati a 15–20 minuti di distanza: da tenere d'occhio sulle missioni lunghe.
+- **Ritorno senza movimento**: se tutte le briciole sono a meno di 0.40 m dal robot, `graphnav_step_back` non chiama GraphNav e si ripianifica da fermo (riga `[RITORNO] La briciola piu' lontana dietro … non mi muovo`). Il 22-10 16:22 il robot stava sopra wp_138 e lo spostamento "di ritorno" era di 0 m. Gli altri tre ritorni "a 0.0 m" del log erano invece spostamenti veri di circa 0.6 m: lo 0.0 era la distanza nel grafo GraphNav dal waypoint su cui il robot era localizzato. Ora ogni ritorno scrive la distanza vera.
+
+### Scelta dell'obiettivo della cella (`easy_walk.find_best_point_in_cell`)
+- **Prima i punti che il grafo collega al robot.** Il nodo del robot si aggancia prima della scelta; i candidati (centro e nodi della cella) si provano in ordine di preferenza finché uno è raggiungibile. Se nessuno lo è, si sceglie il migliore come prima e il tentativo fallisce come prima. **Tolti i 3 tentativi di riserva all'inizio del tentativo** (22-10 sera): sceglievano i punti più vicini al centro, nella stessa zona isolata, e sono falliti 9 volte su 10.
+- **Spazio libero preferito 0.33 m** (`TARGET_CLEARANCE_M`), sulla mappa globale e dal vivo; 0.28 resta il minimo. Obiettivi scelti a 0.28 sono stati rifiutati dal vivo a 0.24, al bordo dell'erba: il fronte vuole 0.25 e l'isteresi è 0.04.
+- **Almeno 0.30 m dal bordo della cella** (`TARGET_CELL_BORDER_M`), quando c'è di meglio. Il 22-10 c'erano obiettivi a 0.98–1.01 m dal centro di celle da 2 m.
+- **Un obiettivo rifiutato dal fronte resta escluso per la sua cella fino a fine missione** (`_refuse_goal`): quando lo spazio libero dal vivo è sotto 0.25, o quando un blocco è confermato entro 0.35 m da lui (`REFUSED_GOAL_BLOCK_M`). Torna ammesso solo se nella cella non resta altro. Il 22-10 il nodo 548 della cella (7,4) è stato riscelto a ogni tentativo e bloccato 3 volte nello stesso punto, con 5 ritorni GraphNav in mezzo.
+- Ordine dei criteri: non rifiutato > raggiungibile > spazio ≥ 0.33 > centro > visto libero > lontano dal bordo > vicino al centro > vicino al robot. La riga `[TARGET]` dice perché il centro è stato scartato e conta stretti, sul bordo e rifiutati.
+
+### Arrivo (`easy_walk.py`)
+- **L'arrivo per tolleranza vale anche con il robot appena fuori dalla cella, fino a 0.35 m** (`ARRIVAL_OUTSIDE_CELL_M` = tolleranza 0.65 − margine dal bordo 0.30; il muso, 0.55 m avanti, è dentro). Corregge la regola del 22-10 sera, troppo stretta: all'aperto 44 rifiuti "Mancano X m … ancora fuori dalla cella", in 8 tentativi, con il robot fuori di 0.01–0.61 m e a 0.5–0.65 m dall'obiettivo (il fronte ferma il centro mezzo corpo prima). Con la regola nuova 7 tentativi su 8 si sarebbero chiusi. Una prima versione accettava il robot entro 0.25 m dall'obiettivo: avrebbe chiuso 3 casi su 9, scartata.
+
+### Prove e strumenti
+- **`test_obiettivi.py`** (nuovo): controlli sintetici delle regole, poi rigioco delle scansioni rifacendo la scelta dell'obiettivo a ogni inizio di tentativo, confrontata con quella della missione. 22-10 16:04: obiettivi rifiutabili dal fronte 20 → 15, riproposti dopo un rifiuto 3 → 0, raggiungibili 63 → 64. Missioni al chiuso: nessun peggioramento, obiettivi sul bordo 7 → 0 (13-10 12:14) e 3 → 0 (13-10 12:40).
+- `test_e2e_loop.py`: scenario **S14**, cella libera solo lungo il bordo, con ostacoli già nella mappa globale (`memory`): il robot si ferma 0.14 m fuori e l'arrivo vale.
+- `mission_report.py`: tre controlli nuovi. **Attesa prima di GraphNav** (attesa contro viaggio, timeout della chiusura d'anello), **Scelta dell'obiettivo e arrivo** (esclusi, riproposti, senza punti raggiungibili, arrivi appena fuori, rifiuti fuori cella), **Ritorni con GraphNav** (distanza vera, ritorni da fermo). Sul 22-10 16:04 i primi due danno DA GUARDARE, come atteso.
+- Statistiche nuove: `goals_refused`, `goals_unreachable`, `arrivals_near_goal`, `backtracks_in_place`; riga `[CONFIG] SCELTA OBIETTIVO` all'avvio.
+
+### Da discutere
+- **Erba alta**: Spot segna i ciuffi (+0.15/+0.45 m sul suolo) come ostacoli; 25% della mappa occupata, celle (4,6), (7,2), (7,3), (7,4), (7,7) non raggiunte.
+
+---
+
 ## 2026-10-22 (pomeriggio, dopo le prove al chiuso delle 15:24 e 15:50)
 
 ### Pianificatore e mappe (`spotGrid.py`, `prm_graph.py`)
