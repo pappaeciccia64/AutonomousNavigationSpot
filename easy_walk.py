@@ -65,6 +65,9 @@ MISSION_STATS = {
     'sdk_loop_edges': 0,      # archi creati da Spot
     'sdk_loop_partial': 0,    # chiamate finite allo scadere del limite (risultato parziale)
     'sdk_loop_failures': 0,   # tentativi di chiusura d'anello falliti (errore, nel log)
+    'drift_samples': 0,       # misure della deriva dell'odometria (graphnav_log_drift)
+    'drift_max_m': 0.0,       # deriva massima misurata
+    'drift_last_m': 0.0,      # ultima misura (di solito all'arrivo su wp_0)
     'graphnav_trips_avoided': 0,  # spostamenti GraphNav evitati: dal waypoint il grafo non arriva alla cella
     'cone_moves': 0,          # avanzamenti dentro il cono di rotazione possibile
     'retreats_suppressed': 0,  # arretramenti evitati perche' inutili
@@ -1054,6 +1057,56 @@ def _graphnav_localization(recordingInterface):
     return out
 
 
+_DRIFT_COLUMNS = ['time', 'where', 'waypoint', 'age_s', 'dx', 'dy', 'd', 'gn_x', 'gn_y', 'vision_x',
+                  'vision_y']
+
+
+def graphnav_log_drift(recordingInterface, robot_state_client, where):
+    """
+    DERIVA DELL'ODOMETRIA, misurata a ogni arrivo GraphNav. GraphNav si localizza sulle
+    scansioni del waypoint e dice dove sta il corpo rispetto a lui (waypoint_tform_body);
+    componendolo con la posa VISION che il waypoint aveva quando l'abbiamo creato si ottiene
+    dove il robot DOVREBBE essere in VISION senza deriva. La differenza con la posa VISION di
+    adesso e' la deriva accumulata dalla creazione del waypoint: la stessa che sposta, nelle
+    nostre mappe globali (costruite in VISION), cio' che si e' visto molti minuti prima. Il
+    26-10 15:11, all'arrivo su wp_0, lo scarto grezzo era 0.66 m (tolleranza d'arrivo inclusa).
+
+    Solo misura: niente si corregge. Misurabile solo sui waypoint creati da noi (di cella e
+    briciole), di cui si conosce la posa VISION. Mai eccezioni verso chi chiama.
+    """
+    try:
+        loc = recordingInterface._graph_nav_client.get_localization_state().localization
+        wid = loc.waypoint_id
+        poses = getattr(recordingInterface, 'waypoint_poses', None) or {}
+        hit = next(((n, p) for n, p in poses.items() if p.get('waypoint_id') == wid), None)
+        if not wid or hit is None:
+            print(f"[DERIVA] {where}: localizzato su un waypoint automatico di Spot (o non localizzato): "
+                  f"deriva non misurabile qui.")
+            return None
+        name, wp = hit
+        b = loc.waypoint_tform_body.position
+        c, sn = np.cos(wp['yaw']), np.sin(wp['yaw'])
+        gx = wp['x'] + c * b.x - sn * b.y
+        gy = wp['y'] + sn * b.x + c * b.y
+        rx, ry, _, _ = spotUtils.getPosition(robot_state_client)
+        dx, dy = rx - gx, ry - gy
+        d = float(np.hypot(dx, dy))
+        age = time.time() - wp['t'] if wp.get('t') else float('nan')
+        MISSION_STATS['drift_samples'] += 1
+        MISSION_STATS['drift_max_m'] = max(MISSION_STATS['drift_max_m'], d)
+        MISSION_STATS['drift_last_m'] = d
+        print(f"[DERIVA] {where}: localizzato su {name}, creato {age / 60:.1f} min fa -> l'odometria "
+              f"(VISION) e' scostata di {d:.2f} m (dx {dx:+.2f}, dy {dy:+.2f}) da dove GraphNav "
+              f"mette il robot.")
+        _append_csv("drift.csv", _DRIFT_COLUMNS,
+                    [[time.time(), where, name, round(age, 1), round(dx, 4), round(dy, 4), round(d, 4),
+                      round(gx, 4), round(gy, 4), round(rx, 4), round(ry, 4)]])
+        return d
+    except Exception as e:
+        print(f"[DERIVA] {where}: misura non riuscita ({type(e).__name__}: {e}).")
+        return None
+
+
 def _graphnav_is_lost(loc):
     return bool(loc) and (loc.get('is_lost') is True or ('error' not in loc and not loc.get('wp_id')))
 
@@ -1454,6 +1507,7 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
         if status == _GN.STATUS_REACHED_GOAL:
             print(f"[GRAPHNAV] {label}: arrivato in {time.time() - t0:.0f} s.")
             MISSION_STATS['graphnav_ok'] += 1
+            graphnav_log_drift(recordingInterface, robot_state_client, label)
             return True
         if status == _GN.STATUS_LOST and relocs < GRAPHNAV_MAX_RELOCALIZATIONS:
             # Riaggancio sul waypoint piu' vicino (NON sulla destinazione, e senza dichiarare
@@ -1804,6 +1858,9 @@ def _emit_mission_summary_once():
                  if tot_r else ""))
         print(f"Cadute: {MISSION_STATS['falls']}, rialzate da solo: {MISSION_STATS['self_rights']}")
         print(f"Spostamenti GraphNav riusciti: {MISSION_STATS['graphnav_ok']}, falliti: {MISSION_STATS['graphnav_fail']}")
+        print(f"Deriva dell'odometria: {MISSION_STATS['drift_samples']} misure agli arrivi GraphNav, "
+              f"massima {MISSION_STATS['drift_max_m']:.2f} m, ultima {MISSION_STATS['drift_last_m']:.2f} m "
+              f"(dettaglio in drift.csv)")
         print(f"Chiusura d'anello di Spot: {MISSION_STATS['sdk_loop_calls']} chiamate, "
               f"{MISSION_STATS['sdk_loop_s']:.0f} s, {MISSION_STATS['sdk_loop_edges']} archi, "
               f"{MISSION_STATS['sdk_loop_partial']} finite allo scadere del limite, "

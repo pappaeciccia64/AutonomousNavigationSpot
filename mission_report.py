@@ -12,7 +12,8 @@ numpy, NON l'SDK di Spot (che se c'e' viene usato per la strada di ritorno nel g
     python3 mission_report.py --tutte                 # una riga di sintesi per ogni missione
 
 File letti (quelli che mancano vengono saltati: le missioni vecchie ne hanno meno):
-    MissionLogs/Mission_<nome>/mission_log.txt, mission_summary.json, segments.csv, trajectory.csv
+    MissionLogs/Mission_<nome>/mission_log.txt, mission_summary.json, segments.csv, trajectory.csv,
+        drift.csv (dal 26-10 sera)
     MissionMap/Mission_<nome>/scans/*.npz       le scansioni del ciclo di navigazione
     graph/Mission_<nome>/Grafo_*/               il grafo GraphNav scaricato a fine missione
 """
@@ -459,6 +460,22 @@ def section_checks(log, segments):
                     f"{len(d_ret)} ritorni" + (f" di {min(d_ret):.2f}-{max(d_ret):.2f} m" if d_ret else "")
                     + f", {in_place} senza movimento (briciole tutte a meno di 0.40 m: si ripianifica da "
                     f"fermo)"))
+
+    # 11. Deriva dell'odometria agli arrivi GraphNav (dal 26-10 sera, vedi graphnav_log_drift).
+    drift = [(float(a), float(d)) for a, d in re.findall(
+        r"\[DERIVA\] .*?creato ([\d.]+) min fa -> l'odometria \(VISION\) e' scostata di ([\d.]+) m", log)]
+    if not drift:
+        out.append(("Deriva dell'odometria", 'NON SCATTATO', "nessuna misura (niente arrivi GraphNav su "
+                    "waypoint nostri, o missione precedente al 26-10 sera)"))
+    else:
+        old_ = [d for a, d in drift if a >= 10.0]
+        det = (f"{len(drift)} misure agli arrivi GraphNav: massima {max(d for _, d in drift):.2f} m, ultima "
+               f"{drift[-1][1]:.2f} m (waypoint creato {drift[-1][0]:.0f} min prima)")
+        if old_:
+            det += f"; su waypoint creati da 10 min o piu': mediana {np.median(old_):.2f} m"
+        out.append(("Deriva dell'odometria", 'DECISIONE',
+                    det + "; e' lo spostamento delle nostre mappe globali sulle zone viste prima "
+                    "(dettaglio in drift.csv)"))
     return out
 
 

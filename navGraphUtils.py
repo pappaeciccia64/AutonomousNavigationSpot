@@ -427,6 +427,7 @@ class RecordingInterface(object):
                 'y': y,
                 'z': z,
                 'yaw': yaw,
+                't': time.time(),        # per la misura della deriva (easy_walk.graphnav_log_drift)
                 'waypoint_id': created_waypoint_id,
                 'cell_row': cell_row,
                 'cell_col': cell_col
