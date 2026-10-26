@@ -25,6 +25,8 @@ Tasti (modalita' interattiva):
     freccia destra / sinistra   scansione successiva / precedente
     freccia su / giu'            10 scansioni avanti / indietro
     1..9, 0                      layer del pannello sinistro (vedi LAYERS)
+    i / x                        layer intensita' / no_step di Spot (missioni dal 26-10)
+    l                            layer successivo
     o                            pannello destro: fine missione <-> momento della scansione
     g                            grafo PRM sopra la scansione: mostra / nascondi
     m                            pannello destro: mappa del robot (ostacoli confermati, default)
@@ -33,9 +35,14 @@ Tasti (modalita' interattiva):
                                  (terreno colorato per quota, ostacoli in rosso sopra;
                                  linea bianca = quota 0, il suolo all'avvio missione, segnata
                                  anche sulla barra)
-    r                            pannello destro nel frame della MISSIONE: griglia delle celle dritta,
-                                 partenza nell'origine, muso del robot alla partenza verso l'alto
-                                 (sotto il mouse restano anche le coordinate VISION)
+    r                            entrambi i pannelli nel frame della MISSIONE: griglia delle celle
+                                 dritta, partenza nell'origine, muso del robot alla partenza verso
+                                 l'alto (sotto il mouse restano anche le coordinate VISION)
+    b / B                        blocco successivo / precedente
+    c / C                        prima scansione del tentativo (cella) successivo / precedente
+    v / V                        prima scansione dopo il prossimo / precedente spostamento GraphNav
+                                 (o tratto non registrato, nelle missioni prima del 26-10)
+    e                            legende: mostra / nascondi
     n                            nav graph di GraphNav sul pannello destro: mostra / nascondi
                                  (serve l'SDK di Spot per leggerlo, vedi NAV GRAPH)
     lo zoom del pannello destro resta quando si cambia scansione o sfondo
@@ -146,7 +153,22 @@ LAYERS = [
      -2.0, 2.0, "quota corretta - suolo all'avvio missione (m)"),
     ("celle mai scritte", lambda d: d['unwritten'].astype(float) if 'unwritten' in d
      else np.zeros_like(d['terrain_raw']), 'gray_r', 0, 1, "1 = mai scritta: trattata come non vista"),
+    # Layer di Spot salvati dal 26-10 (easy_walk.SAVE_EXTRA_LAYERS), ognuno sulla sua griglia
+    # (<nome>_origin, <nome>_cell): settimo elemento = nome del campo.
+    ("intensita' (Spot)", lambda d: _extra(d, 'intensity'), 'gray', 0, 255,
+     "intensita' del ritorno del sensore", 'intensity'),
+    ("no_step (Spot)", lambda d: _extra(d, 'no_step'), 'RdBu', -0.3, 0.3,
+     "distanza dal confine no-step (m): < 0 = Spot non ci mette le zampe", 'no_step'),
 ]
+# Tasti dei layer: 1..9, 0 per i primi dieci, poi questi.
+LAYER_KEYS = {'i': 10, 'x': 11}
+
+
+def _extra(d, key):
+    """Un layer in piu' di Spot, NaN se la missione non l'ha salvato."""
+    if key in d:
+        return np.asarray(d[key], dtype=float)
+    return np.full(np.shape(d['terrain_raw']), np.nan)
 
 
 def _ground(d):
@@ -223,9 +245,16 @@ def _hover(ax, mat, extent):
 
 def draw_scan(ax, d, layer_idx, title_prefix="", ctx=None):
     ax.clear()
-    name, fn, cmap, vmin, vmax, label = LAYERS[layer_idx]
+    name, fn, cmap, vmin, vmax, label = LAYERS[layer_idx][:6]
+    src = LAYERS[layer_idx][6] if len(LAYERS[layer_idx]) > 6 else None
     mat = np.asarray(fn(d), dtype=float)
     ext = _extent(d)
+    if src is not None and f"{src}_origin" in d and src in d:
+        # griglia propria del layer
+        (lox, loy), lcs = d[f"{src}_origin"], float(d.get(f"{src}_cell", d['cell_size']))
+        ext = [lox, lox + mat.shape[1] * lcs, loy, loy + mat.shape[0] * lcs]
+    if src is not None and src not in d:
+        name += " -- non salvato in questa missione"
     # quota sotto il corpo vista dopo (vedi QUOTA SOTTO IL CORPO)
     hole = None
     if ctx is not None and name in QUOTA_LAYER_REF:
@@ -243,6 +272,12 @@ def draw_scan(ax, d, layer_idx, title_prefix="", ctx=None):
         ax.contourf(xs_c, ys_c, hole.astype(float), levels=[0.5, 1.5], colors='none', hatches=['////'])
         ax.add_patch(patches.Rectangle((0, 0), 0, 0, fill=False, hatch='////', edgecolor='k', lw=0,
                                        label='sotto il corpo: quota vista dopo'))
+
+    if src == 'no_step' and np.isfinite(mat).any():
+        cs_l = (ext[1] - ext[0]) / mat.shape[1]
+        ax.contour(ext[0] + (np.arange(mat.shape[1]) + 0.5) * cs_l, ext[2] + (np.arange(mat.shape[0]) + 0.5) * cs_l,
+                   mat, levels=[0.0], colors='k', linewidths=0.9)
+    ext = _extent(d)        # da qui in poi la griglia della scansione
 
     # contorno della distanza minima dal centro del percorso
     od = d['obstacle_distance']
@@ -751,6 +786,35 @@ class MissionContext:
         hole &= np.isfinite(q)
         return (q, hole) if hole.any() else (None, None)
 
+    def events(self):
+        """
+        Indici delle scansioni a cui saltare (tasti b, c, v), per tipo:
+          'blocco'   -- scansioni con decisione 'blocked'
+          'cella'    -- prima scansione di ogni tentativo (cambia l'iterazione)
+          'graphnav' -- prima scansione dopo uno spostamento GraphNav (campioni 'graphnav' di
+                        trajectory.csv) o dopo un tratto non registrato (missioni piu' vecchie)
+        """
+        if getattr(self, '_events', None) is None:
+            kinds = [str(d['decision_kind']) for d in self.scans]
+            its = [int(d['iteration']) if 'iteration' in d else -1 for d in self.scans]
+            ev = {'blocco': [i for i, k in enumerate(kinds) if k == 'blocked'],
+                  'cella': [i for i in range(len(its)) if i == 0 or its[i] != its[i - 1]],
+                  'graphnav': []}
+            t_sc = np.array([float(d['time']) if 'time' in d else np.nan for d in self.scans])
+            if self.traj is not None and len(self.traj) and np.isfinite(t_sc).all():
+                tr = self.traj
+                ends = []
+                gn = tr[:, 3] > 0.5
+                # fine di ogni tratto GraphNav registrato
+                ends += list(tr[np.flatnonzero(gn & ~np.r_[gn[1:], False]), 0])
+                # fine di ogni salto (tratto non registrato)
+                jump = np.hypot(np.diff(tr[:, 1]), np.diff(tr[:, 2])) > TRAJ_GAP_M
+                ends += list(tr[np.flatnonzero(jump) + 1, 0])
+                idx = {int(np.searchsorted(t_sc, t)) for t in ends}
+                ev['graphnav'] = sorted(i for i in idx if i < len(t_sc))
+            self._events = ev
+        return self._events
+
     def mission_frame(self):
         """
         (x, y, yaw) del frame della missione: origine nel centro della cella (0, 0), che e' il
@@ -1205,17 +1269,18 @@ def draw_navgraph(ax, ng, t_now=None):
         ax.plot(*xy[k0[0]], 'P', color='black', mfc='gold', ms=11, zorder=8, label='wp_0 (partenza)')
 
 
-def _to_mission_frame(ax, ctx, fmt_vision):
+def _to_mission_frame(ax, ctx, fmt_vision, extent=None):
     """
     Ruota e trasla tutto cio' che e' disegnato su ax nel frame della missione (vedi
     MissionContext.mission_frame): x laterale, y avanti, origine nella partenza. I dati
-    restano in VISION; cambia solo la trasformazione del disegno.
+    restano in VISION; cambia solo la trasformazione del disegno. extent: zona VISION da
+    inquadrare (default tutta la griglia comune).
     """
     ox, oy, yaw = ctx.mission_frame()
     T = Affine2D().translate(-ox, -oy).rotate(np.pi / 2 - yaw)
     for art in list(ax.images) + list(ax.lines) + list(ax.collections) + list(ax.patches) + list(ax.texts):
         art.set_transform(T + ax.transData)
-    x0, x1, y0, y1 = ctx.extent
+    x0, x1, y0, y1 = ctx.extent if extent is None else extent
     corners = T.transform(np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]]))
     ax.set_xlim(corners[:, 0].min(), corners[:, 0].max())
     ax.set_ylim(corners[:, 1].min(), corners[:, 1].max())
@@ -1442,6 +1507,8 @@ def main():
             fig, (axl, axr) = plt.subplots(1, 2, figsize=(20, 9.5))
             im, label = draw_scan(axl, d, 5, ctx=ctx)          # maschera degli ostacoli
             overlay_prm_local(axl, ctx, k)
+            if mf0:
+                _to_mission_frame(axl, ctx, axl.format_coord, extent=_extent(d))
             fig.colorbar(im, ax=axl, label=label, shrink=0.8)
             draw_global(axr, ctx, k, bg=bg0, navgraph=ng0, mframe=mf0)
             fig.tight_layout()
@@ -1474,12 +1541,15 @@ def main():
         plt.show()
         return 0
 
-    # I tasti del visualizzatore non devono fare anche altro: per matplotlib 'g' e' la griglia
-    # e 'o' lo strumento zoom (premendo 'o' restava attivo lo zoom), 'r' la vista iniziale.
-    for km in ('keymap.grid', 'keymap.zoom', 'keymap.home'):   # 'r' e' anche "vista iniziale"
-        plt.rcParams[km] = [k for k in plt.rcParams[km] if k not in ('g', 'o', 'm', 't', 'n', 'r')]
+    # I tasti del visualizzatore non devono fare anche altro: per matplotlib 'g' e' la griglia,
+    # 'o' lo zoom, 'r' la vista iniziale, 'l' la scala logaritmica, e le frecce e 'c' / 'v' la
+    # vista precedente / successiva dello zoom (scorrendo dopo uno zoom la vista cambiava).
+    ours = {'left', 'right', 'up', 'down', 'g', 'o', 'm', 't', 'n', 'r', 'b', 'B', 'c', 'C', 'v', 'V',
+            'e', 'l', *LAYER_KEYS, *[str(k) for k in range(10)]}
+    for km in [k for k in plt.rcParams if k.startswith('keymap.')]:
+        plt.rcParams[km] = [k for k in plt.rcParams[km] if k not in ours]
     state = {'i': 0, 'layer': 0, 'overview': False, 'prm': True, 'raw': False,
-             'bg': bg0, 'nav': ng0, 'rot': mf0, 'auto_lim': None}
+             'bg': bg0, 'nav': ng0, 'rot': mf0, 'auto_lim': None, 'legend': True}
     # Disposizione fissa (2026-10-26): i due pannelli e le loro barre dei colori in posizioni
     # date, che usano quasi tutta la finestra. Con plt.subplots e le barre aggiunte "accanto"
     # a schermo intero (1920 x 1080) i pannelli erano 541 x 541 px; cosi' circa 800 x 800.
@@ -1507,6 +1577,8 @@ def main():
         fig.colorbar(im, cax=cax, label=label)
         if state['prm']:
             overlay_prm_local(ax, ctx, state['i'])
+        if state['rot']:
+            _to_mission_frame(ax, ctx, ax.format_coord, extent=_extent(d))
         # Lo zoom del pannello destro resta: se i limiti sono diversi da quelli automatici del
         # disegno precedente li ha cambiati l'utente, e si rimettono dopo il ridisegno.
         lim = (axg.get_xlim(), axg.get_ylim())
@@ -1516,6 +1588,9 @@ def main():
         state['auto_lim'] = (axg.get_xlim(), axg.get_ylim())
         if zoomed:
             axg.set_xlim(lim[0]); axg.set_ylim(lim[1])
+        for a in (ax, axg):
+            if a.get_legend() is not None:
+                a.get_legend().set_visible(state['legend'])
         cbar_g.ax.set_visible(m is not None)
         fig.canvas.draw_idle()
 
@@ -1530,6 +1605,26 @@ def main():
             state['i'] = max(0, state['i'] - 10); state['overview'] = False
         elif ev.key in [str((k + 1) % 10) for k in range(min(len(LAYERS), 10))]:
             state['layer'] = (int(ev.key) - 1) % 10   # '0' = decimo layer
+        elif ev.key in LAYER_KEYS and LAYER_KEYS[ev.key] < len(LAYERS):
+            state['layer'] = LAYER_KEYS[ev.key]
+        elif ev.key == 'l':
+            state['layer'] = (state['layer'] + 1) % len(LAYERS)
+        elif ev.key in ('b', 'B', 'c', 'C', 'v', 'V'):
+            kind = {'b': 'blocco', 'c': 'cella', 'v': 'graphnav'}[ev.key.lower()]
+            lst = ctx.events()[kind]
+            fwd = ev.key.islower()
+            cand = [k for k in lst if (k > state['i'] if fwd else k < state['i'])]
+            nome = {'blocco': 'blocco', 'cella': 'tentativo', 'graphnav': 'spostamento GraphNav'}[kind]
+            if not cand:
+                print(f"[viewer] nessun {nome} {'dopo' if fwd else 'prima di'} questa scansione "
+                      f"({len(lst)} in tutto).")
+                return
+            state['i'] = cand[0] if fwd else cand[-1]
+            state['overview'] = False
+            print(f"[viewer] {nome} {lst.index(state['i']) + 1}/{len(lst)}: scansione "
+                  f"{state['i'] + 1}/{len(scans)}")
+        elif ev.key == 'e':
+            state['legend'] = not state['legend']
         elif ev.key == 'o':
             state['overview'] = not state['overview']
         elif ev.key == 'g':
@@ -1551,10 +1646,15 @@ def main():
     print("Frecce sinistra/destra: scansione | su/giu': 10 scansioni | 1-9, 0: layer a sinistra | "
           "o: a destra fine missione / momento della scansione | g: grafo a sinistra si'/no | "
           "m: a destra mappa del robot / mosaico grezzo | t: sfondo ostacoli / terreno / fusione | "
-          "n: nav graph si'/no | r: frame della missione si'/no | "
+          "n: nav graph si'/no | r: frame della missione si'/no | b/c/v (B/C/V): blocco / tentativo / "
+          "GraphNav successivo (precedente) | e: legende si'/no | i, x, l: intensita', no_step, layer dopo | "
           "valore sotto il mouse in basso a destra")
+    keys = {v: k for k, v in LAYER_KEYS.items()}
     for k, layer in enumerate(LAYERS):
-        print(f"  {k + 1}: {layer[0]}")
+        print(f"  {keys.get(k, (k + 1) % 10)}: {layer[0]}")
+    ev = ctx.events()
+    print(f"  salti: {len(ev['blocco'])} blocchi, {len(ev['cella'])} tentativi, "
+          f"{len(ev['graphnav'])} spostamenti GraphNav")
     redraw()
     # Le immagini degli archi del pannello globale si preparano in sottofondo.
     threading.Thread(target=_prebuild_global_images, args=(ctx,), daemon=True).start()
