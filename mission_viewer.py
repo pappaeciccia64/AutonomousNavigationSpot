@@ -14,6 +14,7 @@ easy_walk.py): salva i dati grezzi, e le figure si fanno qui, dopo.
     python3 mission_viewer.py <cartella_missione> --overview   # solo il riepilogo della missione
     ... --sfondo terreno | fusione                             # sfondo iniziale del pannello globale
     ... --navgraph                                             # nav graph visibile dall'inizio
+    ... --frame-missione                                       # pannello globale nel frame della missione
 
 Tasti (modalita' interattiva):
     A sinistra la scansione (layer a scelta), a destra la MAPPA GLOBALE in quel momento:
@@ -32,6 +33,9 @@ Tasti (modalita' interattiva):
                                  (terreno colorato per quota, ostacoli in rosso sopra;
                                  linea bianca = quota 0, il suolo all'avvio missione, segnata
                                  anche sulla barra)
+    r                            pannello destro nel frame della MISSIONE: griglia delle celle dritta,
+                                 partenza nell'origine, muso del robot alla partenza verso l'alto
+                                 (sotto il mouse restano anche le coordinate VISION)
     n                            nav graph di GraphNav sul pannello destro: mostra / nascondi
                                  (serve l'SDK di Spot per leggerlo, vedi NAV GRAPH)
     lo zoom del pannello destro resta quando si cambia scansione o sfondo
@@ -62,6 +66,7 @@ import matplotlib.patches as patches                  # noqa: E402
 import matplotlib.patheffects as patheffects          # noqa: E402
 import csv                                            # noqa: E402
 import matplotlib.patheffects as pe                   # noqa: E402
+from matplotlib.transforms import Affine2D            # noqa: E402
 
 SLOPE_THRESHOLD = 0.6   # come spotGrid.SLOPE_THRESHOLD: serve solo a colorare gli archi
 
@@ -158,6 +163,39 @@ def _mission_z0(d):
     return z0 if np.isfinite(z0) else _ground(d)
 
 
+def _body_masks(d):
+    """Celle sotto il corpo (nucleo) e nell'anello attorno, per la scansione d. Vedi SELF_*."""
+    h, w = d['terrain_raw'].shape
+    if 'robot_yaw' not in d:
+        z = np.zeros((h, w), bool)
+        return z, z
+    cs = float(d['cell_size'])
+    gox, goy = d['grid_origin']
+    rx, ry = d['robot_xyz'][:2]
+    yaw = float(d['robot_yaw'])
+    X, Y = np.meshgrid(gox + (np.arange(w) + 0.5) * cs - rx, goy + (np.arange(h) + 0.5) * cs - ry)
+    xb = np.abs(X * np.cos(yaw) + Y * np.sin(yaw))
+    yb = np.abs(-X * np.sin(yaw) + Y * np.cos(yaw))
+    hl, hw = SELF_BODY_LENGTH_M / 2.0, SELF_BODY_WIDTH_M / 2.0
+    core = (xb <= hl) & (yb <= hw)
+    ring = ~core & (xb <= hl + SELF_RING_M) & (yb <= hw + SELF_RING_M)
+    return core, ring
+
+
+# QUOTA SOTTO IL CORPO (2026-10-26). Alla prima scansione di una missione il robot si e'
+# appena alzato e il terreno sotto il corpo e' "mai scritto": nei layer di quota restava una
+# macchia bianca. Il robot quel punto lo rivede dopo, da lontano: nei layer di quota del
+# pannello sinistro e nel terreno del pannello globale quelle celle prendono la quota della
+# mappa del terreno di fine missione, tratteggiate. Missione del 26-10 15:11: tutte le 90
+# celle coperte, 1.5 cm dal terreno attorno. Solo disegno: il robot le tratta come non viste.
+# Layer di quota -> riferimento sottratto (stesso del layer).
+QUOTA_LAYER_REF = {
+    "quota rispetto al suolo": lambda d: _ground(d),
+    "quota corretta": lambda d: _ground(d),
+    "quota rispetto all'avvio missione": lambda d: _mission_z0(d),
+}
+
+
 def _load(path):
     with np.load(path, allow_pickle=False) as z:
         return {k: z[k] for k in z.files}
@@ -183,14 +221,28 @@ def _hover(ax, mat, extent):
     ax.format_coord = fmt
 
 
-def draw_scan(ax, d, layer_idx, title_prefix=""):
+def draw_scan(ax, d, layer_idx, title_prefix="", ctx=None):
     ax.clear()
     name, fn, cmap, vmin, vmax, label = LAYERS[layer_idx]
     mat = np.asarray(fn(d), dtype=float)
     ext = _extent(d)
+    # quota sotto il corpo vista dopo (vedi QUOTA SOTTO IL CORPO)
+    hole = None
+    if ctx is not None and name in QUOTA_LAYER_REF:
+        q, hole = ctx.body_quota(d)
+        if hole is not None:
+            mat = mat.copy()
+            mat[hole] = q[hole] - QUOTA_LAYER_REF[name](d)
     im = ax.imshow(mat, origin='lower', extent=ext, cmap=cmap, vmin=vmin, vmax=vmax,
                    interpolation='nearest')
     _hover(ax, mat, ext)
+    if hole is not None:
+        cs = float(d['cell_size'])
+        xs_c = ext[0] + (np.arange(mat.shape[1]) + 0.5) * cs
+        ys_c = ext[2] + (np.arange(mat.shape[0]) + 0.5) * cs
+        ax.contourf(xs_c, ys_c, hole.astype(float), levels=[0.5, 1.5], colors='none', hatches=['////'])
+        ax.add_patch(patches.Rectangle((0, 0), 0, 0, fill=False, hatch='////', edgecolor='k', lw=0,
+                                       label='sotto il corpo: quota vista dopo'))
 
     # contorno della distanza minima dal centro del percorso
     od = d['obstacle_distance']
@@ -563,20 +615,7 @@ class MissionContext:
         """
         om = np.asarray(d['obstacle_mask']).reshape(d['terrain_raw'].shape)
         out = np.where(om < 0, -1, np.where(np.asarray(d['is_valid'], bool), 1, 0)).astype(np.int8)
-        core = np.zeros(om.shape, bool)
-        if 'robot_yaw' not in d:
-            return out, core
-        h, w = om.shape
-        cs = float(d['cell_size'])
-        gox, goy = d['grid_origin']
-        rx, ry = d['robot_xyz'][:2]
-        yaw = float(d['robot_yaw'])
-        X, Y = np.meshgrid(gox + (np.arange(w) + 0.5) * cs - rx, goy + (np.arange(h) + 0.5) * cs - ry)
-        xb = np.abs(X * np.cos(yaw) + Y * np.sin(yaw))
-        yb = np.abs(-X * np.sin(yaw) + Y * np.cos(yaw))
-        hl, hw = SELF_BODY_LENGTH_M / 2.0, SELF_BODY_WIDTH_M / 2.0
-        core = (xb <= hl) & (yb <= hw)
-        ring = ~core & (xb <= hl + SELF_RING_M) & (yb <= hw + SELF_RING_M)
+        core, ring = _body_masks(d)
         out[ring & (out < 0)] = 0
         out[core] = 1
         return out, core
@@ -681,6 +720,51 @@ class MissionContext:
                         or np.nanmin(t) > t_scan[1] + 60 or np.nanmax(t) < t_scan[0] - 60):
                     ng['time'] = np.full(len(t), np.nan)
         return self._navgraph
+
+    def walked(self, upto):
+        """Celle su cui il corpo e' passato nelle scansioni 0..upto (dalla mappa del robot)."""
+        self.robot_map(upto)
+        return self._cache['robot']['state'][2]
+
+    def body_quota(self, d):
+        """
+        Quota assoluta della mappa del terreno di fine missione sulle celle della scansione d
+        che stanno sotto il corpo e non hanno quota (vedi QUOTA SOTTO IL CORPO), e la loro
+        maschera. (None, None) se non serve o non c'e'.
+        """
+        if self.final_terrain is None:
+            return None, None
+        core, _ = _body_masks(d)
+        shape = d['terrain_raw'].shape
+        hole = core & ~np.asarray(d['is_valid'], bool).reshape(shape)
+        if not hole.any():
+            return None, None
+        h, w = shape
+        cs = float(d['cell_size'])
+        gox, goy = d['grid_origin']
+        X, Y = np.meshgrid(gox + (np.arange(w) + 0.5) * cs, goy + (np.arange(h) + 0.5) * cs)
+        c = np.floor((X - self.x0) / self.res).astype(int)
+        r = np.floor((Y - self.y0) / self.res).astype(int)
+        inside = (c >= 0) & (c < self.nx) & (r >= 0) & (r < self.ny)
+        q = np.full(shape, np.nan)
+        q[inside] = self.final_terrain[r[inside], c[inside]] + self.z0
+        hole &= np.isfinite(q)
+        return (q, hole) if hole.any() else (None, None)
+
+    def mission_frame(self):
+        """
+        (x, y, yaw) del frame della missione: origine nel centro della cella (0, 0), che e' il
+        punto di partenza, e orientamento della griglia delle celle (env_origin_yaw, il muso
+        del robot alla partenza). Dalle viste PRM; senza, dalla prima scansione.
+        """
+        for _t, _n, vd in self.vis:
+            cells = _arr(vd, 'env_cells', (4,))
+            yaw = _scalar(vd, 'env_origin_yaw', np.nan)
+            k = np.flatnonzero((cells[:, 0] == 0) & (cells[:, 1] == 0)) if len(cells) else []
+            if len(k) and np.isfinite(yaw):
+                return float(cells[k[0], 2]), float(cells[k[0], 3]), float(yaw)
+        d = self.scans[0]
+        return float(d['robot_xyz'][0]), float(d['robot_xyz'][1]), float(d.get('robot_yaw', 0.0))
 
     def terrain_norm(self):
         """Scala dei colori della quota, fissa per la missione (vedi TERRAIN_PERCENTILES)."""
@@ -1121,10 +1205,35 @@ def draw_navgraph(ax, ng, t_now=None):
         ax.plot(*xy[k0[0]], 'P', color='black', mfc='gold', ms=11, zorder=8, label='wp_0 (partenza)')
 
 
-def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=False):
+def _to_mission_frame(ax, ctx, fmt_vision):
+    """
+    Ruota e trasla tutto cio' che e' disegnato su ax nel frame della missione (vedi
+    MissionContext.mission_frame): x laterale, y avanti, origine nella partenza. I dati
+    restano in VISION; cambia solo la trasformazione del disegno.
+    """
+    ox, oy, yaw = ctx.mission_frame()
+    T = Affine2D().translate(-ox, -oy).rotate(np.pi / 2 - yaw)
+    for art in list(ax.images) + list(ax.lines) + list(ax.collections) + list(ax.patches) + list(ax.texts):
+        art.set_transform(T + ax.transData)
+    x0, x1, y0, y1 = ctx.extent
+    corners = T.transform(np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]]))
+    ax.set_xlim(corners[:, 0].min(), corners[:, 0].max())
+    ax.set_ylim(corners[:, 1].min(), corners[:, 1].max())
+    inv = T.inverted()
+
+    def fmt(x, y):
+        xv, yv = inv.transform((x, y))
+        return f"missione ({x:.2f}, {y:.2f}) | VISION " + fmt_vision(xv, yv)
+    ax.format_coord = fmt
+    ax.set_xlabel("laterale [m] (frame missione: origine alla partenza)")
+    ax.set_ylabel("avanti [m]")
+
+
+def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=False, mframe=False):
     """
     Vista globale alla scansione i (o a fine missione con final=True). raw: mosaico grezzo.
-    bg: sfondo, vedi BACKGROUNDS. navgraph: disegna il nav graph (vedi load_navgraph). Restituisce l'oggetto per la barra dei colori della quota
+    bg: sfondo, vedi BACKGROUNDS. navgraph: disegna il nav graph (vedi load_navgraph).
+    mframe: frame della missione invece di VISION (vedi _to_mission_frame). Restituisce l'oggetto per la barra dei colori della quota
     (None per lo sfondo 'ostacoli').
     """
     ax.clear()
@@ -1140,7 +1249,14 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=Fals
         occ = ctx.mosaic(upto) if raw else ctx.robot_map(upto)
     height = None
     if bg != 'ostacoli':
-        height = ctx.final_terrain if (final and ctx.final_terrain is not None) else ctx.terrain(upto)
+        if final and ctx.final_terrain is not None:
+            height = ctx.final_terrain
+        else:
+            height = ctx.terrain(upto)
+            if ctx.final_terrain is not None:
+                # dove il corpo e' passato e la quota manca: quella vista dopo (QUOTA SOTTO IL CORPO)
+                fill = np.isnan(height) & ctx.walked(upto) & np.isfinite(ctx.final_terrain)
+                height[fill] = ctx.final_terrain[fill]
     mappable = None
     if bg == 'ostacoli':
         ax.imshow(occ, origin='lower', cmap=MOSAIC_CMAP, vmin=0, vmax=2, interpolation='nearest',
@@ -1226,6 +1342,8 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=Fals
     ax.set_title(f"{title}\n{legend} ('t'); quadrati rossi = blocchi ({n_blk})"
                  + (f"\ngrafo: {vis[0]}" if vis else ""), fontsize=8)
     ax.set_xlabel("X [m] (VISION)")
+    if mframe:
+        _to_mission_frame(ax, ctx, ax.format_coord)
     ax.legend(loc='upper left', fontsize=7, framealpha=0.8)
     return mappable
 
@@ -1271,6 +1389,7 @@ def main():
     out_dir = sys.argv[sys.argv.index("--png") + 1] if PNG_MODE else None
     bg0 = 'ostacoli'
     ng0 = "--navgraph" in sys.argv
+    mf0 = "--frame-missione" in sys.argv
     if "--sfondo" in sys.argv:
         bg0 = sys.argv[sys.argv.index("--sfondo") + 1]
         if bg0 not in BACKGROUNDS:
@@ -1292,10 +1411,10 @@ def main():
         os.makedirs(out_dir, exist_ok=True)
         for k, (f, d) in enumerate(zip(scan_files, scans)):
             fig, (axl, axr) = plt.subplots(1, 2, figsize=(20, 9.5))
-            im, label = draw_scan(axl, d, 5)          # maschera degli ostacoli
+            im, label = draw_scan(axl, d, 5, ctx=ctx)          # maschera degli ostacoli
             overlay_prm_local(axl, ctx, k)
             fig.colorbar(im, ax=axl, label=label, shrink=0.8)
-            draw_global(axr, ctx, k, bg=bg0, navgraph=ng0)
+            draw_global(axr, ctx, k, bg=bg0, navgraph=ng0, mframe=mf0)
             fig.tight_layout()
             fig.savefig(os.path.join(out_dir, os.path.basename(f).replace(".npz", ".png")), dpi=100)
             plt.close(fig)
@@ -1306,7 +1425,7 @@ def main():
             plt.close(fig)
         for bg in (BACKGROUNDS if scans else ()):
             fig, ax = plt.subplots(figsize=(12, 12))
-            m = draw_global(ax, ctx, len(scans) - 1, final=True, bg=bg, navgraph=ng0)
+            m = draw_global(ax, ctx, len(scans) - 1, final=True, bg=bg, navgraph=ng0, mframe=mf0)
             if m is not None:
                 _mark_zero(fig.colorbar(m, ax=ax, label="quota rispetto all'avvio missione (m)", shrink=0.7))
             fig.savefig(os.path.join(out_dir, "overview.png" if bg == 'ostacoli' else f"overview_{bg}.png"),
@@ -1318,7 +1437,7 @@ def main():
     if "--overview" in sys.argv or not scans:
         fig, ax = plt.subplots(figsize=(11, 11))
         if scans:
-            m = draw_global(ax, ctx, len(scans) - 1, final=True, bg=bg0, navgraph=ng0)
+            m = draw_global(ax, ctx, len(scans) - 1, final=True, bg=bg0, navgraph=ng0, mframe=mf0)
             if m is not None:
                 _mark_zero(fig.colorbar(m, ax=ax, label="quota rispetto all'avvio missione (m)", shrink=0.7))
         elif vis_files:
@@ -1327,11 +1446,11 @@ def main():
         return 0
 
     # I tasti del visualizzatore non devono fare anche altro: per matplotlib 'g' e' la griglia
-    # e 'o' lo strumento zoom (premendo 'o' restava attivo lo zoom).
-    for km in ('keymap.grid', 'keymap.zoom'):
-        plt.rcParams[km] = [k for k in plt.rcParams[km] if k not in ('g', 'o', 'm', 't', 'n')]
+    # e 'o' lo strumento zoom (premendo 'o' restava attivo lo zoom), 'r' la vista iniziale.
+    for km in ('keymap.grid', 'keymap.zoom', 'keymap.home'):   # 'r' e' anche "vista iniziale"
+        plt.rcParams[km] = [k for k in plt.rcParams[km] if k not in ('g', 'o', 'm', 't', 'n', 'r')]
     state = {'i': 0, 'layer': 0, 'overview': False, 'cbar': None, 'prm': True, 'raw': False,
-             'bg': bg0, 'nav': ng0, 'auto_lim': None}
+             'bg': bg0, 'nav': ng0, 'rot': mf0, 'auto_lim': None}
     fig, (ax, axg) = plt.subplots(1, 2, figsize=(18, 8.5))
     # Barra della quota del pannello destro: creata una volta sola e nascosta con lo sfondo
     # 'ostacoli'. Toglierla e rimetterla a ogni cambio rimpiccioliva il pannello ogni volta.
@@ -1343,7 +1462,7 @@ def main():
         if state['cbar'] is not None:
             state['cbar'].remove(); state['cbar'] = None
         d = scans[state['i']]
-        im, label = draw_scan(ax, d, state['layer'],
+        im, label = draw_scan(ax, d, state['layer'], ctx=ctx,
                               title_prefix=f"[{state['i'] + 1}/{len(scans)}] "
                                            f"{os.path.basename(scan_files[state['i']])}\n")
         state['cbar'] = fig.colorbar(im, ax=ax, label=label, shrink=0.8)
@@ -1354,7 +1473,7 @@ def main():
         lim = (axg.get_xlim(), axg.get_ylim())
         zoomed = state['auto_lim'] is not None and lim != state['auto_lim']
         m = draw_global(axg, ctx, state['i'], final=state['overview'], raw=state['raw'], bg=state['bg'],
-                        navgraph=state['nav'])
+                        navgraph=state['nav'], mframe=state['rot'])
         state['auto_lim'] = (axg.get_xlim(), axg.get_ylim())
         if zoomed:
             axg.set_xlim(lim[0]); axg.set_ylim(lim[1])
@@ -1380,6 +1499,9 @@ def main():
             state['raw'] = not state['raw']
         elif ev.key == 'n':
             state['nav'] = not state['nav']
+        elif ev.key == 'r':
+            state['rot'] = not state['rot']
+            state['auto_lim'] = None        # coordinate diverse: lo zoom non si conserva
         elif ev.key == 't':
             state['bg'] = BACKGROUNDS[(BACKGROUNDS.index(state['bg']) + 1) % len(BACKGROUNDS)]
         else:
@@ -1390,7 +1512,7 @@ def main():
     print("Frecce sinistra/destra: scansione | su/giu': 10 scansioni | 1-9, 0: layer a sinistra | "
           "o: a destra fine missione / momento della scansione | g: grafo a sinistra si'/no | "
           "m: a destra mappa del robot / mosaico grezzo | t: sfondo ostacoli / terreno / fusione | "
-          "n: nav graph si'/no | "
+          "n: nav graph si'/no | r: frame della missione si'/no | "
           "valore sotto il mouse in basso a destra")
     for k, layer in enumerate(LAYERS):
         print(f"  {k + 1}: {layer[0]}")
