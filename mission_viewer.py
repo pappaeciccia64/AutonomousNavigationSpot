@@ -1348,6 +1348,35 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=Fals
     return mappable
 
 
+# Posizioni [sinistra, basso, larghezza, altezza] in frazioni della finestra (vedi main).
+LAYOUT = {
+    'scan': [0.035, 0.055, 0.405, 0.835],
+    'scan_cbar': [0.447, 0.12, 0.008, 0.70],
+    'global': [0.535, 0.055, 0.405, 0.835],
+    'global_cbar': [0.947, 0.12, 0.008, 0.70],
+}
+
+
+def _maximize_window(fig):
+    """Apre la finestra massimizzata, se il backend lo permette (Qt, Tk, wx)."""
+    try:
+        mng = fig.canvas.manager
+        win = getattr(mng, 'window', None)
+        if win is None:
+            return
+        if hasattr(win, 'showMaximized'):          # Qt
+            win.showMaximized()
+        elif hasattr(win, 'state'):                # Tk
+            try:
+                win.state('zoomed')                # Windows, macOS
+            except Exception:
+                win.attributes('-zoomed', True)    # Linux
+        elif hasattr(win, 'Maximize'):             # wx
+            win.Maximize(True)
+    except Exception:
+        pass
+
+
 def _latest_mission_folder():
     """
     Senza argomenti (es. tasto Run dell'editor): l'ultima missione in MissionMap/, cercata
@@ -1449,23 +1478,33 @@ def main():
     # e 'o' lo strumento zoom (premendo 'o' restava attivo lo zoom), 'r' la vista iniziale.
     for km in ('keymap.grid', 'keymap.zoom', 'keymap.home'):   # 'r' e' anche "vista iniziale"
         plt.rcParams[km] = [k for k in plt.rcParams[km] if k not in ('g', 'o', 'm', 't', 'n', 'r')]
-    state = {'i': 0, 'layer': 0, 'overview': False, 'cbar': None, 'prm': True, 'raw': False,
+    state = {'i': 0, 'layer': 0, 'overview': False, 'prm': True, 'raw': False,
              'bg': bg0, 'nav': ng0, 'rot': mf0, 'auto_lim': None}
-    fig, (ax, axg) = plt.subplots(1, 2, figsize=(18, 8.5))
+    # Disposizione fissa (2026-10-26): i due pannelli e le loro barre dei colori in posizioni
+    # date, che usano quasi tutta la finestra. Con plt.subplots e le barre aggiunte "accanto"
+    # a schermo intero (1920 x 1080) i pannelli erano 541 x 541 px; cosi' circa 800 x 800.
+    # Le barre hanno assi propri: ridisegnarle non rimpicciolisce i pannelli.
+    fig = plt.figure(figsize=(18, 9.5))
+    ax = fig.add_axes(LAYOUT['scan'])
+    cax = fig.add_axes(LAYOUT['scan_cbar'])
+    axg = fig.add_axes(LAYOUT['global'])
+    cax_g = fig.add_axes(LAYOUT['global_cbar'])
+    for a in (ax, axg):
+        a.set_anchor('C')
+    _maximize_window(fig)
     # Barra della quota del pannello destro: creata una volta sola e nascosta con lo sfondo
-    # 'ostacoli'. Toglierla e rimetterla a ogni cambio rimpiccioliva il pannello ogni volta.
-    cbar_g = fig.colorbar(plt.cm.ScalarMappable(norm=ctx.terrain_norm(), cmap=TERRAIN_CMAP), ax=axg,
-                          label="quota rispetto all'avvio missione (m)", shrink=0.8)
+    # 'ostacoli'.
+    cbar_g = fig.colorbar(plt.cm.ScalarMappable(norm=ctx.terrain_norm(), cmap=TERRAIN_CMAP), cax=cax_g,
+                          label="quota rispetto all'avvio missione (m)")
     _mark_zero(cbar_g)
 
     def redraw():
-        if state['cbar'] is not None:
-            state['cbar'].remove(); state['cbar'] = None
         d = scans[state['i']]
         im, label = draw_scan(ax, d, state['layer'], ctx=ctx,
                               title_prefix=f"[{state['i'] + 1}/{len(scans)}] "
                                            f"{os.path.basename(scan_files[state['i']])}\n")
-        state['cbar'] = fig.colorbar(im, ax=ax, label=label, shrink=0.8)
+        cax.clear()
+        fig.colorbar(im, cax=cax, label=label)
         if state['prm']:
             overlay_prm_local(ax, ctx, state['i'])
         # Lo zoom del pannello destro resta: se i limiti sono diversi da quelli automatici del
