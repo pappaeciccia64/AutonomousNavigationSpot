@@ -855,6 +855,54 @@ def _append_csv(name, header, rows):
         print(f"[LOG] Impossibile scrivere {name}: {e}")
 
 
+# Colonne di trajectory.csv. 'move' (2026-10-26) dice che tipo di movimento ha prodotto il
+# campione: 'prm' (tratto del ciclo di navigazione), 'graphnav', 'cono', 'arretramento',
+# 'ritirata'. Fino al 2026-10-26 i movimenti diversi da 'prm' NON finivano nel file: il
+# visualizzatore univa con una retta l'ultimo punto prima di un ritorno GraphNav e il primo
+# dopo, una linea che tagliava gli ostacoli (missione del 22-10, 16:00 circa).
+_TRAJECTORY_COLUMNS = ['time', 'iteration', 'cell_row', 'cell_col', 'loop_iter', 'node_from', 'node_to',
+                       'x', 'y', 'yaw_deg', 'roll_deg', 'pitch_deg', 'target_x', 'target_y', 'move']
+
+
+def _append_trajectory(samples, move, target_xy=(np.nan, np.nan), seg_id=None):
+    """Campioni di un BodyTiltRecorder in trajectory.csv. seg_id: le 6 colonne da iteration a node_to."""
+    seg_id = list(seg_id) if seg_id is not None else [''] * 6
+    _append_csv("trajectory.csv", _TRAJECTORY_COLUMNS,
+                [[t] + seg_id + [x, y, yw, r, pt, target_xy[0], target_xy[1], move]
+                 for (t, x, y, yw, r, pt) in samples])
+
+
+class _TrajectoryLog:
+    """
+    Registra in trajectory.csv dove passa il robot durante un movimento che non e' un tratto
+    del ciclo di navigazione (GraphNav, cono, arretramenti). Mai eccezioni verso chi chiama.
+
+        with _TrajectoryLog(robot_state_client, 'graphnav', (x, y)):
+            ... movimento ...
+    """
+    def __init__(self, robot_state_client, move, target_xy=(np.nan, np.nan)):
+        self._client, self._move, self._target = robot_state_client, move, target_xy
+        self._rec = None
+
+    def __enter__(self):
+        try:
+            self._rec = BodyTiltRecorder(self._client)
+            self._rec.start()
+        except Exception:
+            self._rec = None
+        return self
+
+    def __exit__(self, *exc):
+        if self._rec is None:
+            return False
+        try:
+            self._rec.stop()
+            _append_trajectory(list(self._rec.samples), self._move, self._target)
+        except Exception as e:
+            print(f"[LOG] Traiettoria del movimento '{self._move}' non registrata: {e}")
+        return False
+
+
 def _log_segment(row_dict):
     seg_log = _MISSION_CTX.get('segment_log')
     if seg_log is not None:
@@ -1197,8 +1245,10 @@ def _graphnav_navigate_to(recordingInterface, waypoint_id, robot_state_client, c
     # fase misurata, e la fetta piu' grossa era proprio questa (83 s il solo ritorno a wp_0).
     _t_gn = time.perf_counter()
     try:
-        return _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_client,
-                                           command_client, label, timeout_s)
+        # 2026-10-26: anche i tratti GraphNav finiscono in trajectory.csv (vedi _TRAJECTORY_COLUMNS).
+        with _TrajectoryLog(robot_state_client, 'graphnav'):
+            return _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_client,
+                                               command_client, label, timeout_s)
     finally:
         _timing_add('GraphNav', time.perf_counter() - _t_gn)
 
@@ -3747,11 +3797,12 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                     MISSION_STATS['cone_moves'] += 1
                     cx, cy = cone['target']
                     need_refresh = True      # fine di un movimento: vedi REFRESH A EVENTI
-                    ok_c, dist_c, _ = navigate_to(
-                        cx, cy, robot_x, robot_y, robot_state_client, command_client,
-                        get_a_tform_b(lg_proto_up.local_grid.transforms_snapshot,
-                                      VISION_FRAME_NAME, BODY_FRAME_NAME),
-                        should_abort=None, keep_heading=False, **mobility_kwargs)
+                    with _TrajectoryLog(robot_state_client, 'cono', (cx, cy)):
+                        ok_c, dist_c, _ = navigate_to(
+                            cx, cy, robot_x, robot_y, robot_state_client, command_client,
+                            get_a_tform_b(lg_proto_up.local_grid.transforms_snapshot,
+                                          VISION_FRAME_NAME, BODY_FRAME_NAME),
+                            should_abort=None, keep_heading=False, **mobility_kwargs)
                     if dist_c > 0.05:
                         if not hasattr(env, '_traveled_arcs'):
                             env._traveled_arcs = []
@@ -3791,8 +3842,9 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                         verification_tracker.clear_path()
                     MISSION_STATS['straight_retreats'] += 1
                     need_refresh = True      # fine di un movimento: vedi REFRESH A EVENTI
-                    ok_back, dist_back = movements.move_to_world_point_without_turning(
-                        bx, by, "vision", command_client, robot_state_client, **mobility_kwargs)
+                    with _TrajectoryLog(robot_state_client, 'arretramento', (bx, by)):
+                        ok_back, dist_back = movements.move_to_world_point_without_turning(
+                            bx, by, "vision", command_client, robot_state_client, **mobility_kwargs)
                     if dist_back > 0.05:
                         if not hasattr(env, '_traveled_arcs'):
                             env._traveled_arcs = []
@@ -4444,11 +4496,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             _timing_add('movimento', move_duration)
             try:   # solo log: non deve mai interrompere la missione
                 _seg_id = [iteration, target_row, target_col, loop_iter, robot_node_id, next_node_id]
-                _append_csv("trajectory.csv",
-                            ['time', 'iteration', 'cell_row', 'cell_col', 'loop_iter', 'node_from', 'node_to',
-                             'x', 'y', 'yaw_deg', 'roll_deg', 'pitch_deg', 'target_x', 'target_y'],
-                            [[t] + _seg_id + [x, y, yw, r, pt, move_x, move_y]
-                             for (t, x, y, yw, r, pt) in getattr(tilt_recorder, 'samples', [])])
+                _append_trajectory(getattr(tilt_recorder, 'samples', []), 'prm', (move_x, move_y), _seg_id)
                 _append_csv("frontier_live.csv",
                             ['time', 'iteration', 'cell_row', 'cell_col', 'loop_iter', 'node_from', 'node_to',
                              'robot_x', 'robot_y', 'reason', 'frontier_dist', 'reachable_m', 'remaining_m',
@@ -4821,8 +4869,9 @@ def retreat_along_traveled_path(env, robot_state_client, command_client,
 
         print(f"[RITIRATA] Tratto {done + 1}/{max_segments}: rientro verso "
               f"({from_x:.2f}, {from_y:.2f}), {seg_len:.2f} m all'indietro.")
-        success, dist = movements.move_to_world_point_without_turning(
-            from_x, from_y, "vision", command_client, robot_state_client, **mobility_kwargs)
+        with _TrajectoryLog(robot_state_client, 'ritirata', (from_x, from_y)):
+            success, dist = movements.move_to_world_point_without_turning(
+                from_x, from_y, "vision", command_client, robot_state_client, **mobility_kwargs)
         total += dist
         traveled.pop()
 
