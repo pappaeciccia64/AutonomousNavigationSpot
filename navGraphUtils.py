@@ -103,8 +103,8 @@ class RecordingInterface(object):
         chiamata successiva ricomincia (prova al banco del 26-10: non riprende il lavoro).
         Senza, Spot si ferma da solo dopo ~30 s, insieme alla RPC: il 22-10 la RPC scadeva
         prima e non arrivava nessun risultato. Il limite di Spot e' approssimativo e dopo ogni
-        modifica della mappa la chiamata si allunga (4 s richiesti -> fino a 12 s): il limite
-        della RPC qui e' il doppio di timeout_s, almeno timeout_s + 15 s.
+        modifica della mappa la chiamata si allunga (4 s richiesti -> fino a 12 s; 60 s -> oltre
+        120 s una volta): il limite della RPC qui e' il triplo di timeout_s, almeno + 15 s.
         max_path_m / min_path_m: limiti sulla distanza fra i due waypoint lungo il grafo
         (max/min_loop_closure_path_length); None = valori di Spot.
         modify_map_on_server, check_collision: False solo per le misure al banco
@@ -137,7 +137,7 @@ class RecordingInterface(object):
         kwargs = {}
         if timeout_s is not None:
             params.timeout_seconds = float(timeout_s)
-            kwargs['timeout'] = max(2.0 * float(timeout_s), float(timeout_s) + 15.0)
+            kwargs['timeout'] = max(3.0 * float(timeout_s), float(timeout_s) + 15.0)
         response = self._map_processing_client.process_topology(
             params=params, modify_map_on_server=bool(modify_map_on_server), **kwargs)
         self.invalidate_graph_cache()

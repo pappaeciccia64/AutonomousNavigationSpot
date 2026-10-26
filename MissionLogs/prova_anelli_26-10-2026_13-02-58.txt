@@ -1,0 +1,45 @@
+[ANELLI-BANCO] Serie 2. Grafo /home/andrea/spotSDK/v2/AutonomousNavigationSpot/graph/Mission_22-10-2026_16-04-22/Grafo_22-10-2026_16-48-11: 388 waypoint, 416 archi
+
+[ANELLI-BANCO] --- grafo con 100 waypoint e 105 archi ---
+[ANELLI-BANCO] istantanee dei waypoint: 50 (20 s)
+[ANELLI-BANCO] istantanee dei waypoint: 100 (44 s)
+[ANELLI-BANCO] caricato in 45 s; sul robot 100 waypoint
+[ANELLI-BANCO]  100 wp  limite 2 s                                4.9 s    4 archi  PARZIALE (limite scaduto)
+[ANELLI-BANCO]  100 wp  limite 4 s                                5.0 s    4 archi  PARZIALE (limite scaduto)
+[ANELLI-BANCO]  100 wp  limite 4 s, senza ICP                     1.0 s    6 archi  FINITA
+[ANELLI-BANCO]  100 wp  limite 4 s, senza feature matching        4.4 s    3 archi  PARZIALE (limite scaduto)
+[ANELLI-BANCO]  100 wp  limite 4 s, senza ICP ne' feature         0.4 s    6 archi  FINITA
+[ANELLI-BANCO]  100 wp  limite 4 s, solo anelli oltre 8 m         3.1 s    3 archi  FINITA
+[ANELLI-BANCO]  100 wp  limite 60 s (finisce?)                   25.9 s    5 archi  FINITA
+
+[ANELLI-BANCO] --- grafo con 200 waypoint e 209 archi ---
+[ANELLI-BANCO] istantanee dei waypoint: 50 (24 s)
+[ANELLI-BANCO] istantanee dei waypoint: 100 (44 s)
+[ANELLI-BANCO] caricato in 45 s; sul robot 200 waypoint
+[ANELLI-BANCO]  200 wp  limite 2 s                                8.0 s    1 archi  PARZIALE (limite scaduto)
+[ANELLI-BANCO]  200 wp  limite 4 s                                8.2 s    1 archi  PARZIALE (limite scaduto)
+[ANELLI-BANCO]  200 wp  limite 4 s, senza ICP                     5.7 s   11 archi  PARZIALE (limite scaduto)
+[ANELLI-BANCO]  200 wp  limite 4 s, senza feature matching        5.0 s    1 archi  PARZIALE (limite scaduto)
+[ANELLI-BANCO]  200 wp  limite 4 s, senza ICP ne' feature         2.0 s   12 archi  FINITA
+[ANELLI-BANCO]  200 wp  limite 4 s, solo anelli oltre 8 m         5.7 s    1 archi  PARZIALE (limite scaduto)
+[ANELLI-BANCO]  200 wp  limite 60 s (finisce?)                  120.0 s  ERRORE TimedOutError: TimedOutError: The remote procedure call did not terminate within the allotted time.
+
+[ANELLI-BANCO] --- grafo con 388 waypoint e 416 archi ---
+[ANELLI-BANCO] istantanee dei waypoint: 50 (19 s)
+[ANELLI-BANCO] istantanee dei waypoint: 100 (39 s)
+[ANELLI-BANCO] istantanee dei waypoint: 150 (57 s)
+[ANELLI-BANCO] caricato in 73 s; sul robot 388 waypoint
+[ANELLI-BANCO]  388 wp  limite 2 s                                3.0 s    0 archi  PARZIALE (limite scaduto)
+[ANELLI-BANCO]  388 wp  limite 4 s                                6.0 s    3 archi  PARZIALE (limite scaduto)
+[ANELLI-BANCO]  388 wp  limite 4 s, senza ICP                     4.6 s   13 archi  PARZIALE (limite scaduto)
+[ANELLI-BANCO]  388 wp  limite 4 s, senza feature matching        5.4 s    2 archi  PARZIALE (limite scaduto)
+[ANELLI-BANCO]  388 wp  limite 4 s, senza ICP ne' feature         4.0 s   24 archi  FINITA
+[ANELLI-BANCO]  388 wp  limite 4 s, solo anelli oltre 8 m         9.0 s    2 archi  PARZIALE (limite scaduto)
+[ANELLI-BANCO]  388 wp  limite 60 s (finisce?)                   71.7 s   19 archi  PARZIALE (limite scaduto)
+
+[ANELLI-BANCO]  388 wp  fine missione, limite 45 s               59.3 s   17 archi  PARZIALE (limite scaduto)
+[ANELLI-BANCO]  388 wp  fine missione, limite 60 s               71.7 s   18 archi  PARZIALE (limite scaduto)
+[ANELLI-BANCO]  388 wp  fine missione, limite 90 s               90.1 s   21 archi  PARZIALE (limite scaduto)
+[ANELLI-BANCO]  388 wp  fine missione, limite 120 s             151.6 s   23 archi  PARZIALE (limite scaduto)
+[ANELLI-BANCO] Mappa del robot svuotata.
+[ANELLI-BANCO] Risultati in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionLogs/prova_anelli_26-10-2026_13-02-58.txt e .json
