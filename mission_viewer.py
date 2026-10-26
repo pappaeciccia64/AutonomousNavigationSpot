@@ -24,6 +24,8 @@ Tasti (modalita' interattiva):
     1..9, 0                      layer del pannello sinistro (vedi LAYERS)
     o                            pannello destro: fine missione <-> momento della scansione
     g                            grafo PRM sopra la scansione: mostra / nascondi
+    m                            pannello destro: mappa del robot (ostacoli confermati, default)
+                                 <-> mosaico grezzo (l'ultima scansione vince)
     il valore sotto il mouse compare in basso a destra, con le coordinate VISION
 
 File letti:
@@ -50,6 +52,25 @@ import matplotlib.patches as patches                  # noqa: E402
 import csv                                            # noqa: E402
 
 SLOPE_THRESHOLD = 0.6   # come spotGrid.SLOPE_THRESHOLD: serve solo a colorare gli archi
+
+# MAPPA GLOBALE COME LA COSTRUIVA IL ROBOT (2026-10-26). Copia di easy_walk._mask_for_global_map
+# e spotGrid.GlobalGrid.update, che qui non si possono importare (servono l'SDK di Spot).
+# Prima il pannello di destra mostrava il mosaico "l'ultima scansione vince": un ostacolo
+# letto UNA volta, anche accanto alle zampe, ricopriva le celle su cui il robot era appena
+# passato, e il percorso reale sembrava attraversare gli ostacoli, soprattutto alla fine
+# (missione del 22-10, 16:00 circa). Il robot quelle letture le scartava o le pretendeva
+# confermate. Il tasto 'm' torna al mosaico grezzo.
+SELF_BODY_LENGTH_M = 1.10      # easy_walk.GLOBAL_MAP_SELF_BODY_LENGTH_M
+SELF_BODY_WIDTH_M = 0.50       # easy_walk.GLOBAL_MAP_SELF_BODY_WIDTH_M
+SELF_RING_M = 0.25             # easy_walk.GLOBAL_MAP_SELF_RING_M
+OCC_CONFIRM_OBS = 2            # spotGrid.GLOBAL_OCC_CONFIRM_OBS
+OCC_CONFIRM_WALKED = 4         # spotGrid.GLOBAL_OCC_CONFIRM_WALKED
+OCC_MAX_COUNT = 4              # spotGrid.GLOBAL_OCC_MAX_COUNT
+
+# Due campioni consecutivi di trajectory.csv piu' lontani di cosi': in mezzo c'e' un
+# movimento non registrato (fino al 2026-10-26 GraphNav, cono e arretramenti non scrivevano
+# il file). Si disegna tratteggiato, non come percorso reale.
+TRAJ_GAP_M = 0.5
 
 REASON_COLORS = {'fine_percorso': 'tab:green', 'fine_dati': 'tab:blue', 'ostacolo': 'tab:red',
                  'rugosita': 'tab:orange', 'pendenza': 'tab:purple'}
@@ -216,6 +237,7 @@ class MissionContext:
             self.nx = int(np.ceil((x1 - self.x0) / self.res))
             self.ny = int(np.ceil((y1 - self.y0) / self.res))
         self._mosaic, self._mosaic_upto = None, -1
+        self._rmap, self._rmap_upto = None, -1     # mappa del robot: (stato, contatore, calpestate)
         self.final_map = self._load_global_map(folder)
 
     @staticmethod
@@ -263,6 +285,74 @@ class MissionContext:
                     print(f"[viewer] trajectory.csv non leggibile: {e}")
         return None
 
+    def _window(self, d):
+        """Slice della griglia comune e della scansione d per la parte che si sovrappone."""
+        gox, goy = d['grid_origin']
+        r0 = int(np.floor((goy - self.y0) / self.res))
+        c0 = int(np.floor((gox - self.x0) / self.res))
+        h, w = d['terrain_raw'].shape
+        rs, cs_ = slice(max(r0, 0), min(r0 + h, self.ny)), slice(max(c0, 0), min(c0 + w, self.nx))
+        return rs, cs_, slice(rs.start - r0, rs.stop - r0), slice(cs_.start - c0, cs_.stop - c0)
+
+    @staticmethod
+    def _robot_mask(d):
+        """
+        Come easy_walk._mask_for_global_map: -1 ostacolo, +1 libero, 0 nessuna informazione;
+        sotto il corpo libero, nell'anello attorno nessun ostacolo. Anche la maschera del corpo.
+        """
+        om = np.asarray(d['obstacle_mask']).reshape(d['terrain_raw'].shape)
+        out = np.where(om < 0, -1, np.where(np.asarray(d['is_valid'], bool), 1, 0)).astype(np.int8)
+        core = np.zeros(om.shape, bool)
+        if 'robot_yaw' not in d:
+            return out, core
+        h, w = om.shape
+        cs = float(d['cell_size'])
+        gox, goy = d['grid_origin']
+        rx, ry = d['robot_xyz'][:2]
+        yaw = float(d['robot_yaw'])
+        X, Y = np.meshgrid(gox + (np.arange(w) + 0.5) * cs - rx, goy + (np.arange(h) + 0.5) * cs - ry)
+        xb = np.abs(X * np.cos(yaw) + Y * np.sin(yaw))
+        yb = np.abs(-X * np.sin(yaw) + Y * np.cos(yaw))
+        hl, hw = SELF_BODY_LENGTH_M / 2.0, SELF_BODY_WIDTH_M / 2.0
+        core = (xb <= hl) & (yb <= hw)
+        ring = ~core & (xb <= hl + SELF_RING_M) & (yb <= hw + SELF_RING_M)
+        out[ring & (out < 0)] = 0
+        out[core] = 1
+        return out, core
+
+    def robot_map(self, upto):
+        """
+        Mappa 0/1/2 (ignoto/libero/ostacolo) delle scansioni 0..upto come la teneva il robot:
+        un ostacolo vale solo dopo OCC_CONFIRM_OBS letture consecutive (OCC_CONFIRM_WALKED sulle
+        celle su cui il corpo e' passato), e torna libero quando le letture libere lo pareggiano.
+        Mancano i dischi delle cadute e la scansione iniziale e finale (non salvate in scans/).
+        """
+        if self._rmap is None or upto < self._rmap_upto:
+            self._rmap = (np.zeros((self.ny, self.nx), np.uint8), np.zeros((self.ny, self.nx), np.int8),
+                          np.zeros((self.ny, self.nx), bool))
+            self._rmap_upto = -1
+        state, count, walked = self._rmap
+        for i in range(self._rmap_upto + 1, upto + 1):
+            d = self.scans[i]
+            m, core = self._robot_mask(d)
+            rs, cs_, sr, sc = self._window(d)
+            m, core = m[sr, sc], core[sr, sc]
+            st, cnt, wk = state[rs, cs_], count[rs, cs_], walked[rs, cs_]   # viste: scrivono nelle mappe
+            wk |= core
+            obs, free = m < 0, m > 0
+            c_obs = np.minimum(np.where(cnt >= 0, cnt + 1, 1), OCC_MAX_COUNT)
+            c_free = np.maximum(cnt - 1, -OCC_MAX_COUNT)
+            new = np.where(obs, c_obs, np.where(free, c_free, cnt)).astype(np.int8)
+            confirm = np.where(wk, OCC_CONFIRM_WALKED, OCC_CONFIRM_OBS)
+            to_obs = obs & (new >= confirm)
+            to_free = free & (new <= 0)
+            seen_new = (obs | free) & (st == 0) & ~to_obs
+            st[to_obs] = 2
+            st[to_free | seen_new] = 1
+            cnt[...] = new
+        self._rmap_upto = upto
+        return state
+
     def mosaic(self, upto):
         """Mosaico 0/1/2 (ignoto/libero/ostacolo) delle scansioni 0..upto: l'ultima vince."""
         if self._mosaic is None or upto < self._mosaic_upto:
@@ -275,12 +365,7 @@ class MissionContext:
             if 'unwritten' in d:
                 known &= ~np.asarray(d['unwritten'], bool) | (om < 0)
             val = np.where(om < 0, 2, 1).astype(np.uint8)
-            gox, goy = d['grid_origin']
-            r0 = int(np.floor((goy - self.y0) / self.res))
-            c0 = int(np.floor((gox - self.x0) / self.res))
-            h, w = om.shape
-            rs, cs_ = slice(max(r0, 0), min(r0 + h, self.ny)), slice(max(c0, 0), min(c0 + w, self.nx))
-            sub_r, sub_c = slice(rs.start - r0, rs.stop - r0), slice(cs_.start - c0, cs_.stop - c0)
+            rs, cs_, sub_r, sub_c = self._window(d)
             tgt = self._mosaic[rs, cs_]
             k = known[sub_r, sub_c]
             tgt[k] = val[sub_r, sub_c][k]
@@ -558,18 +643,33 @@ def _prebuild_global_images(ctx):
             print(f"[viewer] immagine archi di {name} non preparata: {e}")
 
 
-def draw_global(ax, ctx, i, final=False):
-    """Vista globale alla scansione i (o a fine missione con final=True)."""
+def _traj_runs(tr):
+    """
+    Spezza la traiettoria (t, x, y) dove fra due campioni consecutivi c'e' un salto oltre
+    TRAJ_GAP_M. Restituisce (tratti registrati, salti come coppie di punti).
+    """
+    if len(tr) < 2:
+        return [tr[:, 1:3]] if len(tr) else [], []
+    jump = np.hypot(np.diff(tr[:, 1]), np.diff(tr[:, 2])) > TRAJ_GAP_M
+    cuts = np.flatnonzero(jump) + 1
+    runs = [r[:, 1:3] for r in np.split(tr, cuts) if len(r)]
+    gaps = [(tr[k - 1, 1:3], tr[k, 1:3]) for k in cuts]
+    return runs, gaps
+
+
+def draw_global(ax, ctx, i, final=False, raw=False):
+    """Vista globale alla scansione i (o a fine missione con final=True). raw: mosaico grezzo."""
     ax.clear()
     upto = len(ctx.scans) - 1 if final else i
     d = ctx.scans[upto]
     t_now = float(d['time']) if 'time' in d else None
-    if final and ctx.final_map is not None:
-        # Fine missione: la mappa globale vera (vedi MissionContext._load_global_map).
+    if final and not raw and ctx.final_map is not None:
+        # Fine missione: la mappa globale salvata dal pianificatore (vedi
+        # MissionContext._load_global_map), che contiene anche le scansioni d'inizio tentativo.
         ax.imshow(ctx.final_map[0], origin='lower', cmap=MOSAIC_CMAP, vmin=0, vmax=2,
                   interpolation='nearest', extent=ctx.final_map[1], zorder=0)
     else:
-        mos = ctx.mosaic(upto)
+        mos = ctx.mosaic(upto) if raw else ctx.robot_map(upto)
         ax.imshow(mos, origin='lower', cmap=MOSAIC_CMAP, vmin=0, vmax=2, interpolation='nearest',
                   extent=[ctx.x0, ctx.x0 + ctx.nx * ctx.res, ctx.y0, ctx.y0 + ctx.ny * ctx.res], zorder=0)
 
@@ -596,8 +696,13 @@ def draw_global(ax, ctx, i, final=False):
     # traiettoria reale (trajectory.csv) o, se manca, le posizioni alle scansioni
     if ctx.traj is not None and len(ctx.traj):
         tr = ctx.traj if (final or t_now is None) else ctx.traj[ctx.traj[:, 0] <= t_now + 0.5]
-        if len(tr):
-            ax.plot(tr[:, 1], tr[:, 2], '-', color='tab:blue', lw=1.5, alpha=0.8, zorder=5, label='percorso reale')
+        runs, gaps = _traj_runs(tr)
+        for k, r in enumerate(runs):
+            ax.plot(r[:, 0], r[:, 1], '-', color='tab:blue', lw=1.5, alpha=0.8, zorder=5,
+                    label='percorso reale' if k == 0 else None)
+        for k, (a, b) in enumerate(gaps):
+            ax.plot([a[0], b[0]], [a[1], b[1]], ':', color='tab:blue', lw=1.2, alpha=0.6, zorder=5,
+                    label='tratto non registrato (GraphNav o arretramento)' if k == 0 else None)
     else:
         track = np.array([s['robot_xyz'][:2] for s in ctx.scans[:upto + 1]])
         ax.plot(track[:, 0], track[:, 1], '-', color='tab:blue', lw=1.5, alpha=0.8, zorder=5,
@@ -619,9 +724,12 @@ def draw_global(ax, ctx, i, final=False):
     ax.set_aspect('equal')
     ax.grid(alpha=0.2)
     n_blk = sum(str(s['decision_kind']) == 'blocked' for s in ctx.scans[:upto + 1])
-    title = (("Fine missione: mappa globale del pianificatore" if ctx.final_map is not None
-              else "Fine missione: mosaico delle scansioni salvate") if final
-             else f"Mosaico delle scansioni salvate, alla {upto + 1}/{len(ctx.scans)}")
+    if final and not raw and ctx.final_map is not None:
+        title = "Fine missione -- mappa globale salvata dal pianificatore ('m': mosaico grezzo)"
+    else:
+        title = ("Fine missione" if final else f"Mappa globale alla scansione {upto + 1}/{len(ctx.scans)}")
+        title += (" -- mosaico grezzo, l'ultima scansione vince ('m')" if raw
+                  else " -- mappa del robot, ostacoli confermati ('m')")
     ax.set_title(f"{title}\nrosso = ostacolo visto, verde chiaro = libero, bianco = mai visto; "
                  f"quadrati rossi = blocchi ({n_blk})" + (f"\ngrafo: {vis[0]}" if vis else ""), fontsize=8)
     ax.set_xlabel("X [m] (VISION)")
@@ -711,7 +819,7 @@ def main():
         plt.show()
         return 0
 
-    state = {'i': 0, 'layer': 0, 'overview': False, 'cbar': None, 'prm': True}
+    state = {'i': 0, 'layer': 0, 'overview': False, 'cbar': None, 'prm': True, 'raw': False}
     fig, (ax, axg) = plt.subplots(1, 2, figsize=(18, 8.5))
 
     def redraw():
@@ -724,7 +832,7 @@ def main():
         state['cbar'] = fig.colorbar(im, ax=ax, label=label, shrink=0.8)
         if state['prm']:
             overlay_prm_local(ax, ctx, state['i'])
-        draw_global(axg, ctx, state['i'], final=state['overview'])
+        draw_global(axg, ctx, state['i'], final=state['overview'], raw=state['raw'])
         fig.canvas.draw_idle()
 
     def on_key(ev):
@@ -742,6 +850,8 @@ def main():
             state['overview'] = not state['overview']
         elif ev.key == 'g':
             state['prm'] = not state['prm']
+        elif ev.key == 'm':
+            state['raw'] = not state['raw']
         else:
             return
         redraw()
@@ -749,6 +859,7 @@ def main():
     fig.canvas.mpl_connect('key_press_event', on_key)
     print("Frecce sinistra/destra: scansione | su/giu': 10 scansioni | 1-9, 0: layer a sinistra | "
           "o: a destra fine missione / momento della scansione | g: grafo a sinistra si'/no | "
+          "m: a destra mappa del robot / mosaico grezzo | "
           "valore sotto il mouse in basso a destra")
     for k, layer in enumerate(LAYERS):
         print(f"  {k + 1}: {layer[0]}")
