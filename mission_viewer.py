@@ -13,6 +13,7 @@ easy_walk.py): salva i dati grezzi, e le figure si fanno qui, dopo.
     python3 mission_viewer.py <cartella_missione> --png <dir>  # esporta tutte le figure in PNG
     python3 mission_viewer.py <cartella_missione> --overview   # solo il riepilogo della missione
     ... --sfondo terreno | fusione                             # sfondo iniziale del pannello globale
+    ... --navgraph                                             # nav graph visibile dall'inizio
 
 Tasti (modalita' interattiva):
     A sinistra la scansione (layer a scelta), a destra la MAPPA GLOBALE in quel momento:
@@ -29,6 +30,9 @@ Tasti (modalita' interattiva):
                                  <-> mosaico grezzo (l'ultima scansione vince)
     t                            sfondo del pannello destro: ostacoli -> terreno -> fusione
                                  (terreno colorato per quota, ostacoli in rosso sopra)
+    n                            nav graph di GraphNav sul pannello destro: mostra / nascondi
+                                 (serve l'SDK di Spot per leggerlo, vedi NAV GRAPH)
+    lo zoom del pannello destro resta quando si cambia scansione o sfondo
     il valore sotto il mouse compare in basso a destra, con le coordinate VISION
 
 File letti:
@@ -95,6 +99,21 @@ HILLSHADE_STRENGTH = 0.45               # 0 = niente ombreggiatura del rilievo
 # Le mappe si costruiscono scansione per scansione; tornando indietro si riparte dall'ultima
 # copia salvata invece che dalla prima scansione (343 scansioni nella missione del 22-10 16:04).
 CHECKPOINT_EVERY = 25
+
+# NAV GRAPH (2026-10-26), tasto 'n'. Il grafo GraphNav scaricato a fine missione in
+# graph/<missione>/Grafo_*/: per ogni waypoint la posizione e' quella del corpo nel frame
+# VISION quando il waypoint e' stato creato (dallo snapshot), cioe' lo stesso frame della
+# mappa. Dagli snapshot (558 MB nella missione del 22-10 16:04, quasi tutto nuvole di punti)
+# si legge solo lo stato del robot, senza decodificare il resto: 0.3 s invece di 51.
+# Leggere il formato di Boston Dynamics richiede l'SDK (bosdyn); senza, il tasto non fa nulla.
+NAVGRAPH_EDGE_STYLE = {    # origine dell'arco -> (colore, spessore, tratto, etichetta)
+    'EDGE_SOURCE_ODOMETRY': ('#303030', 0.9, '-', 'nav graph: arco registrato'),
+    'EDGE_SOURCE_USER_REQUEST': ('deepskyblue', 1.2, '-', 'nav graph: scorciatoia nostra'),
+    'EDGE_SOURCE_LOCALIZATION': ('darkviolet', 1.2, '--', "nav graph: chiusura d'anello"),
+    'EDGE_SOURCE_SMALL_LOOP_CLOSURE': ('darkviolet', 1.2, '--', "nav graph: chiusura d'anello"),
+    'EDGE_SOURCE_ALTERNATE_ROUTE_FINDING': ('darkviolet', 1.2, '--', "nav graph: chiusura d'anello"),
+}
+NAVGRAPH_OTHER_STYLE = ('gray', 0.9, ':', 'nav graph: altro arco')
 
 REASON_COLORS = {'fine_percorso': 'tab:green', 'fine_dati': 'tab:blue', 'ostacolo': 'tab:red',
                  'rugosita': 'tab:orange', 'pendenza': 'tab:purple'}
@@ -238,6 +257,111 @@ def draw_vis_bundle(ax, d):
 MOSAIC_CMAP = ListedColormap(['#ffffff', '#dfe8d8', '#d62728'])   # ignoto, libero, ostacolo
 
 
+def _navgraph_folder(folder):
+    """graph/<missione>/Grafo_* piu' recente, cercato accanto a MissionMap/ e a questo file."""
+    name = os.path.basename(os.path.normpath(folder))
+    bases = {os.path.dirname(os.path.dirname(os.path.abspath(folder))),
+             os.path.dirname(os.path.abspath(__file__))}
+    cands = []
+    for b in bases:
+        cands += [d for d in glob.glob(os.path.join(b, "graph", name, "Grafo_*")) if os.path.isdir(d)]
+    return max(cands, key=lambda d: os.path.basename(d)) if cands else None
+
+
+def _proto_field(buf, number):
+    """
+    Il campo `number` (length-delimited) al primo livello di un messaggio protobuf serializzato,
+    senza decodificare gli altri: negli snapshot dei waypoint permette di saltare le nuvole di
+    punti. None se non c'e'.
+    """
+    def varint(i):
+        r = sh = 0
+        while True:
+            c = buf[i]; i += 1
+            r |= (c & 0x7f) << sh; sh += 7
+            if c < 0x80:
+                return r, i
+    i = 0
+    while i < len(buf):
+        tag, i = varint(i)
+        f, wt = tag >> 3, tag & 7
+        if wt == 2:
+            n, i = varint(i)
+            if f == number:
+                return buf[i:i + n]
+            i += n
+        elif wt == 0:
+            _, i = varint(i)
+        elif wt == 1:
+            i += 8
+        elif wt == 5:
+            i += 4
+        else:
+            return None
+    return None
+
+
+def load_navgraph(folder):
+    """
+    Il nav graph della missione: dict con 'names', 'xy' (N, 2) in VISION, 'time' (N,) istante
+    di creazione (orologio del robot), 'edges' (M, 2) indici, 'source' (M,) origine dell'arco,
+    'folder'. None se il grafo manca o non c'e' l'SDK per leggerlo.
+    """
+    gdir = _navgraph_folder(folder)
+    if gdir is None:
+        print("[viewer] nav graph: nessuna cartella graph/<missione>/Grafo_* per questa missione.")
+        return None
+    try:
+        from bosdyn.api.graph_nav import map_pb2
+        from bosdyn.api import robot_state_pb2
+        from bosdyn.client.frame_helpers import get_a_tform_b
+    except Exception:
+        print("[viewer] nav graph: per leggerlo serve l'SDK di Spot (bosdyn-client), qui non c'e'.")
+        return None
+    try:
+        g = map_pb2.Graph()
+        with open(os.path.join(gdir, "graph"), 'rb') as f:
+            g.ParseFromString(f.read())
+        fn = map_pb2.WaypointSnapshot.DESCRIPTOR.fields_by_name['robot_state'].number
+        ids, names, xy, times = [], [], [], []
+        for w in g.waypoints:
+            path = os.path.join(gdir, "waypoint_snapshots", w.snapshot_id)
+            if not os.path.exists(path):
+                continue
+            with open(path, 'rb') as f:
+                raw = _proto_field(f.read(), fn)
+            if raw is None:
+                continue
+            rs = robot_state_pb2.RobotState()
+            rs.ParseFromString(raw)
+            ks = rs.kinematic_state
+            p = get_a_tform_b(ks.transforms_snapshot, 'vision', 'body')
+            if p is None:
+                continue
+            ids.append(w.id); names.append(w.annotations.name or w.id[:12])
+            xy.append((p.x, p.y))
+            ts = ks.acquisition_timestamp
+            times.append(ts.seconds + ts.nanos * 1e-9 if ts.seconds else np.nan)
+        index = {k: n for n, k in enumerate(ids)}
+        edges, source = [], []
+        for e in g.edges:
+            a, b = index.get(e.id.from_waypoint), index.get(e.id.to_waypoint)
+            if a is None or b is None:
+                continue
+            edges.append((a, b))
+            try:
+                source.append(map_pb2.Edge.EdgeSource.Name(e.annotations.edge_source))
+            except Exception:
+                source.append('')
+        print(f"[viewer] nav graph: {len(ids)} waypoint, {len(edges)} archi ({os.path.basename(gdir)}).")
+        return {'names': np.array(names), 'xy': np.array(xy, float).reshape(-1, 2),
+                'time': np.array(times, float), 'edges': np.array(edges, int).reshape(-1, 2),
+                'source': np.array(source), 'folder': gdir}
+    except Exception as e:
+        print(f"[viewer] nav graph non leggibile ({gdir}): {e}")
+        return None
+
+
 class MissionContext:
     """Dati di tutta la missione, caricati una volta: scansioni, viste PRM, traiettoria."""
 
@@ -256,6 +380,8 @@ class MissionContext:
         self.final_map = self.final_terrain = None
         self._cache = {}
         self._terrain_norm = None
+        self._folder = folder
+        self._navgraph = False          # False = non ancora letto, None = non disponibile
         if not scans:
             return
         # Griglia comune: tutte le scansioni piu' le mappe salvate a fine missione (che
@@ -464,6 +590,21 @@ class MissionContext:
         hsum, hn = self._build('terrain', upto, self._zeros(np.float64, np.uint32), step)
         with np.errstate(invalid='ignore', divide='ignore'):
             return np.where(hn > 0, hsum / np.maximum(hn, 1), np.nan) - self.z0
+
+    def navgraph(self):
+        """Il nav graph (vedi load_navgraph), letto alla prima richiesta."""
+        if self._navgraph is False:
+            self._navgraph = load_navgraph(self._folder)
+            ng = self._navgraph
+            if ng is not None and self.scans:
+                # Se l'orologio del robot non e' confrontabile con quello delle scansioni,
+                # niente filtro per istante: si mostra sempre tutto il grafo.
+                t = ng['time']
+                t_scan = [float(d['time']) for d in (self.scans[0], self.scans[-1]) if 'time' in d]
+                if (not np.isfinite(t).any() or len(t_scan) < 2
+                        or np.nanmin(t) > t_scan[1] + 60 or np.nanmax(t) < t_scan[0] - 60):
+                    ng['time'] = np.full(len(t), np.nan)
+        return self._navgraph
 
     def terrain_norm(self):
         """Scala dei colori della quota, fissa per la missione (vedi TERRAIN_PERCENTILES)."""
@@ -794,11 +935,20 @@ def _background_rgb(occ, height, mode, norm, res):
     return rgb
 
 
-def _hover_global(ax, ctx, occ, height):
-    """Coordinate, stato della cella e quota sotto il mouse nel pannello globale."""
+def _hover_global(ax, ctx, occ, height, ng=None):
+    """Coordinate, stato della cella, quota e waypoint vicino sotto il mouse nel pannello globale."""
     names = {0: 'mai vista', 1: 'libera', 2: 'OSTACOLO'}
 
     def fmt(x, y):
+        out = _fmt_cell(x, y)
+        if ng is not None and len(ng['xy']):
+            dist = np.hypot(ng['xy'][:, 0] - x, ng['xy'][:, 1] - y)
+            k = int(np.argmin(dist))
+            if dist[k] < 0.3:
+                out += f" | {ng['names'][k]}"
+        return out
+
+    def _fmt_cell(x, y):
         c, r = int(np.floor((x - ctx.x0) / ctx.res)), int(np.floor((y - ctx.y0) / ctx.res))
         out = f"x={x:.2f} y={y:.2f}"
         if 0 <= r < ctx.ny and 0 <= c < ctx.nx:
@@ -811,10 +961,37 @@ def _hover_global(ax, ctx, occ, height):
     ax.format_coord = fmt
 
 
-def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli'):
+def draw_navgraph(ax, ng, t_now=None):
+    """Nav graph sul pannello globale; con t_now solo i waypoint gia' creati a quell'istante."""
+    shown = np.ones(len(ng['xy']), bool)
+    if t_now is not None and np.isfinite(ng['time']).any():
+        shown = ~(ng['time'] > t_now + 1.0)
+    xy, e = ng['xy'], ng['edges']
+    keep = shown[e[:, 0]] & shown[e[:, 1]] if len(e) else np.zeros(0, bool)
+    styles = {}
+    for (a, b), src in zip(e[keep], ng['source'][keep]):
+        styles.setdefault(NAVGRAPH_EDGE_STYLE.get(src, NAVGRAPH_OTHER_STYLE), []).append((xy[a], xy[b]))
+    for (col, lw, ls, lab), segs in styles.items():
+        ax.add_collection(LineCollection(segs, colors=col, linewidths=lw, linestyles=ls, zorder=3,
+                                         label=lab))
+    names = ng['names']
+    ours = shown & np.char.startswith(names.astype(str), 'wp_')
+    auto = shown & ~ours
+    if auto.any():
+        ax.plot(xy[auto, 0], xy[auto, 1], '.', color='dimgray', ms=3, zorder=3,
+                label='waypoint automatici di GraphNav')
+    if ours.any():
+        ax.plot(xy[ours, 0], xy[ours, 1], 'o', color='black', mfc='white', ms=3.5, mew=0.8, zorder=3,
+                label='waypoint della missione (briciole, celle)')
+    k0 = np.flatnonzero(shown & (names == 'wp_0'))
+    if len(k0):
+        ax.plot(*xy[k0[0]], 'P', color='black', mfc='gold', ms=11, zorder=8, label='wp_0 (partenza)')
+
+
+def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=False):
     """
     Vista globale alla scansione i (o a fine missione con final=True). raw: mosaico grezzo.
-    bg: sfondo, vedi BACKGROUNDS. Restituisce l'oggetto per la barra dei colori della quota
+    bg: sfondo, vedi BACKGROUNDS. navgraph: disegna il nav graph (vedi load_navgraph). Restituisce l'oggetto per la barra dei colori della quota
     (None per lo sfondo 'ostacoli').
     """
     ax.clear()
@@ -840,7 +1017,10 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli'):
         ax.imshow(_background_rgb(occ, height, bg, norm, ctx.res), origin='lower',
                   interpolation='nearest', extent=ctx.extent, zorder=0)
         mappable = plt.cm.ScalarMappable(norm=norm, cmap=TERRAIN_CMAP)
-    _hover_global(ax, ctx, occ, height)
+    ng = ctx.navgraph() if navgraph else None
+    if ng is not None:
+        draw_navgraph(ax, ng, None if final else t_now)
+    _hover_global(ax, ctx, occ, height, ng)
 
     vis = ctx.vis_before(None if final else t_now)
     vd = vis[1] if vis else None
@@ -874,7 +1054,8 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli'):
                     zorder=5, path_effects=halo, label=None if lab in labelled else lab)
             labelled.add(lab)
         for k, (a, b) in enumerate(gaps):
-            ax.plot([a[0], b[0]], [a[1], b[1]], ':', color='tab:blue', lw=1.2, zorder=5, path_effects=halo,
+            # senza bordo bianco: sotto un tratteggio il bordo continuo lo fa sembrare una linea piena
+            ax.plot([a[0], b[0]], [a[1], b[1]], linestyle=(0, (1.5, 2.5)), color='navy', lw=1.3, zorder=5,
                     label='tratto non registrato (GraphNav o arretramento)' if k == 0 else None)
     else:
         track = np.array([s['robot_xyz'][:2] for s in ctx.scans[:upto + 1]])
@@ -955,6 +1136,7 @@ def main():
         target = by_name
     out_dir = sys.argv[sys.argv.index("--png") + 1] if PNG_MODE else None
     bg0 = 'ostacoli'
+    ng0 = "--navgraph" in sys.argv
     if "--sfondo" in sys.argv:
         bg0 = sys.argv[sys.argv.index("--sfondo") + 1]
         if bg0 not in BACKGROUNDS:
@@ -979,7 +1161,7 @@ def main():
             im, label = draw_scan(axl, d, 5)          # maschera degli ostacoli
             overlay_prm_local(axl, ctx, k)
             fig.colorbar(im, ax=axl, label=label, shrink=0.8)
-            draw_global(axr, ctx, k, bg=bg0)
+            draw_global(axr, ctx, k, bg=bg0, navgraph=ng0)
             fig.tight_layout()
             fig.savefig(os.path.join(out_dir, os.path.basename(f).replace(".npz", ".png")), dpi=100)
             plt.close(fig)
@@ -990,7 +1172,7 @@ def main():
             plt.close(fig)
         for bg in (BACKGROUNDS if scans else ()):
             fig, ax = plt.subplots(figsize=(12, 12))
-            m = draw_global(ax, ctx, len(scans) - 1, final=True, bg=bg)
+            m = draw_global(ax, ctx, len(scans) - 1, final=True, bg=bg, navgraph=ng0)
             if m is not None:
                 fig.colorbar(m, ax=ax, label="quota rispetto all'avvio missione (m)", shrink=0.7)
             fig.savefig(os.path.join(out_dir, "overview.png" if bg == 'ostacoli' else f"overview_{bg}.png"),
@@ -1002,7 +1184,7 @@ def main():
     if "--overview" in sys.argv or not scans:
         fig, ax = plt.subplots(figsize=(11, 11))
         if scans:
-            m = draw_global(ax, ctx, len(scans) - 1, final=True, bg=bg0)
+            m = draw_global(ax, ctx, len(scans) - 1, final=True, bg=bg0, navgraph=ng0)
             if m is not None:
                 fig.colorbar(m, ax=ax, label="quota rispetto all'avvio missione (m)", shrink=0.7)
         elif vis_files:
@@ -1013,9 +1195,9 @@ def main():
     # I tasti del visualizzatore non devono fare anche altro: per matplotlib 'g' e' la griglia
     # e 'o' lo strumento zoom (premendo 'o' restava attivo lo zoom).
     for km in ('keymap.grid', 'keymap.zoom'):
-        plt.rcParams[km] = [k for k in plt.rcParams[km] if k not in ('g', 'o', 'm', 't')]
+        plt.rcParams[km] = [k for k in plt.rcParams[km] if k not in ('g', 'o', 'm', 't', 'n')]
     state = {'i': 0, 'layer': 0, 'overview': False, 'cbar': None, 'prm': True, 'raw': False,
-             'bg': bg0}
+             'bg': bg0, 'nav': ng0, 'auto_lim': None}
     fig, (ax, axg) = plt.subplots(1, 2, figsize=(18, 8.5))
     # Barra della quota del pannello destro: creata una volta sola e nascosta con lo sfondo
     # 'ostacoli'. Toglierla e rimetterla a ogni cambio rimpiccioliva il pannello ogni volta.
@@ -1032,7 +1214,15 @@ def main():
         state['cbar'] = fig.colorbar(im, ax=ax, label=label, shrink=0.8)
         if state['prm']:
             overlay_prm_local(ax, ctx, state['i'])
-        m = draw_global(axg, ctx, state['i'], final=state['overview'], raw=state['raw'], bg=state['bg'])
+        # Lo zoom del pannello destro resta: se i limiti sono diversi da quelli automatici del
+        # disegno precedente li ha cambiati l'utente, e si rimettono dopo il ridisegno.
+        lim = (axg.get_xlim(), axg.get_ylim())
+        zoomed = state['auto_lim'] is not None and lim != state['auto_lim']
+        m = draw_global(axg, ctx, state['i'], final=state['overview'], raw=state['raw'], bg=state['bg'],
+                        navgraph=state['nav'])
+        state['auto_lim'] = (axg.get_xlim(), axg.get_ylim())
+        if zoomed:
+            axg.set_xlim(lim[0]); axg.set_ylim(lim[1])
         cbar_g.ax.set_visible(m is not None)
         fig.canvas.draw_idle()
 
@@ -1053,6 +1243,8 @@ def main():
             state['prm'] = not state['prm']
         elif ev.key == 'm':
             state['raw'] = not state['raw']
+        elif ev.key == 'n':
+            state['nav'] = not state['nav']
         elif ev.key == 't':
             state['bg'] = BACKGROUNDS[(BACKGROUNDS.index(state['bg']) + 1) % len(BACKGROUNDS)]
         else:
@@ -1063,6 +1255,7 @@ def main():
     print("Frecce sinistra/destra: scansione | su/giu': 10 scansioni | 1-9, 0: layer a sinistra | "
           "o: a destra fine missione / momento della scansione | g: grafo a sinistra si'/no | "
           "m: a destra mappa del robot / mosaico grezzo | t: sfondo ostacoli / terreno / fusione | "
+          "n: nav graph si'/no | "
           "valore sotto il mouse in basso a destra")
     for k, layer in enumerate(LAYERS):
         print(f"  {k + 1}: {layer[0]}")
