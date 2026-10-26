@@ -540,12 +540,19 @@ GRAPHNAV_MAX_BACKTRACK_HOPS = 3          # poi si rimanda la cella e si passa al
 # <= 0.15): 0.30 + 0.15 = 0.45 m dall'ostacolo, largo perche' gli archi sono lunghi.
 GRAPHNAV_SHORTCUTS = True
 GRAPHNAV_SDK_LOOP_CLOSURE = True
-# Tempo massimo di elaborazione LATO SPOT della chiusura d'anello, prima di ogni spostamento
-# GraphNav e prima del ritorno a wp_0. Allo scadere Spot restituisce gli archi trovati fino a
-# li' e la chiamata successiva prosegue (map_processing.proto, Params.timeout_seconds). Il
-# 22-10 16:04, senza limite, Spot usava il suo default di 45 s, la RPC si arrendeva a 30 s:
-# 20 timeout, 603 s di attesa, nessun risultato.
-GRAPHNAV_SDK_LOOP_BUDGET_S = 4.0
+# Tempo massimo di elaborazione LATO SPOT della chiusura d'anello (Params.timeout_seconds):
+# allo scadere Spot restituisce gli archi trovati fino a li'. 0 = non chiamarla.
+#   _BUDGET_S       prima di ogni spostamento GraphNav: SPENTA (0).
+#   _BUDGET_FINAL_S una volta, a fine missione, prima dell'ancoraggio e del ritorno a wp_0.
+# Prova al banco del 26-10 sul grafo del 22-10 16:04 (388 waypoint, prova_anelli.py): senza
+# limite Spot si ferma da solo dopo ~30 s, insieme alla RPC (da qui i 20 timeout senza
+# risultato del 22-10); il limite e' approssimativo (4 s -> 5-6 s, 20 s -> 22 s); ~0.5 archi
+# al secondo, mai finita. Chiamate ripetute da 4 s NON riprendono il lavoro: 3, 1, 1, 1 archi
+# in 5.2, 7.0, 7.3, 12.3 s, poi la RPC scaduta. Prima di ogni spostamento costerebbe 5-12 s
+# per ~1 arco; le scorciatoie dalla mappa globale ne danno di piu' (25 il 22-10). Una volta a
+# fine missione, 20 s -> 12 archi verificati sulle scansioni: servono soprattutto
+# all'ancoraggio della mappa scaricata (correggono la deriva).
+GRAPHNAV_SDK_LOOP_BUDGET_S = 0.0
 GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S = 20.0
 # Limiti sulla distanza lungo il grafo fra i due waypoint di un anello candidato
 # (max/min_loop_closure_path_length). None = valori di Spot. Da scegliere con prova_anelli.py.
@@ -1226,7 +1233,7 @@ def plan_graphnav_shortcuts(poses, base_edges, start_id, goal_id, global_map,
 
 
 def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, sdk=True,
-                           target_wp_id=None, robot_xy=None):
+                           target_wp_id=None, robot_xy=None, sdk_budget_s=None):
     """
     Aggiunge scorciatoie al grafo GraphNav prima di uno spostamento (vedi GRAPHNAV_SHORTCUTS).
     Non solleva mai: senza scorciatoie GraphNav funziona lo stesso, sulla catena.
@@ -1242,6 +1249,8 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, sdk=Tru
                    plan_graphnav_shortcuts).
       sdk       -- la chiusura d'anello di Spot: da chiamare DOPO stop_recording (si salta da
                    sola se si sta registrando), con qualche tentativo su MapModifiedError.
+                   sdk_budget_s: limite lato Spot; None = GRAPHNAV_SDK_LOOP_BUDGET_S (oggi 0,
+                   cioe' non chiamarla: vedi GRAPHNAV_SDK_LOOP_BUDGET_S).
     """
     if not GRAPHNAV_SHORTCUTS or recordingInterface is None:
         return 0
@@ -1288,8 +1297,8 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, sdk=Tru
             if added:
                 recordingInterface.invalidate_graph_cache()
     n_sdk = 0
-    if sdk and GRAPHNAV_SDK_LOOP_CLOSURE and recording is not True:
-        budget = GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S if 'wp_0' in label else GRAPHNAV_SDK_LOOP_BUDGET_S
+    budget = GRAPHNAV_SDK_LOOP_BUDGET_S if sdk_budget_s is None else sdk_budget_s
+    if sdk and GRAPHNAV_SDK_LOOP_CLOSURE and budget > 0 and recording is not True:
         for attempt in range(1, 4):
             try:
                 t0 = time.perf_counter()
@@ -1690,6 +1699,7 @@ def mission_switches():
         'easy_walk.GRAPHNAV_PRECHECK': GRAPHNAV_PRECHECK,
         'easy_walk.GRAPHNAV_SDK_LOOP_CLOSURE': GRAPHNAV_SDK_LOOP_CLOSURE,
         'easy_walk.GRAPHNAV_SDK_LOOP_BUDGET_S': GRAPHNAV_SDK_LOOP_BUDGET_S,
+        'easy_walk.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S': GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S,
         'easy_walk.GRAPHNAV_SDK_LOOP_MAX_PATH_M': GRAPHNAV_SDK_LOOP_MAX_PATH_M,
         'easy_walk.SAVE_SCAN_BUNDLES': SAVE_SCAN_BUNDLES,
         'easy_walk.SAVE_EXTRA_LAYERS': list(SAVE_EXTRA_LAYERS),
@@ -5356,6 +5366,11 @@ def easy_walk(options):
                                map_edges=True, sdk=False, target_wp_id=_wp0_id, robot_xy=_xy_end)
         recordingInterface.auto_close_loops(True, False)
         recordingInterface.stop_recording()
+        # Chiusura d'anello di Spot una volta sola, PRIMA dell'ancoraggio: i suoi archi,
+        # verificati sulle scansioni, correggono la deriva della mappa scaricata e accorciano
+        # il ritorno (vedi GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S).
+        graphnav_add_shortcuts(recordingInterface, "chiusura della mappa", map_edges=False,
+                               sdk=True, sdk_budget_s=GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S)
         recordingInterface.optimize_anchoring()
         _t_close['chiusura mappa e ancoraggio'] = time.perf_counter() - _t
 

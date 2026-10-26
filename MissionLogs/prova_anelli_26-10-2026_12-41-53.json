@@ -1,0 +1,68 @@
+{
+ "grafo": "/home/andrea/spotSDK/v2/AutonomousNavigationSpot/graph/Mission_22-10-2026_16-04-22/Grafo_22-10-2026_16-48-11",
+ "waypoint": 388,
+ "archi": 416,
+ "prove": [
+  {
+   "prova": "A. come giovedi', senza limite",
+   "secondi": 32.0,
+   "archi": 15,
+   "parziale": true
+  },
+  {
+   "prova": "B. limite 4 s",
+   "secondi": 6.0,
+   "archi": 3,
+   "parziale": true
+  },
+  {
+   "prova": "C. limite 4 s, strada <= 20 m",
+   "secondi": 4.4,
+   "archi": 3,
+   "parziale": true
+  },
+  {
+   "prova": "D. limite 4 s, senza collisioni",
+   "secondi": 5.6,
+   "archi": 3,
+   "parziale": true
+  },
+  {
+   "prova": "E. limite 20 s (ritorno a wp_0)",
+   "secondi": 22.0,
+   "archi": 12,
+   "parziale": true
+  }
+ ],
+ "caricamento_s": 200.0,
+ "ripetute": [
+  {
+   "chiamata": 1,
+   "secondi": 5.2,
+   "archi": 3,
+   "parziale": true
+  },
+  {
+   "chiamata": 2,
+   "secondi": 7.0,
+   "archi": 1,
+   "parziale": true
+  },
+  {
+   "chiamata": 3,
+   "secondi": 7.3,
+   "archi": 1,
+   "parziale": true
+  },
+  {
+   "chiamata": 4,
+   "secondi": 12.3,
+   "archi": 1,
+   "parziale": true
+  },
+  {
+   "chiamata": 5,
+   "errore": "TimedOutError: TimedOutError: The remote procedure call did not terminate within the allotted time."
+  }
+ ]
+}
