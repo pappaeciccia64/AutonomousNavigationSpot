@@ -41,7 +41,7 @@ Prova all'aperto: 8 × 8 celle da 2 m, 59 celle su 64 in 42 minuti, nessuna cadu
 - Statistiche nuove: `goals_refused`, `goals_unreachable`, `arrivals_near_goal`, `backtracks_in_place`; riga `[CONFIG] SCELTA OBIETTIVO` all'avvio.
 
 ### Dati nel repository
-- **Le 13 missioni di validazione sono su GitHub** (le 10 di `test_replay.py --tutte` e le tre del 22-10): log e CSV, `scans/`, `global_occupancy_map.pkl`, `global_terrain_map.pkl` (pendenze) e la mappa GraphNav completa (`graph`, `waypoint_snapshots/`, `edge_snapshots/`), che si può ricaricare sul robot (vedi `prova_anelli.py`). In tutto circa 1.75 GB; mancano solo i file salvati a ogni iterazione (`iteration_*`). Aggiunte con `git add -f`: `MissionLogs/` e `MissionMap/` restano ignorate, quindi le missioni nuove non entrano da sole.
+- **Le 13 missioni di validazione sono su GitHub** (le 10 di `test_replay.py --tutte` e le tre del 22-10): log e CSV, `scans/`, `global_occupancy_map.pkl`, `global_terrain_map.pkl` (pendenze) e la mappa GraphNav completa (`graph`, `waypoint_snapshots/`, `edge_snapshots/`), che si può ricaricare sul robot (vedi `prova_anelli.py`). Anche le viste del pianificatore (`*_vis.npz`, 390 file, 340 MB) per il visualizzatore. In tutto circa 2.1 GB; mancano solo gli altri file salvati a ogni iterazione (`iteration_*.npy`, `*_BLOCKED_*.npz`). Aggiunte con `git add -f`: `MissionLogs/` e `MissionMap/` restano ignorate, quindi le missioni nuove non entrano da sole.
 
 ### Da discutere
 - **Erba alta**: Spot segna i ciuffi (+0.15/+0.45 m sul suolo) come ostacoli; 25% della mappa occupata, celle (4,6), (7,2), (7,3), (7,4), (7,7) non raggiunte.
