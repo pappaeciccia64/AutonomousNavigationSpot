@@ -544,7 +544,7 @@ GRAPHNAV_SDK_LOOP_CLOSURE = True
 # Tempo massimo di elaborazione LATO SPOT della chiusura d'anello (Params.timeout_seconds):
 # allo scadere Spot restituisce gli archi trovati fino a li'. 0 = non chiamarla.
 #   _BUDGET_S       prima di ogni spostamento GraphNav, in modalita' VELOCE (_FAST: senza ICP
-#                   ne' feature matching);
+#                   ne' feature matching). SPENTA dal 26-10 sera (vedi sotto);
 #   _BUDGET_FINAL_S una volta, a fine missione, prima dell'ancoraggio e del ritorno a wp_0,
 #                   completa (con ICP).
 # Prove al banco del 26-10 sul grafo del 22-10 16:04 ricostruito a 100/200/388 waypoint
@@ -559,14 +559,21 @@ GRAPHNAV_SDK_LOOP_CLOSURE = True
 #   - a fine missione, completa: 45 s -> 17 archi in 59 s, 60 -> 18 in 72 s, 90 -> 21 in 90 s,
 #     120 -> 23 in 152 s. Oltre 45 s ~1 arco ogni 10-15 s. Questi archi correggono la deriva
 #     della mappa scaricata (ancoraggio).
-# Non misurato: chiamate VELOCI ripetute su una mappa che cambia (la completa rallentava).
-GRAPHNAV_SDK_LOOP_BUDGET_S = 3.0
+# Prova all'aperto del 26-10 15:11: veloce 0.0-2.0 s a viaggio, 13 archi; la completa finale
+# 2 archi. Serie 3 al banco sul grafo di quella missione: la completa finisce in 62-71 s con
+# 0 archi, con o senza prune_edges, con 45 o 90 s. Spot cerca coppie vicine nello spazio ma
+# LONTANE lungo il grafo, e gli archi veloci e le nostre scorciatoie quei giri li hanno gia'
+# accorciati; gli archi esistenti non li ricontrolla mai. Le due cose si escludono: si tiene la
+# completa (archi corretti sulle scansioni, gli unici che correggono la deriva della mappa
+# scaricata: 17 in 45 s al banco su un grafo senza archi veloci) e si spegne la veloce. Gli
+# spostamenti usano le nostre scorciatoie: il 22-10 23 viaggi riusciti su 23 con quelle sole.
+GRAPHNAV_SDK_LOOP_BUDGET_S = 0.0
 GRAPHNAV_SDK_LOOP_FAST = True
 GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S = 45.0
 # prune_edges della chiusura completa finale: None = valore di Spot (True: un solo arco per
 # zona). Il 26-10 15:36 la finale ha dato 2 archi: le zone erano gia' collegate dalla veloce e
 # dalle scorciatoie, e Spot non ne aggiungeva altri accanto. False le farebbe aggiungere anche
-# li', corretti sulle scansioni: da decidere con prova_anelli.py --serie 3.
+# li', corretti sulle scansioni. Serie 3: nessuna differenza (0 archi in entrambi i casi).
 GRAPHNAV_SDK_LOOP_FINAL_PRUNE = None
 # Limiti sulla distanza lungo il grafo fra i due waypoint di un anello candidato
 # (max/min_loop_closure_path_length). None = valori di Spot. Da scegliere con prova_anelli.py.
@@ -1321,6 +1328,7 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, sdk=Tru
         # comparivano e il tempo era solo quello dell'ultimo: 65 s dichiarati su 138).
         what = 'veloce, senza ICP' if fast else 'completa'
         t_all = time.perf_counter()
+        write_on_spot = False
         for attempt in range(1, 3):
             t0 = time.perf_counter()
             try:
@@ -1328,14 +1336,20 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, sdk=Tru
                     max_edge_length_m=GRAPHNAV_SDK_LOOP_MAX_M, timeout_s=budget,
                     max_path_m=GRAPHNAV_SDK_LOOP_MAX_PATH_M, min_path_m=GRAPHNAV_SDK_LOOP_MIN_PATH_M,
                     icp_iters=0 if fast else None, feature_matching=False if fast else None,
-                    upload_result=True, prune_edges=None if fast else GRAPHNAV_SDK_LOOP_FINAL_PRUNE)
+                    upload_result=not write_on_spot,
+                    prune_edges=None if fast else GRAPHNAV_SDK_LOOP_FINAL_PRUNE)
             except Exception as e:
                 dt = time.perf_counter() - t0
                 MISSION_STATS['sdk_loop_failures'] += 1
-                retry = attempt == 1 and ('MapModified' in type(e).__name__ or 'modified' in str(e))
+                retry = attempt == 1 and ('MapModified' in type(e).__name__ or 'modified' in str(e)
+                                          or 'LoopClosureUpload' in type(e).__name__)
+                # Caricamento degli archi rifiutato: al secondo tentativo li scrive Spot stesso
+                # (mai provato sul robot con archi da caricare: la serie 3 ne ha trovati 0).
+                write_on_spot = 'LoopClosureUpload' in type(e).__name__
                 print(f"[GRAPHNAV] Chiusura d'anello di Spot ({what}): tentativo {attempt} non riuscito "
                       f"dopo {dt:.1f} s ({type(e).__name__}: {e})"
-                      + ("; riprovo." if retry else "; proseguo senza."))
+                      + (("; riprovo facendoli scrivere a Spot." if write_on_spot else "; riprovo.")
+                         if retry else "; proseguo senza."))
                 if retry:
                     time.sleep(1.0)
                     continue
