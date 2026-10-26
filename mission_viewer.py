@@ -204,6 +204,14 @@ def draw_scan(ax, d, layer_idx, title_prefix=""):
     yaw = float(d['robot_yaw'])
     ax.plot(rx, ry, 'o', color='blue', ms=9)
     ax.arrow(rx, ry, 0.35 * np.cos(yaw), 0.35 * np.sin(yaw), color='blue', width=0.02)
+    # Ingombro del corpo (come la zona del corpo della mappa globale). Alla prima scansione
+    # di una missione il terreno sotto il corpo e' spesso "mai scritto" (bianco): il robot si
+    # e' appena alzato li' e i sensori non l'hanno mai visto. E' trattato come non visto,
+    # non come ostacolo.
+    ax.add_patch(patches.Rectangle((rx - SELF_BODY_LENGTH_M / 2, ry - SELF_BODY_WIDTH_M / 2),
+                                   SELF_BODY_LENGTH_M, SELF_BODY_WIDTH_M, angle=float(np.degrees(yaw)),
+                                   rotation_point=(rx, ry), fill=False, edgecolor='blue', lw=1.2, ls='--',
+                                   zorder=6))
     reason = str(d['frontier_reason'])
     sx, sy = d['frontier_stop_xy']
     ax.plot(sx, sy, 'X', color=REASON_COLORS.get(reason, 'k'), ms=13, mec='white',
