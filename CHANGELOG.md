@@ -35,6 +35,9 @@ Prova all'aperto: 8 × 8 celle da 2 m, 59 celle su 64 in 42 minuti, nessuna cadu
 - `mission_report.py`: tre controlli nuovi. **Attesa prima di GraphNav** (attesa contro viaggio, timeout della chiusura d'anello), **Scelta dell'obiettivo e arrivo** (esclusi, riproposti, senza punti raggiungibili, arrivi appena fuori, rifiuti fuori cella), **Ritorni con GraphNav** (distanza vera, ritorni da fermo). Sul 22-10 16:04 i primi due danno DA GUARDARE, come atteso.
 - Statistiche nuove: `goals_refused`, `goals_unreachable`, `arrivals_near_goal`, `backtracks_in_place`; riga `[CONFIG] SCELTA OBIETTIVO` all'avvio.
 
+### Dati nel repository
+- **Le 13 missioni di validazione sono su GitHub** (le 10 di `test_replay.py --tutte` e le tre del 22-10): log e CSV, `scans/`, `global_occupancy_map.pkl` e il file `graph` di GraphNav, senza istantanee (271 MB). Aggiunte con `git add -f`: `MissionLogs/` e `MissionMap/` restano ignorate, quindi le missioni nuove non entrano da sole.
+
 ### Da discutere
 - **Erba alta**: Spot segna i ciuffi (+0.15/+0.45 m sul suolo) come ostacoli; 25% della mappa occupata, celle (4,6), (7,2), (7,3), (7,4), (7,7) non raggiunte.
 

@@ -48,8 +48,10 @@ CONFRONTO FRA GRAFI -- con --grafo, --passo (e --distribuzione, --densita, --sem
   e' il nodo piu' vicino con almeno un arco valido, e i blocchi confermati in missione (dati
   come archi del reticolo) non si rigiocano.
 
-Le scansioni stanno in MissionMap/ e i log in MissionLogs/, che NON sono nel repository: una
-missione che manca su questo PC viene saltata, con un avviso.
+Le scansioni stanno in MissionMap/ e i log in MissionLogs/, ignorati da git. Dal 26-10 le
+missioni di validazione (le 10 di ALL_MISSIONS e le tre del 22-10) sono nel repository, aggiunte
+a mano: log, scans/, global_occupancy_map.pkl e il file graph di GraphNav (senza istantanee).
+Una missione che manca su questo PC viene saltata, con un avviso.
 
 Limiti noti del rigioco (non del codice di missione):
   - in missione il grafo si aggiorna sulla scansione presa all'inizio del tentativo, che non

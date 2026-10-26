@@ -1,0 +1,119 @@
+{
+  "prm": {
+    "slope_source_counts": {
+      "live": 83946,
+      "global_map": 58402,
+      "fallback_nodes": 56384
+    },
+    "veto_evaluations": {
+      "longitudinal": 221,
+      "lateral": 115,
+      "occupancy": 156777
+    },
+    "veto_distinct_arcs": {
+      "longitudinal": 161,
+      "lateral": 91,
+      "occupancy": 9487
+    },
+    "max_slope_seen": {
+      "long": 1.3487927295505766,
+      "lat": 1.0564569632212322
+    },
+    "slope_flip_count": 162,
+    "slope_threshold": 0.6,
+    "slope_baseline_m": 0.25,
+    "lateral_slice_half_width_m": 0.3,
+    "beta": 2.0,
+    "beta_lateral": 2.0,
+    "gamma": 0.0,
+    "alpha": 1.0
+  },
+  "mission_stats": {
+    "gait_tier_counts": {
+      "PLAIN": 73,
+      "MODERATE": 69,
+      "HARD": 52
+    },
+    "replan_count": 70,
+    "near_threshold_saves": 0,
+    "segments_logged": 194,
+    "last_tier": "PLAIN",
+    "time_s": {
+      "costruzione grafo": 31.374446292044013,
+      "dati figure": 2.538101322024886,
+      "scansione": 47.317902267976024,
+      "elaborazione griglia": 2.2762113460266846,
+      "mappe globali": 15.779563095034973,
+      "PRM e ripianificazione": 63.346046767961525,
+      "fronte e decisione": 0.5487072710311622,
+      "movimento": 1249.7670283317566,
+      "GraphNav": 787.8140957939977
+    },
+    "scan_bundles": 343,
+    "frontier_blocks": 23,
+    "frontier_aborts": 49,
+    "rotation_refusals": 8,
+    "straight_retreats": 7,
+    "goal_repicks": 13,
+    "graphnav_trips_avoided": 2,
+    "cone_moves": 0,
+    "retreats_suppressed": 1,
+    "early_replans": 58,
+    "traps_detected": 0,
+    "arrival_refusals": 10,
+    "graphnav_backtracks": 12,
+    "graphnav_backtrack_fail": 0,
+    "nodes_pruned": 40,
+    "idle_loops": 0,
+    "multinode_cut": 1,
+    "multinode_moves": 17,
+    "multinode_nodes": 35,
+    "prm_refresh": 303,
+    "prm_refresh_skipped": 43,
+    "rotation_maneuvers": 0,
+    "shortcuts": 10,
+    "falls": 0,
+    "self_rights": 0,
+    "graphnav_ok": 23,
+    "graphnav_fail": 0,
+    "live_arc_vetoes": 54742,
+    "graphnav_shortcuts": 25,
+    "backtracks_skipped": 3,
+    "backtrack_giveups": 2
+  },
+  "lateral_slope_cost_multiplier": 1.0,
+  "slope_threshold": 0.6,
+  "near_threshold_margin_fraction": 0.15,
+  "slope_baseline_m": 0.25,
+  "lateral_slice_half_width_m": 0.3,
+  "min_arc_sample_fraction": 0.5,
+  "terrain_valid_min": 0.5,
+  "goal_reached_tolerance_m": 0.65,
+  "interruttori": {
+    "easy_walk.MISSION_GRAPH_SAMPLING": "casuale",
+    "easy_walk.INCREMENTAL_GRAPH_UPDATE": true,
+    "mission_graph.BATCH_SLOPES": true,
+    "prm_graph.REFRESH_BATCH_SLOPES": true,
+    "spotGrid.CLEARANCE_MAP_DECIDES": false,
+    "easy_walk.PLAN_ONLY_EXPLORED_CELLS": true,
+    "easy_walk.GRAPHNAV_SHORTCUTS": true,
+    "easy_walk.GRAPHNAV_PRECHECK": true,
+    "easy_walk.GRAPHNAV_SDK_LOOP_CLOSURE": true,
+    "easy_walk.SAVE_SCAN_BUNDLES": true,
+    "movements.DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT": true,
+    "spotGrid.ARC_BODY_EXTENSION_M": 0.55,
+    "spotGrid.ROBOT_CLEARANCE_AIR_M": 0.0,
+    "spotGrid.PLAN_CLEARANCE_EXTRA_M": 0.03
+  },
+  "grafo": {
+    "metodo": "casuale",
+    "nodi": 1344,
+    "coppie": 13054,
+    "arco_min_m": 0.5,
+    "arco_max_m": 1.25,
+    "copertura_m": 0.4216,
+    "distribuzione": "poisson",
+    "densita_nodi_m2": 5.0,
+    "seme": 2121996107
+  }
+}

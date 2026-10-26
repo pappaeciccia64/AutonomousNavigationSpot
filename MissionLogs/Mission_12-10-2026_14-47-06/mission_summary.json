@@ -1,0 +1,87 @@
+{
+  "prm": {
+    "slope_source_counts": {
+      "live": 325037,
+      "global_map": 261269,
+      "fallback_nodes": 517825
+    },
+    "veto_evaluations": {
+      "longitudinal": 313,
+      "lateral": 371,
+      "occupancy": 180800
+    },
+    "veto_distinct_arcs": {
+      "longitudinal": 226,
+      "lateral": 263,
+      "occupancy": 19265
+    },
+    "max_slope_seen": {
+      "long": 1.8909002423286447,
+      "lat": 1.5422912438710532
+    },
+    "slope_flip_count": 541,
+    "slope_threshold": 0.6,
+    "slope_baseline_m": 0.25,
+    "lateral_slice_half_width_m": 0.3,
+    "beta": 2.0,
+    "beta_lateral": 2.0,
+    "gamma": 0.0,
+    "alpha": 1.0
+  },
+  "mission_stats": {
+    "gait_tier_counts": {
+      "PLAIN": 14,
+      "MODERATE": 34,
+      "HARD": 0
+    },
+    "replan_count": 15,
+    "near_threshold_saves": 0,
+    "segments_logged": 48,
+    "last_tier": "MODERATE",
+    "time_s": {
+      "costruzione grafo": 62.43927512099617,
+      "dati figure": 3.2853829369996674,
+      "scansione": 12.650651310017565,
+      "elaborazione griglia": 0.4628932159685064,
+      "mappe globali": 3.8509307080239523,
+      "PRM e ripianificazione": 222.60632291299407,
+      "fronte e decisione": 0.23145536391530186,
+      "movimento": 288.674857378006
+    },
+    "scan_bundles": 72,
+    "frontier_blocks": 5,
+    "frontier_aborts": 2,
+    "rotation_refusals": 0,
+    "straight_retreats": 0,
+    "goal_repicks": 2,
+    "cone_moves": 0,
+    "retreats_suppressed": 0,
+    "early_replans": 9,
+    "traps_detected": 0,
+    "arrival_refusals": 0,
+    "graphnav_backtracks": 2,
+    "graphnav_backtrack_fail": 0,
+    "nodes_pruned": 336,
+    "idle_loops": 0,
+    "multinode_cut": 0,
+    "multinode_moves": 3,
+    "multinode_nodes": 6,
+    "prm_refresh": 61,
+    "prm_refresh_skipped": 11,
+    "rotation_maneuvers": 0,
+    "shortcuts": 6,
+    "falls": 0,
+    "self_rights": 0,
+    "graphnav_ok": 2,
+    "graphnav_fail": 0,
+    "graphnav_shortcuts": 13
+  },
+  "lateral_slope_cost_multiplier": 1.0,
+  "slope_threshold": 0.6,
+  "near_threshold_margin_fraction": 0.15,
+  "slope_baseline_m": 0.25,
+  "lateral_slice_half_width_m": 0.3,
+  "min_arc_sample_fraction": 0.5,
+  "terrain_valid_min": 0.5,
+  "goal_reached_tolerance_m": 0.65
+}
