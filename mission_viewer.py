@@ -29,7 +29,9 @@ Tasti (modalita' interattiva):
     m                            pannello destro: mappa del robot (ostacoli confermati, default)
                                  <-> mosaico grezzo (l'ultima scansione vince)
     t                            sfondo del pannello destro: ostacoli -> terreno -> fusione
-                                 (terreno colorato per quota, ostacoli in rosso sopra)
+                                 (terreno colorato per quota, ostacoli in rosso sopra;
+                                 linea bianca = quota 0, il suolo all'avvio missione, segnata
+                                 anche sulla barra)
     n                            nav graph di GraphNav sul pannello destro: mostra / nascondi
                                  (serve l'SDK di Spot per leggerlo, vedi NAV GRAPH)
     lo zoom del pannello destro resta quando si cambia scansione o sfondo
@@ -57,6 +59,7 @@ import matplotlib.pyplot as plt                       # noqa: E402
 from matplotlib.collections import LineCollection    # noqa: E402
 from matplotlib.colors import ListedColormap, Normalize   # noqa: E402
 import matplotlib.patches as patches                  # noqa: E402
+import matplotlib.patheffects as patheffects          # noqa: E402
 import csv                                            # noqa: E402
 import matplotlib.patheffects as pe                   # noqa: E402
 
@@ -94,7 +97,9 @@ TERRAIN_CMAP = 'viridis'                # niente rossi: nella fusione il rosso e
 OBSTACLE_RGB = (0.84, 0.15, 0.16)       # come MOSAIC_CMAP
 NO_TERRAIN_RGB = (0.80, 0.80, 0.80)     # fusione: cella vista libera ma senza quota attendibile
 OBSTACLE_THRESHOLD = 0.15               # spotGrid.OBSTACLE_THRESHOLD (maschera del terreno)
-TERRAIN_PERCENTILES = (2, 98)           # estremi della scala dei colori della quota
+TERRAIN_PERCENTILES = (2, 98)           # estremi della scala dei colori della quota (con lo 0 sempre dentro)
+ZERO_LEVEL_COLOR = 'white'              # linea di livello e riga sulla barra a quota 0 (partenza)
+ZERO_LEVEL_SMOOTH_CELLS = 5             # media su 5 celle (15 cm) solo per tracciare quella linea
 HILLSHADE_STRENGTH = 0.45               # 0 = niente ombreggiatura del rilievo
 
 # Le mappe si costruiscono scansione per scansione; tornando indietro si riparte dall'ultima
@@ -675,6 +680,8 @@ class MissionContext:
             h = self.final_terrain if self.final_terrain is not None else self.terrain(len(self.scans) - 1)
             h = h[np.isfinite(h)]
             lo, hi = (np.percentile(h, TERRAIN_PERCENTILES) if h.size else (-0.5, 0.5))
+            # La quota di partenza (0) sta sempre nella scala, cosi' si vede sulla barra.
+            lo, hi = min(lo, 0.0), max(hi, 0.0)
             if hi - lo < 0.05:
                 lo, hi = lo - 0.025, hi + 0.025
             self._terrain_norm = Normalize(vmin=float(lo), vmax=float(hi))
@@ -998,6 +1005,61 @@ def _background_rgb(occ, height, mode, norm, res):
     return rgb
 
 
+def _box_sum(a, k):
+    """Somma su una finestra k x k centrata (bordi a zero), con le somme cumulate: solo numpy."""
+    r = k // 2
+    p = np.pad(a, ((r + 1, r), (r + 1, r)))
+    c = p.cumsum(0).cumsum(1)
+    return c[k:, k:] - c[:-k, k:] - c[k:, :-k] + c[:-k, :-k]
+
+
+def _draw_zero_level(ax, height, extent):
+    """
+    Linea di livello a quota 0 (il suolo all'avvio missione) sopra lo sfondo del terreno:
+    separa cio' che sta sotto la partenza da cio' che sta sopra. Niente linea se la quota non
+    attraversa lo zero.
+    """
+    if height is None:
+        return
+    # Media su ZERO_LEVEL_SMOOTH_CELLS celle, solo per la linea: sul terreno piatto attorno
+    # alla partenza il rumore della quota (qualche cm) la riempirebbe di piccoli anelli.
+    k = ZERO_LEVEL_SMOOTH_CELLS
+    ok = np.isfinite(height)
+    num = _box_sum(np.where(ok, height, 0.0), k)
+    den = _box_sum(ok.astype(np.float64), k)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        smooth = np.where(ok & (den > 0), num / np.maximum(den, 1), np.nan)
+    h = np.ma.masked_invalid(smooth)
+    if h.count() == 0 or not (h.min() < 0.0 < h.max()):
+        return
+    ny, nx = h.shape
+    xs = np.linspace(extent[0], extent[1], nx, endpoint=False) + (extent[1] - extent[0]) / nx / 2
+    ys = np.linspace(extent[2], extent[3], ny, endpoint=False) + (extent[3] - extent[2]) / ny / 2
+    cs = ax.contour(xs, ys, h, levels=[0.0], colors=ZERO_LEVEL_COLOR, linewidths=1.4, zorder=1)
+    stroke = [patheffects.withStroke(linewidth=3.0, foreground='black')]
+    # Il bordo nero si mette dopo: contour non accetta path_effects nelle versioni vecchie, e
+    # nelle nuove non ha piu' .collections.
+    for art in (getattr(cs, 'collections', None) or [cs]):
+        art.set_path_effects(stroke)
+    ax.plot([], [], '-', color=ZERO_LEVEL_COLOR, lw=1.4,
+            path_effects=[patheffects.withStroke(linewidth=3.0, foreground='black')],
+            label="quota 0 (suolo all'avvio missione)")
+
+
+def _mark_zero(cbar):
+    """Lo zero sulla barra della quota: tacca e riga, se sta nella scala."""
+    lo, hi = cbar.mappable.norm.vmin, cbar.mappable.norm.vmax
+    if not (lo <= 0.0 <= hi):
+        return
+    ticks = [t for t in cbar.get_ticks() if lo <= t <= hi and abs(t) > 1e-9 * max(1.0, hi - lo)]
+    extra = [0.0]
+    if lo < 0.0 and all(abs(t - lo) > 0.25 * (hi - lo) / max(len(ticks), 1) for t in ticks + extra):
+        extra.append(round(lo, 2))      # l'estremo negativo, se non c'e' gia' una tacca vicina
+    cbar.set_ticks(sorted(ticks + extra))
+    cbar.ax.axhline(0.0, color=ZERO_LEVEL_COLOR, lw=2.0,
+                    path_effects=[patheffects.withStroke(linewidth=3.5, foreground='black')])
+
+
 def _hover_global(ax, ctx, occ, height, ng=None):
     """Coordinate, stato della cella, quota e waypoint vicino sotto il mouse nel pannello globale."""
     names = {0: 'mai vista', 1: 'libera', 2: 'OSTACOLO'}
@@ -1080,6 +1142,7 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=Fals
         ax.imshow(_background_rgb(occ, height, bg, norm, ctx.res), origin='lower',
                   interpolation='nearest', extent=ctx.extent, zorder=0)
         mappable = plt.cm.ScalarMappable(norm=norm, cmap=TERRAIN_CMAP)
+        _draw_zero_level(ax, height, ctx.extent)
     ng = ctx.navgraph() if navgraph else None
     if ng is not None:
         draw_navgraph(ax, ng, None if final else t_now)
@@ -1237,7 +1300,7 @@ def main():
             fig, ax = plt.subplots(figsize=(12, 12))
             m = draw_global(ax, ctx, len(scans) - 1, final=True, bg=bg, navgraph=ng0)
             if m is not None:
-                fig.colorbar(m, ax=ax, label="quota rispetto all'avvio missione (m)", shrink=0.7)
+                _mark_zero(fig.colorbar(m, ax=ax, label="quota rispetto all'avvio missione (m)", shrink=0.7))
             fig.savefig(os.path.join(out_dir, "overview.png" if bg == 'ostacoli' else f"overview_{bg}.png"),
                         dpi=110)
             plt.close(fig)
@@ -1249,7 +1312,7 @@ def main():
         if scans:
             m = draw_global(ax, ctx, len(scans) - 1, final=True, bg=bg0, navgraph=ng0)
             if m is not None:
-                fig.colorbar(m, ax=ax, label="quota rispetto all'avvio missione (m)", shrink=0.7)
+                _mark_zero(fig.colorbar(m, ax=ax, label="quota rispetto all'avvio missione (m)", shrink=0.7))
         elif vis_files:
             draw_vis_bundle(ax, _load(vis_files[0]))
         plt.show()
@@ -1266,6 +1329,7 @@ def main():
     # 'ostacoli'. Toglierla e rimetterla a ogni cambio rimpiccioliva il pannello ogni volta.
     cbar_g = fig.colorbar(plt.cm.ScalarMappable(norm=ctx.terrain_norm(), cmap=TERRAIN_CMAP), ax=axg,
                           label="quota rispetto all'avvio missione (m)", shrink=0.8)
+    _mark_zero(cbar_g)
 
     def redraw():
         if state['cbar'] is not None:

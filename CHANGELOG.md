@@ -30,6 +30,9 @@ Prova all'aperto: 8 × 8 celle da 2 m, 59 celle su 64 in 42 minuti, nessuna cadu
 ### Arrivo (`easy_walk.py`)
 - **L'arrivo per tolleranza vale anche con il robot appena fuori dalla cella, fino a 0.35 m** (`ARRIVAL_OUTSIDE_CELL_M` = tolleranza 0.65 − margine dal bordo 0.30; il muso, 0.55 m avanti, è dentro). Corregge la regola del 22-10 sera, troppo stretta: all'aperto 44 rifiuti "Mancano X m … ancora fuori dalla cella", in 8 tentativi, con il robot fuori di 0.01–0.61 m e a 0.5–0.65 m dall'obiettivo (il fronte ferma il centro mezzo corpo prima). Con la regola nuova 7 tentativi su 8 si sarebbero chiusi. Una prima versione accettava il robot entro 0.25 m dall'obiettivo: avrebbe chiuso 3 casi su 9, scartata.
 
+### Visualizzatore (`mission_viewer.py`)
+- **Quota di partenza visibile** negli sfondi "terreno" e "fusione": linea di livello bianca a quota 0 (il suolo all'avvio missione, quote mediate su 15 cm solo per la linea, altrimenti il rumore sul piano la riempie di anelli) e zero segnato sulla barra dei colori, con l'estremo negativo. La scala contiene sempre lo zero. Le quote sotto la partenza c'erano già (il 22-10 16:04 fino a −0.25 m, circa il 5% delle celle), ma in viridis non si distinguevano dal "più basso".
+
 ### Dati per l'erba
 - **Layer `intensity` e `no_step` di Spot nei pacchetti di scansione** (`SAVE_EXTRA_LAYERS`), con una richiesta a parte (`spotGrid.LocalGrid.extra_layers`) che non passa dai controlli di allineamento: se mancano o hanno un'altra griglia, la scansione usata per navigare non ne risente. Accanto a ciascuno `<nome>_origin` e `<nome>_cell`. Servono a capire se distinguono la vegetazione da un ostacolo solido.
 
