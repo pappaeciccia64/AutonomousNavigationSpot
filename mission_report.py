@@ -392,18 +392,26 @@ def section_checks(log, segments):
     #    Dal 26-10 la chiusura d'anello ha un limite lato Spot (GRAPHNAV_SDK_LOOP_BUDGET_S, 20 s
     #    prima del ritorno a wp_0): un'attesa fino al limite e' normale, oltre no.
     timeouts = len(re.findall(r"Chiusura d'anello di Spot non riuscita \(TimedOut", log))
-    loops = [(int(n), float(t), float(b), 'SCADUTO' in rest) for n, t, b, rest in re.findall(
-        r"Chiusura d'anello di Spot: (\d+) archi in ([\d.]+) s \(limite (\d+) s, ([^)]*)\)", log)]
+    #    Dal 26-10 pomeriggio: prima degli spostamenti in modalita' veloce (senza ICP, limite
+    #    3 s), a fine missione completa (limite 45 s), vedi GRAPHNAV_SDK_LOOP_BUDGET_S.
+    loops = [(int(n), float(t), float(b), 'SCADUTO' in rest, mode) for mode, n, t, b, rest in re.findall(
+        r"Chiusura d'anello di Spot(?: \(([^)]*)\))?: (\d+) archi in ([\d.]+) s \(limite (\d+) s, ([^)]*)\)", log)]
+    fast = [l for l in loops if 'veloce' in l[4]]
+    final = [l for l in loops if 'veloce' not in l[4]]
+    loops = [l[:4] for l in loops]
     if not waits:
         out.append(("Attesa prima di GraphNav", 'NON SCATTATO', "nessuno spostamento GraphNav"))
     else:
-        limit = max([b for _, _, b, _ in loops] + [0.0]) + 3.0
+        limit = max([b for _, _, b, _, _ in fast] + [0.0]) + 3.0
         long_w = sum(1 for w in waits if w > max(5.0, limit))
         det = (f"{len(waits)} spostamenti: attesa {sum(waits):.0f} s in tutto (massimo {max(waits):.1f} s, "
                f"{long_w} oltre il limite), viaggio {sum(trips)} s; timeout della RPC {timeouts}")
-        if loops:
-            det += (f"; chiusura d'anello di Spot {len(loops)} volte, {sum(t for _, t, _, _ in loops):.0f} s, "
-                    f"{sum(n for n, _, _, _ in loops)} archi, {sum(p for *_, p in loops)} parziali")
+        if fast:
+            det += (f"; chiusura d'anello veloce {len(fast)} volte, {sum(l[1] for l in fast):.0f} s "
+                    f"(massimo {max(l[1] for l in fast):.1f} s), {sum(l[0] for l in fast)} archi, "
+                    f"{sum(l[3] for l in fast)} parziali")
+        if final:
+            det += (f"; a fine missione {final[-1][0]} archi in {final[-1][1]:.0f} s")
         out.append(("Attesa prima di GraphNav", 'OK' if not long_w and not timeouts else 'DA GUARDARE',
                     det + "; atteso: nessun timeout della RPC, attese entro il limite"))
 

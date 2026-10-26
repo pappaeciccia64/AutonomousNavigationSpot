@@ -158,7 +158,7 @@ REQUIRED = {
                      "ANCHOR_ON_NODE_M", "GLOBAL_MAP_SELF_RING_M",
                      "GRAPHNAV_SHORTCUTS", "GRAPHNAV_SDK_LOOP_CLOSURE", "GRAPHNAV_SHORTCUT_MAX_M",
                      "GRAPHNAV_SHORTCUT_MARGIN_M", "GRAPHNAV_SDK_LOOP_MAX_M",
-                     "GRAPHNAV_SDK_LOOP_BUDGET_S", "GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S",
+                     "GRAPHNAV_SDK_LOOP_BUDGET_S", "GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S", "GRAPHNAV_SDK_LOOP_FAST",
                      "GRAPHNAV_SDK_LOOP_MAX_PATH_M", "GRAPHNAV_SDK_LOOP_MIN_PATH_M",
                      "CONE_PATH_LOOKAHEAD_M", "ABORT_IGNORE_DATA_EDGE_UNTIL_M",
                      "FALL_HAZARD_RADIUS_M",                                             # cadute
