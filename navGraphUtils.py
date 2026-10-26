@@ -91,7 +91,8 @@ class RecordingInterface(object):
 
     def close_loops_checked(self, max_edge_length_m=2.0, robot_radius_m=0.35,
                             height_variation_m=0.25, timeout_s=None, max_path_m=None,
-                            min_path_m=None, modify_map_on_server=True, check_collision=True):
+                            min_path_m=None, modify_map_on_server=True, check_collision=True,
+                            icp_iters=None, feature_matching=None):
         """
         Chiusure d'anello di Spot (fiducial + odometria) DURANTE la missione, con il
         controllo di collisione di Spot sugli archi nuovi, cosi' il grafo non resta una catena
@@ -108,6 +109,8 @@ class RecordingInterface(object):
         (max/min_loop_closure_path_length); None = valori di Spot.
         modify_map_on_server, check_collision: False solo per le misure al banco
         (prova_anelli.py): la mappa resta com'era e si confrontano impostazioni diverse.
+        icp_iters (0 = niente ICP) e feature_matching: solo per le misure al banco; None =
+        valori di Spot.
 
         Restituisce (archi creati, timed_out). Solleva in caso di errore: chi chiama decide
         cosa fare.
@@ -127,6 +130,10 @@ class RecordingInterface(object):
             do_odometry_loop_closure=wrappers.BoolValue(value=True),
             odometry_loop_closure_params=odo,
             collision_check_params=col)
+        if icp_iters is not None:
+            params.icp_params.icp_iters.value = int(icp_iters)
+        if feature_matching is not None:
+            params.feature_matching_params.do_feature_matching.value = bool(feature_matching)
         kwargs = {}
         if timeout_s is not None:
             params.timeout_seconds = float(timeout_s)
