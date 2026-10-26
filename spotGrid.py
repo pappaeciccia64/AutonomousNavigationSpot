@@ -1083,6 +1083,32 @@ class LocalGrid:
         return (tf.position.x, tf.position.y, float(yaw), g.extent.num_cells_x, g.extent.num_cells_y,
                 g.extent.cell_size)
 
+    def extra_layers(self, names):
+        """
+        Layer in piu' da SALVARE soltanto (es. 'intensity', 'no_step'), con una richiesta a
+        parte: non entrano nei controlli di allineamento di return_local_grid, quindi se
+        mancano o hanno un'altra geometria la scansione usata per navigare non ne risente.
+        Non solleva mai. Restituisce {nome: dict(values (ny, nx) float32, origin (x, y) nel
+        frame VISION, cell)}; {} se la richiesta fallisce.
+        """
+        try:
+            protos = list(self.local_grid_client.get_local_grids(list(names)))
+        except Exception:
+            return {}
+        out = {}
+        for lg in protos:
+            try:
+                ox, oy, _, nx, ny, cell = self._layer_geometry(lg)
+                vals = self.unpack_grid(lg)
+                if vals is None or np.size(vals) != nx * ny:
+                    continue
+                out[lg.local_grid_type_name] = dict(
+                    values=np.asarray(vals, dtype=np.float32).reshape((ny, nx)),
+                    origin=np.array([ox, oy]), cell=float(cell))
+            except Exception:
+                continue
+        return out
+
     def return_local_grid(self, types_of_grid, robot_state_client, max_attempts=3):
         """
         Scarica e decodifica i layer richiesti.

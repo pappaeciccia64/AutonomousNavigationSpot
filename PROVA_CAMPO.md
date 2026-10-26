@@ -19,7 +19,8 @@ Le modifiche del 26-10 (righe con quella data) non sono mai andate sul robot; qu
 | Novità | Riga di log | Cosa aspettarsi | Se va male |
 |---|---|---|---|
 | **Aggiornamento locale del grafo** e **pendenze in blocco** (14-10) | `[TEMPO] aggiornamento locale del grafo: X s` (oppure `costruzione completa`) | Una sola costruzione completa, al primo tentativo; poi aggiornamenti locali da **1–3 s**. Il 13-10 12:40 erano 11 costruzioni complete da 7.7 s in media. | `INCREMENTAL_GRAPH_UPDATE = False` in `easy_walk.py`, `BATCH_SLOPES = False` in `mission_graph.py`: stessi risultati, solo più lenti. |
-| **Attesa prima di GraphNav** (26-10, `GRAPHNAV_SDK_LOOP_CLOSURE = False`) | `[GRAPHNAV] …: avvio` subito dopo `[GRAPHNAV] prima dello spostamento …` | Partenza 1–2 s dopo la preparazione; nessuna riga `Chiusura d'anello di Spot non riuscita`. Il 22-10 16:04 erano 30 s a spostamento. | — |
+| **Chiusura d'anello di Spot con limite** (26-10, `GRAPHNAV_SDK_LOOP_BUDGET_S = 4`, 20 prima del ritorno a wp_0) | `[GRAPHNAV] Chiusura d'anello di Spot: N archi in X s (limite Y s, …)` subito prima di `[GRAPHNAV] …: avvio` | Al massimo ~4 s prima di ogni spostamento; nessuna riga `Chiusura d'anello di Spot non riuscita (TimedOutError…)`. Giovedì erano 30 s a spostamento, senza risultato. Annotare quanti archi dà. | `GRAPHNAV_SDK_LOOP_CLOSURE = False` in `easy_walk.py`. |
+| **Layer in più nelle scansioni** (26-10, `SAVE_EXTRA_LAYERS`) | nessuna: dopo, `intensity` e `no_step` nei pacchetti `scans/*.npz` | Presenti nei pacchetti; tempo di `scansione` nel rapporto quasi invariato. | `SAVE_EXTRA_LAYERS = ()`. |
 | **Scelta dell'obiettivo** (26-10: raggiungibile, 0.33 m, 0.30 m dal bordo, rifiutati esclusi) | `[TARGET] Cella (r,c): …`, `[TARGET] Obiettivo … escluso per il resto della missione`, `NESSUN punto della cella e' raggiungibile` | Pochi "GRAFO DISCONNESSO" all'inizio del tentativo; mai lo stesso obiettivo riscelto dopo l'esclusione (il rapporto li conta). | Annotare cella e ora; `test_obiettivi.py --missioni <nome> --dettaglio`. |
 | **Arrivo appena fuori dalla cella** (26-10, fino a 0.35 m) | `[OBIETTIVO] Il robot e' fuori dalla cella … vale come arrivo` | Pochi `ancora fuori dalla cella` (il 22-10 erano 44). | `ARRIVAL_OUTSIDE_CELL_M = 0` in `easy_walk.py` torna alla regola del 22-10. |
 | **Ritorno senza movimento** (26-10) | `[RITORNO] Torno a wp_N, a X m dal robot`, `… non mi muovo, ripianifico da qui` | Nessun ritorno GraphNav di 0 m. | — |
@@ -41,6 +42,7 @@ Le modifiche del 26-10 (righe con quella data) non sono mai andate sul robot; qu
 ## Durante la prova
 
 - Annotare l'**ora** di ogni cosa strana (il log ha l'ora a ogni riga): si ritrova subito nel log e nelle scansioni.
+- **Erba**: quando il robot si ferma o gira attorno a qualcosa che sembra erba, annotare l'ora e fare una foto di cosa c'è davanti. Serve come verità per confrontare le scansioni (con i layer `intensity` e `no_step`).
 - I messaggi di log sono in italiano dal 21-10; le etichette fra parentesi quadre (`[ATTEMPT]`, `[BLOCKED]`, …) sono rimaste le stesse.
 - Il robot non deve mai restare **fermo a girare a vuoto**: se succede, prima o poi compare `[STALLO]`; annotare quanto ci mette.
 - Sfioramenti durante le rotazioni: il primo numero da cambiare è `ROTATION_NOISE_TOLERANCE_M` in `spotGrid.py` (0.15 → 0.10, vedi CHANGELOG 08-10).

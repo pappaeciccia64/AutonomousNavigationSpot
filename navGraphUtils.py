@@ -90,28 +90,49 @@ class RecordingInterface(object):
 
 
     def close_loops_checked(self, max_edge_length_m=2.0, robot_radius_m=0.35,
-                            height_variation_m=0.25):
+                            height_variation_m=0.25, timeout_s=None, max_path_m=None,
+                            min_path_m=None, modify_map_on_server=True, check_collision=True):
         """
         Chiusure d'anello di Spot (fiducial + odometria) DURANTE la missione, con il
         controllo di collisione di Spot sugli archi nuovi, cosi' il grafo non resta una catena
-        e un ritorno non deve ripercorrere tutta la strada fatta. Restituisce quanti archi ha
-        creato. Solleva in caso di errore: chi chiama decide cosa fare.
+        e un ritorno non deve ripercorrere tutta la strada fatta.
+
+        timeout_s: tempo massimo di elaborazione LATO SPOT (Params.timeout_seconds). Allo
+        scadere Spot restituisce gli archi trovati fino a li' (timed_out = True) e una
+        chiamata successiva prosegue. Senza, Spot usa 45 s, piu' dei 30 s della RPC: il 22-10
+        la RPC scadeva sempre prima e non arrivava nessun risultato. Il limite della RPC qui
+        e' timeout_s + 10 s.
+        max_path_m / min_path_m: limiti sulla distanza fra i due waypoint lungo il grafo
+        (max/min_loop_closure_path_length); None = valori di Spot.
+        modify_map_on_server, check_collision: False solo per le misure al banco
+        (prova_anelli.py): la mappa resta com'era e si confrontano impostazioni diverse.
+
+        Restituisce (archi creati, timed_out). Solleva in caso di errore: chi chiama decide
+        cosa fare.
         """
         odo = map_processing_pb2.ProcessTopologyRequest.OdometryLoopClosureParams(
             max_loop_closure_edge_length=wrappers.DoubleValue(value=float(max_edge_length_m)))
+        if max_path_m is not None:
+            odo.max_loop_closure_path_length.value = float(max_path_m)
+        if min_path_m is not None:
+            odo.min_loop_closure_path_length.value = float(min_path_m)
         col = map_processing_pb2.ProcessTopologyRequest.CollisionCheckingParams(
-            check_edges_for_collision=wrappers.BoolValue(value=True),
+            check_edges_for_collision=wrappers.BoolValue(value=bool(check_collision)),
             collision_check_robot_radius=wrappers.DoubleValue(value=float(robot_radius_m)),
             collision_check_height_variation=wrappers.DoubleValue(value=float(height_variation_m)))
+        params = map_processing_pb2.ProcessTopologyRequest.Params(
+            do_fiducial_loop_closure=wrappers.BoolValue(value=True),
+            do_odometry_loop_closure=wrappers.BoolValue(value=True),
+            odometry_loop_closure_params=odo,
+            collision_check_params=col)
+        kwargs = {}
+        if timeout_s is not None:
+            params.timeout_seconds = float(timeout_s)
+            kwargs['timeout'] = float(timeout_s) + 10.0
         response = self._map_processing_client.process_topology(
-            params=map_processing_pb2.ProcessTopologyRequest.Params(
-                do_fiducial_loop_closure=wrappers.BoolValue(value=True),
-                do_odometry_loop_closure=wrappers.BoolValue(value=True),
-                odometry_loop_closure_params=odo,
-                collision_check_params=col),
-            modify_map_on_server=True)
+            params=params, modify_map_on_server=bool(modify_map_on_server), **kwargs)
         self.invalidate_graph_cache()
-        return len(response.new_subgraph.edges)
+        return len(response.new_subgraph.edges), bool(getattr(response, 'timed_out', False))
 
     def _get_graph(self, force_refresh=False):
         """Il grafo di GraphNav, dalla copia locale se valida. force_refresh lo riscarica sempre."""

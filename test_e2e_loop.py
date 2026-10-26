@@ -150,6 +150,15 @@ class FakeLocalGrid(spotGrid.LocalGrid):
                                  transforms_snapshot=snap, frame_name_local_grid_data="grid"))
         return data, proto, None
 
+    def extra_layers(self, names):
+        # Come spotGrid.LocalGrid.extra_layers: un layer finto per controllare il salvataggio;
+        # 'no_step' manca apposta (un layer assente non deve fermare niente).
+        if 'intensity' not in names:
+            return {}
+        return {'intensity': dict(values=np.full((N, N), 7.0, np.float32),
+                                  origin=np.array([ROBOT.x - N * CS / 2, ROBOT.y - N * CS / 2]),
+                                  cell=CS)}
+
 
 class FakeTracker:
     """Il thread del fronte: qui calcola il fronte VERO nella posizione del momento."""
@@ -435,6 +444,10 @@ if __name__ == '__main__':
     check(r['tags']["[BLOCCO] Confermato"] == 0 and r['tags']["[RITIRATA]"] == 0,
           "nessun blocco e nessuna ritirata su terreno libero")
     check(r['scans'] > 0, f"{r['scans']} pacchetti di scansione salvati")
+    _b = np.load(os.path.join(r['folder'], 'scans', sorted(os.listdir(os.path.join(r['folder'], 'scans')))[0]))
+    check('intensity' in _b.files and _b['intensity'].shape == (N, N) and 'intensity_origin' in _b.files
+          and 'no_step' not in _b.files,
+          "layer in piu' nel pacchetto: intensity salvata con la sua origine, no_step assente senza danni")
     check("[TEMPO]" in r['log'], "riga [TEMPO] presente")
 
     r = run("S2. muro con un varco largo 1.2 m lontano dalla retta: va trovato aggirando",

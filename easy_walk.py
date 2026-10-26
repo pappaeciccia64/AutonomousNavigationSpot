@@ -60,6 +60,10 @@ MISSION_STATS = {
     'goals_unreachable': 0,   # scelte d'obiettivo senza nessun punto raggiungibile nel grafo
     'arrivals_near_goal': 0,  # arrivi accettati con il robot appena fuori dalla cella
     'backtracks_in_place': 0, # ritorni senza movimento: nessuna briciola abbastanza lontana
+    'sdk_loop_calls': 0,      # chiusure d'anello di Spot riuscite (con risposta)
+    'sdk_loop_s': 0.0,        # secondi spesi in quelle chiamate
+    'sdk_loop_edges': 0,      # archi creati da Spot
+    'sdk_loop_partial': 0,    # chiamate finite allo scadere del limite (risultato parziale)
     'graphnav_trips_avoided': 0,  # spostamenti GraphNav evitati: dal waypoint il grafo non arriva alla cella
     'cone_moves': 0,          # avanzamenti dentro il cono di rotazione possibile
     'retreats_suppressed': 0,  # arretramenti evitati perche' inutili
@@ -535,10 +539,18 @@ GRAPHNAV_MAX_BACKTRACK_HOPS = 3          # poi si rimanda la cella e si passa al
 # GRAPHNAV_SHORTCUT_MARGIN_M: margine dalle celle occupate (che sono gia' a obstacle_distance
 # <= 0.15): 0.30 + 0.15 = 0.45 m dall'ostacolo, largo perche' gli archi sono lunghi.
 GRAPHNAV_SHORTCUTS = True
-# Spento dal 26-10: all'aperto (22-10 16:04) oltre ~100 waypoint la chiamata ha sempre
-# superato i 30 s della RPC (20 volte, 603 s di attesa) e in tutta la missione ha creato 1
-# arco. Da riaccendere solo dopo averne misurato i tempi al banco.
-GRAPHNAV_SDK_LOOP_CLOSURE = False
+GRAPHNAV_SDK_LOOP_CLOSURE = True
+# Tempo massimo di elaborazione LATO SPOT della chiusura d'anello, prima di ogni spostamento
+# GraphNav e prima del ritorno a wp_0. Allo scadere Spot restituisce gli archi trovati fino a
+# li' e la chiamata successiva prosegue (map_processing.proto, Params.timeout_seconds). Il
+# 22-10 16:04, senza limite, Spot usava il suo default di 45 s, la RPC si arrendeva a 30 s:
+# 20 timeout, 603 s di attesa, nessun risultato.
+GRAPHNAV_SDK_LOOP_BUDGET_S = 4.0
+GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S = 20.0
+# Limiti sulla distanza lungo il grafo fra i due waypoint di un anello candidato
+# (max/min_loop_closure_path_length). None = valori di Spot. Da scegliere con prova_anelli.py.
+GRAPHNAV_SDK_LOOP_MAX_PATH_M = None
+GRAPHNAV_SDK_LOOP_MIN_PATH_M = None
 GRAPHNAV_SHORTCUT_MAX_M = 3.0
 GRAPHNAV_SHORTCUT_MARGIN_M = 0.30
 # Lunghezza massima degli archi che crea la chiusura d'anello di Spot.
@@ -593,6 +605,12 @@ REFUSED_GOAL_BLOCK_M = 0.35
 #       mission_viewer.py, mission_report.py e test_replay.py. ~0.3 MB a scansione.
 # ==================================================================
 SAVE_SCAN_BUNDLES = True
+# Layer di Spot salvati in piu' nei pacchetti, con una richiesta a parte che non tocca la
+# navigazione (spotGrid.LocalGrid.extra_layers): per capire l'erba alta (22-10 16:04), cioe'
+# se intensita' e no_step distinguono la vegetazione da un ostacolo solido. Ogni layer ha
+# accanto <nome>_origin e <nome>_cell, perche' la sua griglia puo' non coincidere con le
+# altre. () = spento.
+SAVE_EXTRA_LAYERS = ('intensity', 'no_step')
 
 # Raggio del disco segnato come pericoloso nella mappa globale attorno al punto di una
 # caduta (vedi _check_and_recover_fall e GlobalGrid.mark_hazard).
@@ -1223,9 +1241,20 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, sdk=Tru
                 recordingInterface.invalidate_graph_cache()
     n_sdk = 0
     if sdk and GRAPHNAV_SDK_LOOP_CLOSURE and recording is not True:
+        budget = GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S if 'wp_0' in label else GRAPHNAV_SDK_LOOP_BUDGET_S
         for attempt in range(1, 4):
             try:
-                n_sdk = recordingInterface.close_loops_checked(max_edge_length_m=GRAPHNAV_SDK_LOOP_MAX_M)
+                t0 = time.perf_counter()
+                n_sdk, timed_out = recordingInterface.close_loops_checked(
+                    max_edge_length_m=GRAPHNAV_SDK_LOOP_MAX_M, timeout_s=budget,
+                    max_path_m=GRAPHNAV_SDK_LOOP_MAX_PATH_M, min_path_m=GRAPHNAV_SDK_LOOP_MIN_PATH_M)
+                dt = time.perf_counter() - t0
+                MISSION_STATS['sdk_loop_calls'] += 1
+                MISSION_STATS['sdk_loop_s'] += dt
+                MISSION_STATS['sdk_loop_edges'] += n_sdk
+                MISSION_STATS['sdk_loop_partial'] += int(timed_out)
+                print(f"[GRAPHNAV] Chiusura d'anello di Spot: {n_sdk} archi in {dt:.1f} s (limite "
+                      f"{budget:.0f} s, {'SCADUTO: risultato parziale' if timed_out else 'finita'}).")
                 break
             except Exception as e:
                 if 'MapModified' in type(e).__name__ or 'modified' in str(e):
@@ -1610,7 +1639,10 @@ def mission_switches():
         'easy_walk.GRAPHNAV_SHORTCUTS': GRAPHNAV_SHORTCUTS,
         'easy_walk.GRAPHNAV_PRECHECK': GRAPHNAV_PRECHECK,
         'easy_walk.GRAPHNAV_SDK_LOOP_CLOSURE': GRAPHNAV_SDK_LOOP_CLOSURE,
+        'easy_walk.GRAPHNAV_SDK_LOOP_BUDGET_S': GRAPHNAV_SDK_LOOP_BUDGET_S,
+        'easy_walk.GRAPHNAV_SDK_LOOP_MAX_PATH_M': GRAPHNAV_SDK_LOOP_MAX_PATH_M,
         'easy_walk.SAVE_SCAN_BUNDLES': SAVE_SCAN_BUNDLES,
+        'easy_walk.SAVE_EXTRA_LAYERS': list(SAVE_EXTRA_LAYERS),
         'movements.DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT': movements.DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT,
         'spotGrid.ARC_BODY_EXTENSION_M': spotGrid.ARC_BODY_EXTENSION_M,
         'spotGrid.ROBOT_CLEARANCE_AIR_M': spotGrid.ROBOT_CLEARANCE_AIR_M,
@@ -1667,6 +1699,9 @@ def _emit_mission_summary_once():
                  if tot_r else ""))
         print(f"Cadute: {MISSION_STATS['falls']}, rialzate da solo: {MISSION_STATS['self_rights']}")
         print(f"Spostamenti GraphNav riusciti: {MISSION_STATS['graphnav_ok']}, falliti: {MISSION_STATS['graphnav_fail']}")
+        print(f"Chiusura d'anello di Spot: {MISSION_STATS['sdk_loop_calls']} chiamate, "
+              f"{MISSION_STATS['sdk_loop_s']:.0f} s, {MISSION_STATS['sdk_loop_edges']} archi, "
+              f"{MISSION_STATS['sdk_loop_partial']} finite allo scadere del limite")
         print(f"Riagganci GraphNav (robot perso): {MISSION_STATS.get('graphnav_relocalizations', 0)} riusciti, "
               f"{MISSION_STATS.get('graphnav_relocalization_fail', 0)} falliti | celle rimandate dopo "
               f"{MAX_BACKTRACKS_PER_ATTEMPT} ritorni nello stesso tentativo: {MISSION_STATS.get('backtrack_giveups', 0)} | "
@@ -3430,6 +3465,14 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         if SAVE_SCAN_BUNDLES and mission_folder is not None:
             gf = local_grid.last_ground_filter
             shape_up = (num_y_up, num_x_up)
+            extra = {}
+            if SAVE_EXTRA_LAYERS:
+                t_x = time.perf_counter()
+                for name, lay in local_grid.extra_layers(SAVE_EXTRA_LAYERS).items():
+                    extra[name] = lay['values']
+                    extra[f'{name}_origin'] = lay['origin']
+                    extra[f'{name}_cell'] = lay['cell']
+                _timing_add('scansione', time.perf_counter() - t_x)
             _save_npz_async(
                 os.path.join(mission_folder, "scans",
                              f"scan_it{iteration:03d}_cell{target_row}_{target_col}_{loop_iter:03d}.npz"),
@@ -3470,6 +3513,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 frontier_clearance=frontier['clearance_nominal'], frontier_path_len=frontier['path_len'],
                 allowed_advance=arcVerification.allowed_advance(frontier),
                 keep_heading=keep_heading, no_progress=no_progress,
+                **extra,
                 decision_kind=decision['kind'],
                 decision_target=np.array(decision.get('target', (np.nan, np.nan)), dtype=np.float64))
             MISSION_STATS['scan_bundles'] += 1
