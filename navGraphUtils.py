@@ -15,6 +15,15 @@ from bosdyn.client.recording import GraphNavRecordingServiceClient
 from bosdyn.client.math_helpers import Quat, SE3Pose
 from google.protobuf import wrappers_pb2 as wrappers
 
+class LoopClosureUploadError(Exception):
+    """Spot ha calcolato gli archi della chiusura d'anello ma il loro caricamento e' fallito."""
+
+    def __init__(self, n_edges, cause):
+        super().__init__(f"{n_edges} archi calcolati ma non caricati nella mappa "
+                         f"({type(cause).__name__}: {cause})")
+        self.n_edges = n_edges
+
+
 class RecordingInterface(object):
     def __init__(self, robot, download_filepath, client_metadata):
         # Cartella base: ogni scaricamento della mappa crea una sottocartella
@@ -92,7 +101,8 @@ class RecordingInterface(object):
     def close_loops_checked(self, max_edge_length_m=2.0, robot_radius_m=0.35,
                             height_variation_m=0.25, timeout_s=None, max_path_m=None,
                             min_path_m=None, modify_map_on_server=True, check_collision=True,
-                            icp_iters=None, feature_matching=None):
+                            icp_iters=None, feature_matching=None, upload_result=False,
+                            prune_edges=None):
         """
         Chiusure d'anello di Spot (fiducial + odometria) DURANTE la missione, con il
         controllo di collisione di Spot sugli archi nuovi, cosi' il grafo non resta una catena
@@ -109,14 +119,24 @@ class RecordingInterface(object):
         (max/min_loop_closure_path_length); None = valori di Spot.
         modify_map_on_server, check_collision: False solo per le misure al banco
         (prova_anelli.py): la mappa resta com'era e si confrontano impostazioni diverse.
-        icp_iters (0 = niente ICP) e feature_matching: solo per le misure al banco; None =
-        valori di Spot.
+        icp_iters (0 = niente ICP) e feature_matching: senza, Spot finisce in pochi secondi ma
+        gli archi non sono corretti sulle scansioni (vedi easy_walk.GRAPHNAV_SDK_LOOP_FAST);
+        None = valori di Spot.
+        upload_result: Spot calcola SENZA scrivere nella mappa e gli archi li carica questa
+        funzione (upload_graph, che li aggiunge alla mappa in un colpo solo). Scrivendo da se',
+        Spot puo' rispondere MapModifiedError ALLA FINE dell'elaborazione, se la mappa e'
+        cambiata nel frattempo, e l'elaborazione va persa: il 26-10 15:36, appena fermata la
+        registrazione, ~73 s di tentativi falliti prima di quello buono.
+        prune_edges: False = tiene anche gli archi candidati in zone gia' collegate (Spot di
+        default ne tiene uno solo per zona, il "migliore"); None = valore di Spot.
 
         Restituisce (archi creati, timed_out). Solleva in caso di errore: chi chiama decide
         cosa fare.
         """
         odo = map_processing_pb2.ProcessTopologyRequest.OdometryLoopClosureParams(
             max_loop_closure_edge_length=wrappers.DoubleValue(value=float(max_edge_length_m)))
+        if prune_edges is not None:
+            odo.prune_edges.value = bool(prune_edges)
         if max_path_m is not None:
             odo.max_loop_closure_path_length.value = float(max_path_m)
         if min_path_m is not None:
@@ -138,10 +158,18 @@ class RecordingInterface(object):
         if timeout_s is not None:
             params.timeout_seconds = float(timeout_s)
             kwargs['timeout'] = max(3.0 * float(timeout_s), float(timeout_s) + 15.0)
+        write_on_server = bool(modify_map_on_server) and not upload_result
         response = self._map_processing_client.process_topology(
-            params=params, modify_map_on_server=bool(modify_map_on_server), **kwargs)
+            params=params, modify_map_on_server=write_on_server, **kwargs)
+        n = len(response.new_subgraph.edges)
+        if upload_result and n:
+            try:
+                self._graph_nav_client.upload_graph(graph=response.new_subgraph,
+                                                    generate_new_anchoring=False)
+            except Exception as e:
+                raise LoopClosureUploadError(n, e) from e
         self.invalidate_graph_cache()
-        return len(response.new_subgraph.edges), bool(getattr(response, 'timed_out', False))
+        return n, bool(getattr(response, 'timed_out', False))
 
     def _get_graph(self, force_refresh=False):
         """Il grafo di GraphNav, dalla copia locale se valida. force_refresh lo riscarica sempre."""

@@ -6,6 +6,17 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 
 ---
 
+## 2026-10-26 sera (dopo la prova all'aperto delle 15:11)
+
+Prova all'aperto: 8 × 7 celle da 2 m, **55 celle su 56 in 25 minuti** (giovedì 59 su 64 in 42), attesa prima dei viaggi GraphNav circa 8 s in tutto (giovedì 603), nessun rifiuto "fuori dalla cella" (giovedì 44), 12 obiettivi esclusi per la missione e mai riproposti, nessuna caduta. Chiusura veloce prima dei viaggi 0.0–2.0 s, 13 archi. Unico problema: la chiusura della mappa è durata 141 s, e quella completa ha dato 2 archi.
+
+### Chiusura d'anello di Spot (`easy_walk.py`, `navGraphUtils.py`)
+- **Spot calcola senza scrivere, gli archi li carichiamo noi** (`close_loops_checked(upload_result=True)`, `upload_graph` degli archi trovati). Il 26-10 15:36, fra lo stop della registrazione e la riga della chiusura completa, sono passati 138 s, ma la riga ne dichiarava 65: i tentativi precedenti erano falliti senza scrivere niente nel log, quasi certamente con `MapModifiedError`, che Spot dà ALLA FINE dell'elaborazione quando prova a scrivere nella mappa. Ogni tentativo fallito costava l'intera elaborazione. Senza scrittura lato Spot quell'errore non può capitare; se fallisse il caricamento, `LoopClosureUploadError` dice quanti archi sono andati persi.
+- **Ogni tentativo fallito finisce nel log** con causa e durata (`… tentativo N non riuscito dopo X s (…)`), al massimo un secondo tentativo e solo per `MapModified`. Il tempo riportato è il totale di tutti i tentativi. Statistica `sdk_loop_failures`; il controllo "Attesa prima di GraphNav" del rapporto li conta.
+- **`GRAPHNAV_SDK_LOOP_FINAL_PRUNE`** (oggi `None`, il valore di Spot): con `prune_edges` Spot tiene un solo arco per zona, e a fine missione le zone erano già collegate dalla veloce e dalle scorciatoie: da qui i 2 archi. `False` farebbe aggiungere anche lì archi corretti sulle scansioni, accanto a quelli veloci. Da decidere con `prova_anelli.py` (serie 3, nuova, sul grafo di oggi).
+
+---
+
 ## 2026-10-26 (dopo la prova all'aperto del 22-10 16:04)
 
 Prova all'aperto: 8 × 8 celle da 2 m, 59 celle su 64 in 42 minuti, nessuna caduta. Tre problemi.

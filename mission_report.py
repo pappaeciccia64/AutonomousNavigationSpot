@@ -392,6 +392,7 @@ def section_checks(log, segments):
     #    Dal 26-10 la chiusura d'anello ha un limite lato Spot (GRAPHNAV_SDK_LOOP_BUDGET_S, 20 s
     #    prima del ritorno a wp_0): un'attesa fino al limite e' normale, oltre no.
     timeouts = len(re.findall(r"Chiusura d'anello di Spot non riuscita \(TimedOut", log))
+    loop_fail = len(re.findall(r"Chiusura d'anello di Spot \([^)]*\): tentativo \d+ non riuscito", log))
     #    Dal 26-10 pomeriggio: prima degli spostamenti in modalita' veloce (senza ICP, limite
     #    3 s), a fine missione completa (limite 45 s), vedi GRAPHNAV_SDK_LOOP_BUDGET_S.
     loops = [(int(n), float(t), float(b), 'SCADUTO' in rest, mode) for mode, n, t, b, rest in re.findall(
@@ -412,8 +413,12 @@ def section_checks(log, segments):
                     f"{sum(l[3] for l in fast)} parziali")
         if final:
             det += (f"; a fine missione {final[-1][0]} archi in {final[-1][1]:.0f} s")
-        out.append(("Attesa prima di GraphNav", 'OK' if not long_w and not timeouts else 'DA GUARDARE',
-                    det + "; atteso: nessun timeout della RPC, attese entro il limite"))
+        if loop_fail:
+            det += f"; tentativi di chiusura d'anello falliti {loop_fail}"
+
+        out.append(("Attesa prima di GraphNav", 'OK' if not long_w and not timeouts and not loop_fail
+                    else 'DA GUARDARE',
+                    det + "; atteso: nessun timeout della RPC ne' tentativo fallito, attese entro il limite"))
 
     # 9. Scelta dell'obiettivo e arrivo appena fuori dalla cella (dal 26-10).
     refused = len(re.findall(r'\[TARGET\] Obiettivo .* escluso per il resto della missione', log))

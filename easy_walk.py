@@ -64,6 +64,7 @@ MISSION_STATS = {
     'sdk_loop_s': 0.0,        # secondi spesi in quelle chiamate
     'sdk_loop_edges': 0,      # archi creati da Spot
     'sdk_loop_partial': 0,    # chiamate finite allo scadere del limite (risultato parziale)
+    'sdk_loop_failures': 0,   # tentativi di chiusura d'anello falliti (errore, nel log)
     'graphnav_trips_avoided': 0,  # spostamenti GraphNav evitati: dal waypoint il grafo non arriva alla cella
     'cone_moves': 0,          # avanzamenti dentro il cono di rotazione possibile
     'retreats_suppressed': 0,  # arretramenti evitati perche' inutili
@@ -562,6 +563,11 @@ GRAPHNAV_SDK_LOOP_CLOSURE = True
 GRAPHNAV_SDK_LOOP_BUDGET_S = 3.0
 GRAPHNAV_SDK_LOOP_FAST = True
 GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S = 45.0
+# prune_edges della chiusura completa finale: None = valore di Spot (True: un solo arco per
+# zona). Il 26-10 15:36 la finale ha dato 2 archi: le zone erano gia' collegate dalla veloce e
+# dalle scorciatoie, e Spot non ne aggiungeva altri accanto. False le farebbe aggiungere anche
+# li', corretti sulle scansioni: da decidere con prova_anelli.py --serie 3.
+GRAPHNAV_SDK_LOOP_FINAL_PRUNE = None
 # Limiti sulla distanza lungo il grafo fra i due waypoint di un anello candidato
 # (max/min_loop_closure_path_length). None = valori di Spot. Da scegliere con prova_anelli.py.
 GRAPHNAV_SDK_LOOP_MAX_PATH_M = None
@@ -1309,31 +1315,42 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, sdk=Tru
     budget = GRAPHNAV_SDK_LOOP_BUDGET_S if sdk_budget_s is None else sdk_budget_s
     fast = GRAPHNAV_SDK_LOOP_FAST if sdk_fast is None else sdk_fast
     if sdk and GRAPHNAV_SDK_LOOP_CLOSURE and budget > 0 and recording is not True:
-        for attempt in range(1, 4):
+        # Spot calcola senza scrivere e gli archi li carichiamo noi (upload_result): niente
+        # MapModifiedError a fine elaborazione. Ogni tentativo fallito finisce nel log con la
+        # sua durata, e il tempo riportato e' il TOTALE (il 26-10 15:36 i tentativi falliti non
+        # comparivano e il tempo era solo quello dell'ultimo: 65 s dichiarati su 138).
+        what = 'veloce, senza ICP' if fast else 'completa'
+        t_all = time.perf_counter()
+        for attempt in range(1, 3):
+            t0 = time.perf_counter()
             try:
-                t0 = time.perf_counter()
                 n_sdk, timed_out = recordingInterface.close_loops_checked(
                     max_edge_length_m=GRAPHNAV_SDK_LOOP_MAX_M, timeout_s=budget,
                     max_path_m=GRAPHNAV_SDK_LOOP_MAX_PATH_M, min_path_m=GRAPHNAV_SDK_LOOP_MIN_PATH_M,
-                    icp_iters=0 if fast else None, feature_matching=False if fast else None)
-                dt = time.perf_counter() - t0
-                MISSION_STATS['sdk_loop_calls'] += 1
-                MISSION_STATS['sdk_loop_s'] += dt
-                MISSION_STATS['sdk_loop_edges'] += n_sdk
-                MISSION_STATS['sdk_loop_partial'] += int(timed_out)
-                print(f"[GRAPHNAV] Chiusura d'anello di Spot ({'veloce, senza ICP' if fast else 'completa'}): "
-                      f"{n_sdk} archi in {dt:.1f} s (limite {budget:.0f} s, "
-                      f"{'SCADUTO: risultato parziale' if timed_out else 'finita'}).")
-                break
+                    icp_iters=0 if fast else None, feature_matching=False if fast else None,
+                    upload_result=True, prune_edges=None if fast else GRAPHNAV_SDK_LOOP_FINAL_PRUNE)
             except Exception as e:
-                if 'MapModified' in type(e).__name__ or 'modified' in str(e):
-                    time.sleep(1.0)      # mappa ancora in elaborazione dopo stop_recording
+                dt = time.perf_counter() - t0
+                MISSION_STATS['sdk_loop_failures'] += 1
+                retry = attempt == 1 and ('MapModified' in type(e).__name__ or 'modified' in str(e))
+                print(f"[GRAPHNAV] Chiusura d'anello di Spot ({what}): tentativo {attempt} non riuscito "
+                      f"dopo {dt:.1f} s ({type(e).__name__}: {e})"
+                      + ("; riprovo." if retry else "; proseguo senza."))
+                if retry:
+                    time.sleep(1.0)
                     continue
-                print(f"[GRAPHNAV] Chiusura d'anello di Spot non riuscita ({e}).")
+                n_sdk = 0
                 break
-        else:
-            print("[GRAPHNAV] Chiusura d'anello di Spot: la mappa risulta ancora in "
-                  "elaborazione dopo 3 tentativi, proseguo senza.")
+            dt_all = time.perf_counter() - t_all
+            MISSION_STATS['sdk_loop_calls'] += 1
+            MISSION_STATS['sdk_loop_s'] += dt_all
+            MISSION_STATS['sdk_loop_edges'] += n_sdk
+            MISSION_STATS['sdk_loop_partial'] += int(timed_out)
+            print(f"[GRAPHNAV] Chiusura d'anello di Spot ({what}): {n_sdk} archi in {dt_all:.1f} s "
+                  f"(limite {budget:.0f} s, "
+                  f"{'SCADUTO: risultato parziale' if timed_out else 'finita'}"
+                  + (f", {attempt} tentativi" if attempt > 1 else "") + ").")
+            break
     if added or n_sdk:
         MISSION_STATS['graphnav_shortcuts'] = MISSION_STATS.get('graphnav_shortcuts', 0) + added + n_sdk
         print(f"[GRAPHNAV] {label}: {added} scorciatoie dalla mappa globale + {n_sdk} da Spot "
@@ -1713,6 +1730,7 @@ def mission_switches():
         'easy_walk.GRAPHNAV_SDK_LOOP_BUDGET_S': GRAPHNAV_SDK_LOOP_BUDGET_S,
         'easy_walk.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S': GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S,
         'easy_walk.GRAPHNAV_SDK_LOOP_FAST': GRAPHNAV_SDK_LOOP_FAST,
+        'easy_walk.GRAPHNAV_SDK_LOOP_FINAL_PRUNE': GRAPHNAV_SDK_LOOP_FINAL_PRUNE,
         'easy_walk.GRAPHNAV_SDK_LOOP_MAX_PATH_M': GRAPHNAV_SDK_LOOP_MAX_PATH_M,
         'easy_walk.SAVE_SCAN_BUNDLES': SAVE_SCAN_BUNDLES,
         'easy_walk.SAVE_EXTRA_LAYERS': list(SAVE_EXTRA_LAYERS),
@@ -1774,7 +1792,8 @@ def _emit_mission_summary_once():
         print(f"Spostamenti GraphNav riusciti: {MISSION_STATS['graphnav_ok']}, falliti: {MISSION_STATS['graphnav_fail']}")
         print(f"Chiusura d'anello di Spot: {MISSION_STATS['sdk_loop_calls']} chiamate, "
               f"{MISSION_STATS['sdk_loop_s']:.0f} s, {MISSION_STATS['sdk_loop_edges']} archi, "
-              f"{MISSION_STATS['sdk_loop_partial']} finite allo scadere del limite")
+              f"{MISSION_STATS['sdk_loop_partial']} finite allo scadere del limite, "
+              f"{MISSION_STATS['sdk_loop_failures']} tentativi falliti")
         print(f"Riagganci GraphNav (robot perso): {MISSION_STATS.get('graphnav_relocalizations', 0)} riusciti, "
               f"{MISSION_STATS.get('graphnav_relocalization_fail', 0)} falliti | celle rimandate dopo "
               f"{MAX_BACKTRACKS_PER_ATTEMPT} ritorni nello stesso tentativo: {MISSION_STATS.get('backtrack_giveups', 0)} | "

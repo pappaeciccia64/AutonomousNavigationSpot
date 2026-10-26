@@ -13,7 +13,15 @@ SERIE 1 (eseguita il 26-10 alle 12:41, vedi CHANGELOG), sul grafo intero:
      (max_loop_closure_path_length), senza controllo di collisione;
   F. la chiamata con limite 4 s ripetuta, modificando la mappa: il lavoro prosegue o riparte?
 
-SERIE 2 (default):
+SERIE 3 (default; sul grafo del 26-10 15:11, che ha gia' gli archi della chiusura veloce fatta
+prima di ogni spostamento): la chiusura COMPLETA di fine missione, che il 26-10 ha dato 2 archi
+in 65 s. Con prune_edges di Spot (un solo arco per zona: le zone erano gia' collegate) e senza
+(prune_edges=False: archi corretti sulle scansioni anche accanto a quelli veloci), con 45 e 90 s.
+Poi il modo usato in missione dal 26-10 sera: Spot calcola senza scrivere e gli archi si
+caricano con upload_graph (niente MapModifiedError); si contano gli archi della mappa prima e
+dopo.
+
+SERIE 2:
   1. Grafo ricostruito come a inizio, meta' e fine missione (i primi 100, 200, tutti i 388
      waypoint in ordine di creazione): a ogni dimensione, le idee per una chiusura d'anello
      veloce PRIMA degli spostamenti -- limite 2 s, senza ICP (l'allineamento delle scansioni:
@@ -25,7 +33,8 @@ SERIE 2 (default):
 Tutte le misure senza modificare la mappa (modify_map_on_server=False).
 
 Uso (chiede utente e password del robot, se non sono in BOSDYN_CLIENT_USERNAME/PASSWORD):
-    python3 prova_anelli.py                 # serie 2, circa 20 minuti
+    python3 prova_anelli.py                 # serie 3, circa 10 minuti
+    python3 prova_anelli.py --serie 2       # la serie del 26-10 13:02, circa 20 minuti
     python3 prova_anelli.py --serie 1       # la serie del 26-10 12:41
     python3 prova_anelli.py --grafo graph/Mission_<nome>/Grafo_<...> --hostname 192.168.80.3
 
@@ -43,6 +52,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 DEFAULT_GRAPH = 'graph/Mission_22-10-2026_16-04-22/Grafo_22-10-2026_16-48-11'
+DEFAULT_GRAPH_3 = 'graph/Mission_26-10-2026_15-11-21/Grafo_26-10-2026_15-39-18'
 
 # --- Serie 1 --------------------------------------------------------------------------
 # (nome, parametri di close_loops_checked). Per A, senza limite lato Spot, la RPC aspetta
@@ -217,12 +227,50 @@ def serie_2(ri, gn, gdir, graph, fh, results):
         measure(ri, fh, name, kw, len(graph.waypoints), results['prove'])
 
 
+CONFIGS_3 = [
+    ("completa 45 s, come il 26-10", dict(timeout_s=45.0)),
+    ("completa 45 s, senza prune", dict(timeout_s=45.0, prune_edges=False)),
+    ("completa 90 s, senza prune", dict(timeout_s=90.0, prune_edges=False)),
+]
+
+
+def serie_3(ri, gn, gdir, graph, fh, results):
+    dt, _, _ = upload(gn, gdir, graph, fh)
+    results['caricamento_s'] = round(dt, 1)
+    src = {}
+    for e in graph.edges:
+        src[e.annotations.edge_source] = src.get(e.annotations.edge_source, 0) + 1
+    log(fh, f"[ANELLI-BANCO] Caricato in {dt:.0f} s; archi per origine: {src}\n")
+    results['prove'] = []
+    for name, kw in CONFIGS_3:
+        measure(ri, fh, name, kw, len(graph.waypoints), results['prove'])
+    # Il modo della missione: calcolo senza scrivere + upload_graph degli archi trovati.
+    log(fh, "")
+    before = len(gn.download_graph().edges)
+    t = time.perf_counter()
+    try:
+        n, partial = ri.close_loops_checked(max_edge_length_m=2.0, timeout_s=45.0, upload_result=True,
+                                            prune_edges=False)
+        dt = time.perf_counter() - t
+        after = len(gn.download_graph().edges)
+        row = dict(prova="caricamento con upload_graph (45 s, senza prune)", secondi=round(dt, 1),
+                   archi=n, parziale=partial, archi_mappa_prima=before, archi_mappa_dopo=after)
+        log(fh, f"[ANELLI-BANCO] caricamento con upload_graph: {n} archi calcolati in {dt:.1f} s; archi "
+                f"nella mappa {before} -> {after} ({'OK' if after - before == n else 'NON TORNA'})")
+    except Exception as e:
+        row = dict(prova="caricamento con upload_graph", errore=f"{type(e).__name__}: {e}")
+        log(fh, f"[ANELLI-BANCO] caricamento con upload_graph: ERRORE {type(e).__name__}: {e}")
+    results['prove'].append(row)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[1])
-    ap.add_argument('--grafo', default=DEFAULT_GRAPH)
+    ap.add_argument('--grafo', default=None)
     ap.add_argument('--hostname', default="192.168.80.3")
-    ap.add_argument('--serie', type=int, choices=(1, 2), default=2)
+    ap.add_argument('--serie', type=int, choices=(1, 2, 3), default=3)
     args = ap.parse_args()
+    if args.grafo is None:
+        args.grafo = DEFAULT_GRAPH_3 if args.serie == 3 else DEFAULT_GRAPH
 
     from bosdyn.api.graph_nav import map_pb2
     import bosdyn.client.lease
@@ -252,7 +300,7 @@ def main():
         except Exception:
             pass
         try:
-            (serie_1 if args.serie == 1 else serie_2)(ri, gn, gdir, graph, fh, results)
+            {1: serie_1, 2: serie_2, 3: serie_3}[args.serie](ri, gn, gdir, graph, fh, results)
         finally:
             gn.clear_graph()
             log(fh, "[ANELLI-BANCO] Mappa del robot svuotata.")
