@@ -597,14 +597,14 @@ class TentativoCella:
         local_grid_client = self.local_grid.local_grid_client
 
         # 1. La scansione: i layer in una richiesta, poi (sotto) la loro elaborazione
-        self.scan = self.local_grid.fetch_scan(self.robot_state_client)
-        if self.scan is None:
+        scan = self.local_grid.fetch_scan(self.robot_state_client)
+        if scan is None:
             print("[ERROR] Rilevamento griglie locali fallito.")
             return FALLITO
-        grids_data, main_proto = self.scan.grids_data, self.scan.proto
-        pts, cells_obstacle_dist = self.scan.pts, self.scan.od
-        terrain_values, valid_values = self.scan.terrain_raw, self.scan.valid
-        num_x, num_y, cell_size = self.scan.num_x, self.scan.num_y, self.scan.cell_size
+        grids_data, main_proto = scan.grids_data, scan.proto
+        pts, cells_obstacle_dist = scan.pts, scan.od
+        terrain_values, valid_values = scan.terrain_raw, scan.valid
+        num_x, num_y, cell_size = scan.num_x, scan.num_y, scan.cell_size
 
         # =========================================================================
         # MAPPE GLOBALI: create alla prima scansione, poi accumulate per tutta la missione
@@ -631,10 +631,10 @@ class TentativoCella:
 
         # 2. Impronta del corpo, terreno corretto (da qui in poi si usa solo terrain_real),
         # pendenza e rugosita', maschera degli ostacoli
-        self.local_grid.process_scan(self.scan, self.robot_x, self.robot_y, self.robot_yaw,
+        self.local_grid.process_scan(scan, self.robot_x, self.robot_y, self.robot_yaw,
                                 ground_label="scan-iniziale", diag_label="scan-cella")
-        self.footprint_mask_2d, terrain_real, is_valid = self.scan.footprint_mask, self.scan.terrain, self.scan.is_valid
-        grad_values, rough_values, obstacle_mask = self.scan.grad, self.scan.rough, self.scan.obstacle_mask
+        self.footprint_mask_2d, terrain_real, is_valid = scan.footprint_mask, scan.terrain, scan.is_valid
+        grad_values, rough_values, obstacle_mask = scan.grad, scan.rough, scan.obstacle_mask
         grad_for_prm = grad_values.copy()
         rough_for_prm = rough_values.copy()
 
@@ -895,16 +895,16 @@ class TentativoCella:
         tentativo deve finire."""
         if self.verification_tracker is not None:
             self.verification_tracker.clear_path()
-        self.esc = _trap_backtrack(
+        esc = _trap_backtrack(
             self.trap_state, block_arc,
             self.env, self.prm_graph, self.goal_id, self.recordingInterface, self.robot_state_client,
             self.command_client, self.global_map, self.mobility_kwargs, self.pts_up, self.obstacle_mask_updated,
             label=label, skip_if_graph_cannot_help=skip_if_graph_cannot_help)
-        if not self.esc['ok']:
+        if not esc['ok']:
             return False
-        self.path_waypoints = self._waypoints_from_ids(self.esc['ids'])
-        self.full_path_coords = [self.prm_graph.get_node_position(nid) for nid in self.esc['ids']]
-        self.robot_node_id = self.esc['robot_node']
+        self.path_waypoints = self._waypoints_from_ids(esc['ids'])
+        self.full_path_coords = [self.prm_graph.get_node_position(nid) for nid in esc['ids']]
+        self.robot_node_id = esc['robot_node']
         self.no_progress = 0
         self.early_replans = 0
         self.retreats_in_a_row = 0
@@ -930,10 +930,10 @@ class TentativoCella:
                                         mobility_kwargs=self.mobility_kwargs)
             return FALLITO
 
-        self.robot_x, self.robot_y, self.robot_z, self.robot_quat = spotUtils.getPosition(self.robot_state_client)
+        self.robot_x, self.robot_y, self.robot_z, robot_quat = spotUtils.getPosition(self.robot_state_client)
 
-        self.robot_yaw = np.arctan2(2.0 * (self.robot_quat.w * self.robot_quat.z + self.robot_quat.x * self.robot_quat.y),
-                               1.0 - 2.0 * (self.robot_quat.y ** 2 + self.robot_quat.z ** 2))
+        self.robot_yaw = np.arctan2(2.0 * (robot_quat.w * robot_quat.z + robot_quat.x * robot_quat.y),
+                               1.0 - 2.0 * (robot_quat.y ** 2 + robot_quat.z ** 2))
 
         # --- Guardia generica anti-stallo: quanti giri di fila senza spostarsi.
         if self.last_xy is not None and float(np.hypot(self.robot_x - self.last_xy[0], self.robot_y - self.last_xy[1])) < P.IDLE_MOVE_M:
@@ -963,26 +963,26 @@ class TentativoCella:
 
     def _scansione_e_grafo(self):
         # 1. SCANSIONE FRESCA, prima di tutto il resto
-        self.scan = self.local_grid.fetch_scan(self.robot_state_client)
-        if self.scan is None:
+        scan = self.local_grid.fetch_scan(self.robot_state_client)
+        if scan is None:
             print("[ERROR] Rilevamento locale fallito durante il tracking. Arresto precauzionale.")
             if self.verification_tracker is not None:
                 self.verification_tracker.clear_path()
             return FALLITO
         self.t_scan = time.perf_counter()
 
-        self.grids_data_up, main_proto_up = self.scan.grids_data, self.scan.proto
+        self.grids_data_up, main_proto_up = scan.grids_data, scan.proto
         self.lg_proto_up = main_proto_up
-        self.pts_up, self.cells_obs_up = self.scan.pts, self.scan.od
-        self.terrain_up, self.valid_up = self.scan.terrain_raw, self.scan.valid
-        self.num_x_up, self.num_y_up, self.cell_size_up = self.scan.num_x, self.scan.num_y, self.scan.cell_size
-        self.grid_origin_x_up, self.grid_origin_y_up = self.local_grid.grid_origin(self.scan)
+        self.pts_up, self.cells_obs_up = scan.pts, scan.od
+        self.terrain_up, self.valid_up = scan.terrain_raw, scan.valid
+        self.num_x_up, self.num_y_up, self.cell_size_up = scan.num_x, scan.num_y, scan.cell_size
+        self.grid_origin_x_up, self.grid_origin_y_up = self.local_grid.grid_origin(scan)
 
-        self.local_grid.process_scan(self.scan, self.robot_x, self.robot_y, self.robot_yaw,
+        self.local_grid.process_scan(scan, self.robot_x, self.robot_y, self.robot_yaw,
                                 ground_label="scan-passo", diag_label="scan-passo")
-        self.footprint_mask_2d = self.scan.footprint_mask
-        self.terrain_real_up, self.is_valid_up, self.unwritten_up = self.scan.terrain, self.scan.is_valid, self.scan.unwritten
-        self.grad_up, self.rough_up, self.obstacle_mask_updated = self.scan.grad, self.scan.rough, self.scan.obstacle_mask
+        self.footprint_mask_2d = scan.footprint_mask
+        self.terrain_real_up, self.is_valid_up, self.unwritten_up = scan.terrain, scan.is_valid, scan.unwritten
+        self.grad_up, self.rough_up, self.obstacle_mask_updated = scan.grad, scan.rough, scan.obstacle_mask
 
         self.t_proc = time.perf_counter()
         _gm_core_up = spotGrid.fold_scan_into_global_maps(
@@ -1173,7 +1173,7 @@ class TentativoCella:
                   f"{P.GOAL_REACHED_TOLERANCE_M:.2f} m, ma il robot e' ancora fuori dalla cella "
                   f"({self.target_row},{self.target_col}): non vale come arrivo, proseguo come per un "
                   f"fronte bloccato.")
-        self.next_node_id, self.next_x, self.next_y = self.path_waypoints[0]
+        self.next_node_id, next_x, next_y = self.path_waypoints[0]
         self.keep_heading = False     # sempre False (niente traverso): resta nei dati salvati e in navigate_to
 
         # Pacchetto della scansione salvato QUI, prima del blocco rotazione: i rami di
@@ -1375,10 +1375,10 @@ class TentativoCella:
                 # muso, puo' essere percorribilissimo. Permanente resta solo cio' che e'
                 # confermato da tre scansioni ferme o da un fallimento fisico.
                 prm_graph_module.mark_edge_blocked_soft(self.prm_graph, self.robot_node_id, self.next_node_id)
-                self.new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
-                if self.new_ids is not None:
-                    self.path_waypoints = self._waypoints_from_ids(self.new_ids)
-                    self.full_path_coords = [self.prm_graph.get_node_position(nid) for nid in self.new_ids]
+                new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
+                if new_ids is not None:
+                    self.path_waypoints = self._waypoints_from_ids(new_ids)
+                    self.full_path_coords = [self.prm_graph.get_node_position(nid) for nid in new_ids]
                     self.no_progress = 0
                     return CONTINUA
                 print("[ROTAZIONE] Nessuna alternativa nel grafo dal punto in cui sono. "
@@ -1446,10 +1446,10 @@ class TentativoCella:
                         self.target_x, self.target_y, self.global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
                         label=f"obiettivo riscelto cella ({self.target_row},{self.target_col})",
                         is_robot=False)
-                    self.new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
-                    if self.new_ids is not None:
-                        self.path_waypoints = self._waypoints_from_ids(self.new_ids)
-                        self.full_path_coords = [self.prm_graph.get_node_position(nid) for nid in self.new_ids]
+                    new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
+                    if new_ids is not None:
+                        self.path_waypoints = self._waypoints_from_ids(new_ids)
+                        self.full_path_coords = [self.prm_graph.get_node_position(nid) for nid in new_ids]
                         self.no_progress = 0
                         print(f"[REPLAN] Verso il nuovo obiettivo ({self.target_x:.2f}, "
                               f"{self.target_y:.2f}): {len(self.path_waypoints)} waypoint.")
@@ -1498,10 +1498,10 @@ class TentativoCella:
                 # Scarto NON permanente: dopo una sola scansione l'arco va tolto dal piano,
                 # non condannato per la missione (vedi mark_edge_blocked_soft).
                 prm_graph_module.mark_edge_blocked_soft(self.prm_graph, ea, eb)
-                self.new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
-                if self.new_ids is not None and len(self.new_ids) > 1:
-                    self.path_waypoints = self._waypoints_from_ids(self.new_ids)
-                    self.full_path_coords = [self.prm_graph.get_node_position(nid) for nid in self.new_ids]
+                new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
+                if new_ids is not None and len(new_ids) > 1:
+                    self.path_waypoints = self._waypoints_from_ids(new_ids)
+                    self.full_path_coords = [self.prm_graph.get_node_position(nid) for nid in new_ids]
                     self.no_progress = 0
                     print(f"[SUBITO] Percorso alternativo con {len(self.path_waypoints)} waypoint, "
                           f"dal punto in cui sono.")
@@ -1580,12 +1580,12 @@ class TentativoCella:
             self.block_replans += 1
             self.no_progress = 0
 
-            self.new_ids = None
+            new_ids = None
             if self.block_replans <= P.MAX_BLOCK_REPLANS:
-                self.new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
-            if self.new_ids is not None:
-                self.path_waypoints = self._waypoints_from_ids(self.new_ids)
-                self.full_path_coords = [self.prm_graph.get_node_position(nid) for nid in self.new_ids]
+                new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
+            if new_ids is not None:
+                self.path_waypoints = self._waypoints_from_ids(new_ids)
+                self.full_path_coords = [self.prm_graph.get_node_position(nid) for nid in new_ids]
                 print(f"[REPLAN] Dopo il blocco ({self.block_replans}/{P.MAX_BLOCK_REPLANS}): percorso "
                       f"alternativo con {len(self.path_waypoints)} waypoint, dal punto in cui sono.")
                 return CONTINUA
@@ -1636,10 +1636,10 @@ class TentativoCella:
                       f"Non ci vado ({self.arrival_refusals}/{P.MAX_ARRIVAL_REFUSALS}), scarto il tratto "
                       f"{self.robot_node_id}->{self.next_node_id} e ripianifico.")
                 prm_graph_module.mark_edge_blocked_soft(self.prm_graph, self.robot_node_id, self.next_node_id)
-                self.new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
-                if self.new_ids is not None and len(self.new_ids) > 1:
-                    self.path_waypoints = self._waypoints_from_ids(self.new_ids)
-                    self.full_path_coords = [self.prm_graph.get_node_position(nid) for nid in self.new_ids]
+                new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
+                if new_ids is not None and len(new_ids) > 1:
+                    self.path_waypoints = self._waypoints_from_ids(new_ids)
+                    self.full_path_coords = [self.prm_graph.get_node_position(nid) for nid in new_ids]
                     self.no_progress = 0
                     return CONTINUA
                 # Sapere in anticipo che il punto d'arrivo e' un vicolo cieco e andarci lo
@@ -1667,12 +1667,12 @@ class TentativoCella:
         for leg_i in range(max(1, n_legs)):
             if not self.path_waypoints:
                 break
-            self.next_node_id, self.next_x, self.next_y = self.path_waypoints[0]
+            self.next_node_id, next_x, next_y = self.path_waypoints[0]
             if n_legs == 0:
                 move_x, move_y = self.decision['target']
                 is_partial_step = True
             else:
-                move_x, move_y = self.next_x, self.next_y
+                move_x, move_y = next_x, next_y
                 is_partial_step = False
             if leg_i > 0:
                 # Posa VERA dopo la gamba precedente. Serve a tre cose, tutte necessarie:
@@ -1682,12 +1682,12 @@ class TentativoCella:
                 #    dell'angolo sbagliato e camminerebbe fuori dal percorso verificato;
                 #  - la distanza da percorrere si calcola da (robot_x, robot_y);
                 #  - l'arresto a meta' movimento misura il percorso rimanente da qui.
-                self.robot_x, self.robot_y, self.robot_z, self.robot_quat = spotUtils.getPosition(self.robot_state_client)
+                self.robot_x, self.robot_y, self.robot_z, robot_quat = spotUtils.getPosition(self.robot_state_client)
                 self.robot_yaw = np.arctan2(
-                    2.0 * (self.robot_quat.w * self.robot_quat.z + self.robot_quat.x * self.robot_quat.y),
-                    1.0 - 2.0 * (self.robot_quat.y ** 2 + self.robot_quat.z ** 2))
+                    2.0 * (robot_quat.w * robot_quat.z + robot_quat.x * robot_quat.y),
+                    1.0 - 2.0 * (robot_quat.y ** 2 + robot_quat.z ** 2))
                 fresh_vision_tform_body = SimpleNamespace(
-                    position=SimpleNamespace(x=self.robot_x, y=self.robot_y, z=self.robot_z), rotation=self.robot_quat)
+                    position=SimpleNamespace(x=self.robot_x, y=self.robot_y, z=self.robot_z), rotation=robot_quat)
 
                 # Al nodo intermedio il robot si FERMA e RUOTA verso il nodo successivo: la
                 # decisione iniziale ha controllato solo la rotazione della prima gamba.
@@ -1741,7 +1741,7 @@ class TentativoCella:
             self.retreats_in_a_row = 0   # un avanzamento vero rompe la catena di arretramenti
             if is_partial_step:
                 print(f"[PASSO PARZIALE] Verso il nodo {self.next_node_id}: avanzo di {self.decision['dist']:.2f} m "
-                      f"su {np.hypot(self.next_x - self.robot_x, self.next_y - self.robot_y):.2f} fino a "
+                      f"su {np.hypot(next_x - self.robot_x, next_y - self.robot_y):.2f} fino a "
                       f"({move_x:.2f}, {move_y:.2f}), poi riguardo con una scansione fresca.")
             else:
                 print(f"[OK] Tratto {self.robot_node_id}->{self.next_node_id} confermato libero dal fronte. Eseguo movimento...")
@@ -1976,7 +1976,7 @@ class TentativoCella:
                     pts=self.pts_up, terrain_real=self.terrain_real_up, obstacle_mask=self.obstacle_mask_updated,
                     robot_x=self.robot_x, robot_y=self.robot_y,
                     candidates={'rejected': [], 'valid': []},
-                    chosen_point=(self.next_x, self.next_y), iteration=self.iteration, env=self.env,
+                    chosen_point=(next_x, next_y), iteration=self.iteration, env=self.env,
                     save_path=fail_save_path, prm_graph=self.prm_graph, chosen_path=self.full_path_coords,
                     cells_obstacle_dist=self.cells_obs_up, valid_values=self.valid_up,
                     grad_values=self.grad_up, rough_values=self.rough_up
