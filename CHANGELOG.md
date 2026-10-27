@@ -8,7 +8,7 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 
 ## 2026-10-27 (ristrutturazione, comportamento invariato)
 
-`easy_walk.py` da 5611 a circa 3000 righe; il comportamento del robot non cambia. Ogni passo verificato con: log del test end-to-end **identici riga per riga** alla registrazione di riferimento in tutti i 19 scenari (`E2E_LOG_DIR` + `confronta_log.py`, nuovi), rigioco delle 10 missioni identico al riferimento, `test_obiettivi.py` identico, controllo statico dei nomi, `preflight.py`; le parti GraphNav, che nessun test esercita, provate con un GraphNav finto (spostamento, blocco, ritorno a wp_0, chiusura d'anello, deriva).
+`easy_walk.py` da 5611 a circa 2900 righe; il comportamento del robot non cambia. Ogni passo verificato con: log del test end-to-end **identici riga per riga** alla registrazione di riferimento in tutti i 19 scenari (`E2E_LOG_DIR` + `confronta_log.py`, nuovi), rigioco delle 10 missioni identico al riferimento, `test_obiettivi.py` identico, controllo statico dei nomi, `preflight.py`; le parti GraphNav, che nessun test esercita, provate con un GraphNav finto (spostamento, blocco, ritorno a wp_0, chiusura d'anello, deriva).
 
 - **`parametri.py`** (nuovo): tutti gli interruttori e i numeri della missione, comprese dimensione della missione e grafo (prima in `mission_graph.py`). Il codice li legge come `parametri.NOME` al momento dell'uso, quindi argomenti da riga di comando e prove li possono cambiare.
 - **`registro.py`** (nuovo): statistiche, copia dell'output su file, CSV, registratore dell'inclinazione, pacchetti e viste salvati.
@@ -17,6 +17,11 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 - **`preflight.py` riscritto:** i riferimenti fra moduli (`modulo.nome`, `from modulo import nome`, argomenti con nome) si controllano in automatico, senza tabelle da aggiornare; a mano restano solo i metodi chiamati sugli oggetti.
 - Tolte `ROTATION_ROOM_SEARCH_M` e `ROTATION_ROOM_DIRECTIONS_DEG`, che nessuno usava.
 - **`DA_DECIDERE.md`** (nuovo): domande aperte e decisioni da prendere dopo la prova del 28-10.
+- **L'ingresso in una cella è la classe `TentativoCella`** (prima una funzione di circa 1500 righe): `_prepara`, poi a ogni giro le fasi `_guardie`, `_scansione_e_grafo`, `_fronte_e_decisione`, `_rotazione`, `_tempi`, `_nodo_o_arrivo`, `_attesa`, `_blocco`, `_esegui_tratti`, e alla fine `_fine`. Le 7 copie del ritorno con GraphNav e dell'azzeramento dei contatori sono il metodo `_ritorno`. La catena di elaborazione della scansione (prima scritta 4 volte) è `LocalGrid.fetch_scan` + `process_scan`.
+- **La missione cella per cella è la classe `Missione`** (prima dentro `easy_walk()`, 590 righe, ora circa 90): `esplora`, `_cella_confinante`, `_recupero`, `_scegli_cella_lontana`, `_viaggio_e_tentativo`, `scansione_finale`.
+- **`test_missione.py`** (nuovo): la missione intera con `easy_walk.main()` vero, robot e GraphNav finti, in tre mondi (il terzo con fallimenti forzati: nuovo tentativo dopo il recupero, nessun obiettivo, caduta durante un viaggio). Log identici fra prima e dopo la ristrutturazione.
+- **Correzione trovata dal test di missione:** dopo un ingresso riuscito con il robot appena fuori dalla cella (arrivo fino a 0.35 m fuori), le nuove celle candidate si cercavano attorno alla cella in cui stava il robot invece che attorno a quella appena visitata.
+- Commenti: intestazione per ogni modulo, riferimenti a funzioni spostate aggiornati, `import *` sostituiti. Le chiavi degli interruttori in `mission_summary.json` ora sono `parametri.NOME` (prima `easy_walk.NOME`); il rapporto ne usa solo il nome finale.
 
 ---
 

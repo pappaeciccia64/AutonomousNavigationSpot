@@ -29,12 +29,10 @@ Tutte si leggono dal rapporto (`python3 mission_report.py`) e dai file della mis
 
 ---
 
-## Ristrutturazione del codice (in corso)
+## Ristrutturazione del codice
 
-Fatto: parametri in `parametri.py`, registro in `registro.py`, scansione e mappe in `spotGrid.py`, movimento in `movements.py`, grafo in `mission_graph.py`, celle in `environmentMap.py`, decisioni in `arcVerification.py`, GraphNav in `navGraphUtils.py`.
+Fatto (vedi CHANGELOG, 27-10): parametri in `parametri.py`, registro in `registro.py`, scansione e mappe in `spotGrid.py`, movimento in `movements.py`, grafo in `mission_graph.py`, celle in `environmentMap.py`, decisioni in `arcVerification.py`, GraphNav in `navGraphUtils.py`; in `easy_walk.py` le classi `TentativoCella` e `Missione`.
 
-Da decidere:
-- **come dividere il resto di `easy_walk.py`** (~3000 righe): l'ingresso in una cella (1584 righe), la missione cella per cella (633), la scelta dell'obiettivo (~200), i ritorni (~250), le celle bloccate (~80), il riepilogo di fine missione e gli interruttori (~120), argomenti e `main` (~100);
-- **dove mettere `mission_switches` e il riepilogo**: leggono interruttori da tutti i moduli, quindi in `registro.py` creerebbero un ciclo di import (`movements` importa `registro`);
-- **duplicazioni da togliere**: la catena di elaborazione di una scansione (scritta 4 volte) e il blocco "ritorno con GraphNav e reset dei contatori" (7 volte nel ciclo di navigazione);
-- **commenti**: togliere la cronaca datata dai commenti (va nel CHANGELOG), aggiornare quelli che nominano funzioni spostate, un'intestazione per modulo; README con la mappa dei moduli.
+Ancora possibile, non urgente:
+- in `TentativoCella` i circa 20 attributi della scansione (`pts_up`, `terrain_up`, `grad_up`, …) raccolti in un solo oggetto `Scan`;
+- `mission_switches` e il riepilogo di fine missione restano in `easy_walk.py`: in `registro.py` creerebbero un ciclo di import (`movements` importa `registro`).
