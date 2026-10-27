@@ -107,6 +107,7 @@ with _quiet():
     import prm_graph
     import environmentMap
     import mission_graph
+    import navGraphUtils
     import movements
     import easy_walk as ew
     import parametri as P
@@ -365,7 +366,7 @@ def return_route_check(name, gm):
     if start is None or goal is None or goal not in xy and start not in xy:
         return None
     with _quiet():
-        used, before, after = ew.plan_graphnav_shortcuts(xy, base, start, goal, gm)
+        used, before, after = navGraphUtils.plan_graphnav_shortcuts(xy, base, start, goal, gm)
     if before is None:
         return None
     sx = xy.get(start)

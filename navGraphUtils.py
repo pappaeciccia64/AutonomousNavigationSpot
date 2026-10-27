@@ -14,6 +14,12 @@ from bosdyn.client.map_processing import MapProcessingServiceClient
 from bosdyn.client.recording import GraphNavRecordingServiceClient
 from bosdyn.client.math_helpers import Quat, SE3Pose
 from google.protobuf import wrappers_pb2 as wrappers
+from bosdyn.api.graph_nav import graph_nav_pb2 as _graph_nav_pb2
+
+import movements
+import parametri as P
+import spotUtils
+from registro import MISSION_CTX, MISSION_STATS, TrajectoryLog, append_csv, timing_add
 
 class LoopClosureUploadError(Exception):
     """Spot ha calcolato gli archi della chiusura d'anello ma il loro caricamento e' fallito."""
@@ -664,3 +670,668 @@ class RecordingInterface(object):
             print(f"[NEAREST_WP] Waypoint piu' vicino nella cella {nearest_cell} (distanza: {min_distance})")
 
         return nearest_cell
+
+
+# =========================================================================================
+# GRAPHNAV DURANTE LA MISSIONE: spostamenti fra celle, ritorni, ritorno a wp_0; scorciatoie
+# e chiusura d'anello; localizzazione, riaggancio e deriva; briciole.
+# Usa RecordingInterface (sopra) per parlare con GraphNav.
+# =========================================================================================
+_GN = _graph_nav_pb2.NavigationFeedbackResponse
+
+_GRAPHNAV_FAIL_STATUSES = {
+    _GN.STATUS_STUCK: "bloccato (STUCK)", _GN.STATUS_NO_ROUTE: "nessun percorso nel grafo",
+    _GN.STATUS_NO_LOCALIZATION: "non localizzato", _GN.STATUS_ROBOT_IMPAIRED: "robot in difficolta' (caduto?)",
+    _GN.STATUS_CONSTRAINT_FAULT: "vincolo violato", _GN.STATUS_COMMAND_OVERRIDDEN: "comando sostituito",
+    _GN.STATUS_NOT_LOCALIZED_TO_ROUTE: "non localizzato sul percorso", _GN.STATUS_LEASE_ERROR: "errore di lease",
+    _GN.STATUS_AREA_CALLBACK_ERROR: "errore di area callback",
+}
+
+_DRIFT_COLUMNS = ['time', 'where', 'waypoint', 'age_s', 'dx', 'dy', 'd', 'gn_x', 'gn_y', 'vision_x',
+                  'vision_y']
+
+
+def graphnav_localization(recordingInterface):
+    """Stato del localizzatore di GraphNav come dict, o None se non leggibile. Non scarica il grafo."""
+    try:
+        st = recordingInterface._graph_nav_client.get_localization_state()
+    except Exception as e:
+        return {'error': str(e)}
+    loc = st.localization
+    out = {'wp_id': loc.waypoint_id or None, 'is_lost': None}
+    try:
+        has_ld = st.HasField('lost_detector_state')
+    except Exception:
+        has_ld = False      # SDK senza rilevatore di perdita
+    if has_ld:
+        ld = st.lost_detector_state
+        out.update(is_lost=bool(ld.is_lost),
+                   accepted=int(ld.total_num_accepted_localizations),
+                   rejected=int(ld.total_num_rejected_localizations),
+                   rej_since=int(ld.num_rejected_localizations_since_accepted),
+                   dist_rej=float(ld.distance_traveled_with_rejected_localization),
+                   bad_edges=int(ld.num_consecutive_bad_edges))
+    return out
+
+
+def graphnav_log_drift(recordingInterface, robot_state_client, where):
+    """
+    DERIVA DELL'ODOMETRIA, misurata a ogni arrivo GraphNav. GraphNav si localizza sulle
+    scansioni del waypoint e dice dove sta il corpo rispetto a lui (waypoint_tform_body);
+    componendolo con la posa VISION che il waypoint aveva quando l'abbiamo creato si ottiene
+    dove il robot DOVREBBE essere in VISION senza deriva. La differenza con la posa VISION di
+    adesso e' la deriva accumulata dalla creazione del waypoint: la stessa che sposta, nelle
+    nostre mappe globali (costruite in VISION), cio' che si e' visto molti minuti prima. Il
+    26-10 15:11, all'arrivo su wp_0, lo scarto grezzo era 0.66 m (tolleranza d'arrivo inclusa).
+
+    Solo misura: niente si corregge. Misurabile solo sui waypoint creati da noi (di cella e
+    briciole), di cui si conosce la posa VISION. Mai eccezioni verso chi chiama.
+    """
+    try:
+        loc = recordingInterface._graph_nav_client.get_localization_state().localization
+        wid = loc.waypoint_id
+        poses = getattr(recordingInterface, 'waypoint_poses', None) or {}
+        hit = next(((n, p) for n, p in poses.items() if p.get('waypoint_id') == wid), None)
+        if not wid or hit is None:
+            print(f"[DERIVA] {where}: localizzato su un waypoint automatico di Spot (o non localizzato): "
+                  f"deriva non misurabile qui.")
+            return None
+        name, wp = hit
+        b = loc.waypoint_tform_body.position
+        c, sn = np.cos(wp['yaw']), np.sin(wp['yaw'])
+        gx = wp['x'] + c * b.x - sn * b.y
+        gy = wp['y'] + sn * b.x + c * b.y
+        rx, ry, _, _ = spotUtils.getPosition(robot_state_client)
+        dx, dy = rx - gx, ry - gy
+        d = float(np.hypot(dx, dy))
+        age = time.time() - wp['t'] if wp.get('t') else float('nan')
+        MISSION_STATS['drift_samples'] += 1
+        MISSION_STATS['drift_max_m'] = max(MISSION_STATS['drift_max_m'], d)
+        MISSION_STATS['drift_last_m'] = d
+        print(f"[DERIVA] {where}: localizzato su {name}, creato {age / 60:.1f} min fa -> l'odometria "
+              f"(VISION) e' scostata di {d:.2f} m (dx {dx:+.2f}, dy {dy:+.2f}) da dove GraphNav "
+              f"mette il robot.")
+        append_csv("drift.csv", _DRIFT_COLUMNS,
+                    [[time.time(), where, name, round(age, 1), round(dx, 4), round(dy, 4), round(d, 4),
+                      round(gx, 4), round(gy, 4), round(rx, 4), round(ry, 4)]])
+        return d
+    except Exception as e:
+        print(f"[DERIVA] {where}: misura non riuscita ({type(e).__name__}: {e}).")
+        return None
+
+
+def graphnav_is_lost(loc):
+    return bool(loc) and (loc.get('is_lost') is True or ('error' not in loc and not loc.get('wp_id')))
+
+
+def wp_name_by_id(recordingInterface, wp_id):
+    for name, p in (getattr(recordingInterface, 'waypoint_poses', None) or {}).items():
+        if p.get('waypoint_id') == wp_id:
+            return name
+    return (wp_id or '?')[:12]
+
+
+def graphnav_log_localization(env, recordingInterface, robot_state_client, where, force=False):
+    """
+    Riga [LOCALIZZAZIONE]: stampata solo se lo stato cambia (perso si'/no, localizzazioni
+    rifiutate dall'ultima accettata, archi cattivi di fila) o con force=True. Riporta anche
+    il tier del passo appena fatto e il beccheggio del corpo adesso, per vedere se la perdita
+    scatta in crawl o in salita. Non solleva mai.
+    """
+    if recordingInterface is None:
+        return None
+    loc = graphnav_localization(recordingInterface)
+    if loc is None:
+        return None
+    if 'error' in loc:
+        print(f"[LOCALIZZAZIONE] {where}: stato non leggibile ({loc['error']}).")
+        return loc
+    key = (loc.get('is_lost'), bool(loc.get('wp_id')), (loc.get('rej_since') or 0) > 0,
+           (loc.get('bad_edges') or 0) > 0)
+    prev = getattr(env, '_loc_key', None) if env is not None else None
+    if env is not None:
+        env._loc_key = key
+    if not force and key == prev:
+        return loc
+    pitch = float('nan')
+    try:
+        q = spotUtils.getPosition(robot_state_client)[3]
+        pitch = float(np.degrees(np.arcsin(np.clip(2.0 * (q.w * q.y - q.z * q.x), -1.0, 1.0))))
+    except Exception:
+        pass
+    if loc.get('is_lost') is None:
+        det = "rilevatore di perdita non disponibile"
+    else:
+        det = (f"localizzazioni accettate {loc['accepted']}, rifiutate {loc['rejected']} "
+               f"({loc['rej_since']} dall'ultima accettata, {loc['dist_rej']:.1f} m fatti cosi'), "
+               f"archi cattivi di fila {loc['bad_edges']}")
+    stato = ("PERSO" if loc.get('is_lost') else
+             (f"localizzato su {wp_name_by_id(recordingInterface, loc['wp_id'])}" if loc.get('wp_id')
+              else "NON localizzato"))
+    print(f"[LOCALIZZAZIONE] {where}: {stato} | {det} | ultimo passo {MISSION_STATS.get('last_tier')}, "
+          f"beccheggio {pitch:.1f} gradi.")
+    return loc
+
+
+def graphnav_relocalize(recordingInterface, robot_state_client, why=""):
+    """
+    Riaggancia GraphNav sul waypoint piu' vicino (secondo le nostre pose in visione). La
+    stima iniziale e' waypoint_tform_ko (dal grafo) * ko_tform_body (adesso): la stessa
+    odometria con cui Spot ha registrato il waypoint. True se Spot accetta.
+    """
+    try:
+        rx, ry, _, _ = spotUtils.getPosition(robot_state_client)
+        poses = getattr(recordingInterface, 'waypoint_poses', None) or {}
+        cands = sorted(((float(np.hypot(p['x'] - rx, p['y'] - ry)), name, p['waypoint_id'])
+                        for name, p in poses.items() if p.get('waypoint_id')), key=lambda c: c[0])
+        if not cands:
+            print(f"[LOCALIZZAZIONE] Riaggancio {why}: nessun waypoint nostro noto.")
+            return False
+        d_wp, name, wp_id = cands[0]
+        if d_wp > P.GRAPHNAV_RELOC_MAX_WP_DIST_M:
+            print(f"[LOCALIZZAZIONE] Riaggancio {why}: il waypoint piu' vicino ({name}) e' a "
+                  f"{d_wp:.1f} m, troppo lontano.")
+            return False
+        graph = recordingInterface._get_graph()
+        wp = next((w for w in graph.waypoints if w.id == wp_id), None) if graph else None
+        if wp is None:
+            graph = recordingInterface._get_graph(force_refresh=True)
+            wp = next((w for w in graph.waypoints if w.id == wp_id), None) if graph else None
+        if wp is None:
+            print(f"[LOCALIZZAZIONE] Riaggancio {why}: {name} non e' nel grafo.")
+            return False
+        from bosdyn.client.math_helpers import SE3Pose
+        from bosdyn.api.graph_nav import nav_pb2 as _nav_pb2
+        state = robot_state_client.get_robot_state()
+        odom_tform_body = get_odom_tform_body(state.kinematic_state.transforms_snapshot)
+        guess = SE3Pose.from_proto(wp.waypoint_tform_ko) * odom_tform_body
+        loc = _nav_pb2.Localization()
+        loc.waypoint_id = wp.id
+        loc.waypoint_tform_body.CopyFrom(guess.to_proto())
+        recordingInterface._graph_nav_client.set_localization(
+            initial_guess_localization=loc,
+            ko_tform_body=odom_tform_body.to_proto(),
+            max_distance=P.GRAPHNAV_RELOC_MAX_DIST_M,
+            max_yaw=P.GRAPHNAV_RELOC_MAX_YAW_RAD,
+            fiducial_init=_graph_nav_pb2.SetLocalizationRequest.FIDUCIAL_INIT_NO_FIDUCIAL)
+        MISSION_STATS['graphnav_relocalizations'] = MISSION_STATS.get('graphnav_relocalizations', 0) + 1
+        print(f"[LOCALIZZAZIONE] Riaggancio {why}: riuscito su {name} (a {d_wp:.2f} m secondo le "
+              f"nostre pose; stima dall'odometria, rifinita dall'ICP).")
+        return True
+    except Exception as e:
+        MISSION_STATS['graphnav_relocalization_fail'] = MISSION_STATS.get('graphnav_relocalization_fail', 0) + 1
+        print(f"[LOCALIZZAZIONE] Riaggancio {why}: non riuscito ({e}).")
+        return False
+
+
+def segment_seen_free(global_map, x1, y1, x2, y2, margin_m, step_m=0.05):
+    """True se il segmento e' stato osservato in ogni punto e non passa vicino a celle occupate."""
+    n = max(2, int(np.ceil(np.hypot(x2 - x1, y2 - y1) / step_m)) + 1)
+    for t in np.linspace(0.0, 1.0, n):
+        x, y = x1 + t * (x2 - x1), y1 + t * (y2 - y1)
+        if not global_map.is_known(x, y) or global_map.is_occupied(x, y, safety_margin=margin_m):
+            return False
+    return True
+
+
+def graphnav_is_recording(recordingInterface):
+    """True/False dalla registrazione GraphNav, None se non si riesce a saperlo."""
+    try:
+        return bool(recordingInterface._recording_client.get_record_status().is_recording)
+    except Exception:
+        return None
+
+
+def graph_route(adj, start, goal):
+    """Dijkstra su {wp: {vicino: lunghezza}}: (lunghezza, [wp...]) o (None, None)."""
+    import heapq
+    dist, prev, pq = {start: 0.0}, {}, [(0.0, start)]
+    while pq:
+        d, u = heapq.heappop(pq)
+        if u == goal:
+            break
+        if d > dist.get(u, float('inf')):
+            continue
+        for v, w in adj.get(u, {}).items():
+            nd = d + w
+            if nd < dist.get(v, float('inf')):
+                dist[v], prev[v] = nd, u
+                heapq.heappush(pq, (nd, v))
+    if goal not in dist:
+        return None, None
+    path = [goal]
+    while path[-1] != start:
+        path.append(prev[path[-1]])
+    return dist[goal], path[::-1]
+
+
+def plan_graphnav_shortcuts(poses, base_edges, start_id, goal_id, global_map,
+                            max_m=None, margin_m=None):
+    """
+    Scorciatoie da aggiungere al grafo GraphNav per andare da start_id a goal_id.
+    Funzione pura (niente robot), provata offline sui grafi scaricati: vedi test_replay.py.
+
+    poses: {wp_id: (x, y)} dei waypoint di cui si conosce la posizione (frame della mappa
+        globale); base_edges: [(wp_a, wp_b, lunghezza_m)] gli archi che il grafo ha gia'.
+    Candidate: coppie di waypoint con posizione a meno di max_m, senza arco diretto, la cui
+    linea retta e' stata VISTA libera nella mappa globale con margin_m (_segment_seen_free).
+    Si calcola la strada piu' corta col grafo piu' TUTTE le candidate, e si restituiscono solo
+    le candidate che quella strada usa.
+
+    Restituisce (scorciatoie [(a, b, d)], lunghezza oggi, lunghezza con le scorciatoie); le
+    lunghezze sono None se goal non e' raggiungibile.
+    """
+    max_m = P.GRAPHNAV_SHORTCUT_MAX_M if max_m is None else max_m
+    margin_m = P.GRAPHNAV_SHORTCUT_MARGIN_M if margin_m is None else margin_m
+    adj = {}
+    for a, b, w in base_edges:
+        w = float(w)
+        if w < adj.get(a, {}).get(b, float('inf')):
+            adj.setdefault(a, {})[b] = w
+            adj.setdefault(b, {})[a] = w
+    before, _ = graph_route(adj, start_id, goal_id)
+    ids = list(poses)
+    shortcut = {}
+    for i in range(len(ids)):
+        xa, ya = poses[ids[i]]
+        for j in range(i + 1, len(ids)):
+            a, b = ids[i], ids[j]
+            if b in adj.get(a, {}):
+                continue
+            xb, yb = poses[b]
+            d = float(np.hypot(xa - xb, ya - yb))
+            if d > max_m or d < 0.05:
+                continue
+            if segment_seen_free(global_map, xa, ya, xb, yb, margin_m):
+                shortcut[frozenset((a, b))] = d
+    full = {k: dict(v) for k, v in adj.items()}
+    for k, d in shortcut.items():
+        a, b = tuple(k)
+        full.setdefault(a, {})[b] = d
+        full.setdefault(b, {})[a] = d
+    after, path = graph_route(full, start_id, goal_id)
+    used = []
+    if path:
+        for a, b in zip(path[:-1], path[1:]):
+            k = frozenset((a, b))
+            if k in shortcut and b not in adj.get(a, {}):
+                used.append((a, b, shortcut[k]))
+    return used, before, after
+
+
+def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, sdk=True,
+                           target_wp_id=None, robot_xy=None, sdk_budget_s=None, sdk_fast=None):
+    """
+    Aggiunge scorciatoie al grafo GraphNav prima di uno spostamento (vedi GRAPHNAV_SHORTCUTS).
+    Non solleva mai: senza scorciatoie GraphNav funziona lo stesso, sulla catena.
+
+    Spot accetta archi nuovi (create_edge) SOLO mentre registra ("NotRecordingError"),
+    mentre la chiusura d'anello (process_topology) va fatta a registrazione ferma, e appena
+    fermata puo' rispondere "MapModifiedError" finche' la mappa non e' finita di elaborare.
+    Quindi:
+      map_edges -- le scorciatoie dalla mappa globale: da chiamare PRIMA di stop_recording
+                   (si saltano da sole se la registrazione e' ferma). Servono
+                   target_wp_id (la destinazione) e, se il localizzatore non dice dove si
+                   trova il robot, robot_xy; si creano solo quelle sulla strada (vedi
+                   plan_graphnav_shortcuts).
+      sdk       -- la chiusura d'anello di Spot: da chiamare DOPO stop_recording (si salta da
+                   sola se si sta registrando), con qualche tentativo su MapModifiedError.
+                   sdk_budget_s: limite lato Spot; None = GRAPHNAV_SDK_LOOP_BUDGET_S.
+                   sdk_fast: senza ICP ne' feature matching; None = GRAPHNAV_SDK_LOOP_FAST
+                   (vedi GRAPHNAV_SDK_LOOP_BUDGET_S).
+    """
+    if not P.GRAPHNAV_SHORTCUTS or recordingInterface is None:
+        return 0
+    added = 0
+    recording = graphnav_is_recording(recordingInterface)
+    gg = MISSION_CTX.get('global_grid')
+    global_map = getattr(gg, 'global_occupancy_map', None) if gg is not None else None
+    poses = getattr(recordingInterface, 'waypoint_poses', None) or {}
+    if (map_edges and target_wp_id and recording is not False and global_map is not None
+            and len(poses) >= 2):
+        try:
+            graph = recordingInterface._get_graph(force_refresh=True)
+            by_id = {w.id: w for w in graph.waypoints}
+            xy = {p['waypoint_id']: (float(p['x']), float(p['y'])) for p in poses.values()
+                  if p.get('waypoint_id') in by_id}
+            base = []
+            for e in graph.edges:
+                t = e.from_tform_to.position
+                base.append((e.id.from_waypoint, e.id.to_waypoint,
+                             float(np.sqrt(t.x ** 2 + t.y ** 2 + t.z ** 2))))
+            start = (graphnav_localization(recordingInterface) or {}).get('wp_id')
+            if start not in by_id:
+                if robot_xy is not None and xy:
+                    start = min(xy, key=lambda k: np.hypot(xy[k][0] - robot_xy[0], xy[k][1] - robot_xy[1]))
+                else:
+                    start = None
+            if start is not None and target_wp_id in by_id:
+                used, before, after = plan_graphnav_shortcuts(xy, base, start, target_wp_id, global_map)
+                for a, b, d in used:
+                    try:
+                        recordingInterface.create_edge_between_waypoint_objs(by_id[a], by_id[b])
+                        added += 1
+                    except Exception as e:
+                        print(f"[GRAPHNAV] Scorciatoia {wp_name_by_id(recordingInterface, a)}-"
+                              f"{wp_name_by_id(recordingInterface, b)} rifiutata ({e}).")
+                if before is not None and after is not None:
+                    print(f"[GRAPHNAV] {label}: strada verso {wp_name_by_id(recordingInterface, target_wp_id)} "
+                          f"{before:.1f} m -> {after:.1f} m con {len(used)} scorciatoie "
+                          f"(fino a {P.GRAPHNAV_SHORTCUT_MAX_M:.1f} m, viste libere con "
+                          f"{P.GRAPHNAV_SHORTCUT_MARGIN_M:.2f} m di margine).")
+        except Exception as e:
+            print(f"[GRAPHNAV] Scorciatoie dalla mappa non aggiunte ({e}).")
+        finally:
+            if added:
+                recordingInterface.invalidate_graph_cache()
+    n_sdk = 0
+    budget = P.GRAPHNAV_SDK_LOOP_BUDGET_S if sdk_budget_s is None else sdk_budget_s
+    fast = P.GRAPHNAV_SDK_LOOP_FAST if sdk_fast is None else sdk_fast
+    if sdk and P.GRAPHNAV_SDK_LOOP_CLOSURE and budget > 0 and recording is not True:
+        # Spot calcola senza scrivere e gli archi li carichiamo noi (upload_result): niente
+        # MapModifiedError a fine elaborazione. Ogni tentativo fallito finisce nel log con la
+        # sua durata, e il tempo riportato e' il TOTALE (il 26-10 15:36 i tentativi falliti non
+        # comparivano e il tempo era solo quello dell'ultimo: 65 s dichiarati su 138).
+        what = 'veloce, senza ICP' if fast else 'completa'
+        t_all = time.perf_counter()
+        write_on_spot = False
+        for attempt in range(1, 3):
+            t0 = time.perf_counter()
+            try:
+                n_sdk, timed_out = recordingInterface.close_loops_checked(
+                    max_edge_length_m=P.GRAPHNAV_SDK_LOOP_MAX_M, timeout_s=budget,
+                    max_path_m=P.GRAPHNAV_SDK_LOOP_MAX_PATH_M, min_path_m=P.GRAPHNAV_SDK_LOOP_MIN_PATH_M,
+                    icp_iters=0 if fast else None, feature_matching=False if fast else None,
+                    upload_result=not write_on_spot,
+                    prune_edges=None if fast else P.GRAPHNAV_SDK_LOOP_FINAL_PRUNE)
+            except Exception as e:
+                dt = time.perf_counter() - t0
+                MISSION_STATS['sdk_loop_failures'] += 1
+                retry = attempt == 1 and ('MapModified' in type(e).__name__ or 'modified' in str(e)
+                                          or 'LoopClosureUpload' in type(e).__name__)
+                # Caricamento degli archi rifiutato: al secondo tentativo li scrive Spot stesso
+                # (mai provato sul robot con archi da caricare: la serie 3 ne ha trovati 0).
+                write_on_spot = 'LoopClosureUpload' in type(e).__name__
+                print(f"[GRAPHNAV] Chiusura d'anello di Spot ({what}): tentativo {attempt} non riuscito "
+                      f"dopo {dt:.1f} s ({type(e).__name__}: {e})"
+                      + (("; riprovo facendoli scrivere a Spot." if write_on_spot else "; riprovo.")
+                         if retry else "; proseguo senza."))
+                if retry:
+                    time.sleep(1.0)
+                    continue
+                n_sdk = 0
+                break
+            dt_all = time.perf_counter() - t_all
+            MISSION_STATS['sdk_loop_calls'] += 1
+            MISSION_STATS['sdk_loop_s'] += dt_all
+            MISSION_STATS['sdk_loop_edges'] += n_sdk
+            MISSION_STATS['sdk_loop_partial'] += int(timed_out)
+            print(f"[GRAPHNAV] Chiusura d'anello di Spot ({what}): {n_sdk} archi in {dt_all:.1f} s "
+                  f"(limite {budget:.0f} s, "
+                  f"{'SCADUTO: risultato parziale' if timed_out else 'finita'}"
+                  + (f", {attempt} tentativi" if attempt > 1 else "") + ").")
+            break
+    if added or n_sdk:
+        MISSION_STATS['graphnav_shortcuts'] = MISSION_STATS.get('graphnav_shortcuts', 0) + added + n_sdk
+        print(f"[GRAPHNAV] {label}: {added} scorciatoie dalla mappa globale + {n_sdk} da Spot "
+              f"(chiusure d'anello con controllo di collisione).")
+    return added + n_sdk
+
+
+def graphnav_navigate_to(recordingInterface, waypoint_id, robot_state_client, command_client, label,
+                          timeout_s=P.GRAPHNAV_TIMEOUT_S):
+    """Porta il robot a un waypoint con GraphNav. True solo se ci arriva davvero."""
+    # Prima di muoversi: chiusure d'anello di Spot (a registrazione ferma). Le scorciatoie
+    # dalla mappa le aggiunge chi chiama, PRIMA di fermare la registrazione.
+    # Tutto cio' che sta qui dentro finisce nella voce 'GraphNav' di [TEMPO]: e' una delle
+    # fasi piu' lunghe della missione (il solo ritorno a wp_0 puo' durare minuti).
+    _t_gn = time.perf_counter()
+    try:
+        # 2026-10-26: anche i tratti GraphNav finiscono in trajectory.csv (vedi _TRAJECTORY_COLUMNS).
+        with TrajectoryLog(robot_state_client, 'graphnav'):
+            return _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_client,
+                                               command_client, label, timeout_s)
+    finally:
+        timing_add('GraphNav', time.perf_counter() - _t_gn)
+
+
+def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_client, command_client,
+                                label, timeout_s):
+    graphnav_add_shortcuts(recordingInterface, label, map_edges=False, sdk=True)
+    client = recordingInterface._graph_nav_client
+    tp = _graph_nav_pb2.TravelParams()
+    tp.velocity_limit.CopyFrom(movements._velocity_limit(P.GRAPHNAV_MAX_LINEAR_VEL_MPS, P.GRAPHNAV_MAX_ANGULAR_VEL_RPS))
+    # Rilevatore di perdita permissivo (vedi LOCALIZZAZIONE DI GRAPHNAV).
+    if P.GRAPHNAV_LOST_DETECTOR_STRICTNESS and hasattr(tp, 'lost_detector_strictness'):
+        try:
+            # dal descrittore: l'enum sta in lost_detection_pb2, che nelle versioni vecchie
+            # dell'SDK non c'e'; cosi' funziona ovunque il campo esista.
+            enum = tp.DESCRIPTOR.fields_by_name['lost_detector_strictness'].enum_type
+            tp.lost_detector_strictness = enum.values_by_name[P.GRAPHNAV_LOST_DETECTOR_STRICTNESS].number
+        except Exception:
+            pass
+    print(f"[GRAPHNAV] {label}: avvio (massimo {timeout_s:.0f} s, {P.GRAPHNAV_MAX_LINEAR_VEL_MPS:.1f} m/s).")
+    # Prima di partire si guarda lo stato del localizzatore; se e' perso si riaggancia
+    # subito, invece di farsi rifiutare il comando.
+    relocs = 0
+    loc0 = graphnav_log_localization(None, recordingInterface, robot_state_client,
+                                     f"prima di '{label}'", force=True)
+    if graphnav_is_lost(loc0):
+        relocs += 1
+        graphnav_relocalize(recordingInterface, robot_state_client, f"prima di '{label}'")
+    t0, cmd_id, fb_errors, nav_errors = time.time(), None, 0, 0
+    while time.time() - t0 < timeout_s:
+        try:
+            cmd_id = client.navigate_to(waypoint_id, 1.0, command_id=cmd_id, travel_params=tp)
+            nav_errors = 0
+        except Exception as e:
+            if 'RobotLost' in type(e).__name__ and relocs < P.GRAPHNAV_MAX_RELOCALIZATIONS:
+                relocs += 1
+                print(f"[GRAPHNAV] {label}: GraphNav dice che il robot e' perso: riaggancio "
+                      f"({relocs}/{P.GRAPHNAV_MAX_RELOCALIZATIONS}).")
+                graphnav_relocalize(recordingInterface, robot_state_client, f"durante '{label}'")
+                cmd_id = None
+                time.sleep(0.5)
+                continue
+            nav_errors += 1
+            print(f"[GRAPHNAV] {label}: comando rifiutato ({nav_errors}/3): {e}")
+            # Un errore RPC transitorio non abbandona lo spostamento: si rinuncia al terzo.
+            if nav_errors >= 3:
+                movements.stop_robot(command_client, reason="GraphNav: comando rifiutato")
+                MISSION_STATS['graphnav_fail'] += 1
+                return False
+            cmd_id = None
+            time.sleep(0.5)
+            continue
+        time.sleep(0.5)
+        try:
+            status = client.navigation_feedback(cmd_id).status
+            fb_errors = 0
+        except Exception as e:
+            fb_errors += 1
+            print(f"[GRAPHNAV] {label}: errore nel feedback ({fb_errors}/3): {e}")
+            if fb_errors >= 3:
+                movements.stop_robot(command_client, reason="GraphNav: feedback non disponibile")
+                MISSION_STATS['graphnav_fail'] += 1
+                return False
+            cmd_id = None      # il comando potrebbe non essere piu' valido: se ne invia uno nuovo
+            time.sleep(0.5)
+            continue
+        if status == _GN.STATUS_REACHED_GOAL:
+            print(f"[GRAPHNAV] {label}: arrivato in {time.time() - t0:.0f} s.")
+            MISSION_STATS['graphnav_ok'] += 1
+            graphnav_log_drift(recordingInterface, robot_state_client, label)
+            return True
+        if status == _GN.STATUS_LOST and relocs < P.GRAPHNAV_MAX_RELOCALIZATIONS:
+            # Riaggancio sul waypoint piu' vicino (NON sulla destinazione, e senza dichiarare
+            # l'arrivo: si rimanda il comando e si continua a navigare).
+            relocs += 1
+            print(f"[GRAPHNAV] {label}: GraphNav ha perso la localizzazione per strada: "
+                  f"riaggancio ({relocs}/{P.GRAPHNAV_MAX_RELOCALIZATIONS}).")
+            graphnav_log_localization(None, recordingInterface, robot_state_client,
+                                      f"perso durante '{label}'", force=True)
+            graphnav_relocalize(recordingInterface, robot_state_client, f"durante '{label}'")
+            cmd_id = None
+            continue
+        if status == _GN.STATUS_LOST:
+            # Non si forza la localizzazione sulla destinazione (vedi sopra): fallimento.
+            print(f"[GRAPHNAV] {label}: GraphNav ha perso la localizzazione. Fermo il robot.")
+            movements.stop_robot(command_client, reason="GraphNav: robot perso")
+            MISSION_STATS['graphnav_fail'] += 1
+            return False
+        if status == _GN.STATUS_COMMAND_TIMED_OUT:
+            cmd_id = None          # comando scaduto: se ne invia uno nuovo
+            continue
+        if status in _GRAPHNAV_FAIL_STATUSES:
+            print(f"[GRAPHNAV] {label}: interrotto -- {_GRAPHNAV_FAIL_STATUSES[status]}.")
+            movements.stop_robot(command_client, reason=f"GraphNav: {_GRAPHNAV_FAIL_STATUSES[status]}")
+            MISSION_STATS['graphnav_fail'] += 1
+            return False
+    print(f"[GRAPHNAV] {label}: tempo massimo di {timeout_s:.0f} s superato. Fermo il robot.")
+    movements.stop_robot(command_client, reason="GraphNav: tempo massimo superato")
+    MISSION_STATS['graphnav_fail'] += 1
+    return False
+
+
+def graphnav_return_to_start(recordingInterface, robot_state_client, command_client):
+    """Ritorno a wp_0 a fine missione, con tempo massimo. False se non ci riesce."""
+    try:
+        graph = recordingInterface._get_graph(force_refresh=True)
+        wp0 = next((w for w in graph.waypoints if w.annotations.name == "wp_0"), None)
+    except Exception as e:
+        print(f"[GRAPHNAV] Ritorno a wp_0: grafo non disponibile ({e}).")
+        return False
+    if wp0 is None:
+        print("[GRAPHNAV] Ritorno a wp_0: waypoint wp_0 non trovato nel grafo.")
+        return False
+    return graphnav_navigate_to(recordingInterface, wp0.id, robot_state_client, command_client,
+                                 "ritorno a wp_0", timeout_s=2 * P.GRAPHNAV_TIMEOUT_S)
+
+
+def graphnav_drop_breadcrumb(env, recordingInterface, robot_state_client, prm_node_id,
+                             cell_row, cell_col, force=False):
+    """
+    Lascia una briciola: un waypoint GraphNav nel punto in cui si trova il robot,
+    legato al nodo PRM da cui sta passando.
+
+    Serve per i ritorni. Camminando ALL'INDIETRO sui tratti registrati
+    (retreat_along_traveled_path) il robot non vede dove mette le zampe, non si
+    rilocalizza, e un errore si accumula. Con una traccia di waypoint il ritorno lo fa
+    GraphNav, che cammina in avanti, con la localizzazione e l'anti-ostacolo di Boston
+    Dynamics (decisione dell'utente).
+
+    Densita': un waypoint solo se il robot e' almeno GRAPHNAV_WAYPOINT_MIN_SPACING_M
+    dall'ultimo lasciato, piu' sempre uno all'ingresso di una cella (force=True). Un
+    waypoint per OGNI posizione di sosta darebbe una mappa troppo densa: i passi parziali
+    lasciano soste a 20-60 cm una dall'altra.
+
+    La traccia vive su env (_graphnav_trail) perche' deve sopravvivere ai tentativi di cella.
+    Non solleva mai: una briciola mancata e' una briciola, non un motivo per fermare il robot.
+    """
+    if recordingInterface is None:
+        return None
+    trail = getattr(env, '_graphnav_trail', None)
+    if trail is None:
+        trail = env._graphnav_trail = []
+    try:
+        x, y, _, _ = spotUtils.getPosition(robot_state_client)
+    except Exception as e:
+        print(f"[BRICIOLA] Posizione non leggibile: {e}")
+        return None
+    if not force and trail:
+        last = trail[-1]
+        if float(np.hypot(x - last['x'], y - last['y'])) < P.GRAPHNAV_WAYPOINT_MIN_SPACING_M:
+            return None
+    try:
+        recordingInterface.create_default_waypoint(cell_row=cell_row, cell_col=cell_col)
+        # Nome e id dal waypoint appena creato (li porta la risposta del robot), non da
+        # get_localization_state(), che riscarica tutto il grafo solo per leggerli. Ripiego
+        # su get_localization_state() se l'interfaccia non li espone.
+        last = getattr(recordingInterface, 'last_created_waypoint', None)
+        if isinstance(last, dict) and last.get('id'):
+            wp_id, wp_name = last['id'], last.get('name')
+        else:
+            loc = recordingInterface.get_localization_state()
+            wp_id = loc.get('waypoint_id') if isinstance(loc, dict) else None
+            wp_name = loc.get('waypoint_name') if isinstance(loc, dict) else None
+    except Exception as e:
+        print(f"[BRICIOLA] Waypoint non creato: {e}")
+        return None
+    if not wp_id:
+        print("[BRICIOLA] Waypoint creato ma non localizzato: non lo metto nella traccia "
+              "(un waypoint senza id non si puo' raggiungere).")
+        return None
+    crumb = {'wp_id': wp_id, 'wp_name': wp_name, 'x': float(x), 'y': float(y),
+             'prm_node': prm_node_id, 'cell': (cell_row, cell_col)}
+    trail.append(crumb)
+    print(f"[BRICIOLA] Waypoint {wp_name} in ({x:.2f}, {y:.2f}), nodo PRM {prm_node_id} "
+          f"(traccia: {len(trail)} waypoint).")
+    # Stato del localizzatore di GraphNav, stampato solo quando cambia.
+    graphnav_log_localization(env, recordingInterface, robot_state_client, f"briciola {wp_name}")
+    return crumb
+
+
+def graphnav_step_back(env, recordingInterface, robot_state_client, command_client,
+                       min_dist_m=0.40):
+    """
+    Torna al waypoint piu' recente che sia almeno min_dist_m DIETRO, con GraphNav.
+
+    Si cerca indietro nella traccia perche' l'ultima briciola puo' essere stata lasciata qui,
+    dove il robot e' adesso: tornarci non sposterebbe niente. Se nessuna briciola e' abbastanza
+    lontana si usa comunque la piu' vecchia disponibile.
+
+    Restituisce (ok, crumb). ok=True solo se GraphNav dichiara di essere ARRIVATO: in
+    _graphnav_navigate_to lo STATUS_LOST e' un fallimento, non si forza la localizzazione
+    sulla destinazione (vedi SPOSTAMENTI CON GRAPHNAV).
+
+    La registrazione va FERMATA prima di navigare e ripresa dopo: GraphNav non naviga mentre
+    registra. E' la stessa sequenza usata per gli spostamenti fra celle.
+    """
+    trail = getattr(env, '_graphnav_trail', None) or []
+    if not trail:
+        return False, None
+    try:
+        rx, ry, _, _ = spotUtils.getPosition(robot_state_client)
+    except Exception:
+        rx, ry = trail[-1]['x'], trail[-1]['y']
+    idx = None
+    for k in range(len(trail) - 1, -1, -1):
+        if float(np.hypot(trail[k]['x'] - rx, trail[k]['y'] - ry)) >= min_dist_m:
+            idx = k
+            break
+    if idx is None:
+        idx = 0
+    hop = len(trail) - 1 - idx
+    crumb = trail[idx]
+    d_crumb = float(np.hypot(crumb['x'] - rx, crumb['y'] - ry))
+    if d_crumb < min_dist_m:
+        # Tutte le briciole sono qui attorno (22-10 16:22: il robot stava SU wp_138): GraphNav
+        # non sposterebbe il robot. Si ripianifica da dove si e', senza muoversi.
+        MISSION_STATS['backtracks_in_place'] += 1
+        print(f"[RITORNO] La briciola piu' lontana dietro, {crumb['wp_name']}, e' a {d_crumb:.2f} m "
+              f"(meno di {min_dist_m:.2f}): non mi muovo, ripianifico da qui.")
+        return True, dict(crumb, in_place=True)
+    print(f"[RITORNO] Torno a {crumb['wp_name']}, a {d_crumb:.2f} m dal robot.")
+    recording_stopped = False
+    graphnav_add_shortcuts(recordingInterface, "prima del ritorno", map_edges=True, sdk=False,
+                           target_wp_id=crumb['wp_id'], robot_xy=(rx, ry))
+    try:
+        recordingInterface.stop_recording()
+        recording_stopped = True
+    except Exception as e:
+        print(f"[RITORNO] Non ho potuto fermare la registrazione ({e}): provo comunque.")
+    ok = graphnav_navigate_to(
+        recordingInterface, crumb['wp_id'], robot_state_client, command_client,
+        f"ritorno al waypoint {crumb['wp_name']} in ({crumb['x']:.2f}, {crumb['y']:.2f})")
+    if recording_stopped:
+        try:
+            recordingInterface.start_recording()
+        except Exception as e:
+            print(f"[RITORNO] Registrazione non ripresa ({e}): le briciole successive "
+                  "potrebbero non essere create.")
+    if ok:
+        # I tratti percorsi a zampe non descrivono piu' la strada da cui si e' arrivati:
+        # GraphNav non li registra, e la ritirata di ripiego non deve usarli.
+        env._traveled_arcs = []
+        del trail[len(trail) - hop:]        # le briciole oltre questa non servono piu'
+    return ok, crumb
