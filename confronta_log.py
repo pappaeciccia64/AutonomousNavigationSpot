@@ -22,6 +22,8 @@ _RULES = [
     (re.compile(r'/tmp/[^\s\'",)]+'), '<TMP>'),                  # cartelle temporanee
     (re.compile(r'\b\d{2}:\d{2}:\d{2}(\.\d+)?\b'), '<ORA>'),     # orari
     (re.compile(r'0x[0-9a-f]+'), '<ADDR>'),                      # indirizzi di oggetti
+    (re.compile(r'\d{2}-\d{2}-\d{4}_\d{2}-\d{2}-\d{2}'), '<DATA>'),   # nomi delle cartelle
+    (re.compile(r'\d+(\.\d+)?\s*min\b'), '<T>min'),               # eta' dei waypoint
 ]
 
 
@@ -32,6 +34,8 @@ def normalize(text):
             continue                                            # righe di soli tempi
         for rx, rep in _RULES:
             line = rx.sub(rep, line)
+        if re.search(r'<T>s\s+\(\s*[\d.]+%\)', line):
+            continue                                            # ripartizione dei tempi
         out.append(line)
     return out
 
