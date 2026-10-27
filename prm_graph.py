@@ -1356,3 +1356,29 @@ class PRM:
     def get_node_position(self, node_idx: int) -> Optional[Tuple[float, float]]:
         """Posizione (x, y) del nodo, None se non esiste."""
         return self.nodes.get(node_idx)
+
+
+# =========================================================================================
+# FUNZIONI SUL GRAFO usate dal ciclo di navigazione
+# =========================================================================================
+def mark_edge_blocked_soft(prm, idx1, idx2):
+    """
+    Toglie un arco dal grafo ADESSO, senza condannarlo per sempre.
+
+    prm_graph.mark_edge_invalid() lo mette anche in `tracker_blocked_edges`, che non viene
+    MAI ricreato -- ne' dal refresh ne' dalla ricostruzione degli archi. Giusto per un
+    blocco confermato da tre scansioni ferme; sbagliato per [SUBITO], che scarta dopo UNA
+    scansione: un ostacolo marginale visto una volta isolerebbe un nodo per tutta la missione.
+
+    Qui si tolgono solo l'arco e la sua validita': alla prossima rivalutazione, se i dati
+    freschi dicono che e' libero, l'arco torna -- che e' esattamente il comportamento di
+    rientro che refresh_local_edge_weights e' stato scritto per avere.
+    """
+    key = (min(idx1, idx2), max(idx1, idx2))
+    # Scartare un arco cambia il piano, quindi al prossimo giro il refresh degli archi va
+    # fatto (vedi REFRESH A EVENTI nel ciclo di navigazione).
+    prm.needs_refresh = True
+    prm.edge_validity[key] = False
+    prm.traversed_edges.discard(key)
+    prm.edges[idx1] = [(n, w) for n, w in prm.edges.get(idx1, []) if n != idx2]
+    prm.edges[idx2] = [(n, w) for n, w in prm.edges.get(idx2, []) if n != idx1]
