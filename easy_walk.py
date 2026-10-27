@@ -549,26 +549,15 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
 
     local_grid_client = local_grid.local_grid_client
 
-    # 1. Tutti i layer necessari, in una richiesta
-    grids_data, main_proto, all_grids_proto = local_grid.return_local_grid(
-        ['obstacle_distance', 'terrain', 'terrain_valid'],
-        robot_state_client
-    )
-
-    if grids_data is None or 'obstacle_distance' not in grids_data:
+    # 1. La scansione: i layer in una richiesta, poi (sotto) la loro elaborazione
+    scan = local_grid.fetch_scan(robot_state_client)
+    if scan is None:
         print("[ERROR] Rilevamento griglie locali fallito.")
         return False
-
-    # 2. Valori dei layer
-    pts = grids_data['obstacle_distance']['pts']
-    cells_obstacle_dist = grids_data['obstacle_distance']['values']
-    terrain_values = grids_data['terrain']['values']
-    valid_values = grids_data['terrain_valid']['values']
-
-    # Geometria della griglia
-    num_x = main_proto.local_grid.extent.num_cells_x
-    num_y = main_proto.local_grid.extent.num_cells_y
-    cell_size = main_proto.local_grid.extent.cell_size
+    grids_data, main_proto = scan.grids_data, scan.proto
+    pts, cells_obstacle_dist = scan.pts, scan.od
+    terrain_values, valid_values = scan.terrain_raw, scan.valid
+    num_x, num_y, cell_size = scan.num_x, scan.num_y, scan.cell_size
 
     # =========================================================================
     # MAPPE GLOBALI: create alla prima scansione, poi accumulate per tutta la missione
@@ -593,41 +582,14 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
     quat = vision_tform_body.rotation
     robot_yaw = np.arctan2(2.0 * (quat.w * quat.z + quat.x * quat.y), 1.0 - 2.0 * (quat.y ** 2 + quat.z ** 2))
 
-    footprint_mask_2d = local_grid.compute_robot_footprint_mask(
-        pts, robot_x, robot_y, robot_yaw, num_x, num_y
-    )
-
-    # Correzione del terreno (celle non valide e impronta del robot): da qui in poi si usa
-    # solo terrain_real
-    terrain_real, is_valid = local_grid.correct_terrain(
-        terrain_values, valid_values, num_x, num_y,
-        robot_footprint_mask=footprint_mask_2d, cell_size=cell_size,
-        unwritten_value=spotGrid.raw_zero(grids_data), unwritten_scale=spotGrid.raw_scale(grids_data)
-    )
-    spotGrid.log_ground_filter(local_grid, "scan-iniziale")
-
-    # Pendenza e rugosita' sul terreno GIA' corretto
-    grad_values, rough_values = local_grid.compute_gradient_and_roughness(
-        terrain_real, valid_values, num_x, num_y, cell_size, is_valid=is_valid
-    )
-
+    # 2. Impronta del corpo, terreno corretto (da qui in poi si usa solo terrain_real),
+    # pendenza e rugosita', maschera degli ostacoli
+    local_grid.process_scan(scan, robot_x, robot_y, robot_yaw,
+                            ground_label="scan-iniziale", diag_label="scan-cella")
+    footprint_mask_2d, terrain_real, is_valid = scan.footprint_mask, scan.terrain, scan.is_valid
+    grad_values, rough_values, obstacle_mask = scan.grad, scan.rough, scan.obstacle_mask
     grad_for_prm = grad_values.copy()
     rough_for_prm = rough_values.copy()
-
-    # Fusione (VETO): pura logica di soglia, il terreno e' gia' stato corretto sopra.
-    # Il gradiente NON entra in questo veto per cella -- vedi fuse_obstacle_mask().
-    obstacle_mask = local_grid.fuse_obstacle_mask(
-        cells_obstacle_dist=cells_obstacle_dist,
-        rough_values=rough_values,
-        is_valid=is_valid,
-        obstacle_threshold=spotGrid.OBSTACLE_THRESHOLD,
-        rough_threshold=spotGrid.ROUGH_THRESHOLD
-    )
-
-    spotGrid.log_footprint_diagnostic(local_grid, pts, robot_x, robot_y, robot_yaw,
-                              num_x, num_y, obstacle_mask, "scan-cella",
-                              cells_obstacle_dist=cells_obstacle_dist,
-                              rough_values=rough_values, is_valid=is_valid)
 
     # Aggiorna le mappe globali (occupazione e terreno) con i dati appena processati
     spotGrid.fold_scan_into_global_maps(global_map, global_terrain_map, pts, terrain_real, obstacle_mask,
@@ -926,62 +888,26 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             return False
 
         # 1. SCANSIONE FRESCA, prima di tutto il resto
-        grids_data_up, main_proto_up, all_grids_proto_up = local_grid.return_local_grid(
-            ['obstacle_distance', 'terrain', 'terrain_valid'],
-            robot_state_client
-        )
-
-        if grids_data_up is None or 'obstacle_distance' not in grids_data_up:
+        scan = local_grid.fetch_scan(robot_state_client)
+        if scan is None:
             print("[ERROR] Rilevamento locale fallito durante il tracking. Arresto precauzionale.")
             if verification_tracker is not None:
                 verification_tracker.clear_path()
             return False
         t_scan = time.perf_counter()
 
-        pts_up = grids_data_up['obstacle_distance']['pts']
-        cells_obs_up = grids_data_up['obstacle_distance']['values']
-        terrain_up = grids_data_up['terrain']['values']
-        valid_up = grids_data_up['terrain_valid']['values']
-
+        grids_data_up, main_proto_up = scan.grids_data, scan.proto
         lg_proto_up = main_proto_up
-        num_x_up = lg_proto_up.local_grid.extent.num_cells_x
-        num_y_up = lg_proto_up.local_grid.extent.num_cells_y
-        cell_size_up = lg_proto_up.local_grid.extent.cell_size
+        pts_up, cells_obs_up = scan.pts, scan.od
+        terrain_up, valid_up = scan.terrain_raw, scan.valid
+        num_x_up, num_y_up, cell_size_up = scan.num_x, scan.num_y, scan.cell_size
+        grid_origin_x_up, grid_origin_y_up = local_grid.grid_origin(scan)
 
-        transforms_snapshot_up = main_proto_up.local_grid.transforms_snapshot
-        grid_frame_name_up = main_proto_up.local_grid.frame_name_local_grid_data
-        vision_tform_grid_up = get_a_tform_b(transforms_snapshot_up, VISION_FRAME_NAME, grid_frame_name_up)
-        grid_origin_x_up = vision_tform_grid_up.position.x
-        grid_origin_y_up = vision_tform_grid_up.position.y
-
-        footprint_mask_2d = local_grid.compute_robot_footprint_mask(
-            pts_up, robot_x, robot_y, robot_yaw, num_x_up, num_y_up
-        )
-
-        terrain_real_up, is_valid_up, unwritten_up = local_grid.correct_terrain(
-            terrain_up, valid_up, num_x_up, num_y_up,
-            robot_footprint_mask=footprint_mask_2d, cell_size=cell_size_up,
-            unwritten_value=spotGrid.raw_zero(grids_data_up), unwritten_scale=spotGrid.raw_scale(grids_data_up),
-            return_unwritten=True
-        )
-        spotGrid.log_ground_filter(local_grid, "scan-passo")
-
-        grad_up, rough_up = local_grid.compute_gradient_and_roughness(
-            terrain_real_up, valid_up, num_x_up, num_y_up, cell_size_up, is_valid=is_valid_up
-        )
-
-        obstacle_mask_updated = local_grid.fuse_obstacle_mask(
-            cells_obstacle_dist=cells_obs_up,
-            rough_values=rough_up,
-            is_valid=is_valid_up,
-            obstacle_threshold=spotGrid.OBSTACLE_THRESHOLD,
-            rough_threshold=spotGrid.ROUGH_THRESHOLD
-        )
-
-        spotGrid.log_footprint_diagnostic(local_grid, pts_up, robot_x, robot_y, robot_yaw,
-                                  num_x_up, num_y_up, obstacle_mask_updated, "scan-passo",
-                                  cells_obstacle_dist=cells_obs_up,
-                                  rough_values=rough_up, is_valid=is_valid_up)
+        local_grid.process_scan(scan, robot_x, robot_y, robot_yaw,
+                                ground_label="scan-passo", diag_label="scan-passo")
+        footprint_mask_2d = scan.footprint_mask
+        terrain_real_up, is_valid_up, unwritten_up = scan.terrain, scan.is_valid, scan.unwritten
+        grad_up, rough_up, obstacle_mask_updated = scan.grad, scan.rough, scan.obstacle_mask
 
         t_proc = time.perf_counter()
         _gm_core_up = spotGrid.fold_scan_into_global_maps(
@@ -2527,38 +2453,20 @@ def easy_walk(options):
                         x_curr, y_curr, _, _ = spotUtils.getPosition(robot_state_client)
 
                         # 3. Scansione fresca, per scegliere il punto obiettivo da qui
-                        grids_data_rec, main_proto_rec, _ = local_grid.return_local_grid(
-                            ['obstacle_distance', 'terrain', 'terrain_valid'], robot_state_client
-                        )
-
-                        if grids_data_rec and 'obstacle_distance' in grids_data_rec:
-                            pts = grids_data_rec['obstacle_distance']['pts']
-                            cells_obstacle_dist = grids_data_rec['obstacle_distance']['values']
-                            terrain_values = grids_data_rec['terrain']['values']
-                            valid_values = grids_data_rec['terrain_valid']['values']
-
-                            num_x = main_proto_rec.local_grid.extent.num_cells_x
-                            num_y = main_proto_rec.local_grid.extent.num_cells_y
-                            cell_size = main_proto_rec.local_grid.extent.cell_size
-
-                            terrain_corrected_rec, is_valid_rec = local_grid.correct_terrain(
-                                terrain_values, valid_values, num_x, num_y, cell_size=cell_size,
-                                unwritten_value=spotGrid.raw_zero(grids_data_rec), unwritten_scale=spotGrid.raw_scale(grids_data_rec)
-                            )
-                            grad_values, rough_values = local_grid.compute_gradient_and_roughness(
-                                terrain_corrected_rec, valid_values, num_x, num_y, cell_size,
-                                is_valid=is_valid_rec
-                            )
+                        scan = local_grid.fetch_scan(robot_state_client)
+                        if scan is not None:
+                            # Senza impronta del corpo ne' maschera degli ostacoli: serve solo
+                            # il terreno per il PRM e la scelta dell'obiettivo.
+                            local_grid.process_scan(scan, x_curr, y_curr, 0.0, footprint=False, fuse=False)
+                            pts, cells_obstacle_dist = scan.pts, scan.od
+                            num_x, num_y, cell_size = scan.num_x, scan.num_y, scan.cell_size
+                            terrain_corrected_rec, is_valid_rec = scan.terrain, scan.is_valid
+                            grad_values, rough_values = scan.grad, scan.rough
 
                             grad_2d = grad_values.reshape((num_y, num_x))
                             rough_2d = rough_values.reshape((num_y, num_x))
                             terrain_2d_rec = terrain_corrected_rec.reshape((num_y, num_x))
-
-                            transforms_snapshot = main_proto_rec.local_grid.transforms_snapshot
-                            grid_frame_name = main_proto_rec.local_grid.frame_name_local_grid_data
-                            vision_tform_grid = get_a_tform_b(transforms_snapshot, VISION_FRAME_NAME, grid_frame_name)
-                            grid_origin_x = vision_tform_grid.position.x
-                            grid_origin_y = vision_tform_grid.position.y
+                            grid_origin_x, grid_origin_y = local_grid.grid_origin(scan)
 
                             prm.update_local_grid_data(
                                 grad_values_2d=grad_2d,
@@ -2810,43 +2718,13 @@ def easy_walk(options):
         final_yaw = np.arctan2(2.0 * (quat_final.w * quat_final.z + quat_final.x * quat_final.y),
                                1.0 - 2.0 * (quat_final.y ** 2 + quat_final.z ** 2))
 
-        grids_data_final, main_proto_final, _ = local_grid.return_local_grid(
-            ['obstacle_distance', 'terrain', 'terrain_valid'], robot_state_client
-        )
-
-        if grids_data_final is not None and 'obstacle_distance' in grids_data_final:
-            pts_final = grids_data_final['obstacle_distance']['pts']
-            cells_obs_final = grids_data_final['obstacle_distance']['values']
-            terrain_final = grids_data_final['terrain']['values']
-            valid_final = grids_data_final['terrain_valid']['values']
-
-            num_x_final = main_proto_final.local_grid.extent.num_cells_x
-            num_y_final = main_proto_final.local_grid.extent.num_cells_y
-            cell_size_final = main_proto_final.local_grid.extent.cell_size
-
-            footprint_mask_final = local_grid.compute_robot_footprint_mask(
-                pts_final, x_final, y_final, final_yaw, num_x_final, num_y_final
-            )
-
-            terrain_real_final, is_valid_final = local_grid.correct_terrain(
-                terrain_final, valid_final, num_x_final, num_y_final,
-                robot_footprint_mask=footprint_mask_final, cell_size=cell_size_final,
-                unwritten_value=spotGrid.raw_zero(grids_data_final), unwritten_scale=spotGrid.raw_scale(grids_data_final)
-            )
-            spotGrid.log_ground_filter(local_grid, "scan-finale")
-
-            grad_final, rough_final = local_grid.compute_gradient_and_roughness(
-                terrain_real_final, valid_final, num_x_final, num_y_final, cell_size_final,
-                is_valid=is_valid_final
-            )
-
-            obstacle_mask_final = local_grid.fuse_obstacle_mask(
-                cells_obstacle_dist=cells_obs_final,
-                rough_values=rough_final,
-                is_valid=is_valid_final,
-                obstacle_threshold=spotGrid.OBSTACLE_THRESHOLD,
-                rough_threshold=spotGrid.ROUGH_THRESHOLD
-            )
+        scan = local_grid.fetch_scan(robot_state_client)
+        if scan is not None:
+            local_grid.process_scan(scan, x_final, y_final, final_yaw, ground_label="scan-finale")
+            pts_final, cells_obs_final, valid_final = scan.pts, scan.od, scan.valid
+            num_x_final, num_y_final = scan.num_x, scan.num_y
+            terrain_real_final, is_valid_final = scan.terrain, scan.is_valid
+            grad_final, rough_final, obstacle_mask_final = scan.grad, scan.rough, scan.obstacle_mask
 
             # Anche l'ultima scansione entra nelle mappe globali, come tutte le altre
             spotGrid.fold_scan_into_global_maps(

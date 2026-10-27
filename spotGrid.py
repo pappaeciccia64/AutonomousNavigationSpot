@@ -858,6 +858,16 @@ def compute_arc_sample_coverage(terrain_2d, grid_origin_x, grid_origin_y, cell_s
     return float(inside_along.mean()), float(inside_perp.mean())
 
 
+class Scan:
+    """
+    Una scansione della griglia locale (vedi LocalGrid.fetch_scan e process_scan). Array piatti,
+    nell'ordine delle celle della griglia; (num_y, num_x) per rimetterli in 2D.
+    """
+
+    def __init__(self, **fields):
+        self.__dict__.update(fields)
+
+
 class LocalGrid:
     def __init__(self, robot):
         self.local_grid_client = robot.ensure_client(LocalGridClient.default_service_name)
@@ -1088,6 +1098,66 @@ class LocalGrid:
         yaw = np.degrees(np.arctan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y ** 2 + q.z ** 2)))
         return (tf.position.x, tf.position.y, float(yaw), g.extent.num_cells_x, g.extent.num_cells_y,
                 g.extent.cell_size)
+
+    def fetch_scan(self, robot_state_client):
+        """
+        Scarica i layer di una scansione (obstacle_distance, terrain, terrain_valid) e ne legge
+        valori e geometria. Restituisce una Scan, o None se i layer non arrivano. L'elaborazione
+        (correzione del terreno, pendenza, maschera degli ostacoli) la fa process_scan.
+        """
+        grids_data, proto, _ = self.return_local_grid(
+            ['obstacle_distance', 'terrain', 'terrain_valid'], robot_state_client)
+        if grids_data is None or 'obstacle_distance' not in grids_data:
+            return None
+        ext = proto.local_grid.extent
+        return Scan(grids_data=grids_data, proto=proto,
+                    pts=grids_data['obstacle_distance']['pts'],
+                    od=grids_data['obstacle_distance']['values'],
+                    terrain_raw=grids_data['terrain']['values'],
+                    valid=grids_data['terrain_valid']['values'],
+                    num_x=ext.num_cells_x, num_y=ext.num_cells_y, cell_size=ext.cell_size)
+
+    @staticmethod
+    def grid_origin(scan):
+        """Origine (x, y) della griglia della scansione nel frame VISION."""
+        g = scan.proto.local_grid
+        tf = get_a_tform_b(g.transforms_snapshot, VISION_FRAME_NAME, g.frame_name_local_grid_data)
+        return tf.position.x, tf.position.y
+
+    def process_scan(self, scan, robot_x, robot_y, robot_yaw, footprint=True, fuse=True,
+                     ground_label=None, diag_label=None):
+        """
+        Elabora una scansione letta con fetch_scan, riempiendo la Scan:
+          footprint_mask  celle sotto il corpo del robot (footprint=False: nessuna)
+          terrain, is_valid, unwritten  terreno corretto (vedi correct_terrain): da qui in
+                          poi si usa solo questo
+          grad, rough     pendenza e rugosita' sul terreno corretto
+          obstacle_mask   veto per cella, pura logica di soglia (fuse=False: non calcolata).
+                          La pendenza non entra in questo veto: vedi fuse_obstacle_mask
+        ground_label e diag_label: etichette delle righe [GROUND-FILTER] e [FOOTPRINT-DIAG]
+        (None = niente riga). Restituisce la Scan.
+        """
+        s = scan
+        s.footprint_mask = (self.compute_robot_footprint_mask(s.pts, robot_x, robot_y, robot_yaw,
+                                                              s.num_x, s.num_y) if footprint else None)
+        s.terrain, s.is_valid, s.unwritten = self.correct_terrain(
+            s.terrain_raw, s.valid, s.num_x, s.num_y, robot_footprint_mask=s.footprint_mask,
+            cell_size=s.cell_size, unwritten_value=raw_zero(s.grids_data),
+            unwritten_scale=raw_scale(s.grids_data), return_unwritten=True)
+        if ground_label:
+            log_ground_filter(self, ground_label)
+        s.grad, s.rough = self.compute_gradient_and_roughness(
+            s.terrain, s.valid, s.num_x, s.num_y, s.cell_size, is_valid=s.is_valid)
+        s.obstacle_mask = None
+        if fuse:
+            s.obstacle_mask = self.fuse_obstacle_mask(
+                cells_obstacle_dist=s.od, rough_values=s.rough, is_valid=s.is_valid,
+                obstacle_threshold=OBSTACLE_THRESHOLD, rough_threshold=ROUGH_THRESHOLD)
+        if diag_label:
+            log_footprint_diagnostic(self, s.pts, robot_x, robot_y, robot_yaw, s.num_x, s.num_y,
+                                     s.obstacle_mask, diag_label, cells_obstacle_dist=s.od,
+                                     rough_values=s.rough, is_valid=s.is_valid)
+        return s
 
     def extra_layers(self, names):
         """
