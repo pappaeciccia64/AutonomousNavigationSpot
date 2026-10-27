@@ -8,11 +8,17 @@ scelta dell'andatura: si cambiano SOLO qui.
 
 import numpy as np
 from scipy.ndimage import uniform_filter, distance_transform_edt, binary_dilation
-import bosdyn.client
-from bosdyn.client.frame_helpers import *
-from bosdyn.client.frame_helpers import get_a_tform_b
-from bosdyn.api import local_grid_pb2
-from bosdyn.client.local_grid import LocalGridClient
+# L'SDK di Spot serve solo a LocalGrid (la lettura delle griglie dal robot). Senza SDK il resto
+# del modulo funziona: mappe globali, pendenze, soglie, cosi' lo possono importare anche
+# mission_graph, prm_graph, parametri e mission_viewer su una macchina senza SDK.
+try:
+    import bosdyn.client
+    from bosdyn.client.frame_helpers import *
+    from bosdyn.client.frame_helpers import get_a_tform_b
+    from bosdyn.api import local_grid_pb2
+    from bosdyn.client.local_grid import LocalGridClient
+except ImportError:
+    get_a_tform_b = local_grid_pb2 = LocalGridClient = None
 
 import pickle
 import time
@@ -2248,3 +2254,294 @@ class GlobalTerrainGrid:
             print(f"[MAP] Mappa globale del terreno caricata con {len(self.height_count)} celle osservate.")
         else:
             print(f"[WARNING] File {file_path} non trovato. Inizializzo mappa terreno vuota.")
+
+
+# =========================================================================================
+# DALLA SCANSIONE ALLE MAPPE GLOBALI, e righe di log sullo stato di griglie e mappe
+# =========================================================================================
+# --- Zona attorno al corpo nella mappa GLOBALE ------------------------------------------
+# Le celle a ridosso del fianco del robot risultano "ostacolo" SOLO quando il robot ci sta
+# accanto: lette da 1-2 m sono libere, lette con il robot fermo li' accanto scendono sotto
+# soglia, a 0.2-0.45 m dall'asse, all'altezza delle zampe posteriori. Due scansioni da fermo
+# basterebbero a confermarle nella mappa globale (GLOBAL_OCC_CONFIRM_OBS = 2), e il PRM
+# scarterebbe l'arco su cui il robot e' APPENA passato.
+#   - NUCLEO (il rettangolo del corpo): il robot ci sta sopra, quindi e' libero per
+#     costruzione -> si scrive "visto libero".
+#   - ANELLO (fino a GLOBAL_MAP_SELF_RING_M oltre il corpo): da qui la lettura non e'
+#     attendibile -> un ostacolo NON si scrive (nessuna informazione); il libero si'.
+# Vale solo per la mappa globale: il fronte sicuro usa la scansione dal vivo, intera, quindi
+# un ostacolo vero accanto al robot continua a fermarlo. E un ostacolo vero viene comunque
+# scritto nella mappa globale dalle scansioni fatte da un altro punto.
+GLOBAL_MAP_SELF_BODY_LENGTH_M = 1.10
+
+GLOBAL_MAP_SELF_BODY_WIDTH_M = 0.50
+
+GLOBAL_MAP_SELF_RING_M = 0.25
+
+
+def mask_for_global_map(obstacle_mask, is_valid, pts=None, robot_pose=None,
+                         return_core=False):
+    """
+    Maschera da passare a GlobalGrid.update: -1 ostacolo, +1 vista libera, 0 nessuna
+    informazione (cella non attendibile in questa scansione, che quindi non conta come
+    "vista libera": vedi GlobalGrid.update).
+
+    pts, robot_pose=(x, y, yaw): se passati, applica la zona attorno al corpo (vedi
+    GLOBAL_MAP_SELF_RING_M): nucleo libero, anello senza ostacoli.
+
+    return_core: restituisce anche la maschera del NUCLEO, cioe' le celle
+    coperte dal corpo adesso. Va passata a GlobalGrid.update come `walked`: sono celle su
+    cui il robot e' fisicamente passato, e per dichiararle occupate serviranno piu'
+    conferme (vedi spotGrid.GLOBAL_OCC_CONFIRM_WALKED).
+    """
+    m = np.asarray(obstacle_mask, dtype=np.float64).ravel()
+    v = np.asarray(is_valid, dtype=bool).ravel()
+    out = np.where(m < 0, -1.0, np.where(v, 1.0, 0.0))
+    if pts is None or robot_pose is None:
+        return (out, np.zeros(out.shape, dtype=bool)) if return_core else out
+    rx, ry, ryaw = (float(robot_pose[0]), float(robot_pose[1]), float(robot_pose[2]))
+    p = np.asarray(pts, dtype=np.float64).reshape(-1, 3)
+    if len(p) != len(out):
+        return (out, np.zeros(out.shape, dtype=bool)) if return_core else out
+    dx, dy = p[:, 0] - rx, p[:, 1] - ry
+    c, s_ = np.cos(ryaw), np.sin(ryaw)
+    xb, yb = np.abs(dx * c + dy * s_), np.abs(-dx * s_ + dy * c)
+    hl, hw = GLOBAL_MAP_SELF_BODY_LENGTH_M / 2.0, GLOBAL_MAP_SELF_BODY_WIDTH_M / 2.0
+    core = (xb <= hl) & (yb <= hw)
+    ring = ~core & (xb <= hl + GLOBAL_MAP_SELF_RING_M) & (yb <= hw + GLOBAL_MAP_SELF_RING_M)
+    out[ring & (out < 0)] = 0.0
+    out[core] = 1.0
+    return (out, core) if return_core else out
+
+
+def fold_scan_into_global_maps(global_map, global_terrain_map, pts, terrain, obstacle_mask, is_valid,
+                               cells_obstacle_dist, shape, robot_pose):
+    """
+    Una scansione nelle due mappe globali: occupazione (con la zona attorno al
+    corpo, vedi _mask_for_global_map) e terreno. Unico punto usato dalla missione (inizio
+    tentativo, ogni giro, scansione finale) e da test_replay.py, cosi' la prova di rigioco
+    verifica il codice vero e non una sua copia.
+
+    La mappa del terreno riceve la STESSA maschera del calcolo dal vivo (slope_usable_mask:
+    attendibili E non ostacolo): le quote delle celle ostacolo trasformerebbero tronchi e
+    muri in "pendenze" nella mappa globale.
+
+    Restituisce la maschera del nucleo (celle sotto il corpo), che serve alla mappa dello
+    spazio libero.
+    """
+    gm_mask, gm_core = mask_for_global_map(obstacle_mask, is_valid, pts, robot_pose, return_core=True)
+    global_map.update(pts, gm_mask, walked=gm_core)
+    global_terrain_map.update(pts, terrain, slope_usable_mask(is_valid, cells_obstacle_dist, shape))
+    return gm_core
+
+
+def update_clearance_map(global_map, pts, snap, is_valid, unwritten, core, robot_xy):
+    """
+    Alimenta la mappa dello spazio libero con la scansione corrente.
+
+    Usa la obstacle_distance FILTRATA (quella su cui il fronte decide davvero, mediana +
+    isteresi: vedi arcVerification), non la lettura grezza. Imparano solo le celle
+    attendibili; sotto il corpo il valore non puo' essere minore di mezza larghezza, perche'
+    il robot ci sta sopra (stesso principio di _under_body nel fronte).
+    """
+    if not hasattr(global_map, 'update_clearance') or snap is None:
+        return
+    try:
+        od = np.asarray(snap.obstacle_dist, dtype=np.float64).ravel()
+        v = np.asarray(is_valid, dtype=bool).ravel()
+        if unwritten is not None and np.size(unwritten) == v.size:
+            v = v & ~np.asarray(unwritten, dtype=bool).ravel()
+        c = np.asarray(core, dtype=bool).ravel()
+        if od.size != v.size or c.size != v.size:
+            return
+        usable = v | c
+        od = np.where(c, np.maximum(od, ROBOT_HALF_WIDTH_M), od)
+        p = np.asarray(pts, dtype=np.float64).reshape(-1, 3)
+        near = np.hypot(p[:, 0] - robot_xy[0], p[:, 1] - robot_xy[1]) <= CLEARANCE_NEAR_M
+        global_map.update_clearance(p, od, usable, near=near)
+    except Exception as e:      # mai fatale: e' una mappa di appoggio
+        print(f"[SPAZIO] Mappa dello spazio libero non aggiornata: {e}")
+
+
+def slope_usable_mask(is_valid_flat, cells_obstacle_dist, shape):
+    """
+    Maschera delle celle le cui QUOTE possono
+    entrare nel calcolo della pendenza di un arco: attendibili (is_valid di correct_terrain)
+    E non-ostacolo.
+
+    La faccia verticale di un mobile non e' terreno in pendenza, e' un ostacolo -- ed e' gia'
+    gestita come tale due volte: dal veto di occupazione del PRM e dal fronte sicuro, che si
+    ferma a FRONTIER_CLEARANCE_M da qualunque cella con obstacle_distance bassa. Contarla
+    ANCHE come pendenza la conta la terza volta, e con il peggiore degli effetti: non ferma
+    il robot davanti al mobile (ci pensa il fronte), scollega il grafo PRM in tutta la stanza.
+
+    Gli archi che perdono il dato NON diventano "liberi per decreto": diventano "senza dati",
+    e un arco senza dati non viene vetato (entra nel grafo con un costo di ripiego, vedi
+    PRM._evaluate_and_add_edge); chi lo percorre lo verifica metro per metro col fronte
+    sicuro. E' una scelta esplicita: su quegli archi la sicurezza la da' il fronte, non una
+    pendenza misurata su un armadio.
+
+    La maschera si combina QUI e non dentro prm_graph perche' e' qui che si hanno in mano
+    entrambi gli array, e perche' in prm_graph `current_valid_2d` serve a una cosa sola -- il
+    profilo di pendenza per-arco (compute_arc_slope_profile) -- quindi restringerla non ha
+    altri effetti. Chi legge prm_graph.update_local_grid_data trova `valid_2d` documentato
+    come "celle attendibili": qui significa "attendibili come TERRENO".
+    """
+    valid = np.asarray(is_valid_flat, dtype=bool).reshape(shape)
+    if cells_obstacle_dist is None:
+        return valid
+    od = np.asarray(cells_obstacle_dist, dtype=np.float64).reshape(shape)
+    return valid & ~(od < OBSTACLE_THRESHOLD)
+
+
+def raw_zero(grids_data):
+    """Quota del valore grezzo 0 del layer terrain di questa scansione (None se assente)."""
+    try:
+        return grids_data['terrain'].get('raw_zero')
+    except (KeyError, TypeError, AttributeError):
+        return None
+
+
+def raw_scale(grids_data):
+    try:
+        return grids_data['terrain'].get('scale')
+    except (KeyError, TypeError, AttributeError):
+        return None
+
+
+def segment_diagnostics(terrain_2d, origin_x, origin_y, cell_size, x1, y1, x2, y2):
+    """Stima alternativa (interpolata) e copertura dei campioni per un segmento. Solo log:
+    la stima in uso per decidere resta quella di PRM.sample_terrain_between_points."""
+    out = {'long_interp': None, 'lat_interp': None, 'coverage_along': None, 'coverage_lateral': None}
+    try:
+        li, lai, ok = compute_arc_slope_profile_interp(
+            terrain_2d, origin_x, origin_y, cell_size, x1, y1, x2, y2)
+        if ok:
+            out['long_interp'], out['lat_interp'] = li, lai
+        out['coverage_along'], out['coverage_lateral'] = compute_arc_sample_coverage(
+            terrain_2d, origin_x, origin_y, cell_size, x1, y1, x2, y2)
+    except Exception as e:
+        print(f"[LOG] Diagnostica del segmento non disponibile: {e}")
+    return out
+
+
+def log_ground_filter(local_grid, label):
+    """
+    Una riga solo quando il filtro sull'altezza del suolo ha scartato qualcosa o non ha
+    potuto stimare il suolo -- nel caso normale tace. Vedi spotGrid.GROUND_HEIGHT_TOLERANCE_M.
+    """
+    info = getattr(local_grid, 'last_ground_filter', None) or {}
+    if info.get('ground_z') is None:
+        print(f"[GROUND-FILTER] {label}: suolo non stimabile ({info.get('source')}, "
+              f"{info.get('n_ref', 0)} celle di riferimento) -- filtro non applicato")
+    elif info.get('n_above', 0) > 0:
+        print(f"[GROUND-FILTER] {label}: {info['n_above']} celle scartate, fino a "
+              f"{info['max_above']:.2f} m sopra il suolo (suolo z={info['ground_z']:.3f}, "
+              f"stimato {info['source']} su {info['n_ref']} celle)")
+    if info.get('n_unwritten', 0) > 0:
+        print(f"[GROUND-FILTER] {label}: {info['n_unwritten']} celle mai scritte dai sensori "
+              f"({info.get('n_unwritten_below', 0)} sotto il suolo) -> trattate come non viste"
+              + (f", quota {info['quota_unwritten']:+.4f} m" if info.get('quota_unwritten') is not None else ""))
+
+
+def log_footprint_diagnostic(local_grid, pts, robot_x, robot_y, robot_yaw,
+                              num_x, num_y, obstacle_mask, label,
+                              cells_obstacle_dist=None, rough_values=None, is_valid=None):
+    """
+    Misura quante celle sotto l'impronta del robot risultano ostacolo, e PERCHE'.
+    PURAMENTE OSSERVATIVO: usa diagnostic_only=True, quindi non consuma il flag
+    one-shot di compute_robot_footprint_mask e non cambia nessun comportamento.
+
+    La maschera dell'impronta si applica una volta sola: applicarla a ogni scansione
+    nasconderebbe muri veri in un corridoio stretto. Celle ostacolo NEL NUCLEO, quando
+    compaiono, sono di solito celle mai scritte dai sensori (sotto il corpo non possono
+    scrivere) lasciate alla quota sbagliata, che fanno esplodere la rugosita': le toglie
+    spotGrid._cells_never_written, non questa maschera.
+
+    PERCHE' -- i due veti di fuse_obstacle_mask, ricalcolati identici:
+      - "prossimita'": cells_obstacle_dist <= OBSTACLE_THRESHOLD. NON vuol dire
+        "qui c'e' un ostacolo", vuol dire "qui sei a meno di 15 cm da un ostacolo".
+        Se domina questo, il footprint NON c'entra: il robot sta davvero passando
+        vicino a qualcosa, e mascherare cancellerebbe proprio quell'avviso.
+      - "rugosita'": rough_values > ROUGH_THRESHOLD su celle che il sensore dichiara
+        valide.
+
+    DOVE -- rettangolo intero (1.10 x 0.50 + margine) contro il solo NUCLEO
+    (0.90 x 0.35), cioe' la fascia entro la carreggiata delle zampe. Un ostacolo
+    dentro il nucleo significherebbe che il robot ci sta gia' sopra, quindi mascherare li'
+    non puo' nascondere nulla di raggiungibile, mentre mascherare l'intero rettangolo in un
+    corridoio stretto puo' cancellare un muro vero.
+
+    Nota: anche arcVerification.py chiama compute_robot_footprint_mask, quindi in
+    condizioni di corsa puo' essere il thread di background a consumare l'unica
+    maschera prevista, lasciando senza il ciclo principale.
+    """
+    try:
+        fp = local_grid.compute_robot_footprint_mask(
+            pts, robot_x, robot_y, robot_yaw, num_x, num_y, diagnostic_only=True)
+        if fp is None:
+            return
+        fp_flat = fp.ravel()
+        obs_flat = np.asarray(obstacle_mask).ravel()
+        n_fp = int(fp_flat.sum())
+        if n_fp == 0:
+            return
+        blocked = (obs_flat < 0) & fp_flat
+        n_obs = int(blocked.sum())
+
+        line = (f"[FOOTPRINT-DIAG] {label}: celle sotto il corpo marcate ostacolo: "
+                f"{n_obs}/{n_fp} ({100.0 * n_obs / n_fp:.1f}%)")
+
+        # --- PERCHE': i due veti separati, stessa identica logica di fuse_obstacle_mask ---
+        if n_obs > 0 and cells_obstacle_dist is not None and rough_values is not None \
+                and is_valid is not None:
+            d = np.asarray(cells_obstacle_dist).ravel()
+            r = np.asarray(rough_values).ravel()
+            v = np.asarray(is_valid).ravel()
+            if d.shape == fp_flat.shape and r.shape == fp_flat.shape and v.shape == fp_flat.shape:
+                v1 = (d <= OBSTACLE_THRESHOLD) & v   # prossimita' a un ostacolo
+                v3 = (r > ROUGH_THRESHOLD) & v       # terreno irregolare
+                n_prox = int(np.sum(v1 & fp_flat & ~v3))
+                n_rough = int(np.sum(v3 & fp_flat & ~v1))
+                n_both = int(np.sum(v1 & v3 & fp_flat))
+                n_invalid = int(np.sum(~v & fp_flat))
+                line += (f"\n                 perche': prossimita'={n_prox}  rugosita'={n_rough}  "
+                         f"entrambi={n_both}   (celle non valide sotto il corpo: {n_invalid})")
+
+        # --- DOVE: nucleo (dentro la carreggiata delle zampe) contro corona esterna ---
+        if n_obs > 0:
+            core = local_grid.compute_robot_footprint_mask(
+                pts, robot_x, robot_y, robot_yaw, num_x, num_y,
+                diagnostic_only=True, body_length=0.90, body_width=0.35)
+            if core is not None:
+                core_flat = core.ravel()
+                n_core_fp = int(core_flat.sum())
+                n_core_obs = int(np.sum(blocked & core_flat))
+                n_ring_obs = n_obs - n_core_obs
+                line += (f"\n                 dove: nucleo={n_core_obs}/{n_core_fp}  "
+                         f"corona esterna={n_ring_obs}/{n_fp - n_core_fp}")
+
+        print(line)
+    except Exception as e:
+        print(f"[FOOTPRINT-DIAG] diagnostica non disponibile: {e}")
+
+
+def log_clearance_gap(prm, global_map):
+    """
+    Una riga per giro sul divario fra i due criteri di percorribilita':
+    la mappa binaria (bit occupato + margine) e la mappa dello spazio libero (stessa soglia
+    del fronte). Tace quando sono d'accordo. Serve a decidere sul campo se commutare
+    spotGrid.CLEARANCE_MAP_DECIDES.
+    """
+    d = getattr(prm, 'clearance_disagreement', None)
+    if not d:
+        return
+    only_bin, only_clear, tot = d
+    if not (only_bin or only_clear) or not tot:
+        return
+    chi = "lo spazio libero" if CLEARANCE_MAP_DECIDES else "la mappa binaria"
+    n_cells = len(getattr(global_map, 'clear_all_n', ()) or ())
+    print(f"[SPAZIO] Archi su cui i due criteri non concordano: {only_bin + only_clear} su "
+          f"{tot} ({100.0 * (only_bin + only_clear) / tot:.1f}%) -- "
+          f"{only_bin} bloccati solo dalla mappa binaria, {only_clear} solo dallo spazio "
+          f"libero. Adesso decide {chi}. Celle con spazio libero noto: {n_cells}.")

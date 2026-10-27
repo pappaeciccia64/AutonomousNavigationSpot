@@ -316,7 +316,7 @@ class FakeSampler:
 # ---- patch: solo i confini col robot ------------------------------------------------------
 easy_walk.get_a_tform_b = fake_get_a_tform_b
 spotUtils.getPosition = lambda rsc: (ROBOT.x, ROBOT.y, -2.7, quat(ROBOT.yaw))
-easy_walk.navigate_to = fake_navigate_to
+movements.navigate_to = fake_navigate_to
 movements.move_to_world_point_without_turning = fake_move_no_turn
 parametri.FRONTIER_RESCAN_WAIT_S = 0.0
 movements.check_fall = fake_check_fall

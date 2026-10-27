@@ -106,6 +106,8 @@ with _quiet():
     import spotGrid as sg
     import prm_graph
     import environmentMap
+    import mission_graph
+    import movements
     import easy_walk as ew
     import parametri as P
 
@@ -169,9 +171,9 @@ def scan_arrays(d):
 def feed_scan(a, prm, gm, tm):
     """Una scansione nelle mappe globali (con la funzione stessa della missione) e nel PRM."""
     rx, ry, ryaw = a['robot']
-    ew.fold_scan_into_global_maps(gm, tm, a['pts'], a['z'].ravel(), a['obstacle_mask'], a['valid'].ravel(),
+    sg.fold_scan_into_global_maps(gm, tm, a['pts'], a['z'].ravel(), a['obstacle_mask'], a['valid'].ravel(),
                                   a['od_raw'].ravel(), (a['ny'], a['nx']), (rx, ry, ryaw))
-    usable = ew.slope_usable_mask(a['valid'].ravel(), a['od_raw'].ravel(), (a['ny'], a['nx']))
+    usable = sg.slope_usable_mask(a['valid'].ravel(), a['od_raw'].ravel(), (a['ny'], a['nx']))
     prm.update_local_grid_data(grad_values_2d=a['grad'], rough_values_2d=a['rough'],
                                terrain_values_2d=a['z'], valid_2d=usable,
                                grid_origin_x=a['ox'], grid_origin_y=a['oy'], cell_size=a['cs'])
@@ -209,7 +211,7 @@ def replay_mission(job):
         foreign = bool(override)
         for k, v in (override or {}).items():
             setattr(P, k, v)
-        prm, _sampler, mg = ew._build_mission_prm(env, verbose=False)
+        prm, _sampler, mg = mission_graph.build_mission_prm(env, verbose=False)
         out['grafo'] = mg.describe()
         gm = sg.GlobalGrid()
         tm = sg.GlobalTerrainGrid()
@@ -256,7 +258,7 @@ def replay_mission(job):
                 do_full = (not fast) or it in fast_pick
                 twin = copy.deepcopy((prm, gm)) if do_full and prev_it is not None else None
                 t_g = time.perf_counter()
-                ew._rebuild_prm_edges(prm, gm)
+                mission_graph.rebuild_prm_edges(prm, gm)
                 out['tempo_grafo_s'] += time.perf_counter() - t_g
                 if prev_it is not None:
                     local_expected += 1
@@ -264,14 +266,14 @@ def replay_mission(job):
                 if twin is not None:
                     P.INCREMENTAL_GRAPH_UPDATE = False
                     try:
-                        ew._rebuild_prm_edges(twin[0], twin[1])
+                        mission_graph.rebuild_prm_edges(twin[0], twin[1])
                     finally:
                         P.INCREMENTAL_GRAPH_UPDATE = True
                     full_checks += 1
                     full_same += edges_of(prm) == edges_of(twin[0])
                 # --- percorso verso l'obiettivo, con le restrizioni della missione ------
                 if node_cells is None:
-                    node_cells = ew._node_cells(prm, env)
+                    node_cells = mission_graph.node_cells(prm, env)
                 cells = set(done_cells) | {(tr, tc)} | {tuple(int(v) for v in env.get_cell_from_world(rx, ry))}
                 prm.set_allowed_nodes([n for n, c in node_cells.items() if c in cells])
                 gx, gy = map(float, d['goal_xy'])
@@ -301,9 +303,9 @@ def replay_mission(job):
                 out['tempo_grafo_s'] += time.perf_counter() - t_g
         # --- invariante 2: mappa globale contro dal vivo, su archi a caso nella finestra --
         span = a['nx'] * a['cs']
-        usable = ew.slope_usable_mask(a['valid'].ravel(), a['od_raw'].ravel(), (a['ny'], a['nx']))
+        usable = sg.slope_usable_mask(a['valid'].ravel(), a['od_raw'].ravel(), (a['ny'], a['nx']))
         single = sg.GlobalTerrainGrid()          # mappa globale fatta di questa sola scansione,
-        ew.fold_scan_into_global_maps(           # con la funzione della missione
+        sg.fold_scan_into_global_maps(           # con la funzione della missione
             sg.GlobalGrid(), single, a['pts'], a['z'].ravel(), a['obstacle_mask'], a['valid'].ravel(),
             a['od_raw'].ravel(), (a['ny'], a['nx']), a['robot'])
         for _ in range(ARCS_PER_SCAN):
@@ -386,7 +388,7 @@ def gait_check(m):
         if not prev:
             continue
         a = scan_arrays(np.load(prev[-1]))
-        usable = ew.slope_usable_mask(a['valid'].ravel(), a['od_raw'].ravel(), (a['ny'], a['nx']))
+        usable = sg.slope_usable_mask(a['valid'].ravel(), a['od_raw'].ravel(), (a['ny'], a['nx']))
         seg = [float(x[k]) for k in ('x_from', 'y_from', 'x_to', 'y_to')]
         prof = sg.compute_arc_slope_profile(a['z'], a['ox'], a['oy'], a['cs'], *seg, valid_2d=usable,
                                             body_ext_m=sg.ARC_BODY_EXTENSION_M)
@@ -394,7 +396,7 @@ def gait_check(m):
         if not has:
             continue
         with _quiet():
-            ew.select_mobility_params(max(lo, la), float(x['roughness']))
+            movements.select_mobility_params(max(lo, la), float(x['roughness']))
         rows.append(dict(time=x['timestamp'][11:], tier=ew.MISSION_STATS['last_tier'],
                          pitch=float(x['pitch_peak_abs_deg']), slope=round(max(lo, la), 3)))
     return rows

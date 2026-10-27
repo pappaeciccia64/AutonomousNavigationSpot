@@ -129,6 +129,8 @@ from collections import deque
 import numpy as np
 
 import parametri as P          # dimensione della missione, metodo dei nodi, archi
+import prm_graph
+import spotGrid
 
 
 # La missione (righe, colonne, lato, passo, metodo dei nodi, archi) si sceglie in
@@ -1428,6 +1430,132 @@ def _main():
               f"{mg.preview_png(a.preview, zoom=tuple(a.zoom) if a.zoom else None)}")
     if a.save:
         print(f"[GRAFO] reticolo salvato in {mg.save_npz(a.save)}")
+
+
+# =========================================================================================
+# IL GRAFO DURANTE LA MISSIONE: costruzione del PRM, aggiornamento degli archi, celle
+# ammesse per la pianificazione
+# =========================================================================================
+def build_mission_prm(env, verbose=True):
+    """
+    Crea il grafo della missione (reticolo o nodi casuali, vedi MISSION_GRAPH_SAMPLING) e il
+    PRM con i suoi nodi, dalla dimensione della missione e dalla posa di partenza che `env`
+    ha gia' dentro (set_origin va fatto PRIMA).
+
+    Restituisce (prm, sampler, mission_lattice): `sampler` da' i nodi cella per cella (vedi
+    mission_graph.LatticeSampler), `mission_lattice` e' il MissionGraph.
+    Gli ARCHI non vengono creati qui: servono i dati di terreno, vedi _rebuild_prm_edges.
+    """
+    mg = build_mission_graph(
+        env=env, spacing_m=P.MISSION_LATTICE_SPACING_M, rings=P.MISSION_LATTICE_RINGS,
+        min_edge_length=P.PRM_MIN_EDGE_M, max_edge_length=P.PRM_MAX_EDGE_M,
+        connection_radius=P.PRM_CONNECTION_RADIUS_M, verbose=verbose,
+        sampling=P.MISSION_GRAPH_SAMPLING, distribution=P.MISSION_RANDOM_DISTRIBUTION,
+        density_per_m2=P.MISSION_RANDOM_DENSITY, seed=P.MISSION_RANDOM_SEED)
+    prm = prm_graph.PRM(min_edge_length=P.PRM_MIN_EDGE_M, max_edge_length=mg.reach_m,
+                        connection_radius=P.PRM_CONNECTION_RADIUS_M)
+    prm.mission_graph = mg          # lo rilegge _rebuild_prm_edges
+    prm.set_detour_limit(P.PLAN_MAX_DETOUR_RATIO, P.PLAN_DETOUR_SLACK_M)
+    mg.into_prm(prm)
+    return prm, mg.as_sampler(), mg
+
+
+def node_cells(prm, env):
+    """
+    {id nodo: (riga, colonna)}. Dal reticolo quando c'e' (mission_graph.node_cell, stessa
+    regola di env.get_cell_from_world), altrimenti da env. In cache sul PRM: i nodi non
+    cambiano durante la missione.
+    """
+    cache = getattr(prm, '_node_cell_cache', None)
+    if cache is None:
+        cache = {}
+        prm._node_cell_cache = cache
+    mg = getattr(prm, 'mission_graph', None)
+    for nid, (x, y) in prm.nodes.items():
+        if nid in cache:
+            continue
+        if mg is not None and 0 <= nid < mg.n_nodes:
+            r, c = mg.node_cell[nid]
+            cache[nid] = (int(r), int(c))
+        else:
+            cache[nid] = tuple(int(v) for v in env.get_cell_from_world(x, y))
+    return cache
+
+
+def graph_reaches_cell(prm, env, from_xy, row, col, global_map=None):
+    """
+    Dal punto from_xy (il waypoint da cui si tenterebbe la cella) il grafo arriva ad almeno un
+    nodo della cella (row, col)? Stesse regole del tentativo: con PLAN_ONLY_EXPLORED_CELLS si
+    passa solo dalle celle visitate, dalla cella di partenza e dalla cella obiettivo; archi e
+    nodi come sono adesso (un nodo con penalita' infinita non conta). E' una condizione
+    NECESSARIA: se e' False il tentativo fallirebbe di sicuro con "GRAFO DISCONNESSO"; se e'
+    True decide il tentativo (punto obiettivo, tetto alla deviazione, fronte).
+    Ricerca in ampiezza, nessun effetto sul grafo. None se il grafo non ha nodi.
+    """
+    start = prm.anchor_node(float(from_xy[0]), float(from_xy[1]), global_map,
+                            spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
+                            ignore_near_m=prm_graph.ANCHOR_IGNORE_NEAR_M)
+    if start is None:
+        return None
+    cells = node_cells(prm, env)
+    target = (int(row), int(col))
+    if P.PLAN_ONLY_EXPLORED_CELLS:
+        ok_cells = {(r, c) for r in range(env.rows) for c in range(env.cols)
+                    if env.is_cell_visited(r, c)}
+        ok_cells.add(target)
+        ok_cells.add(tuple(int(v) for v in env.get_cell_from_world(from_xy[0], from_xy[1])))
+    else:
+        ok_cells = None
+    seen, queue = {start}, [start]
+    while queue:
+        u = queue.pop()
+        if cells.get(u) == target and np.isfinite(prm.node_penalty(u)):
+            return True
+        for v, _w in prm.edges.get(u, ()):
+            if v in seen:
+                continue
+            if ok_cells is not None and cells.get(v) not in ok_cells:
+                continue
+            seen.add(v)
+            queue.append(v)
+    return False
+
+
+def restrict_planning_to_explored_cells(prm, env, target_row, target_col, robot_xy):
+    """
+    Limita la ricerca del percorso ai nodi delle celle visitate, della cella del robot e
+    della cella obiettivo (vedi PLAN_ONLY_EXPLORED_CELLS). Da chiamare prima di ogni
+    tentativo di cella: le celle visitate cambiano fra un tentativo e l'altro.
+    """
+    if not P.PLAN_ONLY_EXPLORED_CELLS:
+        prm.set_allowed_nodes(None)
+        return
+    cells = {(r, c) for r in range(env.rows) for c in range(env.cols) if env.is_cell_visited(r, c)}
+    cells.add((int(target_row), int(target_col)))
+    cells.add(tuple(int(v) for v in env.get_cell_from_world(robot_xy[0], robot_xy[1])))
+    allowed = [nid for nid, cell in node_cells(prm, env).items() if cell in cells]
+    prm.set_allowed_nodes(allowed)
+    print(f"[PIANO] Percorsi ammessi solo nelle celle {sorted(cells)}: {len(allowed)} nodi su "
+          f"{len(prm.nodes)}. Se serve passare da una cella non visitata, rinuncio a questo "
+          f"lato e passo a un'altra cella.")
+
+
+def robot_on_node(prm, node_id, x, y):
+    """True se il robot e' praticamente sul nodo (vedi prm_graph.ANCHOR_ON_NODE_M)."""
+    pos = prm.get_node_position(node_id)
+    return pos is not None and float(np.hypot(pos[0] - x, pos[1] - y)) <= prm_graph.ANCHOR_ON_NODE_M
+
+
+def rebuild_prm_edges(prm, global_map):
+    """
+    Rivaluta gli archi del PRM sui dati correnti, sulle coppie del reticolo gia' calcolate
+    (vedi mission_graph.MissionGraph.add_edges_to_prm). Veti e pesi li calcola
+    PRM._evaluate_and_add_edge.
+    """
+    return prm.mission_graph.add_edges_to_prm(
+        prm, global_map=global_map,
+        edge_safety_margin=spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
+        incremental=P.INCREMENTAL_GRAPH_UPDATE)
 
 
 if __name__ == '__main__':

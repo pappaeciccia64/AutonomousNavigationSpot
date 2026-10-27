@@ -413,3 +413,31 @@ class EnvironmentMap(object):
         if hasattr(self, 'current_cell'):
             print(f"Cella attuale: {self.current_cell}")
         print("-----------------------\n")
+
+
+# =========================================================================================
+# FUNZIONI SULLE CELLE (accettano anche una griglia finta con la stessa interfaccia)
+# =========================================================================================
+def cell_border_distance(env, row, col, x, y):
+    """
+    Distanza di (x, y) dal bordo della cella (row, col), nel frame ruotato della griglia:
+    positiva dentro, negativa fuori. None se la cella non esiste.
+    """
+    center = env.get_world_position_from_cell(row, col)
+    if center is None:
+        return None
+    dx, dy = x - center[0], y - center[1]
+    yaw = float(getattr(env, 'origin_yaw', 0.0))
+    c, s = np.cos(-yaw), np.sin(-yaw)
+    lx, ly = dx * c - dy * s, dx * s + dy * c
+    return env.cell_size / 2.0 - max(abs(lx), abs(ly))
+
+
+def find_new_borders(env, robot_row, robot_col, path, frontier):
+    new_borders = env.get_adjacent_frontier_cells(robot_row, robot_col, path)
+    new_borders_cells = []
+    if len(new_borders) != 0:
+        for new_border in new_borders:
+            if new_border not in frontier and env.is_cell_visited(new_border[0], new_border[1]) != 1:
+                new_borders_cells.append(new_border)
+    return new_borders_cells

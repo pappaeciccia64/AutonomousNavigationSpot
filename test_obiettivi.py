@@ -82,7 +82,7 @@ def replay_goals(name):
             P.MISSION_RANDOM_DISTRIBUTION = g['distribution']
             P.MISSION_RANDOM_DENSITY = g['density']
             P.MISSION_RANDOM_SEED = g['seed']
-        prm, sampler, mg = ew._build_mission_prm(env, verbose=False)
+        prm, sampler, mg = tr.mission_graph.build_mission_prm(env, verbose=False)
         gm = sg.GlobalGrid()
         tm = sg.GlobalTerrainGrid()
         tm.update_rects = []
@@ -100,9 +100,9 @@ def replay_goals(name):
             tr.feed_scan(a, prm, gm, tm)
         if cur is None or cur['it'] != it:
             with tr._quiet():
-                ew._rebuild_prm_edges(prm, gm)
+                tr.mission_graph.rebuild_prm_edges(prm, gm)
                 if node_cells is None:
-                    node_cells = ew._node_cells(prm, env)
+                    node_cells = tr.mission_graph.node_cells(prm, env)
                 cells = set(done_cells) | {(rr, cc)} | {tuple(int(v) for v in env.get_cell_from_world(rx, ry))}
                 prm.set_allowed_nodes([n for n, c in node_cells.items() if c in cells])
                 robot_node = prm.anchor_node(rx, ry, gm, sg.PRM_EDGE_SAFETY_MARGIN_M,
@@ -158,7 +158,7 @@ def replay_goals(name):
             n['raggiungibili'] += bool(g_['reach'])
             bad = _bad(g_)
             n['rifiutabili'] += bad
-            b = ew.cell_border_distance(env, *at['cell'], *g_['xy'])
+            b = tr.environmentMap.cell_border_distance(env, *at['cell'], *g_['xy'])
             n['sul_bordo'] += b is not None and b < P.TARGET_CELL_BORDER_M
             prev = refused_by_cell.setdefault(at['cell'], [])
             n['riproposti'] += any(math.dist(g_['xy'], p) < P.RECOVERY_SAME_GOAL_M for p in prev)
@@ -216,12 +216,12 @@ def synthetic_checks():
     with tr._quiet():
         e30 = tr.environmentMap.EnvironmentMap(rows=1, cols=1, cell_size=2.0)
         e30.set_origin(0.0, 0.0, math.radians(30))
-    check(abs(ew.cell_border_distance(e, 0, 0, 0.0, 0.0) - 1.0) < 1e-9
-          and abs(ew.cell_border_distance(e, 0, 0, 0.9, 0.2) - 0.1) < 1e-9
-          and abs(ew.cell_border_distance(e, 0, 0, 1.2, 0.0) + 0.2) < 1e-9,
+    check(abs(tr.environmentMap.cell_border_distance(e, 0, 0, 0.0, 0.0) - 1.0) < 1e-9
+          and abs(tr.environmentMap.cell_border_distance(e, 0, 0, 0.9, 0.2) - 0.1) < 1e-9
+          and abs(tr.environmentMap.cell_border_distance(e, 0, 0, 1.2, 0.0) + 0.2) < 1e-9,
           "distanza dal bordo: 1.0 al centro, 0.1 a 0.9 m, -0.2 fuori")
     p = (0.9 * math.cos(math.radians(30)), 0.9 * math.sin(math.radians(30)))
-    check(abs(ew.cell_border_distance(e30, 0, 0, *p) - 0.1) < 1e-9,
+    check(abs(tr.environmentMap.cell_border_distance(e30, 0, 0, *p) - 0.1) < 1e-9,
           "distanza dal bordo con la griglia ruotata di 30 gradi")
 
     _, g = pick([])
@@ -236,7 +236,7 @@ def synthetic_checks():
           f"centro a 0.30 m da un ostacolo (sotto {P.TARGET_CLEARANCE_M:.2f}): un punto con piu' "
           f"spazio {tuple(round(v, 2) for v in g)}")
     _, g = pick([(0.0, 0.0)])
-    b = ew.cell_border_distance(e, 0, 0, *g)
+    b = tr.environmentMap.cell_border_distance(e, 0, 0, *g)
     check(b >= P.TARGET_CELL_BORDER_M,
           f"centro occupato: il ripiego sta ad almeno {P.TARGET_CELL_BORDER_M:.2f} m dal bordo ({b:.2f})")
     env, g1 = pick([(0.0, 0.0)])

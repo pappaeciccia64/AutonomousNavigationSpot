@@ -10,6 +10,10 @@ from bosdyn.api.spot import robot_command_pb2 as spot_command_pb2
 from bosdyn.api import geometry_pb2
 from google.protobuf import wrappers_pb2
 
+import parametri as P
+import spotGrid
+from registro import MISSION_STATS
+
 
 # =========================================================================
 # LIMITI DI VELOCITA'.
@@ -418,3 +422,160 @@ def move_to_world_point_without_turning(target_x, target_y, frame_name,
                          disable_foot_obstacle_avoidance=disable_foot_obstacle_avoidance,
                          should_abort=should_abort,
                          max_linear_vel=max_linear_vel, max_angular_vel=max_angular_vel)
+
+
+# =========================================================================================
+# UN TRATTO DELLA MISSIONE: andatura, movimento con controllo d'arresto, cadute
+# =========================================================================================
+def check_and_recover_fall(robot_state_client, command_client, global_map, where):
+    """
+    Controlla se il robot e' caduto e, se si', lo rialza (movements.recover_from_fall) e segna
+    il punto come pericoloso nella mappa globale, cosi' il pianificatore lo evita.
+
+    Restituisce None se non c'e' stata nessuna caduta, altrimenti (x, y) del punto in cui il
+    robot e' caduto, a robot di nuovo in piedi. Solleva movements.RobotFallenError se non si
+    puo' rialzare da solo: la missione si ferma e serve l'operatore.
+    """
+    try:
+        st = check_fall(robot_state_client)
+    except Exception as e:
+        print(f"[CADUTA] Impossibile leggere lo stato del robot ({where}): {e}")
+        return None
+    if not st['fallen']:
+        return None
+    MISSION_STATS['falls'] += 1
+    print(f"[CADUTA] Rilevata {where} (caduta n. {MISSION_STATS['falls']} della missione).")
+    recover_from_fall(command_client, robot_state_client, status=st)
+    MISSION_STATS['self_rights'] += 1
+    if MISSION_STATS['falls'] >= P.MAX_FALLS_PER_MISSION:
+        raise RobotFallenError(
+            f"{MISSION_STATS['falls']} cadute in questa missione: il robot si e' rialzato ma la missione "
+            f"si ferma qui. Controllare il terreno e il robot prima di ripartire.")
+    if global_map is not None:
+        n = global_map.mark_hazard(st['x'], st['y'], P.FALL_HAZARD_RADIUS_M)
+        print(f"[CADUTA] Punto della caduta ({st['x']:.2f}, {st['y']:.2f}) segnato come pericoloso "
+              f"nella mappa: disco di {P.FALL_HAZARD_RADIUS_M:.1f} m ({n} celle), il pianificatore lo evitera'.")
+    return (st['x'], st['y'])
+
+
+def select_mobility_params(gradient, roughness):
+    """
+    Andatura su tre livelli, scelta in base alla difficolta' del terreno del SINGOLO tratto
+    che si sta per percorrere (vedi prm_graph.PRM.sample_terrain_between_points), invece di
+    un profilo fisso per tutta la missione.
+
+    Decide la peggiore fra pendenza e rugosita' (basta superare la soglia su UNA delle due
+    per passare al livello piu' duro) -- la stessa logica OR del veto d'ostacolo in
+    spotGrid.fuse_obstacle_mask. Soglie, attriti e velocita' stanno in spotGrid.GAIT_*.
+
+    Livelli:
+      PLAIN    -- terreno piano e regolare: andatura normale (HINT_AUTO), passo medio,
+                  ground_mu_hint alto (buona presa)
+      MODERATE -- un po' di pendenza o rugosita': CRAWL, passo alto, ground_mu_hint medio
+      HARD     -- terreno difficile ma non vietato (il veto e' una soglia separata e molto
+                  piu' alta, in fuse_obstacle_mask): CRAWL, passo alto, ground_mu_hint
+                  basso (meno presa, prudenza)
+    """
+    # Tarato per l'ESTERNO: anche un prato in piano non e' un pavimento, quindi passo
+    # almeno medio per tutti i livelli, e velocita' limitate a ogni livello.
+    if gradient < spotGrid.GAIT_PLAIN_SLOPE_MAX and roughness < spotGrid.GAIT_PLAIN_ROUGH_MAX:
+        tier = "PLAIN"
+        params = dict(locomotion_hint=spot_command_pb2.HINT_AUTO,
+                      swing_height=spot_command_pb2.SWING_HEIGHT_MEDIUM,
+                      ground_mu_hint=spotGrid.GAIT_MU_PLAIN,
+                      max_linear_vel=spotGrid.GAIT_VEL_PLAIN,
+                      max_angular_vel=spotGrid.GAIT_ANG_PLAIN)
+    elif gradient < spotGrid.GAIT_MODERATE_SLOPE_MAX and roughness < spotGrid.GAIT_MODERATE_ROUGH_MAX:
+        tier = "MODERATE"
+        # CRAWL anche qui, su richiesta dell'utente. Sul prato MODERATE prende ~60% dei
+        # passi, quindi il crawl e' l'andatura prevalente e la missione e' piu' lenta;
+        # con HINT_AUTO qui MODERATE torna all'andatura normale.
+        params = dict(locomotion_hint=spot_command_pb2.HINT_CRAWL,
+                      swing_height=spot_command_pb2.SWING_HEIGHT_HIGH,
+                      ground_mu_hint=spotGrid.GAIT_MU_MODERATE,
+                      max_linear_vel=spotGrid.GAIT_VEL_MODERATE,
+                      max_angular_vel=spotGrid.GAIT_ANG_MODERATE)
+    else:
+        tier = "HARD"
+        params = dict(locomotion_hint=spot_command_pb2.HINT_CRAWL,
+                      swing_height=spot_command_pb2.SWING_HEIGHT_HIGH,
+                      ground_mu_hint=spotGrid.GAIT_MU_HARD,
+                      max_linear_vel=spotGrid.GAIT_VEL_HARD,
+                      max_angular_vel=spotGrid.GAIT_ANG_HARD)
+
+    print(f"[GAIT] Livello del terreno: {tier} (pendenza={gradient:.3f}, rugosita'={roughness:.3f}) -> "
+          f"locomotion_hint={params['locomotion_hint']}, swing_height={params['swing_height']}, "
+          f"ground_mu_hint={params['ground_mu_hint']}, "
+          f"vel_max={params['max_linear_vel']:.2f} m/s, rot_max={params['max_angular_vel']:.2f} rad/s")
+    MISSION_STATS['gait_tier_counts'][tier] += 1
+    MISSION_STATS['last_tier'] = tier
+    return params
+
+
+def navigate_to(target_x, target_y, robot_x, robot_y, robot_state_client, command_client, vision_tform_body,
+                 should_abort=None, keep_heading=False, **mobility_kwargs):
+    """
+    Porta il robot al punto (target_x, target_y): prima ruota verso il punto, poi cammina
+    dritto (due chiamate a movements.relative_move).
+
+    keep_heading: se True il robot NON ruota prima di muoversi, raggiunge il punto con
+        l'orientamento che ha (anche di lato o all'indietro). Il ciclo di navigazione passa
+        sempre False: di traverso Spot occupa 1.10 m invece di 0.50 e il fronte pretende
+        0.59 m di obstacle_distance invece di 0.30 (vedi ROTAZIONE E ARRETRAMENTO). Il
+        parametro resta per i test.
+
+    mobility_kwargs: andatura facoltativa passata a movements.relative_move, es.
+        locomotion_hint=spot_command_pb2.HINT_CRAWL,
+        ground_mu_hint=0.4,
+        swing_height=spot_command_pb2.SWING_HEIGHT_HIGH
+
+    Returns:
+        (success: bool, distance_traveled: float, distance_commanded: float)
+
+    movements.relative_move() restituisce una TUPLA (successo, distanza percorsa): qui se ne
+    estrae il booleano, perche' una tupla non vuota in Python e' sempre vera e un
+    movimento fallito sembrerebbe riuscito.
+    """
+    dx, dy = target_x - robot_x, target_y - robot_y
+    distance = np.sqrt(dx ** 2 + dy ** 2)
+    target_yaw = np.arctan2(dy, dx)
+
+    quat = vision_tform_body.rotation
+    current_yaw = np.arctan2(2.0 * (quat.w * quat.z + quat.x * quat.y), 1.0 - 2.0 * (quat.y ** 2 + quat.z ** 2))
+    dyaw = np.arctan2(np.sin(target_yaw - current_yaw), np.cos(target_yaw - current_yaw))
+
+    if keep_heading:
+        print(f"[INFO] Raggiungo il punto senza ruotare ({distance:.2f} m, "
+              f"{np.degrees(dyaw):.0f} gradi rispetto al muso)...")
+        move_success, distance_traveled = move_to_world_point_without_turning(
+            target_x, target_y, "vision", command_client, robot_state_client,
+            should_abort=should_abort, **mobility_kwargs)
+    else:
+        print("[INFO] Passo 1: rotazione verso il punto...")
+        rotate_success, _ = relative_move(0, 0, dyaw, "vision", command_client, robot_state_client,
+                                                    should_abort=should_abort, **mobility_kwargs)
+        if not rotate_success:
+            print(f"[FAIL] Rotazione non riuscita: il movimento in avanti non parte.")
+            return False, 0.0, distance
+
+        print(f"[INFO] Passo 2: avanti di {distance:.2f} m...")
+        move_success, distance_traveled = relative_move(distance, 0, 0, "vision", command_client,
+                                                                   robot_state_client,
+                                                                   should_abort=should_abort, **mobility_kwargs)
+
+    # Controllo di plausibilita': relative_move() puo' dichiarare successo (traiettoria
+    # "assestata") avendo percorso quasi niente della distanza richiesta -- per esempio con
+    # Spot fermo contro un ostacolo fisico, tanto piu' che di default l'anticollisione dei
+    # piedi e' spenta (movements.DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT). Un successo con
+    # un avanzamento quasi nullo su un movimento vero conta come fallimento.
+    MIN_PROGRESS_FRACTION = 0.5
+    MIN_PROGRESS_ABS_M = 0.05
+    required_progress = max(MIN_PROGRESS_ABS_M, MIN_PROGRESS_FRACTION * distance)
+
+    if move_success and distance > MIN_PROGRESS_ABS_M and distance_traveled < required_progress:
+        print(f"[FAIL] Movimento riportato come riuscito ma percorsi solo {distance_traveled:.2f}m "
+              f"su {distance:.2f}m richiesti -- trattato come fallimento meccanico reale (probabile "
+              f"ostacolo fisico non rilevato).")
+        move_success = False
+
+    return move_success, distance_traveled, distance
