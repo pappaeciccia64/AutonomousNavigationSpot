@@ -6,6 +6,20 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 
 ---
 
+## 2026-10-27 (ristrutturazione, comportamento invariato)
+
+`easy_walk.py` da 5611 a circa 3000 righe; il comportamento del robot non cambia. Ogni passo verificato con: log del test end-to-end **identici riga per riga** alla registrazione di riferimento in tutti i 19 scenari (`E2E_LOG_DIR` + `confronta_log.py`, nuovi), rigioco delle 10 missioni identico al riferimento, `test_obiettivi.py` identico, controllo statico dei nomi, `preflight.py`; le parti GraphNav, che nessun test esercita, provate con un GraphNav finto (spostamento, blocco, ritorno a wp_0, chiusura d'anello, deriva).
+
+- **`parametri.py`** (nuovo): tutti gli interruttori e i numeri della missione, comprese dimensione della missione e grafo (prima in `mission_graph.py`). Il codice li legge come `parametri.NOME` al momento dell'uso, quindi argomenti da riga di comando e prove li possono cambiare.
+- **`registro.py`** (nuovo): statistiche, copia dell'output su file, CSV, registratore dell'inclinazione, pacchetti e viste salvati.
+- **Spostati nei moduli esistenti:** scansione e mappe globali in `spotGrid.py`; andatura, tratto con controllo d'arresto e cadute in `movements.py`; costruzione e aggiornamento del grafo in `mission_graph.py`; funzioni sulle celle in `environmentMap.py`; decisioni sul fronte (prossima mossa, rotazione, cono, arretramento, ventaglio, trappola, obiettivo ancora raggiungibile) in `arcVerification.py`; tutto GraphNav della missione in `navGraphUtils.py`; `mark_edge_blocked_soft` in `prm_graph.py`.
+- **`spotGrid.py` si importa senza l'SDK di Spot** (serve solo a `LocalGrid`): `mission_graph`, `prm_graph`, `parametri` e il visualizzatore funzionano anche dove l'SDK non c'è. Il visualizzatore legge le costanti di mappe e soglie da `spotGrid` invece di copiarle.
+- **`preflight.py` riscritto:** i riferimenti fra moduli (`modulo.nome`, `from modulo import nome`, argomenti con nome) si controllano in automatico, senza tabelle da aggiornare; a mano restano solo i metodi chiamati sugli oggetti.
+- Tolte `ROTATION_ROOM_SEARCH_M` e `ROTATION_ROOM_DIRECTIONS_DEG`, che nessuno usava.
+- **`DA_DECIDERE.md`** (nuovo): domande aperte e decisioni da prendere dopo la prova del 28-10.
+
+---
+
 ## 2026-10-26 sera (dopo la prova all'aperto delle 15:11)
 
 Prova all'aperto: 8 × 7 celle da 2 m, **55 celle su 56 in 25 minuti** (giovedì 59 su 64 in 42), attesa prima dei viaggi GraphNav circa 8 s in tutto (giovedì 603), nessun rifiuto "fuori dalla cella" (giovedì 44), 12 obiettivi esclusi per la missione e mai riproposti, nessuna caduta. Chiusura veloce prima dei viaggi 0.0–2.0 s, 13 archi. Unico problema: la chiusura della mappa è durata 141 s, e quella completa ha dato 2 archi.
