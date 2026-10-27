@@ -75,21 +75,24 @@ import csv                                            # noqa: E402
 import matplotlib.patheffects as pe                   # noqa: E402
 from matplotlib.transforms import Affine2D            # noqa: E402
 
-SLOPE_THRESHOLD = 0.6   # come spotGrid.SLOPE_THRESHOLD: serve solo a colorare gli archi
+import spotGrid                                       # noqa: E402  costanti di mappe e soglie
 
-# MAPPA GLOBALE COME LA COSTRUIVA IL ROBOT (2026-10-26). Copia di easy_walk._mask_for_global_map
-# e spotGrid.GlobalGrid.update, che qui non si possono importare (servono l'SDK di Spot).
+SLOPE_THRESHOLD = spotGrid.SLOPE_THRESHOLD    # serve solo a colorare gli archi
+
+# MAPPA GLOBALE COME LA COSTRUIVA IL ROBOT. Le regole di spotGrid.mask_for_global_map e
+# spotGrid.GlobalGrid.update rifatte sui dati salvati (le scansioni di scans/), con le stesse
+# costanti, lette da spotGrid (che si importa anche senza l'SDK di Spot).
 # Prima il pannello di destra mostrava il mosaico "l'ultima scansione vince": un ostacolo
 # letto UNA volta, anche accanto alle zampe, ricopriva le celle su cui il robot era appena
 # passato, e il percorso reale sembrava attraversare gli ostacoli, soprattutto alla fine
 # (missione del 22-10, 16:00 circa). Il robot quelle letture le scartava o le pretendeva
 # confermate. Il tasto 'm' torna al mosaico grezzo.
-SELF_BODY_LENGTH_M = 1.10      # easy_walk.GLOBAL_MAP_SELF_BODY_LENGTH_M
-SELF_BODY_WIDTH_M = 0.50       # easy_walk.GLOBAL_MAP_SELF_BODY_WIDTH_M
-SELF_RING_M = 0.25             # easy_walk.GLOBAL_MAP_SELF_RING_M
-OCC_CONFIRM_OBS = 2            # spotGrid.GLOBAL_OCC_CONFIRM_OBS
-OCC_CONFIRM_WALKED = 4         # spotGrid.GLOBAL_OCC_CONFIRM_WALKED
-OCC_MAX_COUNT = 4              # spotGrid.GLOBAL_OCC_MAX_COUNT
+SELF_BODY_LENGTH_M = spotGrid.GLOBAL_MAP_SELF_BODY_LENGTH_M
+SELF_BODY_WIDTH_M = spotGrid.GLOBAL_MAP_SELF_BODY_WIDTH_M
+SELF_RING_M = spotGrid.GLOBAL_MAP_SELF_RING_M
+OCC_CONFIRM_OBS = spotGrid.GLOBAL_OCC_CONFIRM_OBS
+OCC_CONFIRM_WALKED = spotGrid.GLOBAL_OCC_CONFIRM_WALKED
+OCC_MAX_COUNT = spotGrid.GLOBAL_OCC_MAX_COUNT
 
 # Due campioni consecutivi di trajectory.csv piu' lontani di cosi': in mezzo c'e' un
 # movimento non registrato (fino al 2026-10-26 GraphNav, cono e arretramenti non scrivevano
@@ -99,7 +102,7 @@ TRAJ_GAP_M = 0.5
 # SFONDO DEL PANNELLO GLOBALE (2026-10-26), tasto 't'.
 #   ostacoli -- la mappa di occupazione (rosso ostacolo, verde chiaro libero, bianco mai visto)
 #   terreno  -- la mappa globale della QUOTA, come la teneva il robot (media delle quote
-#               corrette, solo celle attendibili e non ostacolo: vedi easy_walk.slope_usable_mask),
+#               corrette, solo celle attendibili e non ostacolo: vedi spotGrid.slope_usable_mask),
 #               rispetto al suolo all'avvio della missione, con ombreggiatura del rilievo
 #   fusione  -- il terreno, e sopra in rosso gli ostacoli della mappa di occupazione
 # La scala dei colori della quota e' fissa per tutta la missione, cosi' scorrendo le
@@ -108,7 +111,7 @@ BACKGROUNDS = ('ostacoli', 'terreno', 'fusione')
 TERRAIN_CMAP = 'viridis'                # niente rossi: nella fusione il rosso e' solo degli ostacoli
 OBSTACLE_RGB = (0.84, 0.15, 0.16)       # come MOSAIC_CMAP
 NO_TERRAIN_RGB = (0.80, 0.80, 0.80)     # fusione: cella vista libera ma senza quota attendibile
-OBSTACLE_THRESHOLD = 0.15               # spotGrid.OBSTACLE_THRESHOLD (maschera del terreno)
+OBSTACLE_THRESHOLD = spotGrid.OBSTACLE_THRESHOLD       # maschera del terreno
 TERRAIN_PERCENTILES = (2, 98)           # estremi della scala dei colori della quota (con lo 0 sempre dentro)
 ZERO_LEVEL_COLOR = 'white'              # linea di livello e riga sulla barra a quota 0 (partenza)
 ZERO_LEVEL_SMOOTH_CELLS = 5             # media su 5 celle (15 cm) solo per tracciare quella linea
@@ -153,7 +156,7 @@ LAYERS = [
      -2.0, 2.0, "quota corretta - suolo all'avvio missione (m)"),
     ("celle mai scritte", lambda d: d['unwritten'].astype(float) if 'unwritten' in d
      else np.zeros_like(d['terrain_raw']), 'gray_r', 0, 1, "1 = mai scritta: trattata come non vista"),
-    # Layer di Spot salvati dal 26-10 (easy_walk.SAVE_EXTRA_LAYERS), ognuno sulla sua griglia
+    # Layer di Spot salvati dal 26-10 (parametri.SAVE_EXTRA_LAYERS), ognuno sulla sua griglia
     # (<nome>_origin, <nome>_cell): settimo elemento = nome del campo.
     ("intensita' (Spot)", lambda d: _extra(d, 'intensity'), 'gray', 0, 255,
      "intensita' del ritorno del sensore", 'intensity'),
@@ -645,7 +648,7 @@ class MissionContext:
     @staticmethod
     def _robot_mask(d):
         """
-        Come easy_walk._mask_for_global_map: -1 ostacolo, +1 libero, 0 nessuna informazione;
+        Come spotGrid.mask_for_global_map: -1 ostacolo, +1 libero, 0 nessuna informazione;
         sotto il corpo libero, nell'anello attorno nessun ostacolo. Anche la maschera del corpo.
         """
         om = np.asarray(d['obstacle_mask']).reshape(d['terrain_raw'].shape)
@@ -724,7 +727,7 @@ class MissionContext:
         """
         Quota media (m, rispetto al suolo all'avvio missione) delle scansioni 0..upto, come
         spotGrid.GlobalTerrainGrid: quote corrette, solo celle attendibili e non ostacolo
-        (easy_walk.slope_usable_mask). NaN dove non c'e' quota.
+        (spotGrid.slope_usable_mask). NaN dove non c'e' quota.
         """
         def step(st_all, d):
             hsum, hn = st_all
