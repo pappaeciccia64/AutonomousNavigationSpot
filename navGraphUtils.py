@@ -1,8 +1,24 @@
-import math
+"""
+navGraphUtils.py -- tutto GraphNav: registrazione della mappa, spostamenti, ritorni.
+
+  RecordingInterface      registrazione (waypoint di cella e briciole), localizzazione con il
+                          fiducial, chiusura d'anello di Spot (close_loops_checked),
+                          ancoraggio, scaricamento della mappa
+  graphnav_navigate_to    spostamento verso un waypoint, con tempo massimo, limiti di
+                          velocita', riaggancio se si perde
+  graphnav_add_shortcuts  scorciatoie: le nostre (archi visti liberi nella mappa globale,
+                          plan_graphnav_shortcuts) e la chiusura d'anello di Spot
+  graphnav_drop_breadcrumb, graphnav_step_back   briciole durante l'ingresso in una cella
+                          e ritorno di un waypoint indietro (escape_by_backtracking)
+  graphnav_return_to_start   ritorno a wp_0 a fine missione
+  graphnav_localization, graphnav_log_drift, graphnav_relocalize   localizzazione e misura
+                          della deriva dell'odometria (drift.csv)
+
+I parametri (tempi, velocita', limiti della chiusura d'anello) stanno in parametri.py.
+"""
 import os
 import time
 import numpy as np
-from bosdyn.api.graph_nav.graph_nav_pb2 import TravelParams
 import bosdyn.client
 import bosdyn.client.lease
 import bosdyn.client.util
@@ -126,7 +142,7 @@ class RecordingInterface(object):
         modify_map_on_server, check_collision: False solo per le misure al banco
         (prova_anelli.py): la mappa resta com'era e si confrontano impostazioni diverse.
         icp_iters (0 = niente ICP) e feature_matching: senza, Spot finisce in pochi secondi ma
-        gli archi non sono corretti sulle scansioni (vedi easy_walk.GRAPHNAV_SDK_LOOP_FAST);
+        gli archi non sono corretti sulle scansioni (vedi parametri.GRAPHNAV_SDK_LOOP_FAST);
         None = valori di Spot.
         upload_result: Spot calcola SENZA scrivere nella mappa e gli archi li carica questa
         funzione (upload_graph, che li aggiunge alla mappa in un colpo solo). Scrivendo da se',
@@ -433,7 +449,7 @@ class RecordingInterface(object):
                 'y': y,
                 'z': z,
                 'yaw': yaw,
-                't': time.time(),        # per la misura della deriva (easy_walk.graphnav_log_drift)
+                't': time.time(),        # per la misura della deriva (graphnav_log_drift)
                 'waypoint_id': created_waypoint_id,
                 'cell_row': cell_row,
                 'cell_col': cell_col
@@ -914,7 +930,7 @@ def plan_graphnav_shortcuts(poses, base_edges, start_id, goal_id, global_map,
     poses: {wp_id: (x, y)} dei waypoint di cui si conosce la posizione (frame della mappa
         globale); base_edges: [(wp_a, wp_b, lunghezza_m)] gli archi che il grafo ha gia'.
     Candidate: coppie di waypoint con posizione a meno di max_m, senza arco diretto, la cui
-    linea retta e' stata VISTA libera nella mappa globale con margin_m (_segment_seen_free).
+    linea retta e' stata VISTA libera nella mappa globale con margin_m (segment_seen_free).
     Si calcola la strada piu' corta col grafo piu' TUTTE le candidate, e si restituiscono solo
     le candidate che quella strada usa.
 
@@ -1281,7 +1297,7 @@ def graphnav_step_back(env, recordingInterface, robot_state_client, command_clie
     lontana si usa comunque la piu' vecchia disponibile.
 
     Restituisce (ok, crumb). ok=True solo se GraphNav dichiara di essere ARRIVATO: in
-    _graphnav_navigate_to lo STATUS_LOST e' un fallimento, non si forza la localizzazione
+    _graphnav_navigate_to_inner lo STATUS_LOST e' un fallimento, non si forza la localizzazione
     sulla destinazione (vedi SPOSTAMENTI CON GRAPHNAV).
 
     La registrazione va FERMATA prima di navigare e ripresa dopo: GraphNav non naviga mentre

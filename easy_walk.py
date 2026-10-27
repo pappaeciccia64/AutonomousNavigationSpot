@@ -1,3 +1,31 @@
+"""
+easy_walk.py -- la missione di esplorazione autonoma di Spot, cella per cella.
+
+    python3 easy_walk.py [--rows R --cols C --cell L --grafo reticolo|casuale ...]
+    (vedi _parse_args; senza argomenti valgono i valori di parametri.py)
+
+L'area e' una griglia di celle (environmentMap). Il robot le visita in ordine a
+serpentina: entra in una cella confinante quando c'e', altrimenti ci si avvicina con
+GraphNav dal waypoint della cella visitata piu' vicina. Ogni ingresso e' un ciclo
+scansione -> mappe -> grafo PRM -> fronte sicuro -> decisione -> movimento.
+
+Contenuto, nell'ordine:
+  mission_switches, _emit_mission_summary_once   interruttori e riepilogo di fine missione
+  find_best_point_in_cell (+ obiettivi rifiutati) il punto da raggiungere in una cella
+  escape_by_backtracking, _trap_backtrack        ritorno indietro con GraphNav
+  TentativoCella                                 UN tentativo di entrare in una cella:
+                                                 _prepara, poi a ogni giro le fasi
+                                                 _guardie ... _esegui_tratti, infine _fine
+  retreat_along_traveled_path                    ritirata a zampe, l'ultima rete
+  cell_has_reachable_target, finalize_or_defer_blocked_cell   celle bloccate o rimandate
+  Missione                                       il ciclo cella per cella
+  easy_walk, _chiudi_missione, main              avvio, chiusura, riga di comando
+
+Gli altri moduli: parametri (numeri e interruttori), registro (log e statistiche), spotGrid
+(scansione e mappe), mission_graph e prm_graph (grafo), arcVerification (fronte e decisioni
+di movimento), movements (comandi di movimento, cadute), navGraphUtils (GraphNav),
+environmentMap (celle). Vedi README.md.
+"""
 import os
 import sys
 import json
@@ -10,9 +38,8 @@ import bosdyn.client
 import bosdyn.client.lease
 import bosdyn.client.util
 import bosdyn.geometry
-from bosdyn.client.frame_helpers import *
+from bosdyn.client.frame_helpers import BODY_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b
 from bosdyn.client.robot_command import (RobotCommandBuilder, RobotCommandClient, blocking_stand)
-from bosdyn.client.frame_helpers import get_a_tform_b
 from types import SimpleNamespace
 import navGraphUtils
 import movements
@@ -35,10 +62,9 @@ from registro import (MISSION_STATS, MISSION_CTX, BodyTiltRecorder, SegmentLog,
 
 
 # =========================================================================
-# STRUMENTI DIAGNOSTICI -- tutto quello che segue serve SOLO a registrare cosa succede
-# durante la missione. Nessuna decisione del robot dipende da questi oggetti, e ogni
-# funzione e' scritta per non sollevare mai eccezioni verso il chiamante: un log che
-# fallisce non deve mai fermare o alterare un movimento.
+# INTERRUTTORI E RIEPILOGO -- solo diagnostica: nessuna decisione del robot dipende da
+# queste funzioni, e non sollevano mai eccezioni verso il chiamante (un log che fallisce
+# non deve fermare o alterare un movimento). Log e statistiche stanno in registro.py.
 # =========================================================================
 
 
@@ -168,8 +194,10 @@ def _emit_mission_summary_once():
     except Exception as e:
         print(f"[LOG] Impossibile produrre il riepilogo di missione: {e}")
 
-# TODO: verificare se si puo' evitare la pausa dopo ogni comando di movimento
-# TODO: cambiare la cartella in cui si scarica il grafo
+
+# =========================================================================
+# SCELTA DEL PUNTO OBIETTIVO in una cella
+# =========================================================================
 
 
 def _refused_goals(env, row, col):
@@ -209,10 +237,10 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
       1. non rifiutati dal fronte in questa missione (_refuse_goal); i rifiutati tornano
          solo se non c'e' altro;
       2. RAGGIUNGIBILI dal robot nel grafo (reachable(x, y) -> bool, provato nell'ordine
-         dei criteri seguenti finche' uno risponde si'). Prima dal 22-10 si sceglieva il piu'
-         vicino al centro e, se il grafo non ci arrivava, i tre successivi: stavano nella
-         stessa zona isolata e la riserva e' fallita 9 volte su 10. Se nessun punto e'
-         raggiungibile si sceglie comunque il migliore: il tentativo fallisce come prima;
+         dei criteri seguenti finche' uno risponde si'). Non basta ripiegare sui successivi
+         del piu' vicino al centro quando il grafo non ci arriva: stanno nella stessa zona
+         isolata (il 22-10 16:04 quel ripiego e' fallito 9 volte su 10). Se nessun punto e'
+         raggiungibile si sceglie comunque il migliore, e il tentativo fallisce;
       3. con almeno TARGET_CLEARANCE_M (0.33) di spazio libero;
       4. il centro geometrico, libero o ignoto che sia (REGOLA DEL CENTRO: un punto gia'
          visto libero di solito e' l'ultimo lembo scansionato dalla cella precedente, cioe'
@@ -374,6 +402,12 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
     return bx, by, valid, blocked
 
 
+# =========================================================================
+# RITORNO INDIETRO CON GRAPHNAV, quando dal punto in cui si e' il grafo non porta
+# alla cella
+# =========================================================================
+
+
 def backtracking_cannot_help(env, prm_graph, goal_id, robot_state_client, max_hops,
                              min_dist_m=0.40):
     """
@@ -520,6 +554,11 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
     return {'ok': False, 'ids': None, 'robot_node': None, 'how': 'cella rimandata'}
 
 
+# =========================================================================
+# INGRESSO IN UNA CELLA: un tentativo (TentativoCella)
+# =========================================================================
+
+
 # Esiti di una fase del ciclo di navigazione (vedi TentativoCella._giro): None = si va avanti
 # con la fase successiva.
 CONTINUA = "continua"        # giro finito: si ricomincia dalla scansione
@@ -581,6 +620,8 @@ class TentativoCella:
         return CONTINUA
 
     def _prepara(self):
+        """Prima del ciclo: rialzo se caduto, prima scansione, mappe e grafo, punto obiettivo
+        e percorso, contatori del tentativo. FALLITO se non si puo' nemmeno partire."""
         self.mobility_kwargs = self.mobility_kwargs or {}
 
         print(f"\n[ATTEMPT] Provo a entrare nella cella ({self.target_row},{self.target_col}) dalla posizione attuale...")
@@ -746,9 +787,10 @@ class TentativoCella:
             print(f"[ARCHI] Scansione non usabile per lo scarto preliminare ({e}).")
 
         t_build = time.perf_counter()
-        # ATTENZIONE AI NOMI: qui `prm_graph` e' il PARAMETRO della funzione (l'istanza di PRM),
-        # non il modulo omonimo. Le coppie candidate sono quelle del reticolo (vedi
-        # _build_mission_prm); veti e pesi li calcola PRM._evaluate_and_add_edge.
+        # ATTENZIONE AI NOMI: qui `self.prm_graph` e' l'istanza di PRM, non il modulo omonimo
+        # (importato come prm_graph_module). Le coppie candidate sono quelle del grafo di
+        # missione (vedi mission_graph.build_mission_prm); veti e pesi li calcola
+        # PRM._evaluate_and_add_edge.
         mission_graph.rebuild_prm_edges(self.prm_graph, self.global_map)
         timing_add('costruzione grafo', time.perf_counter() - t_build)
         _upd = getattr(getattr(self.prm_graph, 'mission_graph', None), 'last_update', None)
@@ -913,6 +955,7 @@ class TentativoCella:
         return True
 
     def _guardie(self):
+        """Limiti del ciclo: troppi giri (MAX_LOOP_ITERATIONS), caduta, troppi giri fermi."""
         self.loop_iter += 1
         self.t_iter = time.perf_counter()
         if self.loop_iter > P.MAX_LOOP_ITERATIONS:
@@ -962,6 +1005,8 @@ class TentativoCella:
             return FALLITO
 
     def _scansione_e_grafo(self):
+        """Scansione fresca, mappe globali, dati locali nel PRM ed eventuale
+        ripianificazione (REFRESH A EVENTI); si esce dal ciclo se non c'e' piu' percorso."""
         # 1. SCANSIONE FRESCA, prima di tutto il resto
         scan = self.local_grid.fetch_scan(self.robot_state_client)
         if scan is None:
@@ -1018,7 +1063,7 @@ class TentativoCella:
             self.robot_x, self.robot_y, unwritten=self.unwritten_up, robot_yaw=self.robot_yaw)
 
         # Mappa dello spazio libero: QUI, non insieme a global_map.update, perche' serve la
-        # obstacle_distance filtrata che vive nella fotografia (vedi _update_clearance_map).
+        # obstacle_distance filtrata che vive nella fotografia (vedi spotGrid.update_clearance_map).
         # Si alimenta solo dal ciclo di navigazione, cosi' tutte le osservazioni passano per
         # lo stesso filtro.
         spotGrid.update_clearance_map(self.global_map, self.pts_up, self.snap, self.is_valid_up, self.unwritten_up,
@@ -1131,6 +1176,8 @@ class TentativoCella:
             return INTERROMPI
 
     def _fronte_e_decisione(self):
+        """Scorciatoia, fronte sicuro sul percorso e decisione (arcVerification.decide_next_move):
+        muoversi, nodo raggiunto, arrivati, aspettare o blocco confermato."""
         self.t_prm = time.perf_counter()
 
         # 3. FRONTE SICURO sulla scansione appena fatta ---------------------------------
@@ -1237,9 +1284,11 @@ class TentativoCella:
             MISSION_STATS['scan_bundles'] += 1
 
     def _rotazione(self):
+        """Se il passo deciso richiede di girarsi dove non si puo': avanzare nel cono,
+        arretrare dritti, riconoscere la trappola o scartare il tratto."""
         # 4. ROTAZIONE -------------------------------------------------------------------
         # Il muso punta SEMPRE il punto da raggiungere. Se la rotazione non e' possibile NON
-        # si cammina di traverso (vedi ROTAZIONE E ARRETRAMENTO in cima al file). Nell'ordine:
+        # si cammina di traverso (vedi ROTAZIONE E ARRETRAMENTO in parametri.py). Nell'ordine:
         # avanzare dentro il cono di rotazione possibile, arretrare dritti se da li' la
         # rotazione diventa possibile, riconoscere una trappola, scartare il tratto.
         if self.decision['kind'] == 'move':
@@ -1261,7 +1310,7 @@ class TentativoCella:
                 # --- 4a. PRIMA DI TUTTO: posso ANDARE AVANTI dentro il cono di rotazione che
                 # mi e' concesso? Spesso andare dritti, o quasi, avvicina all'obiettivo piu'
                 # di qualunque arretramento (vedi plan_cone_move).
-                cone_goal, self._ = arcVerification.point_along(self.polyline, P.CONE_PATH_LOOKAHEAD_M)
+                cone_goal, _ = arcVerification.point_along(self.polyline, P.CONE_PATH_LOOKAHEAD_M)
                 cone = arcVerification.plan_cone_move((self.robot_x, self.robot_y), self.robot_yaw, self.snap, cone_goal)
                 if cone is not None:
                     print(f"[CONO] Non posso girarmi di {rot['dyaw_deg']:+.0f} gradi, ma ruotando di "
@@ -1275,7 +1324,7 @@ class TentativoCella:
                     cx, cy = cone['target']
                     self.need_refresh = True      # fine di un movimento: vedi REFRESH A EVENTI
                     with TrajectoryLog(self.robot_state_client, 'cono', (cx, cy)):
-                        ok_c, dist_c, self._ = movements.navigate_to(
+                        ok_c, dist_c, _ = movements.navigate_to(
                             cx, cy, self.robot_x, self.robot_y, self.robot_state_client, self.command_client,
                             get_a_tform_b(self.lg_proto_up.local_grid.transforms_snapshot,
                                           VISION_FRAME_NAME, BODY_FRAME_NAME),
@@ -1283,7 +1332,7 @@ class TentativoCella:
                     if dist_c > 0.05:
                         if not hasattr(self.env, '_traveled_arcs'):
                             self.env._traveled_arcs = []
-                        ax_c, ay_c, self._, self._ = spotUtils.getPosition(self.robot_state_client)
+                        ax_c, ay_c, _, _ = spotUtils.getPosition(self.robot_state_client)
                         self.env._traveled_arcs.append((self.robot_x, self.robot_y, ax_c, ay_c))
                         self.robot_node_id = self.prm_graph.add_stop_node(
                             ax_c, ay_c, self.global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M, label="sosta (avanzamento nel cono)")
@@ -1324,7 +1373,7 @@ class TentativoCella:
                     if dist_back > 0.05:
                         if not hasattr(self.env, '_traveled_arcs'):
                             self.env._traveled_arcs = []
-                        ax_b, ay_b, self._, self._ = spotUtils.getPosition(self.robot_state_client)
+                        ax_b, ay_b, _, _ = spotUtils.getPosition(self.robot_state_client)
                         self.env._traveled_arcs.append((self.robot_x, self.robot_y, ax_b, ay_b))
                         self.robot_node_id = self.prm_graph.add_stop_node(
                             ax_b, ay_b, self.global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M, label="sosta (arretramento per ruotare)")
@@ -1389,6 +1438,7 @@ class TentativoCella:
                 return FALLITO
 
     def _tempi(self):
+        """Tempi del giro, per [TEMPO] e il riepilogo."""
         t_front = time.perf_counter()
 
         timing_add('scansione', self.t_scan - self.t_iter)
@@ -1401,6 +1451,7 @@ class TentativoCella:
               f"| decisione: {self.decision['kind']}")
 
     def _nodo_o_arrivo(self):
+        """Nodo del percorso raggiunto, oppure arrivo accettato prima della fine."""
         if self.decision['kind'] == 'reached_node':
             self.robot_node_id = self.next_node_id
             self.prm_graph.set_robot_node(self.robot_node_id, 0.0)
@@ -1415,6 +1466,8 @@ class TentativoCella:
             return INTERROMPI
 
     def _attesa(self):
+        """Il fronte non lascia avanzare: obiettivo ancora raggiungibile? ripianificare subito
+        (SUBITO) o aspettare la conferma da fermo."""
         if self.decision['kind'] == 'wait':
             # Prima di insistere: l'obiettivo e' ancora raggiungibile sui dati FRESCHI? Il
             # punto viene scelto all'inizio del tentativo, da metri di distanza, quando la
@@ -1468,7 +1521,7 @@ class TentativoCella:
                     and self.frontier['reason'] in ('ostacolo', 'rugosita', 'pendenza')
                     and self.path_waypoints):
                 poly_now = [(self.robot_x, self.robot_y)] + [(x, y) for _, x, y in self.path_waypoints]
-                self._, seg_blk = arcVerification.point_along(poly_now, self.frontier['dist'])
+                _, seg_blk = arcVerification.point_along(poly_now, self.frontier['dist'])
                 seg_blk = int(seg_blk)
                 ea = self.robot_node_id if seg_blk == 0 else self.path_waypoints[seg_blk - 1][0]
                 eb = self.path_waypoints[min(seg_blk, len(self.path_waypoints) - 1)][0]
@@ -1516,6 +1569,7 @@ class TentativoCella:
             return CONTINUA
 
     def _blocco(self):
+        """Blocco confermato da piu' scansioni ferme: arco scartato, ripianificazione o ritorno."""
         if self.decision['kind'] == 'blocked':
             k = self.decision['segment']
             edge_a = self.robot_node_id if k == 0 else self.path_waypoints[k - 1][0]
@@ -1612,6 +1666,8 @@ class TentativoCella:
             return FALLITO
 
     def _esegui_tratti(self):
+        """Il movimento deciso: controllo della posa d'arrivo, poi una o piu' gambe sulla
+        polilinea confermata dal fronte, con arresto a meta' se il fronte si accorcia."""
         # --- decision['kind'] == 'move' ----------------------------------------------------
         move_x, move_y = self.decision['target']
         is_partial_step = not self.decision['full']
@@ -1913,7 +1969,7 @@ class TentativoCella:
                 self.env._traveled_arcs.append((self.robot_x, self.robot_y, move_x, move_y))
 
                 if is_partial_step:
-                    ax, ay, self._, self._ = spotUtils.getPosition(self.robot_state_client)
+                    ax, ay, _, _ = spotUtils.getPosition(self.robot_state_client)
                     self.robot_node_id = self.prm_graph.add_stop_node(
                         ax, ay, self.global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M, label="sosta (passo parziale)")
                     self.prm_graph.set_robot_node(self.robot_node_id, 0.0)
@@ -1939,7 +1995,7 @@ class TentativoCella:
                 if distance_traveled > 0.05:
                     if not hasattr(self.env, '_traveled_arcs'):
                         self.env._traveled_arcs = []
-                    ax, ay, self._, self._ = spotUtils.getPosition(self.robot_state_client)
+                    ax, ay, _, _ = spotUtils.getPosition(self.robot_state_client)
                     self.env._traveled_arcs.append((self.robot_x, self.robot_y, ax, ay))
                     self.robot_node_id = self.prm_graph.add_stop_node(
                         ax, ay, self.global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M, label="sosta (arresto)")
@@ -1957,7 +2013,7 @@ class TentativoCella:
                 if distance_traveled > 0.05:
                     if not hasattr(self.env, '_traveled_arcs'):
                         self.env._traveled_arcs = []
-                    ax, ay, self._, self._ = spotUtils.getPosition(self.robot_state_client)
+                    ax, ay, _, _ = spotUtils.getPosition(self.robot_state_client)
                     self.env._traveled_arcs.append((self.robot_x, self.robot_y, ax, ay))
 
                 if mission_graph.robot_on_node(self.prm_graph, self.robot_node_id, self.robot_x, self.robot_y):
@@ -1986,11 +2042,12 @@ class TentativoCella:
         return CONTINUA
 
     def _fine(self):
+        """Dopo il ciclo: True se il robot e' nella cella (o l'arrivo appena fuori e' stato accettato)."""
         if self.verification_tracker is not None:
             self.verification_tracker.clear_path()
 
         # Controllo finale della posizione a fine percorso
-        self.robot_x, self.robot_y, self._, self._ = spotUtils.getPosition(self.robot_state_client)
+        self.robot_x, self.robot_y, _, _ = spotUtils.getPosition(self.robot_state_client)
         if self.arrived_near_goal:
             return True
         return self.env.is_point_in_cell(self.robot_x, self.robot_y, self.target_row, self.target_col)
@@ -2007,6 +2064,11 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                           iteration, recordingInterface, verification_tracker,
                           mobility_kwargs).esegui()
 
+
+
+# =========================================================================
+# RITIRATA A ZAMPE all'indietro: l'ultima rete
+# =========================================================================
 
 
 def retreat_along_traveled_path(env, robot_state_client, command_client,
@@ -2102,6 +2164,11 @@ def retreat_along_traveled_path(env, robot_state_client, command_client,
     return done, total
 
 
+# =========================================================================
+# CELLE BLOCCATE O RIMANDATE
+# =========================================================================
+
+
 def cell_has_reachable_target(env, sampler, global_map, row, col, safety_margin=None):
     """
     Nella cella c'e' ANCORA un punto dove il robot potrebbe stare, secondo la
@@ -2183,6 +2250,11 @@ def finalize_or_defer_blocked_cell(env, row, col, sampler=None, global_map=None)
               f"{bin(env.get_cell_sides_status(row, col))}): resta candidata della "
               f"frontiera e si ritentera' piu' avanti, nell'ordine normale, "
               f"da un lato non ancora provato.")
+
+
+# =========================================================================
+# LA MISSIONE: il ciclo cella per cella, avvio e chiusura
+# =========================================================================
 
 
 class Missione:
@@ -2793,11 +2865,16 @@ def easy_walk(options):
         estop.stop()
 
 
+# =========================================================================
+# RIGA DI COMANDO
+# =========================================================================
+
+
 def _parse_args(argv=None):
     """
     Argomenti da riga di comando. Tutti facoltativi: senza argomenti la missione usa i
-    valori di mission_graph (MISSION_ROWS, MISSION_COLS, MISSION_CELL_SIZE_M,
-    MISSION_SPACING_M) e gli anelli di MISSION_LATTICE_RINGS.
+    valori di parametri.py (MISSION_GRID_ROWS, MISSION_GRID_COLS, MISSION_CELL_SIZE_M,
+    MISSION_LATTICE_SPACING_M, MISSION_LATTICE_RINGS, MISSION_GRAPH_SAMPLING...).
     """
     import argparse
     p = argparse.ArgumentParser(description="Missione di esplorazione autonoma con Spot")

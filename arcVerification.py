@@ -861,7 +861,7 @@ def scan_escape_directions(robot_xy, robot_yaw, snap, step_deg=P.ESCAPE_FAN_STEP
       - quanto spazio concede il fronte sicuro andando in linea retta in quella direzione;
       - se il robot puo' girarsi tanto da puntarci il muso (spotGrid.rotation_is_clear).
     Una direzione e' UTILIZZABILE solo se entrambe rispondono si'. Il robot non cammina di
-    traverso (vedi ROTAZIONE E ARRETRAMENTO), quindi una corsia larga che richiede una
+    traverso (vedi ROTAZIONE E ARRETRAMENTO in parametri.py), quindi una corsia larga che richiede una
     rotazione impossibile NON e' una via d'uscita, per quanto larga sia.
 
     Serve a riconoscere una trappola (zero direzioni utilizzabili: robot in un angolo, con

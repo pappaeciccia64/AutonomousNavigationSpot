@@ -4,7 +4,7 @@ Visualizzatore dei dati di missione. Gira su qualunque computer: servono solo
 numpy e matplotlib, NON l'SDK di Spot.
 
 Durante la missione il robot non disegna figure (vedi visualize_grid_with_candidates in
-easy_walk.py): salva i dati grezzi, e le figure si fanno qui, dopo.
+registro.py): salva i dati grezzi, e le figure si fanno qui, dopo.
 
     python3 mission_viewer.py                                  # (o tasto Run) l'ultima missione in MissionMap/
     python3 mission_viewer.py <cartella_missione>              # interattivo, tutte le scansioni

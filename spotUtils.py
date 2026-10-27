@@ -1,3 +1,4 @@
+"""Piccoli strumenti comuni: posizione del robot nel frame VISION, linea di vista sulla griglia."""
 from bosdyn.client.frame_helpers import get_a_tform_b, VISION_FRAME_NAME, BODY_FRAME_NAME, ODOM_FRAME_NAME
 import numpy as np
 

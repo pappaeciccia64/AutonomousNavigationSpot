@@ -209,7 +209,7 @@ GRAPHNAV_SDK_LOOP_CLOSURE = True
 # Tempo massimo di elaborazione LATO SPOT della chiusura d'anello (Params.timeout_seconds):
 # allo scadere Spot restituisce gli archi trovati fino a li'. 0 = non chiamarla.
 #   _BUDGET_S       prima di ogni spostamento GraphNav, in modalita' VELOCE (_FAST: senza ICP
-#                   ne' feature matching). SPENTA dal 26-10 sera (vedi sotto);
+#                   ne' feature matching). Spenta (vedi sotto);
 #   _BUDGET_FINAL_S una volta, a fine missione, prima dell'ancoraggio e del ritorno a wp_0,
 #                   completa (con ICP).
 # Prove al banco del 26-10 sul grafo del 22-10 16:04 ricostruito a 100/200/388 waypoint
@@ -306,7 +306,7 @@ SAVE_SCAN_BUNDLES = True
 SAVE_EXTRA_LAYERS = ('intensity', 'no_step')
 
 # Raggio del disco segnato come pericoloso nella mappa globale attorno al punto di una
-# caduta (vedi _check_and_recover_fall e GlobalGrid.mark_hazard).
+# caduta (vedi movements.check_and_recover_fall e GlobalGrid.mark_hazard).
 FALL_HAZARD_RADIUS_M = 0.5
 
 # ==================================================================
@@ -333,8 +333,7 @@ RETREAT_MAX_SEGMENT_M = 2.50
 
 # ==================================================================
 # SPOSTAMENTI CON GRAPHNAV -- fra celle lontane, per i ritorni e per il ritorno a wp_0.
-# Questo file non usa RecordingInterface.navigate_to_waypoint / navigate_to_first_waypoint
-# di navGraphUtils.py, ma _graphnav_navigate_to, che:
+# Tutti passano da navGraphUtils.graphnav_navigate_to, che:
 #   - ha un tempo massimo (GRAPHNAV_TIMEOUT_S), cosi' un robot caduto o senza percorso non
 #     blocca la missione;
 #   - limita la velocita' (GRAPHNAV_MAX_*_VEL): gli spostamenti con GraphNav sono i piu'

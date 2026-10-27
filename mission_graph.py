@@ -1,7 +1,8 @@
 """
 mission_graph.py -- il grafo di missione, costruito dalla DIMENSIONE DELLA MISSIONE (righe,
 colonne, lato cella: gli stessi tre numeri di SPOT_MISSION_GRID e di
-environmentMap.EnvironmentMap). I nodi si generano in due modi (GRAPH_SAMPLING):
+environmentMap.EnvironmentMap). I nodi si generano in due modi (P.MISSION_GRAPH_SAMPLING,
+in parametri.py come tutti i P.* citati qui):
   - 'reticolo' (default): un RETICOLO rettangolare di nodi equidistanziati, in forma
     chiusa. Due flag: la SPAZIATURA fra i nodi e gli ANELLI di collegamento.
   - 'casuale': nodi sparsi con una distribuzione scelta, per confrontare i due metodi
@@ -31,7 +32,7 @@ PERCHE' RETTANGOLARE E NON TRIANGOLARE
 SPAZIATURA
   Il passo richiesto viene SEMPRE arrotondato a cell_size/n con n intero: e' la condizione
   che rende ogni centro cella un nodo del reticolo. La riga [GRAFO] del log dice il passo
-  effettivo. Default della missione: MISSION_SPACING_M = 0.5 m (= 4/8); senza, 0.25 m
+  effettivo. Default della missione: P.MISSION_LATTICE_SPACING_M = 0.5 m (= 4/8); senza, 0.25 m
   (DEFAULT_LATTICE_SPACING_M).
   Il passo puo' essere piu' corto di min_edge_length: i vicini troppo vicini semplicemente
   non si collegano, e gli archi partono dagli anelli piu' esterni. La soglia sugli archi
@@ -49,7 +50,7 @@ ANELLI -- quante connessioni
                (diagonale): 16 direzioni invece di 8, 16 vicini per nodo;
     rings=3 -> in piu' 0.75, 0.79, 0.90, 1.00, 1.03, 1.06 m: tratti piu' lunghi, ~2.5
                volte gli archi.
-  I tratti lunghi in rettilineo li produce comunque easy_walk.shortcut_index, che salta i
+  I tratti lunghi in rettilineo li produce comunque arcVerification.shortcut_index, che salta i
   nodi intermedi quando il FRONTE SICURO conferma il tratto sui dati dal vivo.
   rings=None arriva fino a min(connection_radius, max_edge_length).
 
@@ -69,14 +70,14 @@ ALIASING -- il limite da conoscere
   Passaggio garantito: reticolo 2c + passo, nodi casuali 2c + 2 * copertura. A passo 0.25
   ogni striscia piu' larga di 0.25 m contiene una fila di nodi.
 
-NODI CASUALI (GRAPH_SAMPLING = 'casuale')
+NODI CASUALI (P.MISSION_GRAPH_SAMPLING = 'casuale')
   In alternativa al reticolo, i nodi si possono spargere a caso nell'area della missione,
   per confrontare i due metodi. I centri delle celle restano SEMPRE nodi (sono gli
   obiettivi, e il centro della cella di partenza e' il punto di accensione); gli altri
-  nodi seguono una di queste distribuzioni, con RANDOM_DENSITY_PER_M2 nodi per m^2:
+  nodi seguono una di queste distribuzioni, con P.MISSION_RANDOM_DENSITY nodi per m^2:
     'uniforme'   punti indipendenti e uniformi: il PRM classico, con buchi e grumi;
     'poisson'    Poisson-disk: punti uniformi scartati se piu' vicini di una distanza
-                 minima a un nodo gia' messo (POISSON_MIN_DIST_M; None = 0.75/sqrt(densita'),
+                 minima a un nodo gia' messo (P.MISSION_POISSON_MIN_DIST_M; None = 0.75/sqrt(densita'),
                  che lascia raggiungere la densita' chiesta): niente grumi;
     'perturbata' l'area divisa in quadretti da 1/densita' m^2, un punto a caso in ognuno
                  (pochi quadretti tolti o punti aggiunti a caso per arrivare al numero
@@ -86,7 +87,7 @@ NODI CASUALI (GRAPH_SAMPLING = 'casuale')
                  insiemi diversi.
   Gli archi collegano ogni coppia di nodi distante fra min_edge_length e
   min(max_edge_length, connection_radius); passo e anelli non contano.
-  SEME: RANDOM_SEED fisso ripete lo stesso grafo bit per bit; None = un seme estratto a
+  SEME: P.MISSION_RANDOM_SEED fisso ripete lo stesso grafo bit per bit; None = un seme estratto a
   caso. In entrambi i casi il seme usato va nel log (riga [GRAFO] Nodi casuali) e in
   mission_summary.json, cosi' la missione si puo' ripetere e test_replay la rigioca con
   lo stesso grafo.
@@ -146,7 +147,7 @@ DEFAULT_LATTICE_SPACING_M = 0.25
 # ----------------------------------------------------------------------------------------
 # COME SI GENERANO I NODI (vedi NODI CASUALI nel commento in cima).
 #   'reticolo' il reticolo rettangolare, deterministico (default);
-#   'casuale'  nodi sparsi con RANDOM_DISTRIBUTION, centri cella sempre compresi.
+#   'casuale'  nodi sparsi con P.MISSION_RANDOM_DISTRIBUTION, centri cella sempre compresi.
 # Si cambiano per una sola missione con gli argomenti di easy_walk.py (--grafo,
 # --distribuzione, --densita, --seme).
 # ----------------------------------------------------------------------------------------
@@ -956,7 +957,7 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
             mission_settings() (MISSION_*, o i DEFAULT_*). Ignorati se si passa `env`.
         spacing_m: FLAG DELLA SPAZIATURA, in metri; viene arrotondata a cell_size/n (vedi
             align_spacing). Puo' essere sotto min_edge_length (vedi SPAZIATURA). Se non
-            passato: quello di mission_settings() (MISSION_SPACING_M, o 0.25 m); None =
+            passato: quello di mission_settings() (P.MISSION_LATTICE_SPACING_M, o 0.25 m); None =
             suggested_spacing().
         rings: FLAG DELLE CONNESSIONI -- k = tutti i nodi entro la diagonale del k-esimo
             anello (k*passo*sqrt(2)), con archi >= min_edge_length (vedi ANELLI). None =
@@ -970,11 +971,11 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
         env: una EnvironmentMap gia' creata e con set_origin() fatto. Se passata, dimensione
             e posa vengono da lei: e' il modo di garantire che grafo e mappa delle celle non
             possano andare fuori sincrono.
-        sampling: 'reticolo' o 'casuale' (vedi NODI CASUALI); None = GRAPH_SAMPLING. Con
+        sampling: 'reticolo' o 'casuale' (vedi NODI CASUALI); None = P.MISSION_GRAPH_SAMPLING. Con
             'casuale' spacing_m e rings non contano.
         distribution, density_per_m2, seed, poisson_min_dist_m: i parametri dei nodi
-            casuali; None = RANDOM_DISTRIBUTION, RANDOM_DENSITY_PER_M2, RANDOM_SEED,
-            POISSON_MIN_DIST_M. Seme None anche li' = estratto a caso (e scritto nel log).
+            casuali; None = P.MISSION_RANDOM_DISTRIBUTION, P.MISSION_RANDOM_DENSITY,
+            P.MISSION_RANDOM_SEED, P.MISSION_POISSON_MIN_DIST_M. Seme None anche li' = estratto a caso (e scritto nel log).
 
     Returns:
         MissionGraph.
@@ -1444,7 +1445,7 @@ def build_mission_prm(env, verbose=True):
 
     Restituisce (prm, sampler, mission_lattice): `sampler` da' i nodi cella per cella (vedi
     mission_graph.LatticeSampler), `mission_lattice` e' il MissionGraph.
-    Gli ARCHI non vengono creati qui: servono i dati di terreno, vedi _rebuild_prm_edges.
+    Gli ARCHI non vengono creati qui: servono i dati di terreno, vedi rebuild_prm_edges.
     """
     mg = build_mission_graph(
         env=env, spacing_m=P.MISSION_LATTICE_SPACING_M, rings=P.MISSION_LATTICE_RINGS,
@@ -1454,7 +1455,7 @@ def build_mission_prm(env, verbose=True):
         density_per_m2=P.MISSION_RANDOM_DENSITY, seed=P.MISSION_RANDOM_SEED)
     prm = prm_graph.PRM(min_edge_length=P.PRM_MIN_EDGE_M, max_edge_length=mg.reach_m,
                         connection_radius=P.PRM_CONNECTION_RADIUS_M)
-    prm.mission_graph = mg          # lo rilegge _rebuild_prm_edges
+    prm.mission_graph = mg          # lo rilegge rebuild_prm_edges
     prm.set_detour_limit(P.PLAN_MAX_DETOUR_RATIO, P.PLAN_DETOUR_SLACK_M)
     mg.into_prm(prm)
     return prm, mg.as_sampler(), mg

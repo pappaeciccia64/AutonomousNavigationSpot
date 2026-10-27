@@ -1,6 +1,21 @@
+"""
+movements.py -- i comandi di movimento di Spot e la sicurezza del movimento.
+
+  relative_move, move_to_world_point_without_turning   un tratto, con limite di velocita',
+                                                       andatura e arresto a meta' (should_abort)
+  navigate_to                                          un tratto del ciclo di navigazione:
+                                                       ruota, poi avanza (con il fronte che
+                                                       puo' fermarlo)
+  select_mobility_params                               andatura, passo e limiti di velocita'
+                                                       dal terreno dell'arco
+  check_fall, recover_from_fall, check_and_recover_fall   cadute: riconoscerle, rialzarsi,
+                                                       segnare il punto pericoloso
+  stop_robot
+"""
 import time
 import numpy as np
-from bosdyn.client.frame_helpers import *
+from bosdyn.client.frame_helpers import (BODY_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b,
+                                         get_se2_a_tform_b)
 from bosdyn.client.robot_command import RobotCommandBuilder
 from bosdyn.client import robot_command as _robot_command
 from bosdyn.api import robot_state_pb2
@@ -20,8 +35,8 @@ from registro import MISSION_STATS
 #
 # Ogni comando di movimento imposta un limite: senza, Spot cammina fino al proprio massimo
 # (~1.6 m/s), troppo per un terreno esterno anche se in piano. I limiti per livello di
-# terreno stanno in spotGrid.GAIT_VEL_* e arrivano qui tramite select_mobility_params() in
-# easy_walk.py. Questi sono i valori usati quando il chiamante non ne passa (comandi
+# terreno stanno in spotGrid.GAIT_VEL_* e arrivano tramite select_mobility_params()
+# (qui sotto). Questi sono i valori usati quando il chiamante non ne passa (comandi
 # isolati, ritirata).
 #
 # ATTENZIONE: in Spot il limite e' una coppia (min_vel, max_vel). Impostando solo
@@ -521,7 +536,7 @@ def navigate_to(target_x, target_y, robot_x, robot_y, robot_state_client, comman
     keep_heading: se True il robot NON ruota prima di muoversi, raggiunge il punto con
         l'orientamento che ha (anche di lato o all'indietro). Il ciclo di navigazione passa
         sempre False: di traverso Spot occupa 1.10 m invece di 0.50 e il fronte pretende
-        0.59 m di obstacle_distance invece di 0.30 (vedi ROTAZIONE E ARRETRAMENTO). Il
+        0.59 m di obstacle_distance invece di 0.30 (vedi ROTAZIONE E ARRETRAMENTO in parametri.py). Il
         parametro resta per i test.
 
     mobility_kwargs: andatura facoltativa passata a movements.relative_move, es.

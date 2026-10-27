@@ -33,7 +33,7 @@ OCCUPANCY_SAMPLES_MIN = 5
 # un suo campione (ogni 10 cm) cade su una cella VISTA nella scansione attuale con
 # obstacle_distance sotto LIVE_PREFILTER_OD_M e non sotto il corpo del robot.
 #   - La soglia e' la distanza del fronte (spotGrid.FRONTIER_CLEARANCE_M, 0.25 m): toglie
-#     gli archi che il fronte rifiuterebbe. Prima del 22-10 era 0.20 m, sotto il fronte, e il
+#     gli archi che il fronte rifiuterebbe. Con una soglia sotto il fronte (0.20 m) il
 #     pianificatore sceglieva archi a 0.20-0.25 m che il fronte poi rifiutava.
 #   - NON la distanza di pianificazione (0.28, quella della mappa globale): da un punto
 #     stretto gli archi d'uscita passano per forza vicino agli ostacoli, e il fronte li
@@ -906,7 +906,7 @@ class PRM:
         return out | live
 
     def _global_occupancy_blocked_many(self, pairs, global_map, edge_safety_margin):
-        """Il controllo sulla mappa globale di _occupancy_blocked_many (com'era fino al 12-10)."""
+        """Il controllo sulla mappa globale di _occupancy_blocked_many, senza la scansione dal vivo."""
         n_pairs = len(pairs)
         out = np.zeros(n_pairs, dtype=bool)
         if n_pairs == 0 or global_map is None or edge_safety_margin <= 0.0:
@@ -1137,7 +1137,7 @@ class PRM:
     def set_allowed_nodes(self, node_ids=None):
         """
         Limita la ricerca del percorso a questi nodi (None = nessun limite). Partenza e arrivo
-        sono sempre ammessi. Usato da easy_walk per pianificare solo nelle celle visitate.
+        sono sempre ammessi. Usato da mission_graph.restrict_planning_to_explored_cells.
         """
         self.allowed_nodes = None if node_ids is None else set(node_ids)
 
@@ -1376,7 +1376,7 @@ def mark_edge_blocked_soft(prm, idx1, idx2):
     """
     key = (min(idx1, idx2), max(idx1, idx2))
     # Scartare un arco cambia il piano, quindi al prossimo giro il refresh degli archi va
-    # fatto (vedi REFRESH A EVENTI nel ciclo di navigazione).
+    # fatto (vedi REFRESH A EVENTI in easy_walk.TentativoCella._scansione_e_grafo).
     prm.needs_refresh = True
     prm.edge_validity[key] = False
     prm.traversed_edges.discard(key)

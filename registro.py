@@ -22,8 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import numpy as np
-from bosdyn.client.frame_helpers import (BODY_FRAME_NAME, GROUND_PLANE_FRAME_NAME, VISION_FRAME_NAME,
-                                         get_a_tform_b)
+from bosdyn.client.frame_helpers import GROUND_PLANE_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b
 
 import spotUtils
 
@@ -33,7 +32,8 @@ VIS_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vis_worker"
 
 # ==================================================================
 # STATISTICHE DI MISSIONE -- solo diagnostica/log, mai lette per decidere il
-# comportamento del robot. Resettato all'inizio di ogni chiamata a easy_walk().
+# comportamento del robot. Mai azzerato: una missione per processo (i test che ne fanno
+# girare piu' di una nello stesso processo vedono i conteggi sommati).
 # I contatori sul veto/fonte-pendenza vivono invece sull'istanza PRM stessa
 # (vedi prm_graph.PRM.print_mission_summary), perché il PRM persiste per tutta
 # la missione mentre qui teniamo solo cio' che non ha un posto naturale li'.
@@ -44,7 +44,7 @@ MISSION_STATS = {
     'near_threshold_saves': 0,
     'segments_logged': 0,
     'last_tier': None,   # tier dell'ultimo segmento, letto per la riga del CSV
-    'time_s': {},        # secondi spesi per fase, vedi _timing_add / [TEMPO]
+    'time_s': {},        # secondi spesi per fase, vedi timing_add / [TEMPO]
     'scan_bundles': 0,
     'frontier_blocks': 0,
     'frontier_aborts': 0,
@@ -89,8 +89,8 @@ MISSION_STATS = {
 
 # Contesto della missione in corso, per i log diagnostici che non hanno modo di ricevere
 # questi oggetti come argomento (attempt_enter_cell_from_position e' chiamata da piu' punti
-# e non vogliamo cambiarne la firma). Riempito in easy_walk(), letto da _log_segment() e
-# _emit_mission_summary_once(). Solo diagnostica: nessuna decisione del robot lo legge.
+# e non vogliamo cambiarne la firma). Riempito in easy_walk(), letto da log_segment() e
+# easy_walk._emit_mission_summary_once(). Solo diagnostica: nessuna decisione del robot lo legge.
 MISSION_CTX = {
     'prm': None,
     'log_folder': None,
@@ -403,7 +403,7 @@ class TrajectoryLog:
     Registra in trajectory.csv dove passa il robot durante un movimento che non e' un tratto
     del ciclo di navigazione (GraphNav, cono, arretramenti). Mai eccezioni verso chi chiama.
 
-        with _TrajectoryLog(robot_state_client, 'graphnav', (x, y)):
+        with TrajectoryLog(robot_state_client, 'graphnav', (x, y)):
             ... movimento ...
     """
     def __init__(self, robot_state_client, move, target_xy=(np.nan, np.nan)):

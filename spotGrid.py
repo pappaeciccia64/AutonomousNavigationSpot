@@ -261,7 +261,7 @@ CLEARANCE_NEAR_M = 1.0
 CLEARANCE_MAP_DECIDES = False
 
 # =========================================================================
-# SCELTA DELL'ANDATURA (vedi easy_walk.select_mobility_params)
+# SCELTA DELL'ANDATURA (vedi movements.select_mobility_params)
 # Tre livelli dalla pendenza (col corpo) e dalla rugosita' del tratto da percorrere; decide
 # la peggiore delle due. In altezza di gradino netto (H / 0.48): PLAIN sotto ~7 cm, HARD da
 # ~12 cm. Sono soglie di "quanta cura", molto sotto quelle di ostacolo.
@@ -1578,7 +1578,7 @@ class LocalGrid:
         vale il terrain_valid di Spot.
 
         diagnostic_only=True la calcola senza consumare quell'unica volta (diagnostica
-        [FOOTPRINT-DIAG] in easy_walk). body_length / body_width: dimensioni del corpo, da
+        [FOOTPRINT-DIAG], vedi log_footprint_diagnostic). body_length / body_width: dimensioni del corpo, da
         cambiare solo per la diagnostica (confronto col solo nucleo fra le zampe).
 
         Attenzione: la chiama anche il thread del fronte (arcVerification), quindi la maschera
@@ -2078,8 +2078,8 @@ class GlobalTerrainGrid:
     se in missioni lunghe la memoria diventasse un problema, la leva e' `resolution`.
 
     Si alimenta solo con quote corrette (LocalGrid.correct_terrain) e con la stessa maschera
-    del calcolo dal vivo (easy_walk.slope_usable_mask: celle attendibili e non ostacolo),
-    tramite easy_walk.fold_scan_into_global_maps.
+    del calcolo dal vivo (slope_usable_mask: celle attendibili e non ostacolo),
+    tramite fold_scan_into_global_maps.
 
     Limite: se l'odometria (frame VISION) derivasse, letture della "stessa" cella verrebbero
     da punti un po' diversi. Sulle missioni del 13-10 lo scarto fra scansioni successive e'

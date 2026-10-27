@@ -1,3 +1,4 @@
+"""Collegamento al robot (SDK, login, lease, stato) ed E-Stop."""
 import os
 import bosdyn.client
 import bosdyn.client.lease
