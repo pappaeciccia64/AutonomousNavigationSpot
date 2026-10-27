@@ -26,8 +26,12 @@ il robot arriva appena fuori dalla cella.
   A  un muro fra la colonna 1 e la 2 sulla riga 0: si entra in (0,2) da (1,2); scatta il
      controllo prima dello spostamento GraphNav.
   B  il muro piu' lungo e un ostacolo dentro (1,2): blocchi confermati e ritorni con GraphNav.
-Cio' che nessuno dei due esercita: il nuovo tentativo subito dopo il recupero ([RECOVERY]
-Trovato percorso alternativo), le trappole, le cadute (le prova test_e2e_loop.py).
+  C  il mondo B con fallimenti forzati (vedi _con_fallimenti): tentativi falliti d'ufficio,
+     nessun punto obiettivo, una caduta durante uno spostamento GraphNav. Esercita il nuovo
+     tentativo subito dopo il recupero ([RECOVERY]), riuscito e fallito, e i rami della
+     missione che i mondi veri raggiungono di rado.
+Cio' che nessuno esercita: le trappole e le cadute dentro un tentativo (le prova
+test_e2e_loop.py).
 """
 import contextlib
 import io
@@ -239,6 +243,49 @@ class _Tracker(T.FakeTracker):
         pass
 
 
+@contextlib.contextmanager
+def _con_fallimenti():
+    """Fallimenti forzati, sempre gli stessi: il 1o, 4o, 7o... tentativo e il 2o falliscono
+    senza muovere il robot, una scelta dell'obiettivo su 5 non trova punti, il secondo
+    spostamento GraphNav finisce con una caduta (finta: il robot e' gia' in piedi)."""
+    real_attempt = easy_walk.attempt_enter_cell_from_position
+    real_best = easy_walk.find_best_point_in_cell
+    real_fall = movements.check_and_recover_fall
+    n = {'tentativi': 0, 'obiettivi': 0, 'viaggi': 0}
+
+    def attempt(*a, **k):
+        n['tentativi'] += 1
+        if n['tentativi'] % 3 == 1 or n['tentativi'] % 7 == 2:
+            print(f"[FINTO] tentativo {n['tentativi']} fallito d'ufficio")
+            return False
+        return real_attempt(*a, **k)
+
+    def best(*a, **k):
+        n['obiettivi'] += 1
+        if n['obiettivi'] % 5 == 3:
+            print(f"[FINTO] nessun punto obiettivo ({n['obiettivi']})")
+            return None, None, None, None
+        return real_best(*a, **k)
+
+    def fall(rsc, cc, gm, why, *a, **k):
+        if why == "durante lo spostamento con GraphNav":
+            n['viaggi'] += 1
+            if n['viaggi'] == 2:
+                print("[FINTO] caduta durante lo spostamento GraphNav")
+                return 'caduto'
+        return real_fall(rsc, cc, gm, why, *a, **k)
+
+    easy_walk.attempt_enter_cell_from_position = attempt
+    easy_walk.find_best_point_in_cell = best
+    movements.check_and_recover_fall = fall
+    try:
+        yield n
+    finally:
+        easy_walk.attempt_enter_cell_from_position = real_attempt
+        easy_walk.find_best_point_in_cell = real_best
+        movements.check_and_recover_fall = real_fall
+
+
 def run(walls=None, name='MISSIONE'):
     T.WORLD, T.ROBOT = T.World(WALLS if walls is None else walls, ghosts=True), T.Robot(*START)
     arcVerification.OBSTACLE_HISTORY.reset()
@@ -275,30 +322,53 @@ def run(walls=None, name='MISSIONE'):
     return dict(ok=ok, log=log, gn=gn, root=root, seconds=time.time() - t0, out=out.getvalue())
 
 
+def _controlli_comuni(r):
+    log = r['log']
+    print(f"  ({r['seconds']:.0f} s)")
+    check(r['ok'] is True, "main() arriva in fondo senza eccezioni")
+    check('Traceback' not in log and 'Traceback' not in r['out'], "nessuna eccezione nel log")
+    check("ritorno a wp_0: arrivato" in log, "ritorno a wp_0 riuscito")
+    check("[FINAL SCAN] Fatto" in log, "scansione finale fatta")
+    check("[ANCHORING]" in log, "ancoraggio finale chiamato")
+
+
+def _controlli_mondo(name, r):
+    log = r['log']
+    grid = log.split("--- Mappa delle celle ---")[-1].splitlines()[1:ROWS + 1]
+    cells = [line.split()[1:] for line in grid]
+    visited = sum(v == '1' for row in cells for v in row)
+    check(visited == 8, f"visitate tutte le 8 celle raggiungibili (visitate {visited})")
+    check(cells and cells[2][2] == '-1', "la cella chiusa (2,2) e' bloccata")
+    check("[OBIETTIVO] Il robot e' fuori dalla cella (1,1)" in log,
+          "in (1,1) l'arrivo vale con il robot appena fuori dalla cella")
+    check(len(r['gn'].trips) >= 2, f"spostamenti GraphNav: {len(r['gn'].trips)}")
+    if name == 'A':
+        check("[PRECHECK]" in log, "il controllo prima dello spostamento GraphNav scatta")
+    if name == 'B':
+        check("[BLOCCO] Confermato" in log and "[RITORNO]" in log, "blocco confermato e ritorno con GraphNav")
+
+
+def _controlli_fallimenti(r):
+    log = r['log']
+    check("[RECOVERY] Trovato percorso alternativo" in log, "nuovo tentativo subito dopo il recupero")
+    check("[FAIL] Anche il percorso alternativo" in log, "nuovo tentativo fallito: lato segnato")
+    check("[SKIP] Nessun punto obiettivo valido" in log, "nessun punto obiettivo nel recupero")
+    check("[CADUTA] Rialzato dopo lo spostamento con GraphNav" in log, "caduta durante il viaggio")
+
+
 if __name__ == '__main__':
     for name, walls in WORLDS.items():
         print(f"\nMissione intera nel mondo {name}, robot e GraphNav finti: 3 x 3 celle da 3 m.")
         r = run(walls, f"MISSIONE_{name}")
-        log = r['log']
-        print(f"  ({r['seconds']:.0f} s)")
-        check(r['ok'] is True, "main() arriva in fondo senza eccezioni")
-        check('Traceback' not in log and 'Traceback' not in r['out'], "nessuna eccezione nel log")
-        grid = log.split("--- Mappa delle celle ---")[-1].splitlines()[1:ROWS + 1]
-        cells = [line.split()[1:] for line in grid]
-        visited = sum(v == '1' for row in cells for v in row)
-        check(visited == 8, f"visitate tutte le 8 celle raggiungibili (visitate {visited})")
-        check(cells and cells[2][2] == '-1', "la cella chiusa (2,2) e' bloccata")
-        check("[OBIETTIVO] Il robot e' fuori dalla cella (1,1)" in log,
-              "in (1,1) l'arrivo vale con il robot appena fuori dalla cella")
-        check(len(r['gn'].trips) >= 2, f"spostamenti GraphNav: {len(r['gn'].trips)}")
-        check("ritorno a wp_0: arrivato" in log, "ritorno a wp_0 riuscito")
-        check("[FINAL SCAN] Fatto" in log, "scansione finale fatta")
-        check("[ANCHORING]" in log, "ancoraggio finale chiamato")
-        if name == 'A':
-            check("[PRECHECK]" in log, "il controllo prima dello spostamento GraphNav scatta")
-        if name == 'B':
-            check("[BLOCCO] Confermato" in log and "[RITORNO]" in log, "blocco confermato e ritorno con GraphNav")
+        _controlli_comuni(r)
+        _controlli_mondo(name, r)
         shutil.rmtree(r['root'], ignore_errors=True)
+    print("\nMissione intera nel mondo C: il B con fallimenti forzati.")
+    with _con_fallimenti():
+        r = run(WORLDS['B'], "MISSIONE_C")
+    _controlli_comuni(r)
+    _controlli_fallimenti(r)
+    shutil.rmtree(r['root'], ignore_errors=True)
     print("\n" + "=" * 70)
     print("TUTTO OK" if not FAILS else f"{len(FAILS)} CONTROLLI FALLITI:\n  - " + "\n  - ".join(FAILS))
     sys.exit(1 if FAILS else 0)

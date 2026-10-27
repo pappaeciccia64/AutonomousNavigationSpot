@@ -2185,7 +2185,518 @@ def finalize_or_defer_blocked_cell(env, row, col, sampler=None, global_map=None)
               f"da un lato non ancora provato.")
 
 
+class Missione:
+    """La missione cella per cella, dopo l'avvio (vedi easy_walk).
+
+    La frontiera e' la lista delle celle candidate (riga, colonna, rango sul percorso a
+    serpentina). A ogni giro: se una cella della frontiera confina con quella del robot si
+    tenta di entrarci da qui (_cella_confinante); altrimenti si sceglie la candidata di rango
+    piu' basso, ci si avvicina con GraphNav fino al waypoint della cella visitata piu' vicina
+    e si tenta da li' (_scegli_cella_lontana, _viaggio_e_tentativo). Un tentativo fallito segna
+    il LATO da cui si e' provato (_lato_fallito): la cella si blocca solo quando ogni lato
+    raggiungibile e' stato provato (finalize_or_defer_blocked_cell).
+    """
+
+    def __init__(self, robot_state_client, command_client, recordingInterface, local_grid,
+                 global_grid, env, prm, sampler, verification_tracker, mission_folder,
+                 mobility_kwargs):
+        self.robot_state_client = robot_state_client
+        self.command_client = command_client
+        self.recordingInterface = recordingInterface
+        self.local_grid = local_grid
+        self.global_grid = global_grid
+        self.env = env
+        self.prm = prm
+        self.sampler = sampler
+        self.verification_tracker = verification_tracker
+        self.mission_folder = mission_folder
+        self.mobility_kwargs = mobility_kwargs
+        self.path = env.generate_serpentine_path(start_cell=env.start_cell)
+        self.frontier = []
+        self.visualization_counter = 0   # numero progressivo delle immagini salvate
+
+    # --- Pezzi comuni --------------------------------------------------------------------
+
+    def _tenta(self, row, col):
+        """Un tentativo di entrare nella cella (row, col) dalla posizione attuale."""
+        check = attempt_enter_cell_from_position(
+            self.local_grid, self.global_grid, self.robot_state_client, self.command_client,
+            self.env, row, col, self.sampler, self.prm, self.mission_folder,
+            self.visualization_counter, self.recordingInterface, self.verification_tracker,
+            mobility_kwargs=self.mobility_kwargs)
+        self.visualization_counter += 1
+        return check
+
+    def _visitata(self, row, col, x, y):
+        """Cella (row, col) visitata con il robot in (x, y): waypoint GraphNav della cella e
+        nuove candidate attorno a lei."""
+        self.env.update_position(x, y)
+        self.recordingInterface.create_default_waypoint(cell_row=row, cell_col=col)
+        self.env.add_waypoint(x, y)
+        self.env.mark_cell_visited(row, col)
+        # Le confinanti della cella APPENA VISITATA, non di quella in cui sta il robot: con
+        # l'arrivo appena fuori dalla cella (ARRIVAL_OUTSIDE_CELL_M) il robot puo' essere
+        # ancora nella cella di prima.
+        self.frontier.extend(environmentMap.find_new_borders(
+            self.env, row, col, self.path, self.frontier))
+
+    def _lato_fallito(self, row, col, from_row, from_col):
+        """Segna come provato il lato della cella (row, col) che guarda la cella (from_row,
+        from_col). True se ora la cella e' bloccata (nessun lato raggiungibile da provare)."""
+        side_bit = self.env.get_side_bit_facing_origin(from_row, from_col, row, col)
+        self.env.mark_cell_side_explored(row, col, side_bit)
+        finalize_or_defer_blocked_cell(self.env, row, col,
+                                       self.sampler, self.global_grid.global_occupancy_map)
+        return self.env.is_cell_blocked(row, col)
+
+    # --- Il ciclo ------------------------------------------------------------------------
+
+    def esplora(self):
+        """Visita le celle finche' la frontiera non e' vuota."""
+        x, y, z, _ = spotUtils.getPosition(self.robot_state_client)
+        robot_row, robot_col = self.env.get_cell_from_world(x, y)
+        self.frontier.extend(environmentMap.find_new_borders(
+            self.env, robot_row, robot_col, self.path, self.frontier))
+
+        while (True):
+            print(self.frontier)
+            x, y, z, _ = spotUtils.getPosition(self.robot_state_client)
+            robot_row, robot_col = self.env.get_cell_from_world(x, y)
+
+            borders = self.env.get_adjacent_frontier_cells(robot_row, robot_col, self.path)
+            borders_in_frontier = [b for b in borders
+                                   if any((f[0] == b[0] and f[1] == b[1]) for f in self.frontier)]
+
+            if len(borders_in_frontier) != 0:
+                self._cella_confinante(min(borders_in_frontier, key=lambda b: b[2]),
+                                       robot_row, robot_col)
+            else:
+                # Nessuna cella confinante in frontiera: si va con GraphNav verso il waypoint
+                # piu' vicino alla cella di rango piu' basso e si tenta da li'.
+                scelta = self._scegli_cella_lontana()
+                if scelta is not None:
+                    if self._viaggio_e_tentativo(*scelta) == 'caduta':
+                        continue
+                else:
+                    if len(self.frontier) > 0:
+                        self.frontier.remove(self.frontier[0])
+
+            if len(self.frontier) == 0:
+                break
+
+    def _cella_confinante(self, selected_border, robot_row, robot_col):
+        """Tentativo su una cella della frontiera che confina con quella del robot."""
+        row, col = selected_border[0], selected_border[1]
+        # Cella da cui si tenta l'ingresso: serve dopo per segnare il LATO provato. Non la
+        # cella in cui il robot si trova DOPO il tentativo, che una ritirata o un passo
+        # parziale possono aver cambiato (lato sbagliato o nullo).
+        origin_row, origin_col = robot_row, robot_col
+        check = self._tenta(row, col)
+        self.frontier.remove(selected_border)
+
+        x_new, y_new, _, _ = spotUtils.getPosition(self.robot_state_client)
+        robot_row, robot_col = self.env.get_cell_from_world(x_new, y_new)
+
+        if check or (row, col) == (robot_row, robot_col):
+            # Fallito ma il robot e' comunque dentro la cella: vale come visitata.
+            self._visitata(row, col, x_new, y_new)
+        else:
+            self._recupero(selected_border, origin_row, origin_col)
+
+    def _recupero(self, selected_border, origin_row, origin_col):
+        """Subito dopo un tentativo fallito su una cella confinante: si riprova una volta se
+        da qui c'e' una strada corta (al massimo COSTO_SOGLIA archi) verso un obiettivo
+        diverso da quello appena fallito; altrimenti il lato si segna come provato.
+
+        Gli archi scartati nel tentativo fallito (blocchi confermati da vicino, fallimenti
+        fisici) sono gia' nel PRM tramite mark_edge_invalid, e la ricostruzione degli archi
+        li rispetta: Dijkstra non riproporra' la stessa strada."""
+        row, col = selected_border[0], selected_border[1]
+        prm, global_map = self.prm, self.global_grid.global_occupancy_map
+
+        # Posizione attuale (il fallimento puo' essere in partenza o a meta' strada)
+        x_curr, y_curr, _, _ = spotUtils.getPosition(self.robot_state_client)
+
+        # Scansione fresca, per scegliere il punto obiettivo da qui
+        scan = self.local_grid.fetch_scan(self.robot_state_client)
+        if scan is not None:
+            # Senza impronta del corpo ne' maschera degli ostacoli: serve solo il terreno per
+            # il PRM e la scelta dell'obiettivo.
+            self.local_grid.process_scan(scan, x_curr, y_curr, 0.0, footprint=False, fuse=False)
+            num_x, num_y = scan.num_x, scan.num_y
+            grid_origin_x, grid_origin_y = self.local_grid.grid_origin(scan)
+            prm.update_local_grid_data(
+                grad_values_2d=scan.grad.reshape((num_y, num_x)),
+                rough_values_2d=scan.rough.reshape((num_y, num_x)),
+                terrain_values_2d=scan.terrain.reshape((num_y, num_x)),
+                valid_2d=spotGrid.slope_usable_mask(scan.is_valid, scan.od, (num_y, num_x)),
+                grid_origin_x=grid_origin_x,
+                grid_origin_y=grid_origin_y,
+                cell_size=scan.cell_size
+            )
+            mission_graph.rebuild_prm_edges(prm, global_map)
+
+            target_x, target_y, _, _ = find_best_point_in_cell(
+                x_curr, y_curr, self.env, row, col, scan.pts, scan.od, self.sampler,
+                global_map=global_map
+            )
+        else:
+            print(
+                "[RECOVERY ERROR] Impossibile recuperare il layer obstacle_distance per il ricalcolo.")
+            target_x, target_y = None, None
+
+        if target_x is None or target_y is None:
+            print(
+                "[SKIP] Nessun punto obiettivo valido nella cella. Continuo con l'esplorazione normale.")
+            if not self._lato_fallito(row, col, origin_row, origin_col):
+                self.frontier.append(selected_border)
+            return
+
+        mission_graph.restrict_planning_to_explored_cells(prm, self.env, row, col, (x_curr, y_curr))
+        start_id = prm.add_stop_node(
+            x_curr, y_curr, global_map,
+            spotGrid.PRM_EDGE_SAFETY_MARGIN_M, label="verifica recupero (robot)")
+        goal_id = prm.add_stop_node(
+            target_x, target_y, global_map,
+            spotGrid.PRM_EDGE_SAFETY_MARGIN_M, label="verifica recupero (obiettivo)",
+            is_robot=False)
+        prm.set_robot_node(start_id)
+
+        path_ids = prm.find_path_dijkstra(start_id, goal_id)
+
+        # Si riprova subito solo se il percorso ha al massimo COSTO_SOGLIA archi (numero di
+        # nodi - 1)
+        COSTO_SOGLIA = 4
+
+        # Se l'obiettivo e' lo STESSO del tentativo appena fallito, riprovare subito vorrebbe
+        # dire stesso posto, stesso esito: la cella si rimanda e torna in coda come le altre
+        # (vedi finalize_or_defer_blocked_cell).
+        last_goal = getattr(self.env, '_last_attempt_goal', None)
+        same_goal = (last_goal is not None and float(np.hypot(
+            target_x - last_goal[0], target_y - last_goal[1])) <= P.RECOVERY_SAME_GOAL_M)
+        if same_goal and path_ids is not None:
+            print(f"[RECOVERY] L'obiettivo ({target_x:.2f}, {target_y:.2f}) e' "
+                  f"quello del tentativo appena fallito: non riprovo subito, la "
+                  f"cella torna in coda.")
+            path_ids = None
+        if path_ids is None or (len(path_ids) - 1) > COSTO_SOGLIA:
+            print(
+                f"[SKIP] Nessun percorso alternativo valido o costo superiore a {COSTO_SOGLIA}. Continuo l'algoritmo normale.")
+            if not self._lato_fallito(row, col, origin_row, origin_col):
+                self.frontier.append(selected_border)
+            return
+
+        print(
+            f"[RECOVERY] Trovato percorso alternativo con costo {len(path_ids) - 1} <= {COSTO_SOGLIA}. Riprovo l'ingresso...")
+        if self._tenta(row, col):
+            x_final, y_final, _, _ = spotUtils.getPosition(self.robot_state_client)
+            self._visitata(row, col, x_final, y_final)
+        else:
+            print(
+                "[FAIL] Anche il percorso alternativo ha fallito. Abbandono la cella e continuo l'algoritmo normale.")
+            if not self._lato_fallito(row, col, origin_row, origin_col):
+                self.frontier.append(selected_border)
+
+    def _scegli_cella_lontana(self):
+        """La candidata di rango piu' basso da cui avvicinarsi con GraphNav:
+        (riga, colonna, rango, cella visitata del waypoint di partenza), None se nessuna.
+
+        Una cella bloccata (-1) non ha mai lati ancora da provare:
+        finalize_or_defer_blocked_cell() la blocca solo dopo che ogni lato raggiungibile e'
+        stato provato ed e' fallito."""
+        env, recordingInterface = self.env, self.recordingInterface
+        already_skipped_this_round = set()
+        while True:
+            remaining = [c for c in self.frontier if (c[0], c[1]) not in already_skipped_this_round]
+            lowest_rank_cell = env.get_lowest_rank_from_frontier_list(remaining, self.path)
+            if lowest_rank_cell is None:
+                return None
+            candidate_row, candidate_col, candidate_rank = lowest_rank_cell
+            waypoints_by_cell = recordingInterface.get_all_manual_waypoints_with_cells()
+            candidate_nearest_cell = recordingInterface.find_nearest_waypoint_cell_to_target(
+                (candidate_row, candidate_col), waypoints_by_cell, env)
+            if candidate_nearest_cell is None or \
+                    recordingInterface.get_manual_waypoint_by_cell(*candidate_nearest_cell) is None:
+                # Nessuna cella visitata con waypoint da cui partire: si passa alla candidata
+                # successiva.
+                print(f"[SKIP-ROUND] Cella ({candidate_row},{candidate_col}): nessun waypoint "
+                      f"GraphNav da cui avvicinarsi. Provo la successiva.")
+                already_skipped_this_round.add((candidate_row, candidate_col))
+                continue
+            candidate_side_bit = env.get_side_bit_facing_origin(candidate_nearest_cell[0],
+                                                                candidate_nearest_cell[1],
+                                                                candidate_row, candidate_col)
+            if env.get_cell_sides_status(candidate_row, candidate_col) & candidate_side_bit:
+                print(f"[SKIP-ROUND] Cella ({candidate_row},{candidate_col}): ci arriverei dallo "
+                      f"stesso lato gia' provato senza successo. Per questo giro provo la "
+                      f"candidata successiva.")
+                already_skipped_this_round.add((candidate_row, candidate_col))
+                continue
+            # Prima di partire con GraphNav: da quel waypoint il grafo arriva alla cella? Se
+            # no, il tentativo fallirebbe appena arrivati (vedi GRAPHNAV_PRECHECK): il lato si
+            # segna come provato senza muoversi.
+            if P.GRAPHNAV_PRECHECK:
+                cand_wp = recordingInterface.get_manual_waypoint_by_cell(*candidate_nearest_cell)
+                wp_xy = (cand_wp.get('x'), cand_wp.get('y')) if isinstance(cand_wp, dict) else (None, None)
+                reach = (mission_graph.graph_reaches_cell(self.prm, env, wp_xy, candidate_row, candidate_col,
+                                                          self.global_grid.global_occupancy_map)
+                         if wp_xy[0] is not None else None)
+                if reach is False:
+                    MISSION_STATS['graphnav_trips_avoided'] += 1
+                    print(f"[PRECHECK] Cella ({candidate_row},{candidate_col}): dal waypoint "
+                          f"della cella {candidate_nearest_cell} il grafo non arriva a nessun "
+                          f"nodo della cella (ostacoli gia' in mappa). Segno il lato come "
+                          f"provato senza spostarmi.")
+                    env.mark_cell_side_explored(candidate_row, candidate_col, candidate_side_bit)
+                    finalize_or_defer_blocked_cell(env, candidate_row, candidate_col,
+                                                   self.sampler, self.global_grid.global_occupancy_map)
+                    if env.is_cell_blocked(candidate_row, candidate_col):
+                        self.frontier[:] = [c for c in self.frontier
+                                            if (c[0], c[1]) != (candidate_row, candidate_col)]
+                    already_skipped_this_round.add((candidate_row, candidate_col))
+                    continue
+            return candidate_row, candidate_col, candidate_rank, candidate_nearest_cell
+
+    def _viaggio_e_tentativo(self, target_row, target_col, rank, nearest_cell):
+        """Con GraphNav fino al waypoint della cella nearest_cell, poi il tentativo sulla cella
+        (target_row, target_col). 'caduta' se il robot e' caduto durante il viaggio."""
+        recordingInterface = self.recordingInterface
+        x_current, y_current, _, _ = spotUtils.getPosition(self.robot_state_client)
+
+        nearest_wp = recordingInterface.get_manual_waypoint_by_cell(nearest_cell[0], nearest_cell[1])
+        navGraphUtils.graphnav_add_shortcuts(recordingInterface, "prima dello spostamento fra celle",
+                                             map_edges=True, sdk=False, target_wp_id=nearest_wp['id'],
+                                             robot_xy=(x_current, y_current))
+        recordingInterface.stop_recording()
+        navigation_success = navGraphUtils.graphnav_navigate_to(
+            recordingInterface, nearest_wp['id'], self.robot_state_client, self.command_client,
+            f"verso il waypoint della cella {nearest_cell} per la cella ({target_row},{target_col})")
+
+        # GraphNav non registra i tratti percorsi: quelli vecchi non descrivono piu' la strada
+        # da cui il robot e' arrivato, la ritirata non deve usarli.
+        self.env._traveled_arcs = []
+        if movements.check_and_recover_fall(self.robot_state_client, self.command_client,
+                                            self.global_grid.global_occupancy_map,
+                                            "durante lo spostamento con GraphNav") is not None:
+            recordingInterface.start_recording()
+            print(f"[CADUTA] Rialzato dopo lo spostamento con GraphNav: segno il lato della "
+                  f"cella ({target_row},{target_col}) come provato, per non ripetere la stessa strada.")
+            if self._lato_fallito(target_row, target_col, nearest_cell[0], nearest_cell[1]):
+                self.frontier.remove((target_row, target_col, rank))
+            return 'caduta'
+
+        recordingInterface.start_recording()
+        # Se GraphNav non e' nemmeno arrivato al waypoint di partenza vale come un tentativo
+        # fallito. Lato segnato come provato; la cella esce dalla frontiera solo se era
+        # l'ULTIMO lato non provato (cella davvero bloccata).
+        if navigation_success and self._tenta(target_row, target_col):
+            x_final, y_final, _, _ = spotUtils.getPosition(self.robot_state_client)
+            self.frontier.remove((target_row, target_col, rank))
+            self._visitata(target_row, target_col, x_final, y_final)
+        elif self._lato_fallito(target_row, target_col, nearest_cell[0], nearest_cell[1]):
+            self.frontier.remove((target_row, target_col, rank))
+        return None
+
+    def scansione_finale(self):
+        """L'area attorno all'ultima posizione, prima di tornare: entra nelle mappe globali."""
+        print("[FINAL SCAN] Ultima scansione attorno al robot prima di tornare alla partenza...")
+        x_final, y_final, z_final, quat_final = spotUtils.getPosition(self.robot_state_client)
+        final_yaw = np.arctan2(2.0 * (quat_final.w * quat_final.z + quat_final.x * quat_final.y),
+                               1.0 - 2.0 * (quat_final.y ** 2 + quat_final.z ** 2))
+
+        scan = self.local_grid.fetch_scan(self.robot_state_client)
+        if scan is None:
+            print("[FINAL SCAN] ATTENZIONE: griglia locale non ricevuta, proseguo senza scansione finale.")
+            return
+        self.local_grid.process_scan(scan, x_final, y_final, final_yaw, ground_label="scan-finale")
+        # Anche l'ultima scansione entra nelle mappe globali, come tutte le altre
+        spotGrid.fold_scan_into_global_maps(
+            self.global_grid.global_occupancy_map, self.global_grid.global_terrain_map, scan.pts,
+            scan.terrain, scan.obstacle_mask, scan.is_valid, scan.od,
+            (scan.num_y, scan.num_x), (x_final, y_final, final_yaw))
+
+        final_save_path = os.path.join(
+            self.mission_folder, f"iteration_{self.visualization_counter}_FINAL_SCAN.png"
+        ) if self.mission_folder else None
+
+        visualize_grid_with_candidates(
+            pts=scan.pts, terrain_real=scan.terrain, obstacle_mask=scan.obstacle_mask,
+            robot_x=x_final, robot_y=y_final,
+            candidates={'rejected': [], 'valid': []},
+            chosen_point=None, iteration=self.visualization_counter, env=self.env,
+            save_path=final_save_path, prm_graph=self.prm, chosen_path=None,
+            cells_obstacle_dist=scan.od, valid_values=scan.valid,
+            grad_values=scan.grad, rough_values=scan.rough
+        )
+        self.visualization_counter += 1
+        print("[FINAL SCAN] Fatto: l'ultima scansione e' nelle mappe globali.")
+
+
+def _cartelle_di_missione():
+    """Cartelle di missione (graph/, MissionMap/, MissionLogs/ con la data): (grafo, dati e
+    immagini, log)."""
+    mission_timestamp = datetime.now().strftime("Mission_%d-%m-%Y_%H-%M-%S")
+    base = os.path.dirname(os.path.abspath(__file__))
+    graph_folder = os.path.join(base, "graph", mission_timestamp)
+    mission_map_folder = os.path.join(base, "MissionMap", mission_timestamp)
+    mission_log_folder = os.path.join(base, "MissionLogs", mission_timestamp)
+    os.makedirs(graph_folder, exist_ok=True)
+    os.makedirs(mission_map_folder, exist_ok=True)
+    os.makedirs(mission_log_folder, exist_ok=True)
+    return graph_folder, mission_map_folder, mission_log_folder
+
+
+def _stampa_configurazione():
+    """Interruttori e soglie in testa al log, per poterlo leggere sapendo con quali valori e'
+    stato prodotto."""
+    print("[CONFIG] INTERRUTTORI: " + "  ".join(
+        f"{k.split('.')[-1]}={v}" for k, v in mission_switches().items()))
+    print(f"[CONFIG] SLOPE_THRESHOLD={spotGrid.SLOPE_THRESHOLD}  "
+          f"LATERAL_SLOPE_COST_MULTIPLIER={spotGrid.LATERAL_SLOPE_COST_MULTIPLIER}  "
+          f"OBSTACLE_THRESHOLD={spotGrid.OBSTACLE_THRESHOLD}  ROUGH_THRESHOLD={spotGrid.ROUGH_THRESHOLD}  "
+          f"NEAR_THRESHOLD_MARGIN_FRACTION={spotGrid.NEAR_THRESHOLD_MARGIN_FRACTION}")
+    print(f"[CONFIG] PROFILO ARCO: base={spotGrid.SLOPE_BASELINE_M}m  "
+          f"fetta_laterale=+/-{spotGrid.LATERAL_SLICE_HALF_WIDTH_M}m  "
+          f"copertura_minima={spotGrid.MIN_ARC_SAMPLE_FRACTION:.0%}")
+    print(f"[CONFIG] GAIT: plain<{spotGrid.GAIT_PLAIN_SLOPE_MAX}/{spotGrid.GAIT_PLAIN_ROUGH_MAX}  "
+          f"moderate<{spotGrid.GAIT_MODERATE_SLOPE_MAX}/{spotGrid.GAIT_MODERATE_ROUGH_MAX}  "
+          f"mu={spotGrid.GAIT_MU_PLAIN}/{spotGrid.GAIT_MU_MODERATE}/{spotGrid.GAIT_MU_HARD}")
+    print(f"[CONFIG] TERRENO: terrain_valid >= {spotGrid.TERRAIN_VALID_MIN} "
+          f"(era > 0.0, dipendeva dal segno di un residuo numerico)  "
+          f"celle mai scritte: plateau >= {spotGrid.UNWRITTEN_MIN_CELLS} celle, "
+          f"almeno {spotGrid.UNWRITTEN_MIN_SPOT_INVALID:.0%} marcate non valide da Spot")
+    print(f"[CONFIG] ROTAZIONE: prefiltro {spotGrid.ROTATION_CLEARANCE_M:.3f} m "
+          f"(aria {spotGrid.ROTATION_CLEARANCE_AIR_M:.2f} m, separata dai "
+          f"{spotGrid.ROBOT_CLEARANCE_AIR_M:.2f} m dell'avanzamento), poi controllo sul "
+          f"settore spazzato a passi di {spotGrid.ROTATION_SWEEP_STEP_DEG:.0f} gradi "
+          f"(tolleranza {spotGrid.ROTATION_NOISE_TOLERANCE_M:.2f} m sul rumore); "
+          f"MARCIA DI TRAVERSO DISATTIVATA")
+    print(f"[CONFIG] SE NON PUO' RUOTARE: 1) ventaglio nel cono +/-{P.CONE_SWEEP_MAX_DEG:.0f} gradi "
+          f"a passi di {P.CONE_SWEEP_STEP_DEG:.0f}, si va nella direzione piu' libera fra quelle "
+          f"che avvicinano di almeno {P.CONE_MIN_GAIN_M:.2f} m; 2) arretramento dritto fino a "
+          f"{P.ROTATION_RETREAT_M:.2f} m SOLO se da li' la rotazione diventa possibile, "
+          f"max {P.MAX_STRAIGHT_RETREATS_IN_A_ROW} consecutivi; 3) si scarta il tratto")
+    print(f"[CONFIG] TRAPPOLA: ventaglio a 360 gradi a passi di {P.ESCAPE_FAN_STEP_DEG:.0f} "
+          f"({int(360/P.ESCAPE_FAN_STEP_DEG)} direzioni); una direzione vale se concede "
+          f"{P.ESCAPE_FAN_MIN_ADVANCE_M:.2f} m E il robot puo' girarsi per puntarla. Zero "
+          f"direzioni -> si ripercorre il tratto da cui si e' venuti SUBITO, senza "
+          f"scartare archi. Controllo sulla posa d'arrivo per i passi sotto "
+          f"{P.ARRIVAL_EXIT_CHECK_MAX_STEP_M:.2f} m o con obstacle_distance sotto "
+          f"{P.ARRIVAL_EXIT_CHECK_OD_M:.2f} m, max {P.MAX_ARRIVAL_REFUSALS} rifiuti. "
+          f"Scarto da [SUBITO] e da [ARRIVO]: NON permanente")
+    print(f"[CONFIG] RITORNI: briciola GraphNav ogni "
+          f"{P.GRAPHNAV_WAYPOINT_MIN_SPACING_M:.2f} m, ritorno con GraphNav fino a "
+          f"{P.GRAPHNAV_MAX_BACKTRACK_HOPS} waypoint indietro riprovando la "
+          f"pianificazione a ogni tappa, poi si rimanda la cella; ritirata a zampe "
+          f"solo come ultima rete. Nodi PRM scartati sotto "
+          f"{P.PRM_NODE_MIN_CLEARANCE_M:.2f} m di spazio libero, solo dove visti. "
+          f"Deroga di {prm_graph.STOP_NODE_MAP_IGNORE_M:.2f} m alla mappa globale "
+          f"attorno al robot: ora solo dopo una caduta")
+    print(f"[CONFIG] OSTACOLI: mediana su {arcVerification.OBSTACLE_MEDIAN_FRAMES} scansioni "
+          f"+ isteresi {arcVerification.OBSTACLE_HYSTERESIS_M:.2f} m attorno a "
+          f"{spotGrid.FRONTIER_CLEARANCE_M:.2f} m (rumore misurato 1.5 cm tipici, 7.3 di punta); "
+          f"celle-ostacolo escluse dal campionamento della pendenza d'arco")
+    print(f"[CONFIG] OBIETTIVO: tolleranza d'arrivo {P.GOAL_REACHED_TOLERANCE_M:.2f} m "
+          f"(= meta' corpo + margine del fronte), riscelta del punto fino a "
+          f"{P.MAX_BLOCK_REPLANS} volte se risulta irraggiungibile; ripianificazione alla "
+          f"PRIMA cella bloccante, fino a {P.MAX_EARLY_REPLANS} volte per tentativo")
+    print(f"[CONFIG] SCELTA OBIETTIVO: solo punti raggiungibili dal robot nel grafo (se ce "
+          f"ne sono), spazio libero preferito {P.TARGET_CLEARANCE_M:.2f} m (minimo "
+          f"{spotGrid.PLAN_CLEARANCE_M:.2f}), almeno {P.TARGET_CELL_BORDER_M:.2f} m dal bordo "
+          f"della cella, obiettivi rifiutati dal fronte esclusi per la missione; arrivo "
+          f"valido anche col robot fuori dalla cella fino a {P.ARRIVAL_OUTSIDE_CELL_M:.2f} m")
+
+
+def _griglia_di_missione(options):
+    """La griglia di missione: EnvironmentMap con colonne davanti e righe a sinistra.
+
+    Default P.MISSION_GRID_ROWS x P.MISSION_GRID_COLS celle da P.MISSION_CELL_SIZE_M. Si
+    cambiano SENZA toccare il codice, in ordine di precedenza:
+      1. argomenti:  python3 easy_walk.py --rows 2 --cols 4 --cell 5
+      2. variabile:  SPOT_MISSION_GRID="righe,colonne,lato_cella"   es. "2,3,3"
+    """
+    grid_rows, grid_cols, grid_cell = P.MISSION_GRID_ROWS, P.MISSION_GRID_COLS, P.MISSION_CELL_SIZE_M
+    _grid_source = "mission_graph.MISSION_*"
+    _env_grid = os.environ.get("SPOT_MISSION_GRID", "").strip()
+    if _env_grid:
+        try:
+            _r, _c, _cs = _env_grid.split(",")
+            grid_rows, grid_cols, grid_cell = int(_r), int(_c), float(_cs)
+            _grid_source = f"SPOT_MISSION_GRID='{_env_grid}'"
+        except Exception:
+            print(f"[CONFIG] SPOT_MISSION_GRID='{_env_grid}' non valido (atteso 'righe,colonne,lato'): "
+                  f"uso {grid_rows},{grid_cols},{grid_cell:g}.")
+    _cli = (getattr(options, 'grid_rows', None), getattr(options, 'grid_cols', None),
+            getattr(options, 'grid_cell', None))
+    if any(v is not None for v in _cli):
+        grid_rows = int(_cli[0]) if _cli[0] is not None else grid_rows
+        grid_cols = int(_cli[1]) if _cli[1] is not None else grid_cols
+        grid_cell = float(_cli[2]) if _cli[2] is not None else grid_cell
+        _grid_source = "argomenti --rows/--cols/--cell"
+    print(f"[CONFIG] Griglia di missione: {grid_rows} x {grid_cols} celle da {grid_cell:.1f} m "
+          f"({grid_rows * grid_cell:.0f} m a sinistra x {grid_cols * grid_cell:.0f} m davanti; "
+          f"fonte: {_grid_source})")
+    print(f"[CONFIG] Reticolo: passo richiesto "
+          f"{'suggerito' if P.MISSION_LATTICE_SPACING_M is None else '%.3f m' % P.MISSION_LATTICE_SPACING_M}, "
+          f"anelli {P.MISSION_LATTICE_RINGS if P.MISSION_LATTICE_RINGS is not None else 'tutti'}")
+    # test_replay legge metodo e archi da questa riga; distribuzione, densita' e seme dalla
+    # riga [GRAFO] Nodi casuali, scritta quando il grafo e' costruito.
+    print(f"[CONFIG] Grafo: nodi {P.MISSION_GRAPH_SAMPLING}"
+          + (f" ({P.MISSION_RANDOM_DISTRIBUTION}, {P.MISSION_RANDOM_DENSITY:g} nodi/m2, seme "
+             f"{'a caso' if P.MISSION_RANDOM_SEED is None else P.MISSION_RANDOM_SEED})"
+             if P.MISSION_GRAPH_SAMPLING == 'casuale' else "")
+          + f"; archi da {P.PRM_MIN_EDGE_M:g} a {P.PRM_MAX_EDGE_M:g} m")
+    return environmentMap.EnvironmentMap(rows=grid_rows, cols=grid_cols, cell_size=grid_cell)
+
+
+def _chiudi_missione(robot, robot_state_client, command_client, recordingInterface):
+    """Dopo il riepilogo: chiusura della mappa GraphNav, ritorno a wp_0, seduta, spegnimento,
+    scaricamento della mappa. Non entra in nessuna voce di [TEMPO]: si misura a parte e si
+    stampa in chiusura."""
+    _t_close = {}
+    _t = time.perf_counter()
+    try:
+        _wp0_id = next((w.id for w in recordingInterface._get_graph(force_refresh=True).waypoints
+                        if w.annotations.name == "wp_0"), None)
+        _xy_end = spotUtils.getPosition(robot_state_client)[:2]
+    except Exception:
+        _wp0_id, _xy_end = None, None
+    navGraphUtils.graphnav_add_shortcuts(recordingInterface, "prima del ritorno a wp_0",
+                                         map_edges=True, sdk=False, target_wp_id=_wp0_id, robot_xy=_xy_end)
+    recordingInterface.auto_close_loops(True, False)
+    recordingInterface.stop_recording()
+    # Chiusura d'anello di Spot una volta sola, PRIMA dell'ancoraggio: i suoi archi,
+    # verificati sulle scansioni, correggono la deriva della mappa scaricata e accorciano il
+    # ritorno (vedi GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S).
+    navGraphUtils.graphnav_add_shortcuts(recordingInterface, "chiusura della mappa", map_edges=False,
+                                         sdk=True, sdk_budget_s=P.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S,
+                                         sdk_fast=False)
+    recordingInterface.optimize_anchoring()
+    _t_close['chiusura mappa e ancoraggio'] = time.perf_counter() - _t
+
+    _t = time.perf_counter()
+    if not navGraphUtils.graphnav_return_to_start(recordingInterface, robot_state_client, command_client):
+        print("[GRAPHNAV] Ritorno a wp_0 non riuscito: il robot si siede dove si trova.")
+    _t_close['ritorno a wp_0'] = time.perf_counter() - _t
+
+    _t = time.perf_counter()
+    command_client.robot_command(RobotCommandBuilder.synchro_sit_command(), end_time_secs=time.time() + 20)
+    sleep(3)
+    robot.power_off(cut_immediately=False)
+    _t_close['seduta e spegnimento'] = time.perf_counter() - _t
+
+    _t = time.perf_counter()
+    recordingInterface.download_full_graph()
+    _t_close['scaricamento della mappa'] = time.perf_counter() - _t
+
+    print(f"[TEMPO] Chiusura della missione, {sum(_t_close.values()):.1f} s in tutto:")
+    for k, v in sorted(_t_close.items(), key=lambda kv: -kv[1]):
+        print(f"  {k:32s} {v:6.1f} s")
+
+
 def easy_walk(options):
+    """La missione intera: avvio del robot e di GraphNav, grafo, esplorazione cella per cella
+    (Missione), scansione finale, riepilogo, ritorno alla partenza e spegnimento."""
     robot, lease_client, robot_state_client, client_metadata = spotLogInUtils.setLogInfo(options)
     estop = spotLogInUtils.SimpleEstop(robot, options.name + "_estop")
 
@@ -2199,82 +2710,16 @@ def easy_walk(options):
     recordingInterface.clear_map()
 
     with bosdyn.client.lease.LeaseKeepAlive(lease_client, must_acquire=True, return_at_exit=True):
-        # --- Cartelle di missione e log, create subito, cosi' la copia dell'output su file
-        # (mission_log.txt) cattura anche tutto l'avvio e la costruzione del grafo.
-        mission_timestamp = datetime.now().strftime("Mission_%d-%m-%Y_%H-%M-%S")
-        base_graph_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "graph")
-        graph_folder = os.path.join(base_graph_folder, mission_timestamp)
-        mission_map_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "MissionMap", mission_timestamp)
-        mission_log_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "MissionLogs", mission_timestamp)
-        os.makedirs(graph_folder, exist_ok=True)
-        os.makedirs(mission_map_folder, exist_ok=True)
-        os.makedirs(mission_log_folder, exist_ok=True)
-        mission_folder = mission_map_folder
-        mission_log_path = os.path.join(mission_log_folder, "mission_log.txt")
-        install_stdout_tee(mission_log_path)
+        # Cartelle e log creati subito, cosi' la copia dell'output su file (mission_log.txt)
+        # cattura anche tutto l'avvio e la costruzione del grafo.
+        graph_folder, mission_folder, mission_log_folder = _cartelle_di_missione()
+        install_stdout_tee(os.path.join(mission_log_folder, "mission_log.txt"))
         try:
             MISSION_CTX['log_folder'] = mission_log_folder
             MISSION_CTX['segment_log'] = SegmentLog(os.path.join(mission_log_folder, "segments.csv"))
             MISSION_CTX['summary_done'] = False
-            print(f"[LOG] Cartella log: {mission_log_folder}  |  dati e immagini: {mission_map_folder}")
-            print("[CONFIG] INTERRUTTORI: " + "  ".join(
-                f"{k.split('.')[-1]}={v}" for k, v in mission_switches().items()))
-            print(f"[CONFIG] SLOPE_THRESHOLD={spotGrid.SLOPE_THRESHOLD}  "
-                  f"LATERAL_SLOPE_COST_MULTIPLIER={spotGrid.LATERAL_SLOPE_COST_MULTIPLIER}  "
-                  f"OBSTACLE_THRESHOLD={spotGrid.OBSTACLE_THRESHOLD}  ROUGH_THRESHOLD={spotGrid.ROUGH_THRESHOLD}  "
-                  f"NEAR_THRESHOLD_MARGIN_FRACTION={spotGrid.NEAR_THRESHOLD_MARGIN_FRACTION}")
-            print(f"[CONFIG] PROFILO ARCO: base={spotGrid.SLOPE_BASELINE_M}m  "
-                  f"fetta_laterale=+/-{spotGrid.LATERAL_SLICE_HALF_WIDTH_M}m  "
-                  f"copertura_minima={spotGrid.MIN_ARC_SAMPLE_FRACTION:.0%}")
-            print(f"[CONFIG] GAIT: plain<{spotGrid.GAIT_PLAIN_SLOPE_MAX}/{spotGrid.GAIT_PLAIN_ROUGH_MAX}  "
-                  f"moderate<{spotGrid.GAIT_MODERATE_SLOPE_MAX}/{spotGrid.GAIT_MODERATE_ROUGH_MAX}  "
-                  f"mu={spotGrid.GAIT_MU_PLAIN}/{spotGrid.GAIT_MU_MODERATE}/{spotGrid.GAIT_MU_HARD}")
-            # Soglie di terreno, rotazione, ritorni e obiettivo, stampate per poter leggere i
-            # log sapendo con quali valori sono stati prodotti.
-            print(f"[CONFIG] TERRENO: terrain_valid >= {spotGrid.TERRAIN_VALID_MIN} "
-                  f"(era > 0.0, dipendeva dal segno di un residuo numerico)  "
-                  f"celle mai scritte: plateau >= {spotGrid.UNWRITTEN_MIN_CELLS} celle, "
-                  f"almeno {spotGrid.UNWRITTEN_MIN_SPOT_INVALID:.0%} marcate non valide da Spot")
-            print(f"[CONFIG] ROTAZIONE: prefiltro {spotGrid.ROTATION_CLEARANCE_M:.3f} m "
-                  f"(aria {spotGrid.ROTATION_CLEARANCE_AIR_M:.2f} m, separata dai "
-                  f"{spotGrid.ROBOT_CLEARANCE_AIR_M:.2f} m dell'avanzamento), poi controllo sul "
-                  f"settore spazzato a passi di {spotGrid.ROTATION_SWEEP_STEP_DEG:.0f} gradi "
-                  f"(tolleranza {spotGrid.ROTATION_NOISE_TOLERANCE_M:.2f} m sul rumore); "
-                  f"MARCIA DI TRAVERSO DISATTIVATA")
-            print(f"[CONFIG] SE NON PUO' RUOTARE: 1) ventaglio nel cono +/-{P.CONE_SWEEP_MAX_DEG:.0f} gradi "
-                  f"a passi di {P.CONE_SWEEP_STEP_DEG:.0f}, si va nella direzione piu' libera fra quelle "
-                  f"che avvicinano di almeno {P.CONE_MIN_GAIN_M:.2f} m; 2) arretramento dritto fino a "
-                  f"{P.ROTATION_RETREAT_M:.2f} m SOLO se da li' la rotazione diventa possibile, "
-                  f"max {P.MAX_STRAIGHT_RETREATS_IN_A_ROW} consecutivi; 3) si scarta il tratto")
-            print(f"[CONFIG] TRAPPOLA: ventaglio a 360 gradi a passi di {P.ESCAPE_FAN_STEP_DEG:.0f} "
-                  f"({int(360/P.ESCAPE_FAN_STEP_DEG)} direzioni); una direzione vale se concede "
-                  f"{P.ESCAPE_FAN_MIN_ADVANCE_M:.2f} m E il robot puo' girarsi per puntarla. Zero "
-                  f"direzioni -> si ripercorre il tratto da cui si e' venuti SUBITO, senza "
-                  f"scartare archi. Controllo sulla posa d'arrivo per i passi sotto "
-                  f"{P.ARRIVAL_EXIT_CHECK_MAX_STEP_M:.2f} m o con obstacle_distance sotto "
-                  f"{P.ARRIVAL_EXIT_CHECK_OD_M:.2f} m, max {P.MAX_ARRIVAL_REFUSALS} rifiuti. "
-                  f"Scarto da [SUBITO] e da [ARRIVO]: NON permanente")
-            print(f"[CONFIG] RITORNI: briciola GraphNav ogni "
-                  f"{P.GRAPHNAV_WAYPOINT_MIN_SPACING_M:.2f} m, ritorno con GraphNav fino a "
-                  f"{P.GRAPHNAV_MAX_BACKTRACK_HOPS} waypoint indietro riprovando la "
-                  f"pianificazione a ogni tappa, poi si rimanda la cella; ritirata a zampe "
-                  f"solo come ultima rete. Nodi PRM scartati sotto "
-                  f"{P.PRM_NODE_MIN_CLEARANCE_M:.2f} m di spazio libero, solo dove visti. "
-                  f"Deroga di {prm_graph.STOP_NODE_MAP_IGNORE_M:.2f} m alla mappa globale "
-                  f"attorno al robot: ora solo dopo una caduta")
-            print(f"[CONFIG] OSTACOLI: mediana su {arcVerification.OBSTACLE_MEDIAN_FRAMES} scansioni "
-                  f"+ isteresi {arcVerification.OBSTACLE_HYSTERESIS_M:.2f} m attorno a "
-                  f"{spotGrid.FRONTIER_CLEARANCE_M:.2f} m (rumore misurato 1.5 cm tipici, 7.3 di punta); "
-                  f"celle-ostacolo escluse dal campionamento della pendenza d'arco")
-            print(f"[CONFIG] OBIETTIVO: tolleranza d'arrivo {P.GOAL_REACHED_TOLERANCE_M:.2f} m "
-                  f"(= meta' corpo + margine del fronte), riscelta del punto fino a "
-                  f"{P.MAX_BLOCK_REPLANS} volte se risulta irraggiungibile; ripianificazione alla "
-                  f"PRIMA cella bloccante, fino a {P.MAX_EARLY_REPLANS} volte per tentativo")
-            print(f"[CONFIG] SCELTA OBIETTIVO: solo punti raggiungibili dal robot nel grafo (se ce "
-                  f"ne sono), spazio libero preferito {P.TARGET_CLEARANCE_M:.2f} m (minimo "
-                  f"{spotGrid.PLAN_CLEARANCE_M:.2f}), almeno {P.TARGET_CELL_BORDER_M:.2f} m dal bordo "
-                  f"della cella, obiettivi rifiutati dal fronte esclusi per la missione; arrivo "
-                  f"valido anche col robot fuori dalla cella fino a {P.ARRIVAL_OUTSIDE_CELL_M:.2f} m")
+            print(f"[LOG] Cartella log: {mission_log_folder}  |  dati e immagini: {mission_folder}")
+            _stampa_configurazione()
         except Exception as e:
             print(f"[LOG] Impossibile inizializzare il CSV dei segmenti: {e}")
 
@@ -2295,51 +2740,13 @@ def easy_walk(options):
         start_row, start_col = 0, 0
         recordingInterface.create_default_waypoint(cell_row=start_row, cell_col=start_col)
 
-        # --- Griglia di missione
-        # Dimensioni della griglia di missione. Default MISSION_GRID_ROWS x MISSION_GRID_COLS
-        # celle da MISSION_CELL_SIZE_M (da mission_graph.MISSION_*). Si cambiano
-        # SENZA toccare il codice, in ordine di precedenza:
-        #   1. argomenti:  python3 easy_walk.py --rows 2 --cols 4 --cell 5
-        #   2. variabile:  SPOT_MISSION_GRID="righe,colonne,lato_cella"   es. "2,3,3"
-        grid_rows, grid_cols, grid_cell = P.MISSION_GRID_ROWS, P.MISSION_GRID_COLS, P.MISSION_CELL_SIZE_M
-        _grid_source = "mission_graph.MISSION_*"
-        _env_grid = os.environ.get("SPOT_MISSION_GRID", "").strip()
-        if _env_grid:
-            try:
-                _r, _c, _cs = _env_grid.split(",")
-                grid_rows, grid_cols, grid_cell = int(_r), int(_c), float(_cs)
-                _grid_source = f"SPOT_MISSION_GRID='{_env_grid}'"
-            except Exception:
-                print(f"[CONFIG] SPOT_MISSION_GRID='{_env_grid}' non valido (atteso 'righe,colonne,lato'): "
-                      f"uso {grid_rows},{grid_cols},{grid_cell:g}.")
-        _cli = (getattr(options, 'grid_rows', None), getattr(options, 'grid_cols', None),
-                getattr(options, 'grid_cell', None))
-        if any(v is not None for v in _cli):
-            grid_rows = int(_cli[0]) if _cli[0] is not None else grid_rows
-            grid_cols = int(_cli[1]) if _cli[1] is not None else grid_cols
-            grid_cell = float(_cli[2]) if _cli[2] is not None else grid_cell
-            _grid_source = "argomenti --rows/--cols/--cell"
-        print(f"[CONFIG] Griglia di missione: {grid_rows} x {grid_cols} celle da {grid_cell:.1f} m "
-              f"({grid_rows * grid_cell:.0f} m a sinistra x {grid_cols * grid_cell:.0f} m davanti; "
-              f"fonte: {_grid_source})")
-        print(f"[CONFIG] Reticolo: passo richiesto "
-              f"{'suggerito' if P.MISSION_LATTICE_SPACING_M is None else '%.3f m' % P.MISSION_LATTICE_SPACING_M}, "
-              f"anelli {P.MISSION_LATTICE_RINGS if P.MISSION_LATTICE_RINGS is not None else 'tutti'}")
-        # test_replay legge metodo e archi da questa riga; distribuzione, densita' e seme
-        # dalla riga [GRAFO] Nodi casuali, scritta quando il grafo e' costruito.
-        print(f"[CONFIG] Grafo: nodi {P.MISSION_GRAPH_SAMPLING}"
-              + (f" ({P.MISSION_RANDOM_DISTRIBUTION}, {P.MISSION_RANDOM_DENSITY:g} nodi/m2, seme "
-                 f"{'a caso' if P.MISSION_RANDOM_SEED is None else P.MISSION_RANDOM_SEED})"
-                 if P.MISSION_GRAPH_SAMPLING == 'casuale' else "")
-              + f"; archi da {P.PRM_MIN_EDGE_M:g} a {P.PRM_MAX_EDGE_M:g} m")
-        env = environmentMap.EnvironmentMap(rows=grid_rows, cols=grid_cols, cell_size=grid_cell)  # colonne davanti, righe a sinistra
+        env = _griglia_di_missione(options)
 
         # --- Andatura per tutta la missione ---
-        # Vuoto: andatura, altezza del passo e ground_mu_hint si scelgono TRATTO PER TRATTO
-        # in base al terreno (vedi select_mobility_params()). Per imporre un profilo fisso
-        # (per esempio in prova) basta un dict non vuoto qui:
-        # attempt_enter_cell_from_position() lo usa per tutti i tratti e salta la scelta
-        # automatica. Esempio:
+        # Vuoto: andatura, altezza del passo e ground_mu_hint si scelgono TRATTO PER TRATTO in
+        # base al terreno (vedi movements.select_mobility_params). Per imporre un profilo fisso
+        # (per esempio in prova) basta un dict non vuoto qui: TentativoCella lo usa per tutti i
+        # tratti e salta la scelta automatica. Esempio:
         #   mobility_kwargs = dict(
         #       locomotion_hint=spot_command_pb2.HINT_CRAWL,
         #       ground_mu_hint=0.4,
@@ -2354,424 +2761,35 @@ def easy_walk(options):
         env.set_origin(x_boot, y_boot, yaw_boot, start_row=start_row, start_col=start_col)
         set_mission_z0(robot_state_client, z_boot)
 
-        # Nodi del PRM: il grafo della missione (vedi _build_mission_prm e mission_graph.py).
-        # Il punto di accensione e i centri cella sono nodi del grafo, con entrambi i metodi.
+        # Nodi del PRM: il grafo della missione (vedi mission_graph.build_mission_prm). Il punto
+        # di accensione e i centri cella sono nodi del grafo, con entrambi i metodi. Gli ARCHI
+        # non si creano qui: non c'e' ancora nessun dato di terreno ne' di occupazione. Li crea
+        # TentativoCella alla prima scansione (vedi mission_graph.rebuild_prm_edges).
         prm, gb_sampler, mission_lattice = mission_graph.build_mission_prm(env)
         MISSION_CTX['prm'] = prm  # per il riepilogo di fine missione (anche se interrotta)
 
-        # Gli ARCHI non si creano qui: non c'e' ancora nessun dato di terreno ne' di
-        # occupazione. Li crea attempt_enter_cell_from_position() alla prima scansione
-        # (vedi _rebuild_prm_edges).
         verification_tracker = arcVerification.ArcVerificationTracker(robot)
         MISSION_CTX['tracker'] = verification_tracker
         verification_tracker.start()
 
         recordingInterface.set_download_filepath(graph_folder)
-        path = env.generate_serpentine_path(start_cell=env.start_cell)
 
-        frontier = []
-        visualization_counter = 0
-
-        x, y, z, _ = spotUtils.getPosition(robot_state_client)
-        robot_row, robot_col = env.get_cell_from_world(x, y)
-        frontier.extend(environmentMap.find_new_borders(env, robot_row, robot_col, path, frontier))
-
-        while (True):
-            print(frontier)
-            x, y, z, _ = spotUtils.getPosition(robot_state_client)
-            robot_row, robot_col = env.get_cell_from_world(x, y)
-
-            borders = env.get_adjacent_frontier_cells(robot_row, robot_col, path)
-            borders_in_frontier = [b for b in borders if any((f[0] == b[0] and f[1] == b[1]) for f in frontier)]
-
-            if len(borders_in_frontier) != 0:
-                selected_border = min(borders_in_frontier, key=lambda b: b[2])
-                # Cella da cui si tenta l'ingresso: serve dopo per segnare il LATO provato.
-                # Non la cella in cui il robot si trova DOPO il tentativo, che una ritirata o
-                # un passo parziale possono aver cambiato (lato sbagliato o nullo).
-                origin_row, origin_col = robot_row, robot_col
-                check = attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client, command_client, env,
-                                                         selected_border[0], selected_border[1], gb_sampler, prm,
-                                                         mission_folder,
-                                                         visualization_counter, recordingInterface, verification_tracker,
-                                                         mobility_kwargs=mobility_kwargs)
-                visualization_counter += 1
-                frontier.remove(selected_border)
-
-                x_new, y_new, _, _ = spotUtils.getPosition(robot_state_client)
-                robot_row, robot_col = env.get_cell_from_world(x_new, y_new)
-
-                if check:
-                    env.update_position(x_new, y_new)
-                    recordingInterface.create_default_waypoint(cell_row=selected_border[0], cell_col=selected_border[1])
-                    env.add_waypoint(x_new, y_new)
-                    env.mark_cell_visited(selected_border[0], selected_border[1])
-                    # Le confinanti della cella APPENA VISITATA, non di quella in cui sta il
-                    # robot: con l'arrivo appena fuori dalla cella (ARRIVAL_OUTSIDE_CELL_M) il
-                    # robot puo' essere ancora nella cella di prima.
-                    frontier.extend(environmentMap.find_new_borders(
-                        env, selected_border[0], selected_border[1], path, frontier))
-                else:
-                    if (selected_border[0], selected_border[1]) == (robot_row, robot_col):
-                        env.update_position(x_new, y_new)
-                        recordingInterface.create_default_waypoint(cell_row=selected_border[0],
-                                                                   cell_col=selected_border[1])
-                        env.add_waypoint(x_new, y_new)
-                        env.mark_cell_visited(selected_border[0], selected_border[1])
-                        frontier.extend(environmentMap.find_new_borders(env, robot_row, robot_col, path, frontier))
-                    else:
-                        # RECUPERO subito dopo un tentativo fallito.
-                        # 1. Gli archi scartati nel tentativo fallito (blocchi confermati da vicino,
-                        # fallimenti fisici) sono gia' nel PRM tramite mark_edge_invalid, e la
-                        # ricostruzione degli archi li rispetta: Dijkstra non riproporra' la
-                        # stessa strada.
-
-                        # 2. Posizione attuale (il fallimento puo' essere in partenza o a meta' strada)
-                        x_curr, y_curr, _, _ = spotUtils.getPosition(robot_state_client)
-
-                        # 3. Scansione fresca, per scegliere il punto obiettivo da qui
-                        scan = local_grid.fetch_scan(robot_state_client)
-                        if scan is not None:
-                            # Senza impronta del corpo ne' maschera degli ostacoli: serve solo
-                            # il terreno per il PRM e la scelta dell'obiettivo.
-                            local_grid.process_scan(scan, x_curr, y_curr, 0.0, footprint=False, fuse=False)
-                            pts, cells_obstacle_dist = scan.pts, scan.od
-                            num_x, num_y, cell_size = scan.num_x, scan.num_y, scan.cell_size
-                            terrain_corrected_rec, is_valid_rec = scan.terrain, scan.is_valid
-                            grad_values, rough_values = scan.grad, scan.rough
-
-                            grad_2d = grad_values.reshape((num_y, num_x))
-                            rough_2d = rough_values.reshape((num_y, num_x))
-                            terrain_2d_rec = terrain_corrected_rec.reshape((num_y, num_x))
-                            grid_origin_x, grid_origin_y = local_grid.grid_origin(scan)
-
-                            prm.update_local_grid_data(
-                                grad_values_2d=grad_2d,
-                                rough_values_2d=rough_2d,
-                                terrain_values_2d=terrain_2d_rec,
-                                valid_2d=spotGrid.slope_usable_mask(is_valid_rec, cells_obstacle_dist, (num_y, num_x)),
-                                grid_origin_x=grid_origin_x,
-                                grid_origin_y=grid_origin_y,
-                                cell_size=cell_size
-                            )
-                            mission_graph.rebuild_prm_edges(prm, global_grid.global_occupancy_map)
-
-                            target_x, target_y, _, _ = find_best_point_in_cell(
-                                x_curr, y_curr, env, selected_border[0], selected_border[1],
-                                pts, cells_obstacle_dist, gb_sampler,
-                                global_map=global_grid.global_occupancy_map
-                            )
-                        else:
-                            print(
-                                "[RECOVERY ERROR] Impossibile recuperare il layer obstacle_distance per il ricalcolo.")
-                            target_x, target_y = None, None
-
-                        if target_x is not None and target_y is not None:
-                            mission_graph.restrict_planning_to_explored_cells(
-                                prm, env, selected_border[0], selected_border[1], (x_curr, y_curr))
-                            start_id = prm.add_stop_node(
-                                x_curr, y_curr, global_grid.global_occupancy_map,
-                                spotGrid.PRM_EDGE_SAFETY_MARGIN_M, label="verifica recupero (robot)")
-                            goal_id = prm.add_stop_node(
-                                target_x, target_y, global_grid.global_occupancy_map,
-                                spotGrid.PRM_EDGE_SAFETY_MARGIN_M, label="verifica recupero (obiettivo)",
-                                is_robot=False)
-                            prm.set_robot_node(start_id)
-
-                            path_ids = prm.find_path_dijkstra(start_id, goal_id)
-
-                            # Si riprova subito solo se il percorso ha al massimo COSTO_SOGLIA
-                            # archi (numero di nodi - 1)
-                            COSTO_SOGLIA = 4
-
-                            # Se l'obiettivo e' lo STESSO del tentativo appena fallito, riprovare
-                            # subito vorrebbe dire stesso posto, stesso esito: la cella si rimanda
-                            # e torna in coda come le altre (vedi finalize_or_defer_blocked_cell).
-                            last_goal = getattr(env, '_last_attempt_goal', None)
-                            same_goal = (last_goal is not None and float(np.hypot(
-                                target_x - last_goal[0], target_y - last_goal[1])) <= P.RECOVERY_SAME_GOAL_M)
-                            if same_goal and path_ids is not None:
-                                print(f"[RECOVERY] L'obiettivo ({target_x:.2f}, {target_y:.2f}) e' "
-                                      f"quello del tentativo appena fallito: non riprovo subito, la "
-                                      f"cella torna in coda.")
-                                path_ids = None
-                            if path_ids is not None and (len(path_ids) - 1) <= COSTO_SOGLIA:
-                                print(
-                                    f"[RECOVERY] Trovato percorso alternativo con costo {len(path_ids) - 1} <= {COSTO_SOGLIA}. Riprovo l'ingresso...")
-
-                                retry_check = attempt_enter_cell_from_position(
-                                    local_grid, global_grid, robot_state_client, command_client, env,
-                                    selected_border[0], selected_border[1], gb_sampler, prm,
-                                    mission_folder, visualization_counter, recordingInterface, verification_tracker,
-                                    mobility_kwargs=mobility_kwargs
-                                )
-                                visualization_counter += 1
-
-                                if retry_check:
-                                    x_final, y_final, _, _ = spotUtils.getPosition(robot_state_client)
-                                    env.update_position(x_final, y_final)
-                                    recordingInterface.create_default_waypoint(cell_row=selected_border[0],
-                                                                               cell_col=selected_border[1])
-                                    env.add_waypoint(x_final, y_final)
-                                    env.mark_cell_visited(selected_border[0], selected_border[1])
-                                    frontier.extend(environmentMap.find_new_borders(
-                                        env, selected_border[0], selected_border[1], path, frontier))
-                                else:
-                                    print(
-                                        "[FAIL] Anche il percorso alternativo ha fallito. Abbandono la cella e continuo l'algoritmo normale.")
-                                    side_bit = env.get_side_bit_facing_origin(origin_row, origin_col, selected_border[0],
-                                                                              selected_border[1])
-                                    env.mark_cell_side_explored(selected_border[0], selected_border[1], side_bit)
-                                    finalize_or_defer_blocked_cell(env, selected_border[0], selected_border[1],
-                                                               gb_sampler, global_grid.global_occupancy_map)
-                                    if not env.is_cell_blocked(selected_border[0], selected_border[1]):
-                                        frontier.append(selected_border)
-                            else:
-                                print(
-                                    f"[SKIP] Nessun percorso alternativo valido o costo superiore a {COSTO_SOGLIA}. Continuo l'algoritmo normale.")
-                                side_bit = env.get_side_bit_facing_origin(origin_row, origin_col, selected_border[0],
-                                                                          selected_border[1])
-                                env.mark_cell_side_explored(selected_border[0], selected_border[1], side_bit)
-                                finalize_or_defer_blocked_cell(env, selected_border[0], selected_border[1],
-                                                               gb_sampler, global_grid.global_occupancy_map)
-                                if not env.is_cell_blocked(selected_border[0], selected_border[1]):
-                                    frontier.append(selected_border)
-                        else:
-                            print(
-                                "[SKIP] Nessun punto obiettivo valido nella cella. Continuo con l'esplorazione normale.")
-                            side_bit = env.get_side_bit_facing_origin(origin_row, origin_col, selected_border[0],
-                                                                      selected_border[1])
-                            env.mark_cell_side_explored(selected_border[0], selected_border[1], side_bit)
-                            finalize_or_defer_blocked_cell(env, selected_border[0], selected_border[1],
-                                                               gb_sampler, global_grid.global_occupancy_map)
-                            if not env.is_cell_blocked(selected_border[0], selected_border[1]):
-                                frontier.append(selected_border)
-
-            else:
-                # Nessuna cella confinante in frontiera: si va con GraphNav verso il waypoint
-                # piu' vicino alla cella di rango piu' basso e si tenta da li'.
-                # Una cella bloccata (-1) non ha mai lati ancora da provare:
-                # finalize_or_defer_blocked_cell() la blocca solo dopo che ogni lato
-                # raggiungibile e' stato provato ed e' fallito.
-                already_skipped_this_round = set()
-                target_row = target_col = rank = nearest_cell = None
-                while True:
-                    remaining = [c for c in frontier if (c[0], c[1]) not in already_skipped_this_round]
-                    lowest_rank_cell = env.get_lowest_rank_from_frontier_list(remaining, path)
-                    if lowest_rank_cell is None:
-                        break
-                    candidate_row, candidate_col, candidate_rank = lowest_rank_cell
-                    waypoints_by_cell = recordingInterface.get_all_manual_waypoints_with_cells()
-                    candidate_nearest_cell = recordingInterface.find_nearest_waypoint_cell_to_target(
-                        (candidate_row, candidate_col), waypoints_by_cell, env)
-                    if candidate_nearest_cell is None or \
-                            recordingInterface.get_manual_waypoint_by_cell(*candidate_nearest_cell) is None:
-                        # Nessuna cella visitata con waypoint da cui partire: si passa alla
-                        # candidata successiva.
-                        print(f"[SKIP-ROUND] Cella ({candidate_row},{candidate_col}): nessun waypoint "
-                              f"GraphNav da cui avvicinarsi. Provo la successiva.")
-                        already_skipped_this_round.add((candidate_row, candidate_col))
-                        continue
-                    candidate_side_bit = env.get_side_bit_facing_origin(candidate_nearest_cell[0],
-                                                                        candidate_nearest_cell[1],
-                                                                        candidate_row, candidate_col)
-                    if env.get_cell_sides_status(candidate_row, candidate_col) & candidate_side_bit:
-                        print(f"[SKIP-ROUND] Cella ({candidate_row},{candidate_col}): ci arriverei dallo "
-                              f"stesso lato gia' provato senza successo. Per questo giro provo la "
-                              f"candidata successiva.")
-                        already_skipped_this_round.add((candidate_row, candidate_col))
-                        continue
-                    # Prima di partire con GraphNav: da quel waypoint il grafo arriva alla
-                    # cella? Se no, il tentativo fallirebbe appena arrivati (vedi
-                    # GRAPHNAV_PRECHECK): il lato si segna come provato senza muoversi.
-                    if P.GRAPHNAV_PRECHECK:
-                        cand_wp = recordingInterface.get_manual_waypoint_by_cell(*candidate_nearest_cell)
-                        wp_xy = (cand_wp.get('x'), cand_wp.get('y')) if isinstance(cand_wp, dict) else (None, None)
-                        reach = (mission_graph.graph_reaches_cell(prm, env, wp_xy, candidate_row, candidate_col,
-                                                    global_grid.global_occupancy_map)
-                                 if wp_xy[0] is not None else None)
-                        if reach is False:
-                            MISSION_STATS['graphnav_trips_avoided'] += 1
-                            print(f"[PRECHECK] Cella ({candidate_row},{candidate_col}): dal waypoint "
-                                  f"della cella {candidate_nearest_cell} il grafo non arriva a nessun "
-                                  f"nodo della cella (ostacoli gia' in mappa). Segno il lato come "
-                                  f"provato senza spostarmi.")
-                            env.mark_cell_side_explored(candidate_row, candidate_col, candidate_side_bit)
-                            finalize_or_defer_blocked_cell(env, candidate_row, candidate_col,
-                                                           gb_sampler, global_grid.global_occupancy_map)
-                            if env.is_cell_blocked(candidate_row, candidate_col):
-                                frontier[:] = [c for c in frontier
-                                               if (c[0], c[1]) != (candidate_row, candidate_col)]
-                            already_skipped_this_round.add((candidate_row, candidate_col))
-                            continue
-                    target_row, target_col, rank = candidate_row, candidate_col, candidate_rank
-                    nearest_cell = candidate_nearest_cell
-                    break
-
-                if target_row is not None:
-                    x_current, y_current, _, _ = spotUtils.getPosition(robot_state_client)
-
-                    nearest_wp = recordingInterface.get_manual_waypoint_by_cell(nearest_cell[0], nearest_cell[1])
-                    navGraphUtils.graphnav_add_shortcuts(recordingInterface, "prima dello spostamento fra celle",
-                                           map_edges=True, sdk=False, target_wp_id=nearest_wp['id'],
-                                           robot_xy=(x_current, y_current))
-                    recordingInterface.stop_recording()
-                    navigation_success = navGraphUtils.graphnav_navigate_to(
-                        recordingInterface, nearest_wp['id'], robot_state_client, command_client,
-                        f"verso il waypoint della cella {nearest_cell} per la cella ({target_row},{target_col})")
-
-                    # GraphNav non registra i tratti percorsi: quelli vecchi non descrivono piu'
-                    # la strada da cui il robot e' arrivato, la ritirata non deve usarli.
-                    env._traveled_arcs = []
-                    if movements.check_and_recover_fall(robot_state_client, command_client,
-                                               global_grid.global_occupancy_map,
-                                               "durante lo spostamento con GraphNav") is not None:
-                        recordingInterface.start_recording()
-                        print(f"[CADUTA] Rialzato dopo lo spostamento con GraphNav: segno il lato della "
-                              f"cella ({target_row},{target_col}) come provato, per non ripetere la stessa strada.")
-                        side_bit = env.get_side_bit_facing_origin(nearest_cell[0], nearest_cell[1],
-                                                                  target_row, target_col)
-                        env.mark_cell_side_explored(target_row, target_col, side_bit)
-                        finalize_or_defer_blocked_cell(env, target_row, target_col,
-                                                     gb_sampler, global_grid.global_occupancy_map)
-                        if env.is_cell_blocked(target_row, target_col):
-                            frontier.remove((target_row, target_col, rank))
-                        continue
-
-                    if navigation_success:
-                        recordingInterface.start_recording()
-                        check = attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client, command_client,
-                                                                 env, target_row, target_col, gb_sampler, prm,
-                                                                 mission_folder,
-                                                                 visualization_counter, recordingInterface, verification_tracker,
-                                                                 mobility_kwargs=mobility_kwargs)
-                        visualization_counter += 1
-
-                        if check:
-                            x_final, y_final, _, _ = spotUtils.getPosition(robot_state_client)
-                            env.update_position(x_final, y_final)
-                            recordingInterface.create_default_waypoint(cell_row=target_row, cell_col=target_col)
-                            env.add_waypoint(x_final, y_final)
-                            env.mark_cell_visited(target_row, target_col)
-                            frontier.remove((target_row, target_col, rank))
-                            frontier.extend(environmentMap.find_new_borders(
-                                env, target_row, target_col, path, frontier))
-                        else:
-                            # Lato segnato come provato; la cella esce dalla frontiera solo se era
-                            # l'ULTIMO lato non provato (cella davvero bloccata).
-                            side_bit = env.get_side_bit_facing_origin(nearest_cell[0], nearest_cell[1],
-                                                                      target_row, target_col)
-                            env.mark_cell_side_explored(target_row, target_col, side_bit)
-                            finalize_or_defer_blocked_cell(env, target_row, target_col,
-                                                     gb_sampler, global_grid.global_occupancy_map)
-                            if env.is_cell_blocked(target_row, target_col):
-                                frontier.remove((target_row, target_col, rank))
-                    else:
-                        # GraphNav non e' nemmeno arrivato al waypoint di partenza -- stessa regola:
-                        # la cella esce dalla frontiera solo se era l'ultimo lato non provato.
-                        recordingInterface.start_recording()
-                        side_bit = env.get_side_bit_facing_origin(nearest_cell[0], nearest_cell[1],
-                                                                  target_row, target_col)
-                        env.mark_cell_side_explored(target_row, target_col, side_bit)
-                        finalize_or_defer_blocked_cell(env, target_row, target_col,
-                                                     gb_sampler, global_grid.global_occupancy_map)
-                        if env.is_cell_blocked(target_row, target_col):
-                            frontier.remove((target_row, target_col, rank))
-                else:
-                    if len(frontier) > 0:
-                        frontier.remove(frontier[0])
-
-            if len(frontier) == 0:
-                break
+        missione = Missione(robot_state_client, command_client, recordingInterface, local_grid,
+                            global_grid, env, prm, gb_sampler, verification_tracker,
+                            mission_folder, mobility_kwargs)
+        missione.esplora()
 
         env.print_map()
         x_final, y_final, _, _ = spotUtils.getPosition(robot_state_client)
         final_row, final_col = env.get_cell_from_world(x_final, y_final)
         recordingInterface.create_default_waypoint(cell_row=final_row, cell_col=final_col)
 
-        # --- SCANSIONE FINALE: l'area attorno all'ultima posizione, prima di tornare ---
-        print("[FINAL SCAN] Ultima scansione attorno al robot prima di tornare alla partenza...")
-        x_final, y_final, z_final, quat_final = spotUtils.getPosition(robot_state_client)
-        final_yaw = np.arctan2(2.0 * (quat_final.w * quat_final.z + quat_final.x * quat_final.y),
-                               1.0 - 2.0 * (quat_final.y ** 2 + quat_final.z ** 2))
+        missione.scansione_finale()
 
-        scan = local_grid.fetch_scan(robot_state_client)
-        if scan is not None:
-            local_grid.process_scan(scan, x_final, y_final, final_yaw, ground_label="scan-finale")
-            pts_final, cells_obs_final, valid_final = scan.pts, scan.od, scan.valid
-            num_x_final, num_y_final = scan.num_x, scan.num_y
-            terrain_real_final, is_valid_final = scan.terrain, scan.is_valid
-            grad_final, rough_final, obstacle_mask_final = scan.grad, scan.rough, scan.obstacle_mask
-
-            # Anche l'ultima scansione entra nelle mappe globali, come tutte le altre
-            spotGrid.fold_scan_into_global_maps(
-                global_grid.global_occupancy_map, global_grid.global_terrain_map, pts_final,
-                terrain_real_final, obstacle_mask_final, is_valid_final, cells_obs_final,
-                (num_y_final, num_x_final), (x_final, y_final, final_yaw))
-
-            final_save_path = os.path.join(
-                mission_folder, f"iteration_{visualization_counter}_FINAL_SCAN.png"
-            ) if mission_folder else None
-
-            visualize_grid_with_candidates(
-                pts=pts_final, terrain_real=terrain_real_final, obstacle_mask=obstacle_mask_final,
-                robot_x=x_final, robot_y=y_final,
-                candidates={'rejected': [], 'valid': []},
-                chosen_point=None, iteration=visualization_counter, env=env,
-                save_path=final_save_path, prm_graph=prm, chosen_path=None,
-                cells_obstacle_dist=cells_obs_final, valid_values=valid_final,
-                grad_values=grad_final, rough_values=rough_final
-            )
-            visualization_counter += 1
-            print("[FINAL SCAN] Fatto: l'ultima scansione e' nelle mappe globali.")
-        else:
-            print("[FINAL SCAN] ATTENZIONE: griglia locale non ricevuta, proseguo senza scansione finale.")
-
-        # ---------------------------------------------------------------------
         # RIEPILOGO DI MISSIONE -- solo diagnostica, va letto dopo il volo.
-        # ---------------------------------------------------------------------
         _emit_mission_summary_once()
 
-        # Tutto cio' che segue avviene DOPO il riepilogo, quindi non entra in nessuna voce di
-        # [TEMPO]: si misura a parte e si stampa in chiusura.
-        _t_close = {}
-        _t = time.perf_counter()
-        try:
-            _wp0_id = next((w.id for w in recordingInterface._get_graph(force_refresh=True).waypoints
-                            if w.annotations.name == "wp_0"), None)
-            _xy_end = spotUtils.getPosition(robot_state_client)[:2]
-        except Exception:
-            _wp0_id, _xy_end = None, None
-        navGraphUtils.graphnav_add_shortcuts(recordingInterface, "prima del ritorno a wp_0",
-                               map_edges=True, sdk=False, target_wp_id=_wp0_id, robot_xy=_xy_end)
-        recordingInterface.auto_close_loops(True, False)
-        recordingInterface.stop_recording()
-        # Chiusura d'anello di Spot una volta sola, PRIMA dell'ancoraggio: i suoi archi,
-        # verificati sulle scansioni, correggono la deriva della mappa scaricata e accorciano
-        # il ritorno (vedi GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S).
-        navGraphUtils.graphnav_add_shortcuts(recordingInterface, "chiusura della mappa", map_edges=False,
-                               sdk=True, sdk_budget_s=P.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S, sdk_fast=False)
-        recordingInterface.optimize_anchoring()
-        _t_close['chiusura mappa e ancoraggio'] = time.perf_counter() - _t
-
-        _t = time.perf_counter()
-        if not navGraphUtils.graphnav_return_to_start(recordingInterface, robot_state_client, command_client):
-            print("[GRAPHNAV] Ritorno a wp_0 non riuscito: il robot si siede dove si trova.")
-        _t_close['ritorno a wp_0'] = time.perf_counter() - _t
-
-        _t = time.perf_counter()
-        command_client.robot_command(RobotCommandBuilder.synchro_sit_command(), end_time_secs=time.time() + 20)
-        sleep(3)
-        robot.power_off(cut_immediately=False)
-        _t_close['seduta e spegnimento'] = time.perf_counter() - _t
-
-        _t = time.perf_counter()
-        recordingInterface.download_full_graph()
-        _t_close['scaricamento della mappa'] = time.perf_counter() - _t
-
-        print(f"[TEMPO] Chiusura della missione, {sum(_t_close.values()):.1f} s in tutto:")
-        for k, v in sorted(_t_close.items(), key=lambda kv: -kv[1]):
-            print(f"  {k:32s} {v:6.1f} s")
+        _chiudi_missione(robot, robot_state_client, command_client, recordingInterface)
         estop.stop()
 
 
