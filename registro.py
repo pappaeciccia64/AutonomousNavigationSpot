@@ -434,3 +434,97 @@ def log_segment(row_dict):
     if seg_log is not None:
         seg_log.write_row(row_dict)
         MISSION_STATS['segments_logged'] += 1
+
+
+def visualize_grid_with_candidates(pts, terrain_real, obstacle_mask, robot_x, robot_y,
+                                   candidates, chosen_point, iteration, env, save_path,
+                                   prm_graph=None, chosen_path=None,
+                                   cells_obstacle_dist=None, intensity_values=None,
+                                   valid_values=None, grad_values=None, rough_values=None,
+                                   include_diagnostics=True):
+    """
+    Dati di una figura (scansione, candidati, punto scelto, grafo PRM, percorso) salvati in
+    <nome>_vis.npz. Durante la missione non si disegna: le figure le fa mission_viewer.py
+    dopo, da questi file.
+    """
+    if save_path is None:
+        return
+    save_visualization_bundle(save_path, pts, terrain_real, obstacle_mask, robot_x, robot_y,
+                               candidates, chosen_point, iteration, env, prm_graph, chosen_path,
+                               cells_obstacle_dist, valid_values, grad_values, rough_values)
+
+
+def save_visualization_bundle(save_path, pts, terrain_real, obstacle_mask, robot_x, robot_y,
+                               candidates, chosen_point, iteration, env, prm_graph, chosen_path,
+                               cells_obstacle_dist, valid_values, grad_values, rough_values):
+    """
+    Al posto di una figura: tutti i dati che la figura avrebbe mostrato, compreso il grafo
+    PRM in quel momento. Viene chiamata quando il grafo cambia (inizio tentativo,
+    ripianificazione, blocco), quindi il grafo si salva qui e non a ogni scansione.
+    """
+    t0 = time.perf_counter()
+    try:
+        def _arr(a, dtype=np.float64):
+            return np.empty(0, dtype=dtype) if a is None else np.asarray(a, dtype=dtype)
+
+        node_ids = np.array(list(prm_graph.nodes.keys()), dtype=np.int64) if prm_graph else np.empty(0, np.int64)
+        node_xy = (np.array([prm_graph.nodes[i] for i in node_ids], dtype=np.float64)
+                   if prm_graph and len(node_ids) else np.empty((0, 2)))
+        pairs, weights = [], []
+        if prm_graph:
+            for a, nbrs in prm_graph.edges.items():
+                for b, w in nbrs:
+                    if a < b:
+                        pairs.append((a, b)); weights.append(w)
+        slope_keys = list(prm_graph.edge_slope_info.keys()) if prm_graph else []
+        slope_vals = [prm_graph.edge_slope_info[k] for k in slope_keys] if prm_graph else []
+        traversed = np.array(sorted(getattr(prm_graph, 'traversed_edges', set())), dtype=np.int64)
+
+        cells = []
+        if env is not None:
+            for row in range(env.rows):
+                for col in range(env.cols):
+                    wp = env.get_world_position_from_cell(row, col)
+                    if wp is None:
+                        continue
+                    st = env.get_cell_status(row, col)
+                    st = st[0] if isinstance(st, (tuple, list)) else st
+                    cells.append((row, col, wp[0], wp[1], str(st)))
+
+        def _pts(lst):
+            try:
+                a = np.asarray([(float(p[0]), float(p[1])) for p in (lst or [])], dtype=np.float64)
+                return a.reshape(-1, 2)
+            except Exception:
+                return np.empty((0, 2))
+
+        out = os.path.splitext(save_path)[0] + "_vis.npz"
+        save_npz_async(
+            out,
+            pts=_arr(pts), terrain=_arr(terrain_real), obstacle_mask=_arr(obstacle_mask),
+            obstacle_distance=_arr(cells_obstacle_dist), terrain_valid=_arr(valid_values),
+            gradient=_arr(grad_values), roughness=_arr(rough_values),
+            robot_xy=np.array([robot_x, robot_y], dtype=np.float64), mission_z0=mission_z0(),
+            # istante della vista: mission_viewer abbina la vista alle scansioni con questo, non
+            # con la data del file (dopo un git clone o pull e' quella del download)
+            time=time.time(),
+            chosen_point=np.array([np.nan if v is None else v for v in (chosen_point or (None, None))],
+                                  dtype=np.float64),
+            chosen_path=_pts(chosen_path), iteration=iteration,
+            candidates_valid=_pts((candidates or {}).get('valid')),
+            candidates_rejected=_pts((candidates or {}).get('rejected')),
+            prm_node_ids=node_ids, prm_node_xy=node_xy,
+            prm_edges=np.array(pairs, dtype=np.int64).reshape(-1, 2),
+            prm_edge_weights=np.array(weights, dtype=np.float64),
+            prm_slope_keys=np.array(slope_keys, dtype=np.int64).reshape(-1, 2),
+            prm_slope_values=np.array(slope_vals, dtype=np.float64).reshape(-1, 2),
+            prm_traversed_edges=traversed.reshape(-1, 2),
+            env_cells=np.array([c[:4] for c in cells], dtype=np.float64).reshape(-1, 4),
+            env_cell_status=np.array([c[4] for c in cells]),
+            env_cell_size=np.nan if env is None else float(env.cell_size),
+            env_origin_yaw=np.nan if env is None else float(env.origin_yaw),
+            traveled_arcs=np.array(getattr(env, '_traveled_arcs', []), dtype=np.float64).reshape(-1, 4),
+        )
+    except Exception as e:
+        print(f"[DATA SAVE] Impossibile preparare i dati della figura: {e}")
+    timing_add('dati figure', time.perf_counter() - t0)
