@@ -47,7 +47,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import test_replay as tr          # noqa: E402  (importa anche easy_walk in silenzio)
-from test_replay import ew, sg    # noqa: E402
+from test_replay import ew, sg, P    # noqa: E402
 
 DEFAULT = ['22-10-2026_16-04-22']
 
@@ -74,14 +74,14 @@ def replay_goals(name):
     with tr._quiet():
         env = tr.environmentMap.EnvironmentMap(rows=m['rows'], cols=m['cols'], cell_size=m['cell'])
         env.set_origin(m['origin'][0], m['origin'][1], math.radians(m['yaw_deg']))
-        ew.MISSION_LATTICE_SPACING_M = m['spacing']
+        P.MISSION_LATTICE_SPACING_M = m['spacing']
         g = m['graph']
-        ew.MISSION_GRAPH_SAMPLING = g['sampling']
-        ew.PRM_MIN_EDGE_M, ew.PRM_MAX_EDGE_M = g['min_edge'], g['max_edge']
+        P.MISSION_GRAPH_SAMPLING = g['sampling']
+        P.PRM_MIN_EDGE_M, P.PRM_MAX_EDGE_M = g['min_edge'], g['max_edge']
         if g['sampling'] == 'casuale':
-            ew.MISSION_RANDOM_DISTRIBUTION = g['distribution']
-            ew.MISSION_RANDOM_DENSITY = g['density']
-            ew.MISSION_RANDOM_SEED = g['seed']
+            P.MISSION_RANDOM_DISTRIBUTION = g['distribution']
+            P.MISSION_RANDOM_DENSITY = g['density']
+            P.MISSION_RANDOM_SEED = g['seed']
         prm, sampler, mg = ew._build_mission_prm(env, verbose=False)
         gm = sg.GlobalGrid()
         tm = sg.GlobalTerrainGrid()
@@ -134,10 +134,10 @@ def replay_goals(name):
         if (str(d['decision_kind']) == 'blocked'
                 and str(d['frontier_reason']) in ('ostacolo', 'rugosita', 'pendenza')):
             sxy = tuple(map(float, d['frontier_stop_xy']))
-            if math.dist(sxy, cur['old']['xy']) <= ew.REFUSED_GOAL_BLOCK_M:
+            if math.dist(sxy, cur['old']['xy']) <= P.REFUSED_GOAL_BLOCK_M:
                 cur['old']['blocked'] = True
                 if (cur['new']['xy'] is not None
-                        and math.dist(cur['new']['xy'], cur['old']['xy']) < ew.RECOVERY_SAME_GOAL_M):
+                        and math.dist(cur['new']['xy'], cur['old']['xy']) < P.RECOVERY_SAME_GOAL_M):
                     cur['new']['blocked'] = True
         # L'obiettivo nuovo rifiutabile si esclude per la missione, come fa il ciclo.
         if _bad(cur['new']):
@@ -159,9 +159,9 @@ def replay_goals(name):
             bad = _bad(g_)
             n['rifiutabili'] += bad
             b = ew.cell_border_distance(env, *at['cell'], *g_['xy'])
-            n['sul_bordo'] += b is not None and b < ew.TARGET_CELL_BORDER_M
+            n['sul_bordo'] += b is not None and b < P.TARGET_CELL_BORDER_M
             prev = refused_by_cell.setdefault(at['cell'], [])
-            n['riproposti'] += any(math.dist(g_['xy'], p) < ew.RECOVERY_SAME_GOAL_M for p in prev)
+            n['riproposti'] += any(math.dist(g_['xy'], p) < P.RECOVERY_SAME_GOAL_M for p in prev)
             if bad:
                 prev.append(g_['xy'])
         out[k] = n
@@ -232,18 +232,18 @@ def synthetic_checks():
     _, g = pick([], reachable=lambda x, y: False)
     check(g == (0.0, 0.0), "nessun punto raggiungibile: comunque il migliore (il centro)")
     _, g = pick([(0.30, 0.0)])
-    check(g != (0.0, 0.0) and math.dist(g, (0.30, 0.0)) >= ew.TARGET_CLEARANCE_M,
-          f"centro a 0.30 m da un ostacolo (sotto {ew.TARGET_CLEARANCE_M:.2f}): un punto con piu' "
+    check(g != (0.0, 0.0) and math.dist(g, (0.30, 0.0)) >= P.TARGET_CLEARANCE_M,
+          f"centro a 0.30 m da un ostacolo (sotto {P.TARGET_CLEARANCE_M:.2f}): un punto con piu' "
           f"spazio {tuple(round(v, 2) for v in g)}")
     _, g = pick([(0.0, 0.0)])
     b = ew.cell_border_distance(e, 0, 0, *g)
-    check(b >= ew.TARGET_CELL_BORDER_M,
-          f"centro occupato: il ripiego sta ad almeno {ew.TARGET_CELL_BORDER_M:.2f} m dal bordo ({b:.2f})")
+    check(b >= P.TARGET_CELL_BORDER_M,
+          f"centro occupato: il ripiego sta ad almeno {P.TARGET_CELL_BORDER_M:.2f} m dal bordo ({b:.2f})")
     env, g1 = pick([(0.0, 0.0)])
     with tr._quiet():
         ew._refuse_goal(env, 0, 0, *g1, "prova")
     env, g2 = pick([(0.0, 0.0)], env=env)
-    check(math.dist(g1, g2) >= ew.RECOVERY_SAME_GOAL_M,
+    check(math.dist(g1, g2) >= P.RECOVERY_SAME_GOAL_M,
           f"obiettivo rifiutato non riproposto: {tuple(round(v, 2) for v in g1)} -> "
           f"{tuple(round(v, 2) for v in g2)}")
     env2 = _env()

@@ -13,6 +13,15 @@ non serve l'SDK bosdyn. Si puo' lanciare in qualunque momento.
     python3 preflight.py                 # nella cartella del progetto
     python3 preflight.py /percorso/cartella
 
+Cosa controlla:
+  1. ogni file della missione esiste e non ha errori di sintassi;
+  2. IN AUTOMATICO, per ogni file: ogni `modulo.nome` e ogni `from modulo import nome` verso
+     un altro modulo del progetto esiste davvero in quel modulo, e gli argomenti con nome
+     passati a una funzione di un altro modulo sono fra i suoi parametri. Nessuna tabella
+     da aggiornare quando si spostano funzioni o costanti;
+  3. A MANO (METHODS, METHOD_PARAMS): i metodi chiamati sugli OGGETTI (local_grid.xxx(),
+     prm.xxx()) e i loro argomenti, che un controllo statico non puo' attribuire a una classe.
+
 Uscita 0 = tutto allineato. Uscita 1 = manca qualcosa, NON lanciare la missione.
 """
 
@@ -20,190 +29,78 @@ import ast
 import os
 import sys
 
-# Per ogni file: i simboli che DEVONO esistere perche' gli altri file li usano.
-# Aggiornare questa tabella quando si aggiunge una dipendenza fra moduli.
-REQUIRED = {
-    "spotGrid.py": {
-        "costanti": [
-            "OBSTACLE_THRESHOLD", "SLOPE_THRESHOLD", "ROUGH_THRESHOLD",
-            "SLOPE_BASELINE_M", "LATERAL_SLICE_HALF_WIDTH_M", "MIN_ARC_SAMPLE_FRACTION",
-            "NEAR_THRESHOLD_MARGIN_FRACTION", "LATERAL_SLOPE_COST_MULTIPLIER",
-            "GROUND_HEIGHT_TOLERANCE_M", "GROUND_REF_RADIUS_M",
-            "GROUND_REF_FALLBACK_RADIUS_M", "GROUND_REF_MIN_CELLS",
-            "GAIT_VEL_PLAIN", "GAIT_VEL_MODERATE", "GAIT_VEL_HARD",          # passo 2
-            "GAIT_ANG_PLAIN", "GAIT_ANG_MODERATE", "GAIT_ANG_HARD",
-            "FRONTIER_CLEARANCE_M", "FRONTIER_MIN_CLEARANCE_M", "FRONTIER_ESCAPE_DIST_M",   # passo 3
-            "FRONTIER_BODY_HALF_LENGTH_M", "FRONTIER_MARGIN_M", "FRONTIER_SAMPLE_STEP_M",
-            "FRONTIER_ROBOT_RADIUS_M", "FRONTIER_SLOPE_MIN_LENGTH_M", "PRM_EDGE_SAFETY_MARGIN_M",
-            "GLOBAL_OCC_CONFIRM_OBS", "GLOBAL_OCC_MAX_COUNT", "GLOBAL_OCC_COARSE_CELLS",       # passo 6
-            "ROBOT_HALF_LENGTH_M", "ROBOT_HALF_WIDTH_M", "ROBOT_CLEARANCE_AIR_M",               # passo 4
-            "ROTATION_CLEARANCE_M", "ROTATION_CHECK_MIN_DYAW_DEG",
-            "UNWRITTEN_MATCH_FRACTION", "UNWRITTEN_MATCH_FALLBACK_M",                          # celle mai scritte
-        ],
-        "funzioni": ["body_extents",
-            "compute_arc_slope_profile", "compute_arc_sample_coverage",
-            "_gather_heights", "_baseline_gradient", "_slope_profile_from_sampler",
-        ],
-        "metodi": [
-            ("GlobalGrid", "is_occupied"),
-            ("GlobalGrid", "is_known"),            # usato da find_best_point_in_cell
-            ("GlobalGrid", "_set_state"),
-            ("GlobalGrid", "_rebuild_coarse_index"),
-            ("GlobalGrid", "mark_hazard"),         # cadute
-            ("GlobalTerrainGrid", "compute_arc_slope_profile"),
-            ("LocalGrid", "compute_robot_footprint_mask"),
-            ("LocalGrid", "correct_terrain"),
-            ("LocalGrid", "_cells_above_ground"),    # filtro sull'altezza del suolo
-            ("LocalGrid", "_cells_never_written"),   # celle mai scritte (sopra o sotto il suolo)
-            ("LocalGrid", "_fetch_layers"),
-            ("LocalGrid", "_layer_geometry"),
-            ("GlobalGrid", "segment_hits_hazard"),
-            ("LocalGrid", "fuse_obstacle_mask"),
-        ],
-    },
-    # Il grafo di missione: easy_walk lo importa e ne usa queste cose.
-    "mission_graph.py": {
-        "costanti": ["LATTICE_RINGS", "DEFAULT_MIN_EDGE_M", "DEFAULT_MAX_EDGE_M",
-                     "DEFAULT_CONNECTION_RADIUS_M",
-                     # dimensione della missione e passo di default, letti da easy_walk
-                     "DEFAULT_MISSION_ROWS", "DEFAULT_MISSION_COLS", "DEFAULT_CELL_SIZE_M",
-                     "DEFAULT_LATTICE_SPACING_M",
-                     # metodo dei nodi e nodi casuali, letti da easy_walk e test_replay
-                     "GRAPH_SAMPLINGS", "GRAPH_SAMPLING", "RANDOM_DISTRIBUTIONS",
-                     "RANDOM_DISTRIBUTION", "RANDOM_DENSITY_PER_M2", "RANDOM_SEED"],
-        "funzioni": ["build_mission_graph", "load_npz", "align_spacing", "suggested_spacing",
-                     "covering_radius", "node_density", "draw_seed"],
-        "metodi": [
-            ("MissionGraph", "into_prm"),
-            ("MissionGraph", "add_edges_to_prm"),
-            ("MissionGraph", "as_sampler"),
-            ("MissionGraph", "save_npz"),
-            ("MissionGraph", "report"),
-            ("MissionGraph", "describe"),
-            ("LatticeSampler", "get_point_in_cell"),
-        ],
-    },
-    # easy_walk chiama questi metodi per le scorciatoie GraphNav.
-    "navGraphUtils.py": {
-        "costanti": [],
-        "funzioni": [],
-        "metodi": [
-            ("RecordingInterface", "close_loops_checked"),
-            ("RecordingInterface", "create_edge_between_waypoint_objs"),
-            ("RecordingInterface", "invalidate_graph_cache"),
-            ("RecordingInterface", "_get_graph"),
-        ],
-    },
-    "prm_graph.py": {
-        "costanti": ["ANCHOR_SEARCH_M", "ANCHOR_ON_NODE_M",
-                     "ANCHOR_IGNORE_NEAR_M",
-                     "OCCUPANCY_SAMPLES_PER_M", "OCCUPANCY_SAMPLES_MIN",
-                     "STOP_NODE_MAP_IGNORE_M"],
-        "funzioni": [],
-        "metodi": [
-            ("PRM", "refresh_local_edge_weights"),
-            ("PRM", "sample_terrain_between_points"),
-            ("PRM", "_compute_edge_weight"),
-            ("PRM", "set_global_terrain_map"),
-            ("PRM", "add_stop_node"),
-            ("PRM", "_evaluate_and_add_edge"),
-            ("PRM", "set_robot_node"),            # cadute
-            ("PRM", "_occupancy_blocked"),
-            ("PRM", "_global_slope"),
-            ("PRM", "_sync_global_slope_cache"),
-            ("PRM", "_traversed_edge_ok"),
-            ("PRM", "anchor_node"),
-            ("PRM", "set_allowed_nodes"),         # solo celle visitate
-            ("PRM", "set_detour_limit"),
-            ("PRM", "path_length"),
-        ],
-    },
-    "arcVerification.py": {
-        "costanti": [],
-        "funzioni": ["is_arc_in_fov", "verify_arc_safety",
-                     "make_grid_snapshot", "compute_safe_frontier", "allowed_advance",
-                     "point_along", "describe_frontier"],
-        "metodi": [("ArcVerificationTracker", "update_path"),
-                   ("ArcVerificationTracker", "get_frontier"),
-                   ("ArcVerificationTracker", "clear_path")],
-    },
-    "movements.py": {
-        "costanti": ["DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT",
-                     "DEFAULT_MAX_LINEAR_VEL_MPS", "DEFAULT_MAX_ANGULAR_VEL_RPS",
-                     "RETREAT_MAX_LINEAR_VEL_MPS",
-                     "FALL_TILT_DEG", "UPRIGHT_TILT_DEG", "SELF_RIGHT_TIMEOUT_S",       # cadute
-                     "STAND_TIMEOUT_S", "SELF_RIGHT_MAX_ATTEMPTS",
-                     "MOVE_TIMEOUT_FACTOR", "MOVE_TIMEOUT_MARGIN_S", "MOVE_MAX_RPC_ERRORS"],
-        "funzioni": ["relative_move", "stop_robot",                      "move_to_world_point_without_turning", "_build_mobility_params",
-                     "_velocity_limit", "check_fall", "recover_from_fall", "_roll_pitch_deg"],
-        "metodi": [],
-    },
-    "easy_walk.py": {
-        "costanti": ["MIN_PARTIAL_STEP_M", "FRONTIER_BLOCK_CONFIRM_SCANS", "FRONTIER_RESCAN_WAIT_S",
-                     "MAX_BLOCK_REPLANS", "FRONTIER_ABORT_CONFIRM", "FRONTIER_ABORT_TOLERANCE_M",
-                     "GOAL_REACHED_TOLERANCE_M", "MAX_LOOP_ITERATIONS",
-                     "SAVE_SCAN_BUNDLES",
-                     "ROTATION_ROOM_SEARCH_M", "ROTATION_ROOM_DIRECTIONS_DEG",
-                     "SHORTCUT_MAX_DIST_M", "MAX_ROTATION_FAILS_SAME_EDGE",
-                     "MAX_STRAIGHT_RETREATS_IN_A_ROW",
-                     # grafo di missione
-                     "MISSION_LATTICE_SPACING_M", "MISSION_LATTICE_RINGS",
-                     "PRM_MIN_EDGE_M", "PRM_MAX_EDGE_M", "PRM_CONNECTION_RADIUS_M",
-                     "MISSION_GRAPH_SAMPLING", "MISSION_RANDOM_DISTRIBUTION",
-                     "MISSION_RANDOM_DENSITY", "MISSION_RANDOM_SEED",
-                     # guardie anti-stallo e avanzamento multinodo
-                     "MAX_ROTATION_DISCARDS", "MAX_IDLE_LOOPS", "IDLE_MOVE_M",
-                     "MISSION_GRID_ROWS", "MISSION_GRID_COLS", "MISSION_CELL_SIZE_M",
-                     "PLAN_ONLY_EXPLORED_CELLS", "PLAN_MAX_DETOUR_RATIO", "PLAN_DETOUR_SLACK_M",
-                     "ANCHOR_ON_NODE_M", "GLOBAL_MAP_SELF_RING_M",
-                     "GRAPHNAV_SHORTCUTS", "GRAPHNAV_SDK_LOOP_CLOSURE", "GRAPHNAV_SHORTCUT_MAX_M",
-                     "GRAPHNAV_SHORTCUT_MARGIN_M", "GRAPHNAV_SDK_LOOP_MAX_M",
-                     "GRAPHNAV_SDK_LOOP_BUDGET_S", "GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S", "GRAPHNAV_SDK_LOOP_FAST", "GRAPHNAV_SDK_LOOP_FINAL_PRUNE",
-                     "GRAPHNAV_SDK_LOOP_MAX_PATH_M", "GRAPHNAV_SDK_LOOP_MIN_PATH_M",
-                     "CONE_PATH_LOOKAHEAD_M", "ABORT_IGNORE_DATA_EDGE_UNTIL_M",
-                     "FALL_HAZARD_RADIUS_M",                                             # cadute
-                     "RETREAT_MAX_SEGMENTS", "RETREAT_MIN_SEGMENT_M", "RETREAT_AFTER_ABORT_M",
-                     "RETREAT_CONTINUITY_M", "RETREAT_MAX_SEGMENT_M",
-                     "GRAPHNAV_TIMEOUT_S", "GRAPHNAV_MAX_LINEAR_VEL_MPS", "GRAPHNAV_MAX_ANGULAR_VEL_RPS",
-                     "MAX_FALLS_PER_MISSION"],
-        "funzioni": ["find_best_point_in_cell", "retreat_along_traveled_path",
-                     "navigate_to", "attempt_enter_cell_from_position",
-                     "_log_footprint_diagnostic", "_log_ground_filter", "decide_next_move",
-                     "rotation_plan", "shortcut_index",
-                     "_check_and_recover_fall", "_raw_zero", "_raw_scale",
-                     "_mission_z0", "_set_mission_z0", "_mask_for_global_map",
-                     "_graphnav_navigate_to", "_graphnav_return_to_start", "_append_csv",
-                     "_parse_args", "_mask_for_global_map", "_restrict_planning_to_explored_cells",
-                     "_node_cells", "_robot_on_node", "graphnav_add_shortcuts", "_segment_seen_free"],
-        "metodi": [],
-    },
-}
+# I file che la missione importa (direttamente o no).
+MISSION_FILES = [
+    "easy_walk.py", "parametri.py", "registro.py", "spotGrid.py", "navGraphUtils.py",
+    "prm_graph.py", "mission_graph.py", "arcVerification.py", "movements.py",
+    "environmentMap.py", "spotUtils.py", "spotLogInUtils.py",
+]
 
-# Firme che devono combaciare fra chiamante e definizione: (file, funzione, parametro).
-REQUIRED_PARAMS = [
-    ("movements.py", "relative_move", "should_abort"),
-    ("movements.py", "relative_move", "poll_period_s"),
-    ("movements.py", "relative_move", "disable_foot_obstacle_avoidance"),
-    ("movements.py", "relative_move", "max_linear_vel"),
-    ("movements.py", "_build_mobility_params", "max_linear_vel"),
-    ("easy_walk.py", "navigate_to", "should_abort"),
-    ("easy_walk.py", "find_best_point_in_cell", "global_map"),
-    ("spotGrid.py", "compute_arc_slope_profile", "baseline_m"),
-    ("spotGrid.py", "compute_arc_slope_profile", "lateral_half_width_m"),
-    ("spotGrid.py", "correct_terrain", "cell_size"),
-    ("spotGrid.py", "compute_gradient_and_roughness", "is_valid"),
-    ("arcVerification.py", "compute_safe_frontier", "body"),
-    ("easy_walk.py", "navigate_to", "keep_heading"),
-    ("prm_graph.py", "add_stop_node", "is_robot"),                      # cadute
-    ("easy_walk.py", "shortcut_index", "global_map"),
-    ("spotGrid.py", "correct_terrain", "unwritten_value"),              # celle mai scritte
-    ("spotGrid.py", "correct_terrain", "return_unwritten"),
-    ("arcVerification.py", "make_grid_snapshot", "unwritten"),
-    ("spotGrid.py", "compute_arc_slope_profile", "valid_2d"),           # pendenza su celle attendibili
-    ("spotGrid.py", "_gather_heights", "valid_2d"),
-    ("prm_graph.py", "update_local_grid_data", "valid_2d"),
-    ("prm_graph.py", "compute_path_cost", "allow_direct_first_hop"),
-    ("spotGrid.py", "return_local_grid", "max_attempts"),
+# Metodi chiamati sugli oggetti: (file, classe, metodo).
+METHODS = [
+    ("spotGrid.py", "GlobalGrid", "is_occupied"),
+    ("spotGrid.py", "GlobalGrid", "is_known"),
+    ("spotGrid.py", "GlobalGrid", "_set_state"),
+    ("spotGrid.py", "GlobalGrid", "_rebuild_coarse_index"),
+    ("spotGrid.py", "GlobalGrid", "mark_hazard"),
+    ("spotGrid.py", "GlobalGrid", "segment_hits_hazard"),
+    ("spotGrid.py", "GlobalTerrainGrid", "compute_arc_slope_profile"),
+    ("spotGrid.py", "LocalGrid", "compute_robot_footprint_mask"),
+    ("spotGrid.py", "LocalGrid", "correct_terrain"),
+    ("spotGrid.py", "LocalGrid", "_cells_above_ground"),
+    ("spotGrid.py", "LocalGrid", "_cells_never_written"),
+    ("spotGrid.py", "LocalGrid", "_fetch_layers"),
+    ("spotGrid.py", "LocalGrid", "_layer_geometry"),
+    ("spotGrid.py", "LocalGrid", "fuse_obstacle_mask"),
+    ("spotGrid.py", "LocalGrid", "extra_layers"),
+    ("spotGrid.py", "LocalGrid", "return_local_grid"),
+    ("spotGrid.py", "LocalGrid", "compute_gradient_and_roughness"),
+    ("mission_graph.py", "MissionGraph", "into_prm"),
+    ("mission_graph.py", "MissionGraph", "add_edges_to_prm"),
+    ("mission_graph.py", "MissionGraph", "as_sampler"),
+    ("mission_graph.py", "MissionGraph", "save_npz"),
+    ("mission_graph.py", "MissionGraph", "report"),
+    ("mission_graph.py", "MissionGraph", "describe"),
+    ("mission_graph.py", "LatticeSampler", "get_point_in_cell"),
+    ("navGraphUtils.py", "RecordingInterface", "close_loops_checked"),
+    ("navGraphUtils.py", "RecordingInterface", "create_edge_between_waypoint_objs"),
+    ("navGraphUtils.py", "RecordingInterface", "invalidate_graph_cache"),
+    ("navGraphUtils.py", "RecordingInterface", "_get_graph"),
+    ("prm_graph.py", "PRM", "refresh_local_edge_weights"),
+    ("prm_graph.py", "PRM", "sample_terrain_between_points"),
+    ("prm_graph.py", "PRM", "_compute_edge_weight"),
+    ("prm_graph.py", "PRM", "set_global_terrain_map"),
+    ("prm_graph.py", "PRM", "add_stop_node"),
+    ("prm_graph.py", "PRM", "_evaluate_and_add_edge"),
+    ("prm_graph.py", "PRM", "set_robot_node"),
+    ("prm_graph.py", "PRM", "_occupancy_blocked"),
+    ("prm_graph.py", "PRM", "_global_slope"),
+    ("prm_graph.py", "PRM", "_sync_global_slope_cache"),
+    ("prm_graph.py", "PRM", "_traversed_edge_ok"),
+    ("prm_graph.py", "PRM", "anchor_node"),
+    ("prm_graph.py", "PRM", "set_allowed_nodes"),
+    ("prm_graph.py", "PRM", "set_detour_limit"),
+    ("prm_graph.py", "PRM", "path_length"),
+    ("prm_graph.py", "PRM", "update_local_grid_data"),
+    ("prm_graph.py", "PRM", "compute_path_cost"),
+    ("arcVerification.py", "ArcVerificationTracker", "update_path"),
+    ("arcVerification.py", "ArcVerificationTracker", "get_frontier"),
+    ("arcVerification.py", "ArcVerificationTracker", "clear_path"),
+]
+
+# Argomenti con nome passati a quei metodi: (file, classe, metodo, parametro).
+METHOD_PARAMS = [
+    ("spotGrid.py", "LocalGrid", "correct_terrain", "cell_size"),
+    ("spotGrid.py", "LocalGrid", "correct_terrain", "unwritten_value"),
+    ("spotGrid.py", "LocalGrid", "correct_terrain", "return_unwritten"),
+    ("spotGrid.py", "LocalGrid", "compute_gradient_and_roughness", "is_valid"),
+    ("spotGrid.py", "LocalGrid", "return_local_grid", "max_attempts"),
+    ("prm_graph.py", "PRM", "add_stop_node", "is_robot"),
+    ("prm_graph.py", "PRM", "update_local_grid_data", "valid_2d"),
+    ("prm_graph.py", "PRM", "compute_path_cost", "allow_direct_first_hop"),
+    ("navGraphUtils.py", "RecordingInterface", "close_loops_checked", "upload_result"),
+    ("navGraphUtils.py", "RecordingInterface", "close_loops_checked", "prune_edges"),
+    ("navGraphUtils.py", "RecordingInterface", "close_loops_checked", "icp_iters"),
 ]
 
 
@@ -212,86 +109,131 @@ def _parse(path):
         return ast.parse(f.read(), filename=path)
 
 
-def _module_names(tree):
-    """Nomi definiti a livello di modulo: costanti, funzioni, classi."""
-    consts, funcs, classes = set(), set(), {}
-    for node in tree.body:
-        if isinstance(node, ast.Assign):
-            for t in node.targets:
-                if isinstance(t, ast.Name):
-                    consts.add(t.id)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            funcs.add(node.name)
-        elif isinstance(node, ast.ClassDef):
-            classes[node.name] = {n.name for n in node.body
-                                  if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
-    return consts, funcs, classes
+def _top_names(tree):
+    """Nomi definiti a livello di modulo (anche dentro if/try/with) e importati."""
+    names, funcs, classes = set(), {}, {}
+
+    def scan(body):
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                names.add(node.name)
+                funcs[node.name] = node
+            elif isinstance(node, ast.ClassDef):
+                names.add(node.name)
+                classes[node.name] = {n.name: n for n in node.body
+                                      if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                names.update((a.asname or a.name).split('.')[0] for a in node.names if a.name != '*')
+            elif isinstance(node, (ast.If, ast.Try, ast.With)):
+                for part in ('body', 'orelse', 'finalbody'):
+                    scan(getattr(node, part, []) or [])
+                for h in getattr(node, 'handlers', []) or []:
+                    scan(h.body)
+            for t in ast.walk(node) if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)) else []:
+                if isinstance(t, ast.Name) and isinstance(t.ctx, ast.Store):
+                    names.add(t.id)
+    scan(tree.body)
+    return names, funcs, classes
 
 
-def _func_params(tree, name):
+def _params(fn):
+    a = fn.args
+    names = [p.arg for p in list(getattr(a, 'posonlyargs', [])) + list(a.args) + list(a.kwonlyargs)]
+    return set(names), a.kwarg is not None
+
+
+def _locals(fn):
+    names = _params(fn)[0]
+    if fn.args.vararg:
+        names.add(fn.args.vararg.arg)
+    for x in ast.walk(fn):
+        if isinstance(x, ast.Name) and isinstance(x.ctx, ast.Store):
+            names.add(x.id)
+    return names
+
+
+def _cross_module(fname, tree, info):
+    """Problemi nei riferimenti di `fname` verso gli altri moduli del progetto."""
+    ours = {os.path.splitext(f)[0]: f for f in info}
+    alias, problems = {}, []
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
-            a = node.args
-            names = [p.arg for p in list(a.posonlyargs) + list(a.args) + list(a.kwonlyargs)]
-            if a.vararg:
-                names.append(a.vararg.arg)
-            if a.kwarg:
-                names.append(a.kwarg.arg)
-            return names
-    return None
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.name in ours:
+                    alias[a.asname or a.name] = a.name
+        elif isinstance(node, ast.ImportFrom) and node.module in ours:
+            names = info[ours[node.module]][0]
+            for a in node.names:
+                if a.name != '*' and a.name not in names:
+                    problems.append(f"{fname}:{node.lineno}: 'from {node.module} import {a.name}' "
+                                    f"-- {a.name} non esiste in {ours[node.module]}")
+
+    def visit(node, shadow):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            shadow = shadow | _locals(node)
+        target = None
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) \
+                and node.value.id in alias and node.value.id not in shadow:
+            mod = alias[node.value.id]
+            names, funcs, _ = info[ours[mod]]
+            if node.attr not in names:
+                problems.append(f"{fname}:{node.lineno}: {node.value.id}.{node.attr} non esiste in {mod}.py")
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                and isinstance(node.func.value, ast.Name) and node.func.value.id in alias \
+                and node.func.value.id not in shadow:
+            mod = alias[node.func.value.id]
+            fn = info[ours[mod]][1].get(node.func.attr)
+            if fn is not None:
+                params, has_kwargs = _params(fn)
+                for kw in node.keywords:
+                    if kw.arg and kw.arg not in params and not has_kwargs:
+                        problems.append(f"{fname}:{node.lineno}: {mod}.{node.func.attr}() non accetta "
+                                        f"'{kw.arg}'")
+        for c in ast.iter_child_nodes(node):
+            visit(c, shadow)
+
+    visit(tree, frozenset())
+    return problems
 
 
 def main():
     root = sys.argv[1] if len(sys.argv) > 1 else os.getcwd()
     print(f"Controllo pre-volo su: {root}\n")
 
-    problems = []
-    trees = {}
-
-    for fname in REQUIRED:
-        path = os.path.join(root, fname)
-        if not os.path.isfile(path):
-            problems.append(f"{fname}: FILE MANCANTE")
-            continue
+    problems, trees, info = [], {}, {}
+    for fname in sorted(f for f in os.listdir(root) if f.endswith('.py')):
         try:
-            trees[fname] = _parse(path)
+            trees[fname] = _parse(os.path.join(root, fname))
+            info[fname] = _top_names(trees[fname])
         except SyntaxError as e:
-            problems.append(f"{fname}: ERRORE DI SINTASSI riga {e.lineno}: {e.msg}")
+            if fname in MISSION_FILES:
+                problems.append(f"{fname}: ERRORE DI SINTASSI riga {e.lineno}: {e.msg}")
+    for fname in MISSION_FILES:
+        if not os.path.isfile(os.path.join(root, fname)):
+            problems.append(f"{fname}: FILE MANCANTE")
 
-    for fname, want in REQUIRED.items():
+    for fname in MISSION_FILES:
         if fname not in trees:
             continue
-        consts, funcs, classes = _module_names(trees[fname])
-        missing = []
-        for c in want["costanti"]:
-            if c not in consts:
-                missing.append(f"costante {c}")
-        for f in want["funzioni"]:
-            if f not in funcs:
-                missing.append(f"funzione {f}()")
-        for cls, meth in want["metodi"]:
-            if cls not in classes:
-                missing.append(f"classe {cls}")
-            elif meth not in classes[cls]:
-                missing.append(f"metodo {cls}.{meth}()")
-        if missing:
-            problems.append(f"{fname}: copia VECCHIA -- mancano: " + ", ".join(missing))
-        else:
+        found = _cross_module(fname, trees[fname], info)
+        problems += found
+        if not found:
             print(f"  OK   {fname}")
 
-    if "movements.py" in trees:
-        _, _, classes = _module_names(trees["movements.py"])
-        if "RobotFallenError" not in classes:
-            problems.append("movements.py: copia VECCHIA -- manca la classe RobotFallenError")
-
-    for fname, func, param in REQUIRED_PARAMS:
-        if fname not in trees:
+    for fname, cls, meth in METHODS:
+        if fname not in info:
             continue
-        params = _func_params(trees[fname], func)
-        if params is None:
-            problems.append(f"{fname}: funzione {func}() non trovata")
-        elif param not in params:
-            problems.append(f"{fname}: {func}() non accetta '{param}' -- copia vecchia")
+        classes = info[fname][2]
+        if cls not in classes:
+            problems.append(f"{fname}: manca la classe {cls}")
+        elif meth not in classes[cls]:
+            problems.append(f"{fname}: manca il metodo {cls}.{meth}() -- copia vecchia")
+    for fname, cls, meth, param in METHOD_PARAMS:
+        fn = info.get(fname, (None, None, {}))[2].get(cls, {}).get(meth)
+        if fn is not None:
+            params, has_kwargs = _params(fn)
+            if param not in params and not has_kwargs:
+                problems.append(f"{fname}: {cls}.{meth}() non accetta '{param}' -- copia vecchia")
 
     print()
     if problems:

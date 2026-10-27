@@ -32,64 +32,11 @@ import mission_graph                   # reticolo dei nodi della missione
 
 import threading
 from concurrent.futures import ThreadPoolExecutor
-
-# Un thread di appoggio per salvare i dati su disco senza fermare il ciclo di navigazione.
-_VIS_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vis_worker")
-
-# ==================================================================
-# STATISTICHE DI MISSIONE -- solo diagnostica/log, mai lette per decidere il
-# comportamento del robot. Resettato all'inizio di ogni chiamata a easy_walk().
-# I contatori sul veto/fonte-pendenza vivono invece sull'istanza PRM stessa
-# (vedi prm_graph.PRM.print_mission_summary), perché il PRM persiste per tutta
-# la missione mentre qui teniamo solo cio' che non ha un posto naturale li'.
-# ==================================================================
-MISSION_STATS = {
-    'gait_tier_counts': {'PLAIN': 0, 'MODERATE': 0, 'HARD': 0},
-    'replan_count': 0,
-    'near_threshold_saves': 0,
-    'segments_logged': 0,
-    'last_tier': None,   # tier dell'ultimo segmento, letto per la riga del CSV
-    'time_s': {},        # secondi spesi per fase, vedi _timing_add / [TEMPO]
-    'scan_bundles': 0,
-    'frontier_blocks': 0,
-    'frontier_aborts': 0,
-    'rotation_refusals': 0,   # rotazioni rifiutate dal controllo sul settore
-    'straight_retreats': 0,   # arretramenti dritti dopo un rifiuto di rotazione
-    'goal_repicks': 0,        # punti obiettivo riscelti dentro il ciclo
-    'goals_refused': 0,       # obiettivi esclusi per il resto della missione (_refuse_goal)
-    'goals_unreachable': 0,   # scelte d'obiettivo senza nessun punto raggiungibile nel grafo
-    'arrivals_near_goal': 0,  # arrivi accettati con il robot appena fuori dalla cella
-    'backtracks_in_place': 0, # ritorni senza movimento: nessuna briciola abbastanza lontana
-    'sdk_loop_calls': 0,      # chiusure d'anello di Spot riuscite (con risposta)
-    'sdk_loop_s': 0.0,        # secondi spesi in quelle chiamate
-    'sdk_loop_edges': 0,      # archi creati da Spot
-    'sdk_loop_partial': 0,    # chiamate finite allo scadere del limite (risultato parziale)
-    'sdk_loop_failures': 0,   # tentativi di chiusura d'anello falliti (errore, nel log)
-    'drift_samples': 0,       # misure della deriva dell'odometria (graphnav_log_drift)
-    'drift_max_m': 0.0,       # deriva massima misurata
-    'drift_last_m': 0.0,      # ultima misura (di solito all'arrivo su wp_0)
-    'graphnav_trips_avoided': 0,  # spostamenti GraphNav evitati: dal waypoint il grafo non arriva alla cella
-    'cone_moves': 0,          # avanzamenti dentro il cono di rotazione possibile
-    'retreats_suppressed': 0,  # arretramenti evitati perche' inutili
-    'early_replans': 0,       # ripianificazioni alla prima cella bloccante
-    'traps_detected': 0,      # trappole riconosciute dal ventaglio a 360 gradi
-    'arrival_refusals': 0,    # passi rifiutati perche' la posa d'arrivo non ha uscite
-    'graphnav_backtracks': 0,     # ritorni di un waypoint riusciti con GraphNav
-    'graphnav_backtrack_fail': 0, # ritorni con GraphNav falliti (ripiego a zampe)
-    'nodes_pruned': 0,            # nodi PRM scartati perche' dentro un ostacolo
-    'idle_loops': 0,              # giri di ciclo a vuoto (guardia anti-stallo)
-    'multinode_cut': 0,           # sequenze multinodo fermate a un nodo intermedio
-    'multinode_moves': 0,         # movimenti che hanno attraversato piu' nodi
-    'multinode_nodes': 0,         # nodi attraversati da quei movimenti
-    'prm_refresh': 0,             # refresh degli archi effettuati
-    'prm_refresh_skipped': 0,     # refresh saltati (nessun evento, robot fermo)
-    'rotation_maneuvers': 0,
-    'shortcuts': 0,
-    'falls': 0,
-    'self_rights': 0,
-    'graphnav_ok': 0,
-    'graphnav_fail': 0,
-}
+import parametri as P
+from registro import (MISSION_STATS, MISSION_CTX, VIS_EXECUTOR, BodyTiltRecorder, SegmentLog,
+                      TrajectoryLog, append_csv, append_trajectory, install_stdout_tee,
+                      log_segment, mission_z0, remove_stdout_tee, save_npz_async,
+                      set_mission_z0, timing_add)
 
 
 def _check_and_recover_fall(robot_state_client, command_client, global_map, where):
@@ -112,99 +59,15 @@ def _check_and_recover_fall(robot_state_client, command_client, global_map, wher
     print(f"[CADUTA] Rilevata {where} (caduta n. {MISSION_STATS['falls']} della missione).")
     movements.recover_from_fall(command_client, robot_state_client, status=st)
     MISSION_STATS['self_rights'] += 1
-    if MISSION_STATS['falls'] >= MAX_FALLS_PER_MISSION:
+    if MISSION_STATS['falls'] >= P.MAX_FALLS_PER_MISSION:
         raise movements.RobotFallenError(
             f"{MISSION_STATS['falls']} cadute in questa missione: il robot si e' rialzato ma la missione "
             f"si ferma qui. Controllare il terreno e il robot prima di ripartire.")
     if global_map is not None:
-        n = global_map.mark_hazard(st['x'], st['y'], FALL_HAZARD_RADIUS_M)
+        n = global_map.mark_hazard(st['x'], st['y'], P.FALL_HAZARD_RADIUS_M)
         print(f"[CADUTA] Punto della caduta ({st['x']:.2f}, {st['y']:.2f}) segnato come pericoloso "
-              f"nella mappa: disco di {FALL_HAZARD_RADIUS_M:.1f} m ({n} celle), il pianificatore lo evitera'.")
+              f"nella mappa: disco di {P.FALL_HAZARD_RADIUS_M:.1f} m ({n} celle), il pianificatore lo evitera'.")
     return (st['x'], st['y'])
-
-
-def _timing_add(phase, seconds):
-    """Accumula il tempo speso in una fase (riepilogo [TEMPO] a fine missione)."""
-    MISSION_STATS['time_s'][phase] = MISSION_STATS['time_s'].get(phase, 0.0) + float(seconds)
-
-
-# ==================================================================
-# GRAFO DI MISSIONE REGOLARE -- vedi mission_graph.py.
-#
-# I nodi stanno su un reticolo rettangolare con passo cell_size/n. Conseguenze:
-#   - grafo DETERMINISTICO: stessi parametri, stesso grafo, quindi test_replay puo'
-#     riprodurre le scelte del pianificatore e due missioni sono confrontabili;
-#   - il centro di ogni cella e' un nodo del reticolo per costruzione, quindi l'obiettivo
-#     di cella e' il centro geometrico ESATTO (non un punto vicino);
-#   - il punto di accensione e' il centro della cella di partenza ed e' anch'esso un nodo.
-#
-#   MISSION_LATTICE_SPACING_M  passo fra i nodi, da mission_graph.MISSION_SPACING_M (oggi
-#                              0.5 m; None = 0.25 m). Puo' stare sotto PRM_MIN_EDGE_M: i vicini piu'
-#                              corti di PRM_MIN_EDGE_M non si collegano (vedi mission_graph,
-#                              SPAZIATURA e ANELLI). None = mission_graph.suggested_spacing().
-#                              Arrotondato a cell_size/n. Da riga di comando: --spacing.
-#   MISSION_LATTICE_RINGS      anelli di vicini collegati: k = tutti i nodi entro la diagonale
-#                              del k-esimo anello, purche' a >= PRM_MIN_EDGE_M. Con passo 0.25
-#                              e k=2: archi da 0.50, 0.56 e 0.71 m in 16 direzioni. None =
-#                              tutti quelli entro max_edge_length. Da riga di comando: --rings.
-#   MISSION_GRID_ROWS/COLS, MISSION_CELL_SIZE_M  dimensione della missione, da
-#                              mission_graph.MISSION_*. Si cambiano con
-#                              --rows --cols --cell oppure SPOT_MISSION_GRID (vedi easy_walk).
-#   MISSION_GRAPH_SAMPLING     'reticolo' (quello descritto qui) o 'casuale': nodi sparsi con
-#                              una distribuzione, centri cella sempre compresi (vedi
-#                              mission_graph, NODI CASUALI). Da riga di comando: --grafo.
-#   MISSION_RANDOM_*           distribuzione, densita' e seme dei nodi casuali, da
-#                              mission_graph.RANDOM_*. Seme None = estratto a caso; quello
-#                              usato va nel log e in mission_summary.json. Da riga di
-#                              comando: --distribuzione --densita --seme.
-#   PRM_MIN_EDGE_M, PRM_MAX_EDGE_M  lunghezza minima e massima degli archi, per entrambi
-#                              i metodi. Da riga di comando: --min-edge --max-edge.
-#
-# Regola degli archi (scelta dell'utente): nodi fitti, ma un arco esiste SOLO fra nodi
-# distanti fra 0.5 e 1.25 m -- cioe' `rings=None` (nessun limite per gusci) con
-# PRM_MAX_EDGE_M = 1.25. Un arco salta fino a cinque passi di reticolo: con archi piu' corti
-# l'ingresso in una cella diventa una catena di molti waypoint, e ogni waypoint e' una
-# rotazione, proprio nei corridoi stretti in cui ruotare non si puo'. Il prezzo e' una
-# costruzione del grafo ~5 volte piu' lenta (vedi CHANGELOG), in parte restituito dal
-# refresh a eventi.
-#
-# PRM_MAX_EDGE_M e' anche il max_edge_length del PRM (mg.reach_m):
-# refresh_local_edge_weights ricostruisce da se' le coppie candidate dentro la finestra
-# usando quel valore, quindi un tetto diverso varrebbe solo fuori dalla finestra e il grafo
-# si riempirebbe di archi lunghi solo attorno al robot. I tratti lunghi li produce comunque
-# shortcut_index, che li conferma sui dati DAL VIVO invece di giudicarli da lontano.
-#
-# Righe, colonne, lato cella e passo vengono da mission_graph.mission_settings(): si
-# scelgono la' (MISSION_ROWS, MISSION_COLS, MISSION_CELL_SIZE_M, MISSION_SPACING_M; None =
-# default). Da qui si costruiscono sia la mappa delle celle sia il grafo.
-# ==================================================================
-_MISSION = mission_graph.mission_settings()
-MISSION_GRID_ROWS = _MISSION[0]
-MISSION_GRID_COLS = _MISSION[1]
-MISSION_CELL_SIZE_M = _MISSION[2]
-MISSION_LATTICE_SPACING_M = _MISSION[3]
-MISSION_LATTICE_RINGS = mission_graph.LATTICE_RINGS   # None: nessun limite per gusci, decide PRM_MAX_EDGE_M
-MISSION_GRAPH_SAMPLING = mission_graph.GRAPH_SAMPLING
-MISSION_RANDOM_DISTRIBUTION = mission_graph.RANDOM_DISTRIBUTION
-MISSION_RANDOM_DENSITY = mission_graph.RANDOM_DENSITY_PER_M2
-MISSION_RANDOM_SEED = mission_graph.RANDOM_SEED
-PRM_MIN_EDGE_M = mission_graph.DEFAULT_MIN_EDGE_M     # 0.5 m
-PRM_MAX_EDGE_M = mission_graph.DEFAULT_MAX_EDGE_M     # 1.25 m, tetto degli archi (vedi sopra)
-PRM_CONNECTION_RADIUS_M = 3.0
-
-# --- Dove puo' passare il pianificatore -------------------------------------------------
-# Per entrare in una cella il percorso puo' usare SOLO le celle gia' visitate, la cella in
-# cui si trova il robot e la cella obiettivo: le celle mai esplorate non si attraversano.
-# Se l'unica strada passa da una cella non visitata non si prova: il tentativo fallisce, il
-# lato viene segnato come provato (finalize_or_defer_blocked_cell) e si passa a un'altra
-# cella; quella bloccata verra' ritentata piu' avanti, da un altro lato.
-PLAN_ONLY_EXPLORED_CELLS = True
-# Tetto alla deviazione: un percorso piu' lungo di RATIO * linea d'aria + SLACK vale
-# "nessun percorso" (vedi PRM.set_detour_limit). None = nessun tetto.
-PLAN_MAX_DETOUR_RATIO = 2.0
-PLAN_DETOUR_SLACK_M = 1.0
-# Copia del modulo: dentro attempt_enter_cell_from_position il nome prm_graph e' l'istanza.
-ANCHOR_ON_NODE_M = prm_graph.ANCHOR_ON_NODE_M
 
 
 def _build_mission_prm(env, verbose=True):
@@ -218,15 +81,15 @@ def _build_mission_prm(env, verbose=True):
     Gli ARCHI non vengono creati qui: servono i dati di terreno, vedi _rebuild_prm_edges.
     """
     mg = mission_graph.build_mission_graph(
-        env=env, spacing_m=MISSION_LATTICE_SPACING_M, rings=MISSION_LATTICE_RINGS,
-        min_edge_length=PRM_MIN_EDGE_M, max_edge_length=PRM_MAX_EDGE_M,
-        connection_radius=PRM_CONNECTION_RADIUS_M, verbose=verbose,
-        sampling=MISSION_GRAPH_SAMPLING, distribution=MISSION_RANDOM_DISTRIBUTION,
-        density_per_m2=MISSION_RANDOM_DENSITY, seed=MISSION_RANDOM_SEED)
-    prm = prm_graph.PRM(min_edge_length=PRM_MIN_EDGE_M, max_edge_length=mg.reach_m,
-                        connection_radius=PRM_CONNECTION_RADIUS_M)
+        env=env, spacing_m=P.MISSION_LATTICE_SPACING_M, rings=P.MISSION_LATTICE_RINGS,
+        min_edge_length=P.PRM_MIN_EDGE_M, max_edge_length=P.PRM_MAX_EDGE_M,
+        connection_radius=P.PRM_CONNECTION_RADIUS_M, verbose=verbose,
+        sampling=P.MISSION_GRAPH_SAMPLING, distribution=P.MISSION_RANDOM_DISTRIBUTION,
+        density_per_m2=P.MISSION_RANDOM_DENSITY, seed=P.MISSION_RANDOM_SEED)
+    prm = prm_graph.PRM(min_edge_length=P.PRM_MIN_EDGE_M, max_edge_length=mg.reach_m,
+                        connection_radius=P.PRM_CONNECTION_RADIUS_M)
     prm.mission_graph = mg          # lo rilegge _rebuild_prm_edges
-    prm.set_detour_limit(PLAN_MAX_DETOUR_RATIO, PLAN_DETOUR_SLACK_M)
+    prm.set_detour_limit(P.PLAN_MAX_DETOUR_RATIO, P.PLAN_DETOUR_SLACK_M)
     mg.into_prm(prm)
     return prm, mg.as_sampler(), mg
 
@@ -253,14 +116,6 @@ def _node_cells(prm, env):
     return cache
 
 
-# Prima di spostarsi con GraphNav al waypoint da cui tentare una cella, si controlla sul grafo
-# che da li' si possa arrivare alla cella (vedi graph_reaches_cell). Nella prova del 22-10
-# 15:24, tre spostamenti su sei finivano in un tentativo fallito in meno di un secondo per
-# "GRAFO DISCONNESSO", che il grafo sapeva gia' prima di partire: ~25 s su 3 minuti.
-# False = si parte comunque e decide il tentativo.
-GRAPHNAV_PRECHECK = True
-
-
 def graph_reaches_cell(prm, env, from_xy, row, col, global_map=None):
     """
     Dal punto from_xy (il waypoint da cui si tenterebbe la cella) il grafo arriva ad almeno un
@@ -278,7 +133,7 @@ def graph_reaches_cell(prm, env, from_xy, row, col, global_map=None):
         return None
     cells = _node_cells(prm, env)
     target = (int(row), int(col))
-    if PLAN_ONLY_EXPLORED_CELLS:
+    if P.PLAN_ONLY_EXPLORED_CELLS:
         ok_cells = {(r, c) for r in range(env.rows) for c in range(env.cols)
                     if env.is_cell_visited(r, c)}
         ok_cells.add(target)
@@ -306,7 +161,7 @@ def _restrict_planning_to_explored_cells(prm, env, target_row, target_col, robot
     della cella obiettivo (vedi PLAN_ONLY_EXPLORED_CELLS). Da chiamare prima di ogni
     tentativo di cella: le celle visitate cambiano fra un tentativo e l'altro.
     """
-    if not PLAN_ONLY_EXPLORED_CELLS:
+    if not P.PLAN_ONLY_EXPLORED_CELLS:
         prm.set_allowed_nodes(None)
         return
     cells = {(r, c) for r in range(env.rows) for c in range(env.cols) if env.is_cell_visited(r, c)}
@@ -322,13 +177,7 @@ def _restrict_planning_to_explored_cells(prm, env, target_row, target_col, robot
 def _robot_on_node(prm, node_id, x, y):
     """True se il robot e' praticamente sul nodo (vedi prm_graph.ANCHOR_ON_NODE_M)."""
     pos = prm.get_node_position(node_id)
-    return pos is not None and float(np.hypot(pos[0] - x, pos[1] - y)) <= ANCHOR_ON_NODE_M
-
-
-# True: all'inizio di ogni cella si rivalutano solo gli archi vicini alle zone con dati
-# nuovi (vedi mission_graph.MissionGraph.add_edges_to_prm, incremental). False = si
-# rivalutano tutti; il risultato e' lo stesso.
-INCREMENTAL_GRAPH_UPDATE = True
+    return pos is not None and float(np.hypot(pos[0] - x, pos[1] - y)) <= prm_graph_module.ANCHOR_ON_NODE_M
 
 
 def _rebuild_prm_edges(prm, global_map):
@@ -340,334 +189,7 @@ def _rebuild_prm_edges(prm, global_map):
     return prm.mission_graph.add_edges_to_prm(
         prm, global_map=global_map,
         edge_safety_margin=spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
-        incremental=INCREMENTAL_GRAPH_UPDATE)
-
-
-def _save_npz_async(path, **arrays):
-    """Salvataggio compresso nel thread di servizio: il ciclo principale non aspetta il disco."""
-    def _job():
-        try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            np.savez_compressed(path, **arrays)
-        except Exception as e:
-            print(f"[DATA SAVE] Impossibile salvare {os.path.basename(path)}: {e}")
-    _VIS_EXECUTOR.submit(_job)
-
-# Contesto della missione in corso, per i log diagnostici che non hanno modo di ricevere
-# questi oggetti come argomento (attempt_enter_cell_from_position e' chiamata da piu' punti
-# e non vogliamo cambiarne la firma). Riempito in easy_walk(), letto da _log_segment() e
-# _emit_mission_summary_once(). Solo diagnostica: nessuna decisione del robot lo legge.
-_MISSION_CTX = {
-    'prm': None,
-    'log_folder': None,
-    'segment_log': None,
-    'summary_done': False,
-    # Quota del suolo all'AVVIO DELLA MISSIONE nel frame VISION. Spot misura le
-    # quote rispetto a dove e' stato ACCESO: se lo si porta alla zona di missione facendo
-    # delle scale, tutte le quote risultano spostate (di metri). x, y e direzione
-    # sono gia' riferiti all'avvio missione (env.set_origin con la posa di partenza); per la
-    # quota si salva questo valore in tutti i dati e nelle mappe, e il viewer mostra le quote
-    # rispetto ad esso. I CALCOLI non ne dipendono: usano solo differenze di quota e il
-    # suolo stimato sotto il robot a ogni scansione (vedi spotGrid.GROUND_HEIGHT_TOLERANCE_M).
-    'mission_z0': None,
-}
-
-
-def _mission_z0():
-    """Quota di riferimento della missione (NaN finche' non e' fissata), per i file salvati."""
-    z0 = _MISSION_CTX.get('mission_z0')
-    return np.nan if z0 is None else float(z0)
-
-
-def _set_mission_z0(robot_state_client, z_body):
-    """
-    Fissa la quota di riferimento all'avvio missione: il piano del suolo stimato da Spot
-    sotto i piedi (frame 'gpe'); se non disponibile, la quota del corpo meno l'altezza
-    nominale in piedi. Stampa di quanto la quota di missione differisce da quella di accensione.
-    """
-    z0, source = None, "piano del suolo di Spot"
-    try:
-        snap = robot_state_client.get_robot_state().kinematic_state.transforms_snapshot
-        z0 = float(get_a_tform_b(snap, VISION_FRAME_NAME, GROUND_PLANE_FRAME_NAME).position.z)
-    except Exception as e:
-        print(f"[QUOTE] Piano del suolo non disponibile ({e}): uso la quota del corpo.")
-    if z0 is None or not np.isfinite(z0):
-        z0, source = float(z_body) - 0.5, "quota del corpo - 0.5 m"
-    _MISSION_CTX['mission_z0'] = z0
-    note = ""
-    if abs(z0) > 1.0:
-        note = (" -- il robot e' stato acceso a un'altra quota (scale?). La navigazione non ne "
-                "risente; il valore e' salvato come mission_z0 in ogni file e mission_viewer "
-                "mostra le quote rispetto all'avvio missione")
-    print(f"[QUOTE] Riferimento quote = suolo all'avvio missione: z={z0:.3f} m nel frame VISION "
-          f"({source}), cioe' {z0:+.2f} m rispetto all'accensione{note}.")
-    return z0
-
-# ==================================================================
-# NAVIGAZIONE CON IL FRONTE SICURO -- vedi decide_next_move() e il ciclo
-# in attempt_enter_cell_from_position(). Le distanze del fronte stanno in spotGrid
-# (FRONTIER_*), qui solo la logica del ciclo.
-#   MIN_PARTIAL_STEP_M           -- passo minimo: sotto questa lunghezza non vale la pena
-#                                   muoversi (si pagherebbe una scansione per pochi cm).
-#   FRONTIER_BLOCK_CONFIRM_SCANS -- quante scansioni consecutive, a robot FERMO, senza poter
-#                                   avanzare nemmeno del passo minimo, prima di dichiarare
-#                                   un blocco: la conferma "da vicino", invece di
-#                                   condannare un arco al primo scorcio da lontano.
-#   FRONTIER_RESCAN_WAIT_S       -- pausa fra due scansioni di conferma.
-#   MAX_BLOCK_REPLANS            -- dopo un blocco si ripianifica dal punto in cui si e'; se
-#                                   succede piu' di queste volte nello stesso tentativo, ci
-#                                   si arrende (ritirata, cella rimandata). Lo stesso
-#                                   valore limita anche le riscelte del punto obiettivo.
-#   FRONTIER_ABORT_CONFIRM       -- a movimento in corso, quanti fronti consecutivi (~0.2 s
-#                                   l'uno) devono dire "non arrivi dove stai andando" prima
-#                                   di fermare il robot. 2 evita di inchiodare per un singolo
-#                                   fotogramma sporco; a 0.5 m/s sono ~20 cm.
-#   GOAL_REACHED_TOLERANCE_M     -- se il fronte impedisce gli ultimi centimetri verso
-#                                   l'obiettivo (es. un muro appena oltre), ci si accontenta.
-#   MAX_LOOP_ITERATIONS          -- salvaguardia anti-stallo del ciclo.
-# ==================================================================
-MIN_PARTIAL_STEP_M = 0.40
-FRONTIER_BLOCK_CONFIRM_SCANS = 3
-FRONTIER_RESCAN_WAIT_S = 0.3
-MAX_BLOCK_REPLANS = 3
-FRONTIER_ABORT_CONFIRM = 2
-FRONTIER_ABORT_TOLERANCE_M = 0.05
-
-# Legata allo scostamento che il fronte stesso impone: allowed_advance() ferma il CENTRO del
-# robot a FRONTIER_BODY_HALF_LENGTH_M + FRONTIER_MARGIN_M = 0.65 m prima del primo punto non
-# libero. Una tolleranza piu' piccola lascerebbe una banda morta in cui il robot non puo' ne'
-# avanzare ne' dichiarare di essere arrivato, e finirebbe per dichiarare un blocco. Le due
-# costanti devono essere la stessa cosa.
-GOAL_REACHED_TOLERANCE_M = spotGrid.FRONTIER_BODY_HALF_LENGTH_M + spotGrid.FRONTIER_MARGIN_M
-MAX_LOOP_ITERATIONS = 150
-
-# --- GUARDIE ANTI-STALLO ------------------------------------------------------------
-# Il ciclo puo' girare a vuoto con il robot immobile: la rotazione verso il prossimo nodo
-# viene rifiutata, il cono non trova direzioni che avvicinino, ma le direzioni utilizzabili
-# non sono zero (quindi non e' "trappola"); si scarta il tratto, si ripianifica, e al giro
-# dopo il primo waypoint punta da un'altra parte e la rotazione viene rifiutata di nuovo.
-#   MAX_ROTATION_DISCARDS -- scarti di tratto per rifiuto di rotazione ammessi in un
-#       tentativo di cella. Contati per TENTATIVO e non per coppia di nodi: la coppia cambia
-#       a ogni ripianificazione, e un contatore per coppia non scatterebbe mai (e' il
-#       limite di MAX_ROTATION_FAILS_SAME_EDGE).
-#   MAX_IDLE_LOOPS -- giri di ciclo consecutivi senza che il robot si sia spostato di
-#       almeno IDLE_MOVE_M. E' la rete generica: qualunque sia il ramo che gira a vuoto,
-#       dopo tanti giri fermi si rinuncia alla cella in modo ordinato invece di consumare
-#       batteria. Deve stare SOPRA la sequenza legittima piu' lunga a robot fermo,
-#       altrimenti taglia via proprio le reti di ripiego (ritorno con GraphNav) che quella
-#       sequenza deve raggiungere. Calcolata sui limiti del ciclo:
-#         [SUBITO]                MAX_EARLY_REPLANS              4
-#         obiettivo riscelto      MAX_BLOCK_REPLANS              3
-#         conferme di blocco      FRONTIER_BLOCK_CONFIRM_SCANS x (MAX_BLOCK_REPLANS+1) = 3 x 4 = 12
-#         rifiuti di rotazione    MAX_ROTATION_DISCARDS          4
-#         rifiuti d'arrivo        MAX_ARRIVAL_REFUSALS           3
-#                                                        totale 26  -> 30
-#       A ~0.7 s per giro fermo sono ~20 s. Il giro a vuoto sulla rotazione lo prende
-#       prima MAX_ROTATION_DISCARDS; questa e' la rete per tutto il resto.
-MAX_ROTATION_DISCARDS = 4
-MAX_IDLE_LOOPS = 30
-IDLE_MOVE_M = 0.05
-
-# ==================================================================
-# ROTAZIONE E ARRETRAMENTO.
-#
-# Decisione dell'utente: il robot punta SEMPRE il muso verso il punto da raggiungere.
-# Niente marcia obliqua. Di traverso Spot e' largo 1.10 m invece di 0.50, quindi il
-# fronte pretende 0.59 m di obstacle_distance invece di 0.30: andare di lato quando non
-# si riesce a ruotare renderebbe il robot PIU' LARGO proprio dove lo spazio e' poco.
-#
-# Quando la rotazione non e' possibile il robot ARRETRA IN LINEA RETTA lungo l'asse
-# del corpo -- che non e' marcia obliqua: l'ingombro resta 0.50 m e la soglia del
-# fronte resta 0.30 -- e al giro dopo riprova da li'. Alla seconda volta sullo stesso
-# tratto il tratto si scarta e si ripianifica.
-#   ROTATION_RETREAT_M        -- quanto si tenta di arretrare (il fronte puo' concederne meno)
-#   ROTATION_RETREAT_MIN_M    -- sotto questo arretramento non vale la pena muoversi
-#   MAX_ROTATION_FAILS_SAME_EDGE -- tentativi di arretramento sullo stesso tratto prima di scartarlo
-# ==================================================================
-ROTATION_RETREAT_M = 0.60
-ROTATION_RETREAT_MIN_M = 0.20
-MAX_ROTATION_FAILS_SAME_EDGE = 2
-
-# --- Ventaglio dentro il cono di rotazione possibile -- vedi plan_cone_move.
-CONE_SWEEP_MAX_DEG = 90.0      # quanto in la' si guarda, a destra e a sinistra del muso
-CONE_SWEEP_STEP_DEG = 10.0     # passo della scansione angolare (9 direzioni per lato)
-CONE_MIN_GAIN_M = 0.20         # una direzione vale solo se avvicina all'obiettivo di tanto
-# Il cono punta al punto del PERCORSO a questa distanza dal robot, non all'obiettivo della
-# cella in linea d'aria: se il percorso gira attorno a un blocco, "avvicinarsi" all'obiettivo
-# in linea d'aria puo' portare il robot dentro un vicolo cieco, dalla parte opposta al
-# percorso. Se quel punto e' dietro, nessuna direzione del cono avvicina, e si passa
-# all'arretramento -- che e' la mossa giusta.
-CONE_PATH_LOOKAHEAD_M = 1.5
-# Durante la rotazione sul posto un fronte "fine dati" piu' corto non interrompe il movimento:
-# ruotando la zona vista si sposta e il bordo dei dati si accorcia di qualche centimetro senza
-# alcun ostacolo. Vale finche'
-# il robot non si e' spostato di almeno tanto; un fronte accorciato da un OSTACOLO interrompe
-# sempre.
-ABORT_IGNORE_DATA_EDGE_UNTIL_M = 0.15
-
-# Arretramenti consecutivi ammessi, CONTATI PER SEQUENZA e non per arco:
-# MAX_ROTATION_FAILS_SAME_EDGE e' indicizzato su (nodo_robot, nodo_successivo), e dopo un
-# arretramento il robot puo' trovarsi agganciato a un altro nodo, quindi da solo non ferma
-# una catena di arretramenti.
-MAX_STRAIGHT_RETREATS_IN_A_ROW = 2
-
-# --- Ventaglio a 360 gradi: riconoscere la trappola -- vedi scan_escape_directions.
-ESCAPE_FAN_STEP_DEG = 15.0        # 24 direzioni; 24 valutazioni del fronte, ~frazione di scansione
-ESCAPE_FAN_MIN_ADVANCE_M = 0.30   # sotto questo spazio una direzione non e' una via d'uscita
-# Controllo preventivo sulla posa d'arrivo (vedi arrival_has_exit): si paga solo dove serve,
-# cioe' sui passi corti e verso spazi stretti, che sono i casi in cui si entra negli angoli.
-ARRIVAL_EXIT_CHECK_MAX_STEP_M = 0.40
-ARRIVAL_EXIT_CHECK_OD_M = 0.50
-MAX_ARRIVAL_REFUSALS = 3          # per tentativo di cella, per non avvitarsi sul rifiuto
-
-# --- Ritorni con GraphNav invece che camminando all'indietro ------------------------------
-# Tornare indietro a zampe, all'indietro, sui tratti registrati e' la manovra piu' rischiosa
-# che facciamo: il robot non vede dove va e non si rilocalizza. GraphNav cammina in avanti,
-# con la localizzazione e l'anti-ostacolo di Boston Dynamics. Si lascia una traccia di
-# waypoint lungo la strada (vedi graphnav_drop_breadcrumb) e si torna su quella.
-GRAPHNAV_WAYPOINT_MIN_SPACING_M = 0.75   # distanza minima fra due briciole
-GRAPHNAV_MAX_BACKTRACK_HOPS = 3          # poi si rimanda la cella e si passa alla priorita' dopo
-
-# --- Scorciatoie nel grafo GraphNav -----------------------------------------------------
-# Ogni waypoint si collega solo al precedente: il grafo GraphNav e' una CATENA che ricalca la
-# strada fatta, e GraphNav cammina solo sugli archi. Senza scorciatoie, tornare a un waypoint
-# a un metro di distanza ma registrato molti passi prima vuol dire ripercorrere tutta la
-# catena. Prima di ogni spostamento con GraphNav (graphnav_add_shortcuts):
-#   1. scorciatoie NOSTRE, scelte SULLA STRADA (vedi plan_graphnav_shortcuts): si calcola la
-#      strada piu' corta verso la destinazione considerando TUTTE le coppie di waypoint a
-#      meno di GRAPHNAV_SHORTCUT_MAX_M, senza arco diretto, la cui linea retta e' stata
-#      VISTA libera nella mappa globale con GRAPHNAV_SHORTCUT_MARGIN_M di margine, e si
-#      creano solo quelle che la strada usa. Mai attraverso zone mai viste.
-#   2. chiusure d'anello di Spot (fiducial + odometria) con il loro controllo di collisione.
-# GraphNav conserva comunque il suo anti-ostacolo durante il movimento.
-# GRAPHNAV_SHORTCUT_MARGIN_M: margine dalle celle occupate (che sono gia' a obstacle_distance
-# <= 0.15): 0.30 + 0.15 = 0.45 m dall'ostacolo, largo perche' gli archi sono lunghi.
-GRAPHNAV_SHORTCUTS = True
-GRAPHNAV_SDK_LOOP_CLOSURE = True
-# Tempo massimo di elaborazione LATO SPOT della chiusura d'anello (Params.timeout_seconds):
-# allo scadere Spot restituisce gli archi trovati fino a li'. 0 = non chiamarla.
-#   _BUDGET_S       prima di ogni spostamento GraphNav, in modalita' VELOCE (_FAST: senza ICP
-#                   ne' feature matching). SPENTA dal 26-10 sera (vedi sotto);
-#   _BUDGET_FINAL_S una volta, a fine missione, prima dell'ancoraggio e del ritorno a wp_0,
-#                   completa (con ICP).
-# Prove al banco del 26-10 sul grafo del 22-10 16:04 ricostruito a 100/200/388 waypoint
-# (prova_anelli.py, MissionLogs/prova_anelli_26-10-2026_12-41-53 e _13-02-58):
-#   - completa, limite 4 s: 4-5 archi a 100 wp, 1 a 200, 3 a 388, in 5-8 s, mai finita; senza
-#     limite Spot si ferma da solo dopo ~30 s, insieme alla RPC (da qui i 20 timeout senza
-#     risultato del 22-10); chiamate ripetute non riprendono il lavoro e si allungano;
-#   - VELOCE: FINITA in 0.4 s (100 wp, 6 archi), 2.0 s (200 wp, 12), 4.0 s (388 wp, 24). Il
-#     costo era tutto nell'ICP. Gli archi non sono corretti sulle scansioni (la posa viene
-#     dall'odometria, come per le nostre scorciatoie) ma passano il controllo di collisione
-#     di Spot: sono scorciatoie in piu' su tutto il grafo, non solo sulla strada del viaggio;
-#   - a fine missione, completa: 45 s -> 17 archi in 59 s, 60 -> 18 in 72 s, 90 -> 21 in 90 s,
-#     120 -> 23 in 152 s. Oltre 45 s ~1 arco ogni 10-15 s. Questi archi correggono la deriva
-#     della mappa scaricata (ancoraggio).
-# Prova all'aperto del 26-10 15:11: veloce 0.0-2.0 s a viaggio, 13 archi; la completa finale
-# 2 archi. Serie 3 al banco sul grafo di quella missione: la completa finisce in 62-71 s con
-# 0 archi, con o senza prune_edges, con 45 o 90 s. Spot cerca coppie vicine nello spazio ma
-# LONTANE lungo il grafo, e gli archi veloci e le nostre scorciatoie quei giri li hanno gia'
-# accorciati; gli archi esistenti non li ricontrolla mai. Le due cose si escludono: si tiene la
-# completa (archi corretti sulle scansioni, gli unici che correggono la deriva della mappa
-# scaricata: 17 in 45 s al banco su un grafo senza archi veloci) e si spegne la veloce. Gli
-# spostamenti usano le nostre scorciatoie: il 22-10 23 viaggi riusciti su 23 con quelle sole.
-GRAPHNAV_SDK_LOOP_BUDGET_S = 0.0
-GRAPHNAV_SDK_LOOP_FAST = True
-GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S = 45.0
-# prune_edges della chiusura completa finale: None = valore di Spot (True: un solo arco per
-# zona). Il 26-10 15:36 la finale ha dato 2 archi: le zone erano gia' collegate dalla veloce e
-# dalle scorciatoie, e Spot non ne aggiungeva altri accanto. False le farebbe aggiungere anche
-# li', corretti sulle scansioni. Serie 3: nessuna differenza (0 archi in entrambi i casi).
-GRAPHNAV_SDK_LOOP_FINAL_PRUNE = None
-# Limiti sulla distanza lungo il grafo fra i due waypoint di un anello candidato
-# (max/min_loop_closure_path_length). None = valori di Spot. Da scegliere con prova_anelli.py.
-GRAPHNAV_SDK_LOOP_MAX_PATH_M = None
-GRAPHNAV_SDK_LOOP_MIN_PATH_M = None
-GRAPHNAV_SHORTCUT_MAX_M = 3.0
-GRAPHNAV_SHORTCUT_MARGIN_M = 0.30
-# Lunghezza massima degli archi che crea la chiusura d'anello di Spot.
-GRAPHNAV_SDK_LOOP_MAX_M = 2.0
-# Un nodo PRM con meno di questo spazio libero non e' raggiungibile dal fronte: si scarta.
-PRM_NODE_MIN_CLEARANCE_M = spotGrid.FRONTIER_CLEARANCE_M   # 0.30
-# Ripianificazioni "precoci" (alla prima cella bloccante, senza aspettare la conferma da
-# ferma) ammesse per tentativo di cella. Vedi il ramo 'wait'.
-MAX_EARLY_REPLANS = 4
-# Ogni ritorno indietro ha memoria per il tentativo (vedi _trap_backtrack): l'arco su cui il
-# robot si e' fermato diventa impercorribile fino alla fine del tentativo, e al
-# MAX_BACKTRACKS_PER_ATTEMPT-esimo ritorno il robot torna indietro e rinuncia alla cella da
-# questo lato. Senza memoria, dalla briciola precedente il pianificatore ritroverebbe lo
-# stesso percorso e il robot rientrerebbe nella stessa trappola.
-MAX_BACKTRACKS_PER_ATTEMPT = 2
-# Entro questa distanza l'obiettivo del recupero e' "lo stesso" di quello appena fallito.
-RECOVERY_SAME_GOAL_M = 0.30
-
-# --- SCELTA DELL'OBIETTIVO DELLA CELLA (vedi find_best_point_in_cell) -----------------
-# TARGET_CLEARANCE_M: spazio libero PREFERITO attorno all'obiettivo, sulla mappa globale e
-# sulla scansione dal vivo. Il fronte pretende FRONTIER_CLEARANCE_M (0.25) e l'isteresi del
-# fronte e' 0.04 m: un obiettivo scelto a 0.28 (PLAN_CLEARANCE_M, che resta il minimo
-# assoluto) oscilla attorno alla soglia. All'aperto (22-10 16:04) gli obiettivi scelti a
-# 0.28 sono stati rifiutati dal vivo a 0.24, al bordo dell'erba.
-TARGET_CLEARANCE_M = 0.33
-# TARGET_CELL_BORDER_M: l'obiettivo si sceglie preferibilmente ad almeno questa distanza dal
-# bordo della cella. Un obiettivo sul bordo lascia il robot, fermo entro la tolleranza
-# d'arrivo, fuori dalla cella ("Mancano 0.06 m ... ancora fuori dalla cella", 44 volte il
-# 22-10 16:04).
-TARGET_CELL_BORDER_M = 0.30
-# Arrivo per tolleranza con il robot appena FUORI dalla cella: vale se il centro e' fuori di
-# al massimo ARRIVAL_OUTSIDE_CELL_M (il muso, 0.55 m avanti, e' comunque dentro). E' la
-# tolleranza d'arrivo meno il margine dal bordo: un obiettivo scelto a TARGET_CELL_BORDER_M
-# dentro la cella, con il robot fermo a GOAL_REACHED_TOLERANCE_M da lui, vale sempre. Il
-# 22-10 16:04, a ogni rifiuto "fuori dalla cella" il robot era a 0.5-0.65 m dall'obiettivo,
-# fuori di 0.01-0.61 m.
-ARRIVAL_OUTSIDE_CELL_M = GOAL_REACHED_TOLERANCE_M - TARGET_CELL_BORDER_M      # = 0.35
-# Un obiettivo rifiutato dal fronte (spazio libero dal vivo sotto la soglia, o blocco
-# confermato entro questa distanza da lui) resta escluso per la sua cella fino alla fine
-# della missione: vedi _refuse_goal.
-REFUSED_GOAL_BLOCK_M = 0.35
-
-# ==================================================================
-# DATI DI MISSIONE.
-#   Durante la missione non si disegna nulla: ogni figura viene salvata come dati in un
-#   <nome>_vis.npz (vedi visualize_grid_with_candidates) e le figure si fanno dopo con
-#   mission_viewer.py.
-#   SAVE_SCAN_BUNDLES -- un .npz per ogni scansione del ciclo di navigazione, nella
-#       sottocartella scans/: layer GREZZI come arrivano da Spot (terrain, terrain_valid,
-#       obstacle_distance), i derivati usati per decidere, la georeferenziazione (origine,
-#       cella, posa del robot, suolo stimato), percorso, fronte e decisione. E' cio' che usano
-#       mission_viewer.py, mission_report.py e test_replay.py. ~0.3 MB a scansione.
-# ==================================================================
-SAVE_SCAN_BUNDLES = True
-# Layer di Spot salvati in piu' nei pacchetti, con una richiesta a parte che non tocca la
-# navigazione (spotGrid.LocalGrid.extra_layers): per capire l'erba alta (22-10 16:04), cioe'
-# se intensita' e no_step distinguono la vegetazione da un ostacolo solido. Ogni layer ha
-# accanto <nome>_origin e <nome>_cell, perche' la sua griglia puo' non coincidere con le
-# altre. () = spento.
-SAVE_EXTRA_LAYERS = ('intensity', 'no_step')
-
-# Raggio del disco segnato come pericoloso nella mappa globale attorno al punto di una
-# caduta (vedi _check_and_recover_fall e GlobalGrid.mark_hazard).
-FALL_HAZARD_RADIUS_M = 0.5
-
-# ==================================================================
-# RITIRATA (vedi retreat_along_traveled_path).
-#   RETREAT_MAX_SEGMENTS  -- quanti tratti gia' percorsi ripercorrere a ritroso al
-#                            massimo. Pochi: serve a uscire da una tasca, non a
-#                            tornare al punto di partenza.
-#   RETREAT_MIN_SEGMENT_M -- sotto questa lunghezza il tratto si salta (non vale un
-#                            comando di movimento a se').
-#   RETREAT_AFTER_ABORT_M -- quanto arretrare subito dopo un arresto a meta'
-#                            movimento, per staccarsi da cio' che ha fatto fermare.
-# ==================================================================
-RETREAT_MAX_SEGMENTS = 3
-RETREAT_MIN_SEGMENT_M = 0.20
-RETREAT_AFTER_ABORT_M = 0.40
-#   RETREAT_CONTINUITY_M  -- si arretra lungo un tratto registrato solo se il robot sta
-#                            davvero dove quel tratto finiva. Dopo uno spostamento con GraphNav
-#                            fra celle (che non registra tratti) l'ultimo tratto registrato puo'
-#                            stare a molti metri, e il robot ci andrebbe camminando
-#                            all'indietro, alla cieca.
-#   RETREAT_MAX_SEGMENT_M -- tratto piu' lungo di cosi': non lo si ripercorre all'indietro.
-RETREAT_CONTINUITY_M = 0.50
-RETREAT_MAX_SEGMENT_M = 2.50
+        incremental=P.INCREMENTAL_GRAPH_UPDATE)
 
 
 # =========================================================================
@@ -676,287 +198,6 @@ RETREAT_MAX_SEGMENT_M = 2.50
 # funzione e' scritta per non sollevare mai eccezioni verso il chiamante: un log che
 # fallisce non deve mai fermare o alterare un movimento.
 # =========================================================================
-
-class _TeeStream:
-    """
-    Copia tutto quello che viene stampato su un file, mantenendo anche la stampa normale a
-    schermo. Nel file ogni riga e' preceduta da un'ora (HH:MM:SS.mmm), utile per allineare i
-    log con un eventuale video o con le note prese a mano durante la prova.
-    """
-    def __init__(self, original, file_path):
-        self._orig = original
-        self._file = open(file_path, 'a', buffering=1, encoding='utf-8')
-        self._lock = threading.Lock()
-        self._at_line_start = True
-
-    def write(self, s):
-        try:
-            self._orig.write(s)
-        except Exception:
-            pass
-        try:
-            with self._lock:
-                out = []
-                for chunk in s.splitlines(keepends=True):
-                    if self._at_line_start:
-                        out.append(datetime.now().strftime('%H:%M:%S.%f')[:-3] + ' ')
-                    out.append(chunk)
-                    self._at_line_start = chunk.endswith('\n')
-                if out:
-                    self._file.write(''.join(out))
-        except Exception:
-            pass
-        return len(s)
-
-    def flush(self):
-        try:
-            self._orig.flush()
-        except Exception:
-            pass
-        try:
-            with self._lock:
-                self._file.flush()
-        except Exception:
-            pass
-
-    def close_file(self):
-        try:
-            with self._lock:
-                self._file.close()
-        except Exception:
-            pass
-
-    def __getattr__(self, name):
-        # isatty, encoding, fileno... passano allo stream originale
-        return getattr(self._orig, name)
-
-
-def _install_stdout_tee(file_path):
-    """Da qui in poi ogni print finisce anche in file_path. Idempotente."""
-    try:
-        if not isinstance(sys.stdout, _TeeStream):
-            sys.stdout = _TeeStream(sys.stdout, file_path)
-            print(f"[LOG] Copia completa dell'output su file: {file_path}")
-    except Exception as e:
-        print(f"[LOG] Impossibile attivare la copia dell'output su file: {e}")
-
-
-def _remove_stdout_tee():
-    try:
-        if isinstance(sys.stdout, _TeeStream):
-            tee = sys.stdout
-            sys.stdout = tee._orig
-            tee.close_file()
-    except Exception:
-        pass
-
-
-def _quat_to_roll_pitch_deg(q):
-    """Roll e pitch (gradi) di un quaternione con attributi w, x, y, z. Nel frame VISION,
-    che e' allineato alla gravita', sono l'inclinazione reale del corpo rispetto
-    all'orizzontale (stessa convenzione con cui il file calcola gia' lo yaw)."""
-    roll = np.arctan2(2.0 * (q.w * q.x + q.y * q.z), 1.0 - 2.0 * (q.x ** 2 + q.y ** 2))
-    pitch = np.arcsin(np.clip(2.0 * (q.w * q.y - q.z * q.x), -1.0, 1.0))
-    return float(np.degrees(roll)), float(np.degrees(pitch))
-
-
-class BodyTiltRecorder:
-    """
-    Registra l'inclinazione REALE del corpo di Spot (roll e pitch) mentre esegue un
-    movimento, interrogando lo stato del robot circa 5 volte al secondo in un thread a parte.
-    Serve a confrontare cio' che il pianificatore stimava (pendenza del terreno) con cio' che
-    Spot ha effettivamente sentito: e' il dato che permette di ritarare soglie e pesi.
-
-    Uso:
-        rec = BodyTiltRecorder(robot_state_client); rec.start()
-        ... movimento ...
-        stats = rec.stop()   # dict con inizio, fine, picchi, numero di campioni
-
-    Nota di lettura: Spot puo' livellare il corpo rispetto al terreno, quindi l'inclinazione
-    del corpo e' un indicatore indiretto della pendenza, non la pendenza stessa. Ogni errore
-    di lettura viene contato e ignorato.
-    """
-    def __init__(self, robot_state_client, period_s=0.2):
-        self._client = robot_state_client
-        self._period = period_s
-        self._stop = threading.Event()
-        self._thread = None
-        self._lock = threading.Lock()
-        self._start = None
-        self._last = None
-        self._peak_roll = 0.0
-        self._peak_pitch = 0.0
-        self._n = 0
-        self._errors = 0
-        # Traiettoria reale campionata: (t, x, y, yaw, roll, pitch). Finisce in
-        # trajectory.csv, per confrontare dove il robot e' andato davvero con cio' che era
-        # stato comandato.
-        self.samples = []
-
-    def _sample(self):
-        try:
-            x, y, _, q = spotUtils.getPosition(self._client)
-            roll, pitch = _quat_to_roll_pitch_deg(q)
-            yaw = float(np.degrees(np.arctan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y ** 2 + q.z ** 2))))
-        except Exception:
-            with self._lock:
-                self._errors += 1
-            return None
-        with self._lock:
-            if self._start is None:
-                self._start = (roll, pitch)
-            self._last = (roll, pitch)
-            self._peak_roll = max(self._peak_roll, abs(roll))
-            self._peak_pitch = max(self._peak_pitch, abs(pitch))
-            self._n += 1
-            self.samples.append((time.time(), float(x), float(y), yaw, roll, pitch))
-        return roll, pitch
-
-    def _run(self):
-        while not self._stop.wait(self._period):
-            self._sample()
-
-    def start(self):
-        try:
-            self._sample()
-            self._thread = threading.Thread(target=self._run, name="body_tilt_recorder", daemon=True)
-            self._thread.start()
-        except Exception:
-            pass
-
-    def stop(self):
-        try:
-            self._stop.set()
-            if self._thread is not None:
-                self._thread.join(timeout=1.0)
-            self._sample()
-        except Exception:
-            pass
-        with self._lock:
-            return {
-                'roll_start': self._start[0] if self._start else None,
-                'pitch_start': self._start[1] if self._start else None,
-                'roll_end': self._last[0] if self._last else None,
-                'pitch_end': self._last[1] if self._last else None,
-                'roll_peak_abs': self._peak_roll if self._n else None,
-                'pitch_peak_abs': self._peak_pitch if self._n else None,
-                'samples': self._n,
-                'errors': self._errors,
-            }
-
-
-_SEGMENT_COLUMNS = [
-    'timestamp', 'iteration', 'cell_row', 'cell_col', 'node_from', 'node_to',
-    'x_from', 'y_from', 'x_to', 'y_to', 'dist_m',
-    'slope_source', 'long_slope', 'lat_slope', 'long_interp', 'lat_interp',
-    'roughness', 'coverage_along', 'coverage_lateral',
-    'cost_dist', 'cost_long', 'cost_lat', 'cost_rough', 'cost_total',
-    'tier', 'gait_override', 'success', 'dist_traveled_m', 'dist_commanded_m', 'duration_s',
-    'roll_start_deg', 'pitch_start_deg', 'roll_end_deg', 'pitch_end_deg',
-    'roll_peak_abs_deg', 'pitch_peak_abs_deg', 'tilt_samples', 'tilt_errors',
-]
-
-
-class SegmentLog:
-    """CSV con una riga per ogni segmento (da un nodo al successivo) effettivamente
-    percorso o tentato. Si apre in un foglio di calcolo. Una riga viene scritta e scaricata su
-    disco subito, cosi' anche una missione interrotta lascia i dati fino all'ultimo segmento."""
-    def __init__(self, path):
-        self._path = path
-        self._lock = threading.Lock()
-        with open(path, 'w', newline='', encoding='utf-8') as f:
-            csv.writer(f).writerow(_SEGMENT_COLUMNS)
-
-    def write_row(self, row_dict):
-        try:
-            def fmt(v):
-                if v is None:
-                    return ''
-                if isinstance(v, (float, np.floating)):
-                    return f"{float(v):.4f}"
-                return v
-            with self._lock:
-                with open(self._path, 'a', newline='', encoding='utf-8') as f:
-                    csv.writer(f).writerow([fmt(row_dict.get(c)) for c in _SEGMENT_COLUMNS])
-        except Exception as e:
-            print(f"[LOG] Impossibile scrivere la riga del segmento: {e}")
-
-
-_CSV_LOCK = threading.Lock()
-
-
-def _append_csv(name, header, rows):
-    """Aggiunge righe a un CSV nella cartella dei log (intestazione alla prima scrittura). Mai eccezioni."""
-    folder = _MISSION_CTX.get('log_folder')
-    if not folder or not rows:
-        return
-    try:
-        path = os.path.join(folder, name)
-        with _CSV_LOCK:
-            new = not os.path.exists(path)
-            with open(path, 'a', newline='', encoding='utf-8') as f:
-                w = csv.writer(f)
-                if new:
-                    w.writerow(header)
-                for r in rows:
-                    w.writerow([f"{v:.4f}" if isinstance(v, (float, np.floating)) else v for v in r])
-    except Exception as e:
-        print(f"[LOG] Impossibile scrivere {name}: {e}")
-
-
-# Colonne di trajectory.csv. 'move' (2026-10-26) dice che tipo di movimento ha prodotto il
-# campione: 'prm' (tratto del ciclo di navigazione), 'graphnav', 'cono', 'arretramento',
-# 'ritirata'. Fino al 2026-10-26 i movimenti diversi da 'prm' NON finivano nel file: il
-# visualizzatore univa con una retta l'ultimo punto prima di un ritorno GraphNav e il primo
-# dopo, una linea che tagliava gli ostacoli (missione del 22-10, 16:00 circa).
-_TRAJECTORY_COLUMNS = ['time', 'iteration', 'cell_row', 'cell_col', 'loop_iter', 'node_from', 'node_to',
-                       'x', 'y', 'yaw_deg', 'roll_deg', 'pitch_deg', 'target_x', 'target_y', 'move']
-
-
-def _append_trajectory(samples, move, target_xy=(np.nan, np.nan), seg_id=None):
-    """Campioni di un BodyTiltRecorder in trajectory.csv. seg_id: le 6 colonne da iteration a node_to."""
-    seg_id = list(seg_id) if seg_id is not None else [''] * 6
-    _append_csv("trajectory.csv", _TRAJECTORY_COLUMNS,
-                [[t] + seg_id + [x, y, yw, r, pt, target_xy[0], target_xy[1], move]
-                 for (t, x, y, yw, r, pt) in samples])
-
-
-class _TrajectoryLog:
-    """
-    Registra in trajectory.csv dove passa il robot durante un movimento che non e' un tratto
-    del ciclo di navigazione (GraphNav, cono, arretramenti). Mai eccezioni verso chi chiama.
-
-        with _TrajectoryLog(robot_state_client, 'graphnav', (x, y)):
-            ... movimento ...
-    """
-    def __init__(self, robot_state_client, move, target_xy=(np.nan, np.nan)):
-        self._client, self._move, self._target = robot_state_client, move, target_xy
-        self._rec = None
-
-    def __enter__(self):
-        try:
-            self._rec = BodyTiltRecorder(self._client)
-            self._rec.start()
-        except Exception:
-            self._rec = None
-        return self
-
-    def __exit__(self, *exc):
-        if self._rec is None:
-            return False
-        try:
-            self._rec.stop()
-            _append_trajectory(list(self._rec.samples), self._move, self._target)
-        except Exception as e:
-            print(f"[LOG] Traiettoria del movimento '{self._move}' non registrata: {e}")
-        return False
-
-
-def _log_segment(row_dict):
-    seg_log = _MISSION_CTX.get('segment_log')
-    if seg_log is not None:
-        seg_log.write_row(row_dict)
-        MISSION_STATS['segments_logged'] += 1
 
 
 def _segment_diagnostics(terrain_2d, origin_x, origin_y, cell_size, x1, y1, x2, y2):
@@ -990,22 +231,6 @@ def _raw_scale(grids_data):
         return None
 
 
-# ==================================================================
-# SPOSTAMENTI CON GRAPHNAV -- fra celle lontane, per i ritorni e per il ritorno a wp_0.
-# Questo file non usa RecordingInterface.navigate_to_waypoint / navigate_to_first_waypoint
-# di navGraphUtils.py, ma _graphnav_navigate_to, che:
-#   - ha un tempo massimo (GRAPHNAV_TIMEOUT_S), cosi' un robot caduto o senza percorso non
-#     blocca la missione;
-#   - limita la velocita' (GRAPHNAV_MAX_*_VEL): gli spostamenti con GraphNav sono i piu'
-#     lunghi della missione;
-#   - tratta STATUS_LOST come fallimento, a robot fermo, dopo i tentativi di riaggancio: non
-#     forza la localizzazione sul waypoint di destinazione dichiarando "arrivato" quando il
-#     robot potrebbe trovarsi altrove.
-# ==================================================================
-MAX_FALLS_PER_MISSION = 3      # alla terza caduta il robot si rialza e la missione si ferma
-GRAPHNAV_TIMEOUT_S = 240.0
-GRAPHNAV_MAX_LINEAR_VEL_MPS = 0.5
-GRAPHNAV_MAX_ANGULAR_VEL_RPS = 0.6
 _GN = _graph_nav_pb2.NavigationFeedbackResponse
 _GRAPHNAV_FAIL_STATUSES = {
     _GN.STATUS_STUCK: "bloccato (STUCK)", _GN.STATUS_NO_ROUTE: "nessun percorso nel grafo",
@@ -1014,24 +239,6 @@ _GRAPHNAV_FAIL_STATUSES = {
     _GN.STATUS_NOT_LOCALIZED_TO_ROUTE: "non localizzato sul percorso", _GN.STATUS_LEASE_ERROR: "errore di lease",
     _GN.STATUS_AREA_CALLBACK_ERROR: "errore di area callback",
 }
-
-
-# --- LOCALIZZAZIONE DI GRAPHNAV --------------------------------------------------------
-# All'aperto il localizzatore dal vivo di GraphNav si puo' perdere anche quando la mappa e'
-# sana (odometria delle zampe e visione d'accordo entro ~15 cm su decine di metri), e un
-# robot perso si vede rifiutare ogni spostamento. Quindi:
-#   1. riga [LOCALIZZAZIONE] a ogni briciola, solo quando qualcosa cambia, per vedere QUANDO
-#      e PERCHE' si perde (rilevatore di perdita di Spot);
-#   2. riaggancio: se GraphNav risulta perso, si rilocalizza sul waypoint piu' vicino secondo
-#      le nostre pose, con la stima iniziale dall'odometria (waypoint_tform_ko del grafo per
-#      ko_tform_body di adesso: esatta a meno della deriva), poi la rifinisce l'ICP di Spot.
-#      NON si dichiara "arrivato": si riprova a navigare.
-#   3. rilevatore di perdita PERMISSIVO negli spostamenti GraphNav.
-GRAPHNAV_LOST_DETECTOR_STRICTNESS = 'LOST_DETECTOR_STRICTNESS_PERMISSIVE'   # None = quella di Spot
-GRAPHNAV_MAX_RELOCALIZATIONS = 3       # riagganci per singolo spostamento GraphNav
-GRAPHNAV_RELOC_MAX_DIST_M = 0.5        # raggio di ricerca dell'ICP attorno alla stima
-GRAPHNAV_RELOC_MAX_YAW_RAD = float(np.radians(20.0))
-GRAPHNAV_RELOC_MAX_WP_DIST_M = 3.0     # oltre questa distanza dal waypoint piu' vicino non si prova
 
 
 def _graphnav_localization(recordingInterface):
@@ -1098,7 +305,7 @@ def graphnav_log_drift(recordingInterface, robot_state_client, where):
         print(f"[DERIVA] {where}: localizzato su {name}, creato {age / 60:.1f} min fa -> l'odometria "
               f"(VISION) e' scostata di {d:.2f} m (dx {dx:+.2f}, dy {dy:+.2f}) da dove GraphNav "
               f"mette il robot.")
-        _append_csv("drift.csv", _DRIFT_COLUMNS,
+        append_csv("drift.csv", _DRIFT_COLUMNS,
                     [[time.time(), where, name, round(age, 1), round(dx, 4), round(dy, 4), round(d, 4),
                       round(gx, 4), round(gy, 4), round(rx, 4), round(ry, 4)]])
         return d
@@ -1175,7 +382,7 @@ def _graphnav_relocalize(recordingInterface, robot_state_client, why=""):
             print(f"[LOCALIZZAZIONE] Riaggancio {why}: nessun waypoint nostro noto.")
             return False
         d_wp, name, wp_id = cands[0]
-        if d_wp > GRAPHNAV_RELOC_MAX_WP_DIST_M:
+        if d_wp > P.GRAPHNAV_RELOC_MAX_WP_DIST_M:
             print(f"[LOCALIZZAZIONE] Riaggancio {why}: il waypoint piu' vicino ({name}) e' a "
                   f"{d_wp:.1f} m, troppo lontano.")
             return False
@@ -1198,8 +405,8 @@ def _graphnav_relocalize(recordingInterface, robot_state_client, why=""):
         recordingInterface._graph_nav_client.set_localization(
             initial_guess_localization=loc,
             ko_tform_body=odom_tform_body.to_proto(),
-            max_distance=GRAPHNAV_RELOC_MAX_DIST_M,
-            max_yaw=GRAPHNAV_RELOC_MAX_YAW_RAD,
+            max_distance=P.GRAPHNAV_RELOC_MAX_DIST_M,
+            max_yaw=P.GRAPHNAV_RELOC_MAX_YAW_RAD,
             fiducial_init=_graph_nav_pb2.SetLocalizationRequest.FIDUCIAL_INIT_NO_FIDUCIAL)
         MISSION_STATS['graphnav_relocalizations'] = MISSION_STATS.get('graphnav_relocalizations', 0) + 1
         print(f"[LOCALIZZAZIONE] Riaggancio {why}: riuscito su {name} (a {d_wp:.2f} m secondo le "
@@ -1268,8 +475,8 @@ def plan_graphnav_shortcuts(poses, base_edges, start_id, goal_id, global_map,
     Restituisce (scorciatoie [(a, b, d)], lunghezza oggi, lunghezza con le scorciatoie); le
     lunghezze sono None se goal non e' raggiungibile.
     """
-    max_m = GRAPHNAV_SHORTCUT_MAX_M if max_m is None else max_m
-    margin_m = GRAPHNAV_SHORTCUT_MARGIN_M if margin_m is None else margin_m
+    max_m = P.GRAPHNAV_SHORTCUT_MAX_M if max_m is None else max_m
+    margin_m = P.GRAPHNAV_SHORTCUT_MARGIN_M if margin_m is None else margin_m
     adj = {}
     for a, b, w in base_edges:
         w = float(w)
@@ -1327,11 +534,11 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, sdk=Tru
                    sdk_fast: senza ICP ne' feature matching; None = GRAPHNAV_SDK_LOOP_FAST
                    (vedi GRAPHNAV_SDK_LOOP_BUDGET_S).
     """
-    if not GRAPHNAV_SHORTCUTS or recordingInterface is None:
+    if not P.GRAPHNAV_SHORTCUTS or recordingInterface is None:
         return 0
     added = 0
     recording = _graphnav_is_recording(recordingInterface)
-    gg = _MISSION_CTX.get('global_grid')
+    gg = MISSION_CTX.get('global_grid')
     global_map = getattr(gg, 'global_occupancy_map', None) if gg is not None else None
     poses = getattr(recordingInterface, 'waypoint_poses', None) or {}
     if (map_edges and target_wp_id and recording is not False and global_map is not None
@@ -1364,17 +571,17 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, sdk=Tru
                 if before is not None and after is not None:
                     print(f"[GRAPHNAV] {label}: strada verso {_wp_name_by_id(recordingInterface, target_wp_id)} "
                           f"{before:.1f} m -> {after:.1f} m con {len(used)} scorciatoie "
-                          f"(fino a {GRAPHNAV_SHORTCUT_MAX_M:.1f} m, viste libere con "
-                          f"{GRAPHNAV_SHORTCUT_MARGIN_M:.2f} m di margine).")
+                          f"(fino a {P.GRAPHNAV_SHORTCUT_MAX_M:.1f} m, viste libere con "
+                          f"{P.GRAPHNAV_SHORTCUT_MARGIN_M:.2f} m di margine).")
         except Exception as e:
             print(f"[GRAPHNAV] Scorciatoie dalla mappa non aggiunte ({e}).")
         finally:
             if added:
                 recordingInterface.invalidate_graph_cache()
     n_sdk = 0
-    budget = GRAPHNAV_SDK_LOOP_BUDGET_S if sdk_budget_s is None else sdk_budget_s
-    fast = GRAPHNAV_SDK_LOOP_FAST if sdk_fast is None else sdk_fast
-    if sdk and GRAPHNAV_SDK_LOOP_CLOSURE and budget > 0 and recording is not True:
+    budget = P.GRAPHNAV_SDK_LOOP_BUDGET_S if sdk_budget_s is None else sdk_budget_s
+    fast = P.GRAPHNAV_SDK_LOOP_FAST if sdk_fast is None else sdk_fast
+    if sdk and P.GRAPHNAV_SDK_LOOP_CLOSURE and budget > 0 and recording is not True:
         # Spot calcola senza scrivere e gli archi li carichiamo noi (upload_result): niente
         # MapModifiedError a fine elaborazione. Ogni tentativo fallito finisce nel log con la
         # sua durata, e il tempo riportato e' il TOTALE (il 26-10 15:36 i tentativi falliti non
@@ -1386,11 +593,11 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, sdk=Tru
             t0 = time.perf_counter()
             try:
                 n_sdk, timed_out = recordingInterface.close_loops_checked(
-                    max_edge_length_m=GRAPHNAV_SDK_LOOP_MAX_M, timeout_s=budget,
-                    max_path_m=GRAPHNAV_SDK_LOOP_MAX_PATH_M, min_path_m=GRAPHNAV_SDK_LOOP_MIN_PATH_M,
+                    max_edge_length_m=P.GRAPHNAV_SDK_LOOP_MAX_M, timeout_s=budget,
+                    max_path_m=P.GRAPHNAV_SDK_LOOP_MAX_PATH_M, min_path_m=P.GRAPHNAV_SDK_LOOP_MIN_PATH_M,
                     icp_iters=0 if fast else None, feature_matching=False if fast else None,
                     upload_result=not write_on_spot,
-                    prune_edges=None if fast else GRAPHNAV_SDK_LOOP_FINAL_PRUNE)
+                    prune_edges=None if fast else P.GRAPHNAV_SDK_LOOP_FINAL_PRUNE)
             except Exception as e:
                 dt = time.perf_counter() - t0
                 MISSION_STATS['sdk_loop_failures'] += 1
@@ -1426,7 +633,7 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, sdk=Tru
 
 
 def _graphnav_navigate_to(recordingInterface, waypoint_id, robot_state_client, command_client, label,
-                          timeout_s=GRAPHNAV_TIMEOUT_S):
+                          timeout_s=P.GRAPHNAV_TIMEOUT_S):
     """Porta il robot a un waypoint con GraphNav. True solo se ci arriva davvero."""
     # Prima di muoversi: chiusure d'anello di Spot (a registrazione ferma). Le scorciatoie
     # dalla mappa le aggiunge chi chiama, PRIMA di fermare la registrazione.
@@ -1435,11 +642,11 @@ def _graphnav_navigate_to(recordingInterface, waypoint_id, robot_state_client, c
     _t_gn = time.perf_counter()
     try:
         # 2026-10-26: anche i tratti GraphNav finiscono in trajectory.csv (vedi _TRAJECTORY_COLUMNS).
-        with _TrajectoryLog(robot_state_client, 'graphnav'):
+        with TrajectoryLog(robot_state_client, 'graphnav'):
             return _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_client,
                                                command_client, label, timeout_s)
     finally:
-        _timing_add('GraphNav', time.perf_counter() - _t_gn)
+        timing_add('GraphNav', time.perf_counter() - _t_gn)
 
 
 def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_client, command_client,
@@ -1447,17 +654,17 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
     graphnav_add_shortcuts(recordingInterface, label, map_edges=False, sdk=True)
     client = recordingInterface._graph_nav_client
     tp = _graph_nav_pb2.TravelParams()
-    tp.velocity_limit.CopyFrom(movements._velocity_limit(GRAPHNAV_MAX_LINEAR_VEL_MPS, GRAPHNAV_MAX_ANGULAR_VEL_RPS))
+    tp.velocity_limit.CopyFrom(movements._velocity_limit(P.GRAPHNAV_MAX_LINEAR_VEL_MPS, P.GRAPHNAV_MAX_ANGULAR_VEL_RPS))
     # Rilevatore di perdita permissivo (vedi LOCALIZZAZIONE DI GRAPHNAV).
-    if GRAPHNAV_LOST_DETECTOR_STRICTNESS and hasattr(tp, 'lost_detector_strictness'):
+    if P.GRAPHNAV_LOST_DETECTOR_STRICTNESS and hasattr(tp, 'lost_detector_strictness'):
         try:
             # dal descrittore: l'enum sta in lost_detection_pb2, che nelle versioni vecchie
             # dell'SDK non c'e'; cosi' funziona ovunque il campo esista.
             enum = tp.DESCRIPTOR.fields_by_name['lost_detector_strictness'].enum_type
-            tp.lost_detector_strictness = enum.values_by_name[GRAPHNAV_LOST_DETECTOR_STRICTNESS].number
+            tp.lost_detector_strictness = enum.values_by_name[P.GRAPHNAV_LOST_DETECTOR_STRICTNESS].number
         except Exception:
             pass
-    print(f"[GRAPHNAV] {label}: avvio (massimo {timeout_s:.0f} s, {GRAPHNAV_MAX_LINEAR_VEL_MPS:.1f} m/s).")
+    print(f"[GRAPHNAV] {label}: avvio (massimo {timeout_s:.0f} s, {P.GRAPHNAV_MAX_LINEAR_VEL_MPS:.1f} m/s).")
     # Prima di partire si guarda lo stato del localizzatore; se e' perso si riaggancia
     # subito, invece di farsi rifiutare il comando.
     relocs = 0
@@ -1472,10 +679,10 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
             cmd_id = client.navigate_to(waypoint_id, 1.0, command_id=cmd_id, travel_params=tp)
             nav_errors = 0
         except Exception as e:
-            if 'RobotLost' in type(e).__name__ and relocs < GRAPHNAV_MAX_RELOCALIZATIONS:
+            if 'RobotLost' in type(e).__name__ and relocs < P.GRAPHNAV_MAX_RELOCALIZATIONS:
                 relocs += 1
                 print(f"[GRAPHNAV] {label}: GraphNav dice che il robot e' perso: riaggancio "
-                      f"({relocs}/{GRAPHNAV_MAX_RELOCALIZATIONS}).")
+                      f"({relocs}/{P.GRAPHNAV_MAX_RELOCALIZATIONS}).")
                 _graphnav_relocalize(recordingInterface, robot_state_client, f"durante '{label}'")
                 cmd_id = None
                 time.sleep(0.5)
@@ -1509,12 +716,12 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
             MISSION_STATS['graphnav_ok'] += 1
             graphnav_log_drift(recordingInterface, robot_state_client, label)
             return True
-        if status == _GN.STATUS_LOST and relocs < GRAPHNAV_MAX_RELOCALIZATIONS:
+        if status == _GN.STATUS_LOST and relocs < P.GRAPHNAV_MAX_RELOCALIZATIONS:
             # Riaggancio sul waypoint piu' vicino (NON sulla destinazione, e senza dichiarare
             # l'arrivo: si rimanda il comando e si continua a navigare).
             relocs += 1
             print(f"[GRAPHNAV] {label}: GraphNav ha perso la localizzazione per strada: "
-                  f"riaggancio ({relocs}/{GRAPHNAV_MAX_RELOCALIZATIONS}).")
+                  f"riaggancio ({relocs}/{P.GRAPHNAV_MAX_RELOCALIZATIONS}).")
             graphnav_log_localization(None, recordingInterface, robot_state_client,
                                       f"perso durante '{label}'", force=True)
             _graphnav_relocalize(recordingInterface, robot_state_client, f"durante '{label}'")
@@ -1552,7 +759,7 @@ def _graphnav_return_to_start(recordingInterface, robot_state_client, command_cl
         print("[GRAPHNAV] Ritorno a wp_0: waypoint wp_0 non trovato nel grafo.")
         return False
     return _graphnav_navigate_to(recordingInterface, wp0.id, robot_state_client, command_client,
-                                 "ritorno a wp_0", timeout_s=2 * GRAPHNAV_TIMEOUT_S)
+                                 "ritorno a wp_0", timeout_s=2 * P.GRAPHNAV_TIMEOUT_S)
 
 
 # --- Zona attorno al corpo nella mappa GLOBALE ------------------------------------------
@@ -1786,22 +993,22 @@ def mission_switches():
     impostazioni e' stata fatta ogni missione (per i confronti acceso/spento).
     """
     return {
-        'easy_walk.MISSION_GRAPH_SAMPLING': MISSION_GRAPH_SAMPLING,
-        'easy_walk.INCREMENTAL_GRAPH_UPDATE': INCREMENTAL_GRAPH_UPDATE,
+        'easy_walk.MISSION_GRAPH_SAMPLING': P.MISSION_GRAPH_SAMPLING,
+        'easy_walk.INCREMENTAL_GRAPH_UPDATE': P.INCREMENTAL_GRAPH_UPDATE,
         'mission_graph.BATCH_SLOPES': mission_graph.BATCH_SLOPES,
         'prm_graph.REFRESH_BATCH_SLOPES': prm_graph_module.REFRESH_BATCH_SLOPES,
         'spotGrid.CLEARANCE_MAP_DECIDES': spotGrid.CLEARANCE_MAP_DECIDES,
-        'easy_walk.PLAN_ONLY_EXPLORED_CELLS': PLAN_ONLY_EXPLORED_CELLS,
-        'easy_walk.GRAPHNAV_SHORTCUTS': GRAPHNAV_SHORTCUTS,
-        'easy_walk.GRAPHNAV_PRECHECK': GRAPHNAV_PRECHECK,
-        'easy_walk.GRAPHNAV_SDK_LOOP_CLOSURE': GRAPHNAV_SDK_LOOP_CLOSURE,
-        'easy_walk.GRAPHNAV_SDK_LOOP_BUDGET_S': GRAPHNAV_SDK_LOOP_BUDGET_S,
-        'easy_walk.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S': GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S,
-        'easy_walk.GRAPHNAV_SDK_LOOP_FAST': GRAPHNAV_SDK_LOOP_FAST,
-        'easy_walk.GRAPHNAV_SDK_LOOP_FINAL_PRUNE': GRAPHNAV_SDK_LOOP_FINAL_PRUNE,
-        'easy_walk.GRAPHNAV_SDK_LOOP_MAX_PATH_M': GRAPHNAV_SDK_LOOP_MAX_PATH_M,
-        'easy_walk.SAVE_SCAN_BUNDLES': SAVE_SCAN_BUNDLES,
-        'easy_walk.SAVE_EXTRA_LAYERS': list(SAVE_EXTRA_LAYERS),
+        'easy_walk.PLAN_ONLY_EXPLORED_CELLS': P.PLAN_ONLY_EXPLORED_CELLS,
+        'easy_walk.GRAPHNAV_SHORTCUTS': P.GRAPHNAV_SHORTCUTS,
+        'easy_walk.GRAPHNAV_PRECHECK': P.GRAPHNAV_PRECHECK,
+        'easy_walk.GRAPHNAV_SDK_LOOP_CLOSURE': P.GRAPHNAV_SDK_LOOP_CLOSURE,
+        'easy_walk.GRAPHNAV_SDK_LOOP_BUDGET_S': P.GRAPHNAV_SDK_LOOP_BUDGET_S,
+        'easy_walk.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S': P.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S,
+        'easy_walk.GRAPHNAV_SDK_LOOP_FAST': P.GRAPHNAV_SDK_LOOP_FAST,
+        'easy_walk.GRAPHNAV_SDK_LOOP_FINAL_PRUNE': P.GRAPHNAV_SDK_LOOP_FINAL_PRUNE,
+        'easy_walk.GRAPHNAV_SDK_LOOP_MAX_PATH_M': P.GRAPHNAV_SDK_LOOP_MAX_PATH_M,
+        'easy_walk.SAVE_SCAN_BUNDLES': P.SAVE_SCAN_BUNDLES,
+        'easy_walk.SAVE_EXTRA_LAYERS': list(P.SAVE_EXTRA_LAYERS),
         'movements.DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT': movements.DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT,
         'spotGrid.ARC_BODY_EXTENSION_M': spotGrid.ARC_BODY_EXTENSION_M,
         'spotGrid.ROBOT_CLEARANCE_AIR_M': spotGrid.ROBOT_CLEARANCE_AIR_M,
@@ -1813,11 +1020,11 @@ def _emit_mission_summary_once():
     """Stampa e salva il riepilogo di missione una sola volta. Viene chiamata sia a fine
     missione normale sia da main() in un blocco finally, cosi' esce anche se la missione
     termina per un'eccezione o per una ripresa del controllo."""
-    if _MISSION_CTX.get('summary_done') or _MISSION_CTX.get('prm') is None:
+    if MISSION_CTX.get('summary_done') or MISSION_CTX.get('prm') is None:
         return
-    _MISSION_CTX['summary_done'] = True
+    MISSION_CTX['summary_done'] = True
     try:
-        prm = _MISSION_CTX['prm']
+        prm = MISSION_CTX['prm']
         prm.print_mission_summary()
         total_gait = sum(MISSION_STATS['gait_tier_counts'].values())
         print("================ [MISSION STATS] ================")
@@ -1867,10 +1074,10 @@ def _emit_mission_summary_once():
               f"{MISSION_STATS['sdk_loop_failures']} tentativi falliti")
         print(f"Riagganci GraphNav (robot perso): {MISSION_STATS.get('graphnav_relocalizations', 0)} riusciti, "
               f"{MISSION_STATS.get('graphnav_relocalization_fail', 0)} falliti | celle rimandate dopo "
-              f"{MAX_BACKTRACKS_PER_ATTEMPT} ritorni nello stesso tentativo: {MISSION_STATS.get('backtrack_giveups', 0)} | "
+              f"{P.MAX_BACKTRACKS_PER_ATTEMPT} ritorni nello stesso tentativo: {MISSION_STATS.get('backtrack_giveups', 0)} | "
               f"archi tolti dalla scansione dal vivo nei refresh: {MISSION_STATS.get('live_arc_vetoes', 0)}")
-        lg_main = _MISSION_CTX.get('local_grid')
-        lg_trk = getattr(_MISSION_CTX.get('tracker'), '_local_grid', None)
+        lg_main = MISSION_CTX.get('local_grid')
+        lg_trk = getattr(MISSION_CTX.get('tracker'), '_local_grid', None)
         print(f"Scansioni scartate (layer mancanti o non allineati): ciclo principale "
               f"{getattr(lg_main, 'rejected_scans', 0)}, controllo in movimento {getattr(lg_trk, 'rejected_scans', 0)}")
         print(f"Pacchetti di scansione salvati: {MISSION_STATS['scan_bundles']}")
@@ -1882,7 +1089,7 @@ def _emit_mission_summary_once():
                 print(f"  {phase:22s} {sec:8.1f} s  ({100.0 * sec / tot:5.1f}%)")
         print("===================================================\n")
 
-        folder = _MISSION_CTX.get('log_folder')
+        folder = MISSION_CTX.get('log_folder')
         if folder:
             summary = {
                 'prm': prm.get_mission_summary_dict(),
@@ -1894,7 +1101,7 @@ def _emit_mission_summary_once():
                 'lateral_slice_half_width_m': spotGrid.LATERAL_SLICE_HALF_WIDTH_M,
                 'min_arc_sample_fraction': spotGrid.MIN_ARC_SAMPLE_FRACTION,
                 'terrain_valid_min': spotGrid.TERRAIN_VALID_MIN,
-                'goal_reached_tolerance_m': GOAL_REACHED_TOLERANCE_M,
+                'goal_reached_tolerance_m': P.GOAL_REACHED_TOLERANCE_M,
                 'interruttori': mission_switches(),
             }
             mg = getattr(prm, 'mission_graph', None)
@@ -1938,7 +1145,7 @@ def _refuse_goal(env, row, col, x, y, why):
     stesso punto: la mappa globale lo dava libero a 0.28 m, il fronte dal vivo a 0.24.
     """
     lst = _refused_goals(env, row, col)
-    if any(np.hypot(x - ex, y - ey) < RECOVERY_SAME_GOAL_M for ex, ey in lst):
+    if any(np.hypot(x - ex, y - ey) < P.RECOVERY_SAME_GOAL_M for ex, ey in lst):
         return
     lst.append((float(x), float(y)))
     MISSION_STATS['goals_refused'] = MISSION_STATS.get('goals_refused', 0) + 1
@@ -2003,7 +1210,7 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
     # occupata una cella solo dopo due osservazioni, quindi un ostacolo appena visto c'e'
     # solo nella scansione dal vivo (22-10 15:50, cella (0,2)).
     min_clear = spotGrid.PLAN_CLEARANCE_M
-    pref_margin = max(safety_margin, TARGET_CLEARANCE_M - spotGrid.OBSTACLE_THRESHOLD)
+    pref_margin = max(safety_margin, P.TARGET_CLEARANCE_M - spotGrid.OBSTACLE_THRESHOLD)
     refused = _refused_goals(env, cell_row, cell_col)
     live_od = None
     if pts is not None and cells_obstacle_dist is not None:
@@ -2024,7 +1231,7 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
         return float(live_od[1][i]) if d <= 0.05 else None
 
     def _near(p, pts_list):
-        return bool(pts_list) and any(np.hypot(p[0] - ex, p[1] - ey) < RECOVERY_SAME_GOAL_M
+        return bool(pts_list) and any(np.hypot(p[0] - ex, p[1] - ey) < P.RECOVERY_SAME_GOAL_M
                                       for ex, ey in pts_list)
 
     center = (cell_center_x, cell_center_y)
@@ -2055,13 +1262,13 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
                 center_reason = f"a {min(known_c):.2f} m da un ostacolo nella scansione dal vivo"
             continue
         tight = (global_map.is_occupied(px, py, safety_margin=pref_margin)
-                 or (bool(known_c) and min(known_c) < TARGET_CLEARANCE_M))
+                 or (bool(known_c) and min(known_c) < P.TARGET_CLEARANCE_M))
         border = cell_border_distance(env, cell_row, cell_col, px, py)
         rows.append(dict(
             p=(float(px), float(py)), center=is_center, refused=_near(p, refused),
             seen=(c_live is not None or global_map.is_known(px, py)), tight=tight,
             clear=(min(known_c) if known_c else None),
-            edge=(border is not None and border < TARGET_CELL_BORDER_M),
+            edge=(border is not None and border < P.TARGET_CELL_BORDER_M),
             dc=float(np.hypot(px - cell_center_x, py - cell_center_y)),
             dr=float(np.hypot(px - robot_x, py - robot_y))))
 
@@ -2095,9 +1302,9 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
     bx, by = chosen['p']
     flags = []
     if chosen['tight']:
-        flags.append(f"meno di {TARGET_CLEARANCE_M:.2f} m di spazio libero")
+        flags.append(f"meno di {P.TARGET_CLEARANCE_M:.2f} m di spazio libero")
     if chosen['edge']:
-        flags.append(f"a meno di {TARGET_CELL_BORDER_M:.2f} m dal bordo della cella")
+        flags.append(f"a meno di {P.TARGET_CELL_BORDER_M:.2f} m dal bordo della cella")
     flag_txt = f" -- {', '.join(flags)}" if flags else ""
     if chosen['center']:
         state = "libero" if chosen['seen'] else "ignoto"
@@ -2210,12 +1417,12 @@ def _save_visualization_bundle(save_path, pts, terrain_real, obstacle_mask, robo
                 return np.empty((0, 2))
 
         out = os.path.splitext(save_path)[0] + "_vis.npz"
-        _save_npz_async(
+        save_npz_async(
             out,
             pts=_arr(pts), terrain=_arr(terrain_real), obstacle_mask=_arr(obstacle_mask),
             obstacle_distance=_arr(cells_obstacle_dist), terrain_valid=_arr(valid_values),
             gradient=_arr(grad_values), roughness=_arr(rough_values),
-            robot_xy=np.array([robot_x, robot_y], dtype=np.float64), mission_z0=_mission_z0(),
+            robot_xy=np.array([robot_x, robot_y], dtype=np.float64), mission_z0=mission_z0(),
             # istante della vista: mission_viewer abbina la vista alle scansioni con questo, non
             # con la data del file (dopo un git clone o pull e' quella del download)
             time=time.time(),
@@ -2238,7 +1445,7 @@ def _save_visualization_bundle(save_path, pts, terrain_real, obstacle_mask, robo
         )
     except Exception as e:
         print(f"[DATA SAVE] Impossibile preparare i dati della figura: {e}")
-    _timing_add('dati figure', time.perf_counter() - t0)
+    timing_add('dati figure', time.perf_counter() - t0)
 
 
 def decide_next_move(robot_xy, path_waypoints, frontier, no_progress_count, in_target_cell=True):
@@ -2302,14 +1509,14 @@ def decide_next_move(robot_xy, path_waypoints, frontier, no_progress_count, in_t
             px, py, nodes = wx, wy, nodes + 1
         return {'kind': 'move', 'target': (nx, ny), 'full': True, 'dist': seg_len,
                 'nodes': max(1, nodes)}
-    if adv >= MIN_PARTIAL_STEP_M:
+    if adv >= P.MIN_PARTIAL_STEP_M:
         f = adv / seg_len
         return {'kind': 'move', 'target': (rx + f * (nx - rx), ry + f * (ny - ry)),
                 'full': False, 'dist': adv}
 
-    if frontier['path_len'] <= GOAL_REACHED_TOLERANCE_M and in_target_cell:
+    if frontier['path_len'] <= P.GOAL_REACHED_TOLERANCE_M and in_target_cell:
         return {'kind': 'arrived'}
-    if no_progress_count + 1 < FRONTIER_BLOCK_CONFIRM_SCANS:
+    if no_progress_count + 1 < P.FRONTIER_BLOCK_CONFIRM_SCANS:
         return {'kind': 'wait'}
 
     polyline = [(rx, ry)] + [(x, y) for _, x, y in path_waypoints]
@@ -2360,9 +1567,6 @@ def rotation_plan(robot_yaw, robot_xy, target_xy, od_robot, snap=None):
             'why': 'nessun dato di griglia'}
 
 
-SHORTCUT_MAX_DIST_M = 2.5          # oltre, il tratto non sta comunque nella finestra
-
-
 def shortcut_index(robot_xy, path_waypoints, snap, global_map=None, prm=None, robot_node_id=None):
     """
     Scorciatoia: l'indice del waypoint PIU' LONTANO raggiungibile in linea retta
@@ -2393,7 +1597,7 @@ def shortcut_index(robot_xy, path_waypoints, snap, global_map=None, prm=None, ro
             if getattr(prm, 'edge_validity', {}).get(key) is False:
                 continue
         d = float(np.hypot(wx - rx, wy - ry))
-        if d > SHORTCUT_MAX_DIST_M:
+        if d > P.SHORTCUT_MAX_DIST_M:
             continue
         if global_map is not None:
             n = max(prm_graph.OCCUPANCY_SAMPLES_MIN, int(np.ceil(d * prm_graph.OCCUPANCY_SAMPLES_PER_M)) + 1)
@@ -2407,11 +1611,7 @@ def shortcut_index(robot_xy, path_waypoints, snap, global_map=None, prm=None, ro
     return 0
 
 
-ROTATION_ROOM_SEARCH_M = (0.15, 0.30, 0.45, 0.60, 0.80, 1.00, 1.20)
-ROTATION_ROOM_DIRECTIONS_DEG = (180, 135, -135, 90, -90, 45, -45, 0)   # rispetto al muso: indietro prima
-
-
-def plan_straight_retreat(robot_xy, robot_yaw, snap, max_dist=ROTATION_RETREAT_M):
+def plan_straight_retreat(robot_xy, robot_yaw, snap, max_dist=P.ROTATION_RETREAT_M):
     """
     Quanto puo' arretrare il robot IN LINEA RETTA, all'indietro, senza girarsi.
 
@@ -2430,7 +1630,7 @@ def plan_straight_retreat(robot_xy, robot_yaw, snap, max_dist=ROTATION_RETREAT_M
     body = spotGrid.body_extents(robot_yaw, robot_yaw + np.pi)   # all'indietro: (0.55, 0.25)
     f = arcVerification.compute_safe_frontier([(rx, ry), (back_x, back_y)], snap, body=body)
     adv = arcVerification.allowed_advance(f)
-    if adv < ROTATION_RETREAT_MIN_M:
+    if adv < P.ROTATION_RETREAT_MIN_M:
         return None
     adv = min(adv, max_dist)
     return (float(rx - adv * np.cos(robot_yaw)), float(ry - adv * np.sin(robot_yaw)), float(adv))
@@ -2499,7 +1699,7 @@ def graphnav_drop_breadcrumb(env, recordingInterface, robot_state_client, prm_no
         return None
     if not force and trail:
         last = trail[-1]
-        if float(np.hypot(x - last['x'], y - last['y'])) < GRAPHNAV_WAYPOINT_MIN_SPACING_M:
+        if float(np.hypot(x - last['x'], y - last['y'])) < P.GRAPHNAV_WAYPOINT_MIN_SPACING_M:
             return None
     try:
         recordingInterface.create_default_waypoint(cell_row=cell_row, cell_col=cell_col)
@@ -2655,11 +1855,11 @@ def _trap_backtrack(trap_state, block_arc, env, prm_graph, goal_id, recordingInt
             key = (min(a, b), max(a, b))
             prm_graph.edge_penalty_persistent[key] = prm_graph._ATTEMPT_MARK
             print(f"[RITORNO] Arco {a}->{b} fuori dal piano per il resto del tentativo "
-                  f"(ritorno {trap_state['n']}/{MAX_BACKTRACKS_PER_ATTEMPT}).")
+                  f"(ritorno {trap_state['n']}/{P.MAX_BACKTRACKS_PER_ATTEMPT}).")
     esc = escape_by_backtracking(
         env, prm_graph, goal_id, recordingInterface, robot_state_client, command_client,
         global_map, mobility_kwargs, pts, obstacle_mask, label=label, **kwargs)
-    if trap_state['n'] >= MAX_BACKTRACKS_PER_ATTEMPT and esc.get('ok'):
+    if trap_state['n'] >= P.MAX_BACKTRACKS_PER_ATTEMPT and esc.get('ok'):
         MISSION_STATS['backtrack_giveups'] = MISSION_STATS.get('backtrack_giveups', 0) + 1
         print(f"[RITORNO] {trap_state['n']} ritorni in questo tentativo: sono tornato "
               f"indietro, ma non riprovo. Rimando la cella e la provo da un altro lato.")
@@ -2669,7 +1869,7 @@ def _trap_backtrack(trap_state, block_arc, env, prm_graph, goal_id, recordingInt
 
 def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_state_client,
                            command_client, global_map, mobility_kwargs, pts, obstacle_mask,
-                           max_hops=GRAPHNAV_MAX_BACKTRACK_HOPS, label="",
+                           max_hops=P.GRAPHNAV_MAX_BACKTRACK_HOPS, label="",
                            skip_if_graph_cannot_help=False):
     """
     La via d'uscita quando da qui non si va da nessuna parte.
@@ -2742,7 +1942,7 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
     return {'ok': False, 'ids': None, 'robot_node': None, 'how': 'cella rimandata'}
 
 
-def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=PRM_NODE_MIN_CLEARANCE_M,
+def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=P.PRM_NODE_MIN_CLEARANCE_M,
                                  global_map=None):
     """
     Scarta dal grafo i nodi che cadono DENTRO un ostacolo.
@@ -2790,8 +1990,8 @@ def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=PRM_NODE_MIN_CLEARAN
     return pruned
 
 
-def scan_escape_directions(robot_xy, robot_yaw, snap, step_deg=ESCAPE_FAN_STEP_DEG,
-                           min_advance_m=ESCAPE_FAN_MIN_ADVANCE_M, probe_m=3.0):
+def scan_escape_directions(robot_xy, robot_yaw, snap, step_deg=P.ESCAPE_FAN_STEP_DEG,
+                           min_advance_m=P.ESCAPE_FAN_MIN_ADVANCE_M, probe_m=3.0):
     """
     Il giro completo: in quali direzioni il robot puo' DAVVERO andare da qui?
 
@@ -2849,7 +2049,7 @@ def is_trapped(robot_xy, robot_yaw, snap):
     return (not any(d['usable'] for d in dirs)), dirs
 
 
-def arrival_has_exit(snap, arrival_xy, heading, min_advance_m=ESCAPE_FAN_MIN_ADVANCE_M):
+def arrival_has_exit(snap, arrival_xy, heading, min_advance_m=P.ESCAPE_FAN_MIN_ADVANCE_M):
     """
     Dal punto in cui sto per fermarmi, ci sara' un'uscita?
 
@@ -2898,8 +2098,8 @@ def mark_edge_blocked_soft(prm, idx1, idx2):
     prm.edges[idx2] = [(n, w) for n, w in prm.edges.get(idx2, []) if n != idx1]
 
 
-def plan_cone_move(robot_xy, robot_yaw, snap, goal_xy, max_dyaw_deg=CONE_SWEEP_MAX_DEG,
-                   step_deg=CONE_SWEEP_STEP_DEG, min_gain_m=CONE_MIN_GAIN_M):
+def plan_cone_move(robot_xy, robot_yaw, snap, goal_xy, max_dyaw_deg=P.CONE_SWEEP_MAX_DEG,
+                   step_deg=P.CONE_SWEEP_STEP_DEG, min_gain_m=P.CONE_MIN_GAIN_M):
     """
     "Ruota quanto PUOI, non quanto vorresti, e cammina."
 
@@ -2937,7 +2137,7 @@ def plan_cone_move(robot_xy, robot_yaw, snap, goal_xy, max_dyaw_deg=CONE_SWEEP_M
         far_x, far_y = rx + 3.0 * np.cos(heading), ry + 3.0 * np.sin(heading)
         f = arcVerification.compute_safe_frontier([(rx, ry), (far_x, far_y)], snap)
         adv = arcVerification.allowed_advance(f)
-        if adv < MIN_PARTIAL_STEP_M:
+        if adv < P.MIN_PARTIAL_STEP_M:
             continue
 
         nx, ny = rx + adv * np.cos(heading), ry + adv * np.sin(heading)
@@ -3093,7 +2293,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         pkl_map_path = os.path.join(mission_folder, "global_occupancy_map.pkl")
         global_map.save_map(pkl_map_path)
         pkl_terrain_path = os.path.join(mission_folder, "global_terrain_map.pkl")
-        global_terrain_map.mission_z0 = _MISSION_CTX.get('mission_z0')
+        global_terrain_map.mission_z0 = MISSION_CTX.get('mission_z0')
         global_terrain_map.save_map(pkl_terrain_path)
 
         # Le mappe globali crescono per tutta la missione e non vengono mai potate: a
@@ -3192,7 +2392,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
     # non il modulo omonimo. Le coppie candidate sono quelle del reticolo (vedi
     # _build_mission_prm); veti e pesi li calcola PRM._evaluate_and_add_edge.
     _rebuild_prm_edges(prm_graph, global_map)
-    _timing_add('costruzione grafo', time.perf_counter() - t_build)
+    timing_add('costruzione grafo', time.perf_counter() - t_build)
     _upd = getattr(getattr(prm_graph, 'mission_graph', None), 'last_update', None)
     print(f"[TEMPO] {'aggiornamento locale' if _upd and _upd[2] else 'costruzione completa'} "
           f"del grafo: {time.perf_counter() - t_build:.2f} s")
@@ -3330,8 +2530,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
     while path_waypoints and len(path_waypoints) > 0:
         loop_iter += 1
         t_iter = time.perf_counter()
-        if loop_iter > MAX_LOOP_ITERATIONS:
-            print(f"[STALLO] {MAX_LOOP_ITERATIONS} giri del ciclo di navigazione senza arrivare: "
+        if loop_iter > P.MAX_LOOP_ITERATIONS:
+            print(f"[STALLO] {P.MAX_LOOP_ITERATIONS} giri del ciclo di navigazione senza arrivare: "
                   f"interrompo il tentativo sulla cella ({target_row},{target_col}).")
             if verification_tracker is not None:
                 verification_tracker.clear_path()
@@ -3351,7 +2551,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                                1.0 - 2.0 * (robot_quat.y ** 2 + robot_quat.z ** 2))
 
         # --- Guardia generica anti-stallo: quanti giri di fila senza spostarsi.
-        if last_xy is not None and float(np.hypot(robot_x - last_xy[0], robot_y - last_xy[1])) < IDLE_MOVE_M:
+        if last_xy is not None and float(np.hypot(robot_x - last_xy[0], robot_y - last_xy[1])) < P.IDLE_MOVE_M:
             idle_loops += 1
         else:
             idle_loops = 0
@@ -3366,10 +2566,10 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             best_goal_dist = d_goal_now
             rotation_discards = 0
         last_xy = (robot_x, robot_y)
-        if idle_loops >= MAX_IDLE_LOOPS:
+        if idle_loops >= P.MAX_IDLE_LOOPS:
             MISSION_STATS['idle_loops'] += idle_loops
             print(f"[STALLO] {idle_loops} giri di ciclo consecutivi senza spostarsi di "
-                  f"{IDLE_MOVE_M:.2f} m, con il robot in ({robot_x:.2f}, {robot_y:.2f}). "
+                  f"{P.IDLE_MOVE_M:.2f} m, con il robot in ({robot_x:.2f}, {robot_y:.2f}). "
                   f"Qualunque sia il motivo, continuare a girare qui non porta da nessuna "
                   f"parte: rinuncio a entrare in ({target_row},{target_col}) da questo lato.")
             if verification_tracker is not None:
@@ -3520,7 +2720,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         if pruned_nodes:
             MISSION_STATS['nodes_pruned'] += len(pruned_nodes)
             print(f"[NODI] {len(pruned_nodes)} nodi scartati: meno di "
-                  f"{PRM_NODE_MIN_CLEARANCE_M:.2f} m di spazio libero dove li vediamo "
+                  f"{P.PRM_NODE_MIN_CLEARANCE_M:.2f} m di spazio libero dove li vediamo "
                   f"(primi: {pruned_nodes[:8]}).")
 
         # Quanto la mappa dello spazio libero si discosta dal criterio in uso (vedi
@@ -3537,7 +2737,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         for (from_id, to_id), n_fails in rotation_fails.items():
             fx, fy = rotation_fail_xy.get((from_id, to_id), (robot_x, robot_y))
             if (from_id == robot_node_id and n_fails > 0
-                    and float(np.hypot(robot_x - fx, robot_y - fy)) <= ANCHOR_ON_NODE_M):
+                    and float(np.hypot(robot_x - fx, robot_y - fy)) <= prm_graph_module.ANCHOR_ON_NODE_M):
                 mark_edge_blocked_soft(prm_graph, from_id, to_id)
 
         if touched_nodes:
@@ -3606,7 +2806,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         # cella (2,7)", con il robot fuori di 0.01 m.
         robot_border = cell_border_distance(env, target_row, target_col, robot_x, robot_y)
         near_goal = (not in_target_cell and robot_border is not None
-                     and -robot_border <= ARRIVAL_OUTSIDE_CELL_M)
+                     and -robot_border <= P.ARRIVAL_OUTSIDE_CELL_M)
         decision = decide_next_move((robot_x, robot_y), path_waypoints, frontier, no_progress,
                                     in_target_cell=in_target_cell or near_goal)
         if decision['kind'] == 'arrived' and near_goal:
@@ -3614,11 +2814,11 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             MISSION_STATS['arrivals_near_goal'] += 1
             print(f"[OBIETTIVO] Il robot e' fuori dalla cella ({target_row},{target_col}) di "
                   f"{-robot_border:.2f} m, a {frontier['path_len']:.2f} m dall'obiettivo: vale come "
-                  f"arrivo (fuori al massimo di {ARRIVAL_OUTSIDE_CELL_M:.2f} m, il muso e' dentro).")
+                  f"arrivo (fuori al massimo di {P.ARRIVAL_OUTSIDE_CELL_M:.2f} m, il muso e' dentro).")
         if (decision['kind'] in ('wait', 'blocked') and not in_target_cell and not near_goal
-                and frontier['path_len'] <= GOAL_REACHED_TOLERANCE_M):
+                and frontier['path_len'] <= P.GOAL_REACHED_TOLERANCE_M):
             print(f"[OBIETTIVO] Mancano {frontier['path_len']:.2f} m, entro la tolleranza di "
-                  f"{GOAL_REACHED_TOLERANCE_M:.2f} m, ma il robot e' ancora fuori dalla cella "
+                  f"{P.GOAL_REACHED_TOLERANCE_M:.2f} m, ma il robot e' ancora fuori dalla cella "
                   f"({target_row},{target_col}): non vale come arrivo, proseguo come per un "
                   f"fronte bloccato.")
         next_node_id, next_x, next_y = path_waypoints[0]
@@ -3628,18 +2828,18 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         # rotazione rifiutata/cono/arretramento/trappola fanno `continue`, e salvando dopo
         # quelle scansioni non finirebbero su disco. Il rifiuto si ricalcola offline da
         # obstacle_distance, robot_xyz, robot_yaw e decision_target.
-        if SAVE_SCAN_BUNDLES and mission_folder is not None:
+        if P.SAVE_SCAN_BUNDLES and mission_folder is not None:
             gf = local_grid.last_ground_filter
             shape_up = (num_y_up, num_x_up)
             extra = {}
-            if SAVE_EXTRA_LAYERS:
+            if P.SAVE_EXTRA_LAYERS:
                 t_x = time.perf_counter()
-                for name, lay in local_grid.extra_layers(SAVE_EXTRA_LAYERS).items():
+                for name, lay in local_grid.extra_layers(P.SAVE_EXTRA_LAYERS).items():
                     extra[name] = lay['values']
                     extra[f'{name}_origin'] = lay['origin']
                     extra[f'{name}_cell'] = lay['cell']
-                _timing_add('scansione', time.perf_counter() - t_x)
-            _save_npz_async(
+                timing_add('scansione', time.perf_counter() - t_x)
+            save_npz_async(
                 os.path.join(mission_folder, "scans",
                              f"scan_it{iteration:03d}_cell{target_row}_{target_col}_{loop_iter:03d}.npz"),
                 time=time.time(), iteration=iteration, cell=np.array([target_row, target_col]),
@@ -3666,7 +2866,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 robot_xyz=np.array([robot_x, robot_y, robot_z]), robot_yaw=robot_yaw,
                 ground_z=np.nan if gf.get('ground_z') is None else gf['ground_z'],
                 ground_n_above=gf.get('n_above', 0),
-                mission_z0=_mission_z0(),
+                mission_z0=mission_z0(),
                 terrain_raw_zero=np.nan if _raw_zero(grids_data_up) is None else _raw_zero(grids_data_up),
                 terrain_scale=np.nan if not _raw_scale(grids_data_up) else _raw_scale(grids_data_up),
                 unwritten=np.asarray(unwritten_up, dtype=bool).reshape(shape_up),
@@ -3703,25 +2903,25 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                       f"{next_node_id}, ma il corpo toccherebbe ({margin_txt}; "
                       f"obstacle_distance sotto il robot {frontier['od_robot']:.2f} m). "
                       f"Non cammino di traverso: tentativo "
-                      f"{rotation_fails[edge_key]}/{MAX_ROTATION_FAILS_SAME_EDGE}.")
+                      f"{rotation_fails[edge_key]}/{P.MAX_ROTATION_FAILS_SAME_EDGE}.")
 
                 # --- 4a. PRIMA DI TUTTO: posso ANDARE AVANTI dentro il cono di rotazione che
                 # mi e' concesso? Spesso andare dritti, o quasi, avvicina all'obiettivo piu'
                 # di qualunque arretramento (vedi plan_cone_move).
-                cone_goal, _ = arcVerification.point_along(polyline, CONE_PATH_LOOKAHEAD_M)
+                cone_goal, _ = arcVerification.point_along(polyline, P.CONE_PATH_LOOKAHEAD_M)
                 cone = plan_cone_move((robot_x, robot_y), robot_yaw, snap, cone_goal)
                 if cone is not None:
                     print(f"[CONO] Non posso girarmi di {rot['dyaw_deg']:+.0f} gradi, ma ruotando di "
                           f"{cone['dyaw_deg']:+.0f} posso avanzare {cone['dist']:.2f} m "
                           f"({cone['reason']}) e avvicinarmi di {cone['gain']:.2f} m al percorso "
-                          f"({cone_goal[0]:.2f}, {cone_goal[1]:.2f}, {CONE_PATH_LOOKAHEAD_M:.1f} m "
+                          f"({cone_goal[0]:.2f}, {cone_goal[1]:.2f}, {P.CONE_PATH_LOOKAHEAD_M:.1f} m "
                           f"avanti lungo il percorso). Vado, invece di arretrare.")
                     if verification_tracker is not None:
                         verification_tracker.clear_path()
                     MISSION_STATS['cone_moves'] += 1
                     cx, cy = cone['target']
                     need_refresh = True      # fine di un movimento: vedi REFRESH A EVENTI
-                    with _TrajectoryLog(robot_state_client, 'cono', (cx, cy)):
+                    with TrajectoryLog(robot_state_client, 'cono', (cx, cy)):
                         ok_c, dist_c, _ = navigate_to(
                             cx, cy, robot_x, robot_y, robot_state_client, command_client,
                             get_a_tform_b(lg_proto_up.local_grid.transforms_snapshot,
@@ -3754,18 +2954,18 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                               f"rotazione di {rot['dyaw_deg']:+.0f} gradi resterebbe impossibile{mb}: "
                               f"non lo faccio, sposterei il problema di 60 cm.")
                 if (back is not None and helps
-                        and retreats_in_a_row < MAX_STRAIGHT_RETREATS_IN_A_ROW
-                        and rotation_fails[edge_key] < MAX_ROTATION_FAILS_SAME_EDGE):
+                        and retreats_in_a_row < P.MAX_STRAIGHT_RETREATS_IN_A_ROW
+                        and rotation_fails[edge_key] < P.MAX_ROTATION_FAILS_SAME_EDGE):
                     bx, by, bdist = back
                     retreats_in_a_row += 1
                     print(f"[ARRETRAMENTO] Indietro dritto di {bdist:.2f} m verso "
                           f"({bx:.2f}, {by:.2f}), senza girarmi, per fare spazio alla rotazione "
-                          f"({retreats_in_a_row}/{MAX_STRAIGHT_RETREATS_IN_A_ROW} consecutivi).")
+                          f"({retreats_in_a_row}/{P.MAX_STRAIGHT_RETREATS_IN_A_ROW} consecutivi).")
                     if verification_tracker is not None:
                         verification_tracker.clear_path()
                     MISSION_STATS['straight_retreats'] += 1
                     need_refresh = True      # fine di un movimento: vedi REFRESH A EVENTI
-                    with _TrajectoryLog(robot_state_client, 'arretramento', (bx, by)):
+                    with TrajectoryLog(robot_state_client, 'arretramento', (bx, by)):
                         ok_back, dist_back = movements.move_to_world_point_without_turning(
                             bx, by, "vision", command_client, robot_state_client, **mobility_kwargs)
                     if dist_back > 0.05:
@@ -3784,7 +2984,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
 
                 if back is None:
                     print("[ARRETRAMENTO] Non c'e' spazio per arretrare dritto.")
-                elif helps and retreats_in_a_row >= MAX_STRAIGHT_RETREATS_IN_A_ROW:
+                elif helps and retreats_in_a_row >= P.MAX_STRAIGHT_RETREATS_IN_A_ROW:
                     print(f"[ARRETRAMENTO] Gia' {retreats_in_a_row} arretramenti di fila senza "
                           f"combinare niente: smetto di arretrare.")
 
@@ -3824,7 +3024,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                       f"({fan_txt_r}).")
                 # Limite per TENTATIVO, non per coppia di nodi (vedi MAX_ROTATION_DISCARDS).
                 rotation_discards += 1
-                if rotation_discards > MAX_ROTATION_DISCARDS:
+                if rotation_discards > P.MAX_ROTATION_DISCARDS:
                     print(f"[ROTAZIONE] Gia' {rotation_discards - 1} tratti scartati in questo "
                           f"tentativo perche' la rotazione era impossibile, e sono sempre qui: "
                           f"non e' l'arco, e' il posto. Ripercorro il tratto da cui sono venuto.")
@@ -3884,11 +3084,11 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 return False
         t_front = time.perf_counter()
 
-        _timing_add('scansione', t_scan - t_iter)
-        _timing_add('elaborazione griglia', t_proc - t_scan)
-        _timing_add('mappe globali', t_maps - t_proc)
-        _timing_add('PRM e ripianificazione', t_prm - t_maps)
-        _timing_add('fronte e decisione', t_front - t_prm)
+        timing_add('scansione', t_scan - t_iter)
+        timing_add('elaborazione griglia', t_proc - t_scan)
+        timing_add('mappe globali', t_maps - t_proc)
+        timing_add('PRM e ripianificazione', t_prm - t_maps)
+        timing_add('fronte e decisione', t_front - t_prm)
         print(f"[TEMPO] scansione {t_scan - t_iter:.2f} s | elaborazione {t_proc - t_scan:.2f} | "
               f"mappe {t_maps - t_proc:.2f} | PRM {t_prm - t_maps:.2f} | fronte {t_front - t_prm:.2f} "
               f"| decisione: {decision['kind']}")
@@ -3903,7 +3103,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
 
         if decision['kind'] == 'arrived':
             print(f"[OBIETTIVO] Il fronte non permette gli ultimi {frontier['path_len']:.2f} m "
-                  f"({frontier['reason']}), entro la tolleranza di {GOAL_REACHED_TOLERANCE_M:.2f} m: "
+                  f"({frontier['reason']}), entro la tolleranza di {P.GOAL_REACHED_TOLERANCE_M:.2f} m: "
                   f"considero raggiunto l'obiettivo.")
             break
 
@@ -3912,7 +3112,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             # punto viene scelto all'inizio del tentativo, da metri di distanza, quando la
             # cella e' ancora tutta ignota; arrivandoci puo' risultare a ridosso di un muro,
             # e allora nessun numero di scansioni lo rendera' raggiungibile.
-            if goal_repicks < MAX_BLOCK_REPLANS and not goal_still_reachable(snap, target_x, target_y):
+            if goal_repicks < P.MAX_BLOCK_REPLANS and not goal_still_reachable(snap, target_x, target_y):
                 goal_repicks += 1
                 need_refresh = True          # piano cambiato: vedi REFRESH A EVENTI
                 MISSION_STATS['goal_repicks'] += 1
@@ -3923,7 +3123,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                       f"obstacle_distance {od_goal:.2f} m, sotto i "
                       f"{spotGrid.FRONTIER_CLEARANCE_M:.2f} m che il fronte pretende: non e' "
                       f"raggiungibile da nessuna direzione. Ne cerco un altro nella cella "
-                      f"({goal_repicks}/{MAX_BLOCK_REPLANS}).")
+                      f"({goal_repicks}/{P.MAX_BLOCK_REPLANS}).")
                 tried_goals.append((float(target_x), float(target_y)))
                 _refuse_goal(env, target_row, target_col, target_x, target_y,
                              f"spazio libero dal vivo {od_goal:.2f} m")
@@ -3956,7 +3156,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             # un'informazione da usare: l'arco si scarta e si cerca subito un percorso che
             # passi da un'altra parte. Le scansioni da fermo restano come ultima rete, per
             # dichiarare la cella irraggiungibile.
-            if (early_replans < MAX_EARLY_REPLANS
+            if (early_replans < P.MAX_EARLY_REPLANS
                     and frontier['reason'] in ('ostacolo', 'rugosita', 'pendenza')
                     and path_waypoints):
                 poly_now = [(robot_x, robot_y)] + [(x, y) for _, x, y in path_waypoints]
@@ -4003,7 +3203,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 MISSION_STATS['early_replans'] += 1
                 print(f"[SUBITO] {frontier['reason']} in ({sx_b:.2f}, {sy_b:.2f}) sul tratto "
                       f"{ea}->{eb}: lo scarto adesso e cerco un altro percorso, senza "
-                      f"aspettare la conferma da fermo ({early_replans}/{MAX_EARLY_REPLANS}). "
+                      f"aspettare la conferma da fermo ({early_replans}/{P.MAX_EARLY_REPLANS}). "
                       f"Direzioni utilizzabili da qui: {n_us}/{len(fan)}.")
                 # Scarto NON permanente: dopo una sola scansione l'arco va tolto dal piano,
                 # non condannato per la missione (vedi mark_edge_blocked_soft).
@@ -4020,9 +3220,9 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                       "lascio decidere il fronte.")
 
             no_progress += 1
-            print(f"[FRONTE] Non posso avanzare nemmeno di {MIN_PARTIAL_STEP_M:.2f} m: riguardo "
-                  f"da fermo ({no_progress}/{FRONTIER_BLOCK_CONFIRM_SCANS} scansioni).")
-            time.sleep(FRONTIER_RESCAN_WAIT_S)
+            print(f"[FRONTE] Non posso avanzare nemmeno di {P.MIN_PARTIAL_STEP_M:.2f} m: riguardo "
+                  f"da fermo ({no_progress}/{P.FRONTIER_BLOCK_CONFIRM_SCANS} scansioni).")
+            time.sleep(P.FRONTIER_RESCAN_WAIT_S)
             continue
 
         if decision['kind'] == 'blocked':
@@ -4030,13 +3230,13 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             edge_a = robot_node_id if k == 0 else path_waypoints[k - 1][0]
             edge_b = path_waypoints[min(k, len(path_waypoints) - 1)][0]
             sx, sy = frontier['stop_xy']
-            print(f"[BLOCCO] Confermato da vicino: {FRONTIER_BLOCK_CONFIRM_SCANS} scansioni consecutive "
+            print(f"[BLOCCO] Confermato da vicino: {P.FRONTIER_BLOCK_CONFIRM_SCANS} scansioni consecutive "
                   f"senza poter avanzare. Motivo: {frontier['reason']} in ({sx:.2f}, {sy:.2f}), "
                   f"sul tratto {edge_a}->{edge_b}.")
             MISSION_STATS['frontier_blocks'] += 1
             # Bloccato a ridosso dell'obiettivo: e' l'obiettivo a non andare, non la strada.
             if (frontier['reason'] in ('ostacolo', 'rugosita', 'pendenza')
-                    and float(np.hypot(sx - target_x, sy - target_y)) <= REFUSED_GOAL_BLOCK_M):
+                    and float(np.hypot(sx - target_x, sy - target_y)) <= P.REFUSED_GOAL_BLOCK_M):
                 _refuse_goal(env, target_row, target_col, target_x, target_y,
                              f"blocco confermato a {float(np.hypot(sx - target_x, sy - target_y)):.2f} m "
                              f"da lui ({frontier['reason']})")
@@ -4108,18 +3308,18 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             no_progress = 0
 
             new_ids = None
-            if block_replans <= MAX_BLOCK_REPLANS:
+            if block_replans <= P.MAX_BLOCK_REPLANS:
                 new_ids = prm_graph.find_path_dijkstra(robot_node_id, goal_id)
             if new_ids is not None:
                 path_waypoints = _waypoints_from_ids(new_ids)
                 full_path_coords = [prm_graph.get_node_position(nid) for nid in new_ids]
-                print(f"[REPLAN] Dopo il blocco ({block_replans}/{MAX_BLOCK_REPLANS}): percorso "
+                print(f"[REPLAN] Dopo il blocco ({block_replans}/{P.MAX_BLOCK_REPLANS}): percorso "
                       f"alternativo con {len(path_waypoints)} waypoint, dal punto in cui sono.")
                 continue
 
             print(f"[BLOCCO] Nessuna alternativa dal punto in cui sono"
-                  + (f" (gia' {MAX_BLOCK_REPLANS} ripianificazioni dopo blocchi)."
-                     if block_replans > MAX_BLOCK_REPLANS else ".")
+                  + (f" (gia' {P.MAX_BLOCK_REPLANS} ripianificazioni dopo blocchi)."
+                     if block_replans > P.MAX_BLOCK_REPLANS else ".")
                   + " Mi stacco arretrando e rimando la cella.")
             if verification_tracker is not None:
                 verification_tracker.clear_path()
@@ -4166,8 +3366,8 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
         step_len = float(np.hypot(move_x - robot_x, move_y - robot_y))
         r_a, c_a, in_a = arcVerification._cells(snap, np.array([move_x]), np.array([move_y]))
         od_arrival = float(snap.obstacle_dist[r_a[0], c_a[0]]) if in_a[0] else float('inf')
-        if (arrival_refusals < MAX_ARRIVAL_REFUSALS
-                and (step_len <= ARRIVAL_EXIT_CHECK_MAX_STEP_M or od_arrival <= ARRIVAL_EXIT_CHECK_OD_M)):
+        if (arrival_refusals < P.MAX_ARRIVAL_REFUSALS
+                and (step_len <= P.ARRIVAL_EXIT_CHECK_MAX_STEP_M or od_arrival <= P.ARRIVAL_EXIT_CHECK_OD_M)):
             heading_arr = float(np.arctan2(move_y - robot_y, move_x - robot_x))
             has_exit, fan_arr = arrival_has_exit(snap, (move_x, move_y), heading_arr)
             if not has_exit:
@@ -4177,7 +3377,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 print(f"[ARRIVO] Il passo di {step_len:.2f} m verso ({move_x:.2f}, {move_y:.2f}) "
                       f"(obstacle_distance li' {od_arrival:.2f} m) mi porterebbe dove non ci sono "
                       f"uscite: {n_us_a}/{len(fan_arr)} direzioni utilizzabili ({fan_txt_a}). "
-                      f"Non ci vado ({arrival_refusals}/{MAX_ARRIVAL_REFUSALS}), scarto il tratto "
+                      f"Non ci vado ({arrival_refusals}/{P.MAX_ARRIVAL_REFUSALS}), scarto il tratto "
                       f"{robot_node_id}->{next_node_id} e ripianifico.")
                 mark_edge_blocked_soft(prm_graph, robot_node_id, next_node_id)
                 new_ids = prm_graph.find_path_dijkstra(robot_node_id, goal_id)
@@ -4267,7 +3467,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 step_leg = float(np.hypot(move_x - robot_x, move_y - robot_y))
                 r_l, c_l, in_l = arcVerification._cells(snap, np.array([move_x]), np.array([move_y]))
                 od_leg = float(snap.obstacle_dist[r_l[0], c_l[0]]) if in_l[0] else float('inf')
-                if step_leg <= ARRIVAL_EXIT_CHECK_MAX_STEP_M or od_leg <= ARRIVAL_EXIT_CHECK_OD_M:
+                if step_leg <= P.ARRIVAL_EXIT_CHECK_MAX_STEP_M or od_leg <= P.ARRIVAL_EXIT_CHECK_OD_M:
                     has_exit_leg, _fan_leg = arrival_has_exit(
                         snap, (move_x, move_y), float(np.arctan2(move_y - robot_y, move_x - robot_x)))
                     if not has_exit_leg:
@@ -4369,12 +3569,12 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                     live_frontiers.append((f['time'], frx, fry, f['reason'], float(f['dist']), reach, remaining,
                                            abort_state['bad']))
                 if (f['reason'] == 'fine_dati'
-                        and float(np.hypot(frx - robot_x, fry - robot_y)) < ABORT_IGNORE_DATA_EDGE_UNTIL_M):
+                        and float(np.hypot(frx - robot_x, fry - robot_y)) < P.ABORT_IGNORE_DATA_EDGE_UNTIL_M):
                     abort_state['bad'] = 0      # sta ancora ruotando sul posto: vedi la costante
                     return False
-                if reach + FRONTIER_ABORT_TOLERANCE_M < remaining:
+                if reach + P.FRONTIER_ABORT_TOLERANCE_M < remaining:
                     abort_state['bad'] += 1
-                    if abort_state['bad'] >= FRONTIER_ABORT_CONFIRM:
+                    if abort_state['bad'] >= P.FRONTIER_ABORT_CONFIRM:
                         sxa, sya = f['stop_xy']
                         abort_state['reason'] = (f"il fronte si e' accorciato ({f['reason']} in "
                                                  f"({sxa:.2f}, {sya:.2f})): raggiungibili {reach:.2f} m "
@@ -4398,11 +3598,11 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
             finally:
                 tilt_stats = tilt_recorder.stop()
             move_duration = time.time() - move_t0
-            _timing_add('movimento', move_duration)
+            timing_add('movimento', move_duration)
             try:   # solo log: non deve mai interrompere la missione
                 _seg_id = [iteration, target_row, target_col, loop_iter, robot_node_id, next_node_id]
-                _append_trajectory(getattr(tilt_recorder, 'samples', []), 'prm', (move_x, move_y), _seg_id)
-                _append_csv("frontier_live.csv",
+                append_trajectory(getattr(tilt_recorder, 'samples', []), 'prm', (move_x, move_y), _seg_id)
+                append_csv("frontier_live.csv",
                             ['time', 'iteration', 'cell_row', 'cell_col', 'loop_iter', 'node_from', 'node_to',
                              'robot_x', 'robot_y', 'reason', 'frontier_dist', 'reachable_m', 'remaining_m',
                              'consecutive_bad', 'aborted'],
@@ -4418,7 +3618,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                 cost_long = prm_graph.beta * segment_long_slope
                 cost_lat = prm_graph.beta_lateral * segment_lat_slope
                 cost_rough = prm_graph.gamma * segment_roughness
-                _log_segment({
+                log_segment({
                     'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     'iteration': iteration, 'cell_row': target_row, 'cell_col': target_col,
                     'node_from': robot_node_id, 'node_to': next_node_id,
@@ -4679,7 +3879,6 @@ def navigate_to(target_x, target_y, robot_x, robot_y, robot_state_client, comman
     return move_success, distance_traveled, distance
 
 
-
 def find_new_borders(env, robot_row, robot_col, path, frontier):
     new_borders = env.get_adjacent_frontier_cells(robot_row, robot_col, path)
     new_borders_cells = []
@@ -4691,7 +3890,7 @@ def find_new_borders(env, robot_row, robot_col, path, frontier):
 
 
 def retreat_along_traveled_path(env, robot_state_client, command_client,
-                                max_segments=RETREAT_MAX_SEGMENTS,
+                                max_segments=P.RETREAT_MAX_SEGMENTS,
                                 mobility_kwargs=None,
                                 pts=None, obstacle_mask=None):
     """
@@ -4734,17 +3933,17 @@ def retreat_along_traveled_path(env, robot_state_client, command_client,
         seg_len = float(np.hypot(from_x - robot_x, from_y - robot_y))
 
         gap = float(np.hypot(to_x - robot_x, to_y - robot_y))
-        if gap > RETREAT_CONTINUITY_M:
+        if gap > P.RETREAT_CONTINUITY_M:
             print(f"[RITIRATA] Non sono dove finiva l'ultimo tratto registrato (distanza {gap:.2f} m, "
                   f"es. dopo uno spostamento con GraphNav): non arretro alla cieca.")
             del traveled[:]
             break
-        if seg_len > RETREAT_MAX_SEGMENT_M:
+        if seg_len > P.RETREAT_MAX_SEGMENT_M:
             print(f"[RITIRATA] Il tratto di rientro e' lungo {seg_len:.2f} m (oltre "
-                  f"{RETREAT_MAX_SEGMENT_M:.1f} m): non lo ripercorro all'indietro.")
+                  f"{P.RETREAT_MAX_SEGMENT_M:.1f} m): non lo ripercorro all'indietro.")
             break
 
-        if seg_len < RETREAT_MIN_SEGMENT_M:
+        if seg_len < P.RETREAT_MIN_SEGMENT_M:
             # Tratto troppo corto per valere un comando a se': lo consumiamo e proseguiamo.
             traveled.pop()
             continue
@@ -4764,7 +3963,7 @@ def retreat_along_traveled_path(env, robot_state_client, command_client,
 
         print(f"[RITIRATA] Tratto {done + 1}/{max_segments}: rientro verso "
               f"({from_x:.2f}, {from_y:.2f}), {seg_len:.2f} m all'indietro.")
-        with _TrajectoryLog(robot_state_client, 'ritirata', (from_x, from_y)):
+        with TrajectoryLog(robot_state_client, 'ritirata', (from_x, from_y)):
             success, dist = movements.move_to_world_point_without_turning(
                 from_x, from_y, "vision", command_client, robot_state_client, **mobility_kwargs)
         total += dist
@@ -4871,9 +4070,9 @@ def easy_walk(options):
     estop = spotLogInUtils.SimpleEstop(robot, options.name + "_estop")
 
     local_grid = spotGrid.LocalGrid(robot)
-    _MISSION_CTX['local_grid'] = local_grid
+    MISSION_CTX['local_grid'] = local_grid
     global_grid = spotGrid.GlobalGrid()
-    _MISSION_CTX['global_grid'] = global_grid   # per graphnav_add_shortcuts
+    MISSION_CTX['global_grid'] = global_grid   # per graphnav_add_shortcuts
 
     recordingInterface = navGraphUtils.RecordingInterface(robot, options.download_filepath, client_metadata)
     recordingInterface.stop_recording()
@@ -4892,11 +4091,11 @@ def easy_walk(options):
         os.makedirs(mission_log_folder, exist_ok=True)
         mission_folder = mission_map_folder
         mission_log_path = os.path.join(mission_log_folder, "mission_log.txt")
-        _install_stdout_tee(mission_log_path)
+        install_stdout_tee(mission_log_path)
         try:
-            _MISSION_CTX['log_folder'] = mission_log_folder
-            _MISSION_CTX['segment_log'] = SegmentLog(os.path.join(mission_log_folder, "segments.csv"))
-            _MISSION_CTX['summary_done'] = False
+            MISSION_CTX['log_folder'] = mission_log_folder
+            MISSION_CTX['segment_log'] = SegmentLog(os.path.join(mission_log_folder, "segments.csv"))
+            MISSION_CTX['summary_done'] = False
             print(f"[LOG] Cartella log: {mission_log_folder}  |  dati e immagini: {mission_map_folder}")
             print("[CONFIG] INTERRUTTORI: " + "  ".join(
                 f"{k.split('.')[-1]}={v}" for k, v in mission_switches().items()))
@@ -4922,40 +4121,40 @@ def easy_walk(options):
                   f"settore spazzato a passi di {spotGrid.ROTATION_SWEEP_STEP_DEG:.0f} gradi "
                   f"(tolleranza {spotGrid.ROTATION_NOISE_TOLERANCE_M:.2f} m sul rumore); "
                   f"MARCIA DI TRAVERSO DISATTIVATA")
-            print(f"[CONFIG] SE NON PUO' RUOTARE: 1) ventaglio nel cono +/-{CONE_SWEEP_MAX_DEG:.0f} gradi "
-                  f"a passi di {CONE_SWEEP_STEP_DEG:.0f}, si va nella direzione piu' libera fra quelle "
-                  f"che avvicinano di almeno {CONE_MIN_GAIN_M:.2f} m; 2) arretramento dritto fino a "
-                  f"{ROTATION_RETREAT_M:.2f} m SOLO se da li' la rotazione diventa possibile, "
-                  f"max {MAX_STRAIGHT_RETREATS_IN_A_ROW} consecutivi; 3) si scarta il tratto")
-            print(f"[CONFIG] TRAPPOLA: ventaglio a 360 gradi a passi di {ESCAPE_FAN_STEP_DEG:.0f} "
-                  f"({int(360/ESCAPE_FAN_STEP_DEG)} direzioni); una direzione vale se concede "
-                  f"{ESCAPE_FAN_MIN_ADVANCE_M:.2f} m E il robot puo' girarsi per puntarla. Zero "
+            print(f"[CONFIG] SE NON PUO' RUOTARE: 1) ventaglio nel cono +/-{P.CONE_SWEEP_MAX_DEG:.0f} gradi "
+                  f"a passi di {P.CONE_SWEEP_STEP_DEG:.0f}, si va nella direzione piu' libera fra quelle "
+                  f"che avvicinano di almeno {P.CONE_MIN_GAIN_M:.2f} m; 2) arretramento dritto fino a "
+                  f"{P.ROTATION_RETREAT_M:.2f} m SOLO se da li' la rotazione diventa possibile, "
+                  f"max {P.MAX_STRAIGHT_RETREATS_IN_A_ROW} consecutivi; 3) si scarta il tratto")
+            print(f"[CONFIG] TRAPPOLA: ventaglio a 360 gradi a passi di {P.ESCAPE_FAN_STEP_DEG:.0f} "
+                  f"({int(360/P.ESCAPE_FAN_STEP_DEG)} direzioni); una direzione vale se concede "
+                  f"{P.ESCAPE_FAN_MIN_ADVANCE_M:.2f} m E il robot puo' girarsi per puntarla. Zero "
                   f"direzioni -> si ripercorre il tratto da cui si e' venuti SUBITO, senza "
                   f"scartare archi. Controllo sulla posa d'arrivo per i passi sotto "
-                  f"{ARRIVAL_EXIT_CHECK_MAX_STEP_M:.2f} m o con obstacle_distance sotto "
-                  f"{ARRIVAL_EXIT_CHECK_OD_M:.2f} m, max {MAX_ARRIVAL_REFUSALS} rifiuti. "
+                  f"{P.ARRIVAL_EXIT_CHECK_MAX_STEP_M:.2f} m o con obstacle_distance sotto "
+                  f"{P.ARRIVAL_EXIT_CHECK_OD_M:.2f} m, max {P.MAX_ARRIVAL_REFUSALS} rifiuti. "
                   f"Scarto da [SUBITO] e da [ARRIVO]: NON permanente")
             print(f"[CONFIG] RITORNI: briciola GraphNav ogni "
-                  f"{GRAPHNAV_WAYPOINT_MIN_SPACING_M:.2f} m, ritorno con GraphNav fino a "
-                  f"{GRAPHNAV_MAX_BACKTRACK_HOPS} waypoint indietro riprovando la "
+                  f"{P.GRAPHNAV_WAYPOINT_MIN_SPACING_M:.2f} m, ritorno con GraphNav fino a "
+                  f"{P.GRAPHNAV_MAX_BACKTRACK_HOPS} waypoint indietro riprovando la "
                   f"pianificazione a ogni tappa, poi si rimanda la cella; ritirata a zampe "
                   f"solo come ultima rete. Nodi PRM scartati sotto "
-                  f"{PRM_NODE_MIN_CLEARANCE_M:.2f} m di spazio libero, solo dove visti. "
+                  f"{P.PRM_NODE_MIN_CLEARANCE_M:.2f} m di spazio libero, solo dove visti. "
                   f"Deroga di {prm_graph.STOP_NODE_MAP_IGNORE_M:.2f} m alla mappa globale "
                   f"attorno al robot: ora solo dopo una caduta")
             print(f"[CONFIG] OSTACOLI: mediana su {arcVerification.OBSTACLE_MEDIAN_FRAMES} scansioni "
                   f"+ isteresi {arcVerification.OBSTACLE_HYSTERESIS_M:.2f} m attorno a "
                   f"{spotGrid.FRONTIER_CLEARANCE_M:.2f} m (rumore misurato 1.5 cm tipici, 7.3 di punta); "
                   f"celle-ostacolo escluse dal campionamento della pendenza d'arco")
-            print(f"[CONFIG] OBIETTIVO: tolleranza d'arrivo {GOAL_REACHED_TOLERANCE_M:.2f} m "
+            print(f"[CONFIG] OBIETTIVO: tolleranza d'arrivo {P.GOAL_REACHED_TOLERANCE_M:.2f} m "
                   f"(= meta' corpo + margine del fronte), riscelta del punto fino a "
-                  f"{MAX_BLOCK_REPLANS} volte se risulta irraggiungibile; ripianificazione alla "
-                  f"PRIMA cella bloccante, fino a {MAX_EARLY_REPLANS} volte per tentativo")
+                  f"{P.MAX_BLOCK_REPLANS} volte se risulta irraggiungibile; ripianificazione alla "
+                  f"PRIMA cella bloccante, fino a {P.MAX_EARLY_REPLANS} volte per tentativo")
             print(f"[CONFIG] SCELTA OBIETTIVO: solo punti raggiungibili dal robot nel grafo (se ce "
-                  f"ne sono), spazio libero preferito {TARGET_CLEARANCE_M:.2f} m (minimo "
-                  f"{spotGrid.PLAN_CLEARANCE_M:.2f}), almeno {TARGET_CELL_BORDER_M:.2f} m dal bordo "
+                  f"ne sono), spazio libero preferito {P.TARGET_CLEARANCE_M:.2f} m (minimo "
+                  f"{spotGrid.PLAN_CLEARANCE_M:.2f}), almeno {P.TARGET_CELL_BORDER_M:.2f} m dal bordo "
                   f"della cella, obiettivi rifiutati dal fronte esclusi per la missione; arrivo "
-                  f"valido anche col robot fuori dalla cella fino a {ARRIVAL_OUTSIDE_CELL_M:.2f} m")
+                  f"valido anche col robot fuori dalla cella fino a {P.ARRIVAL_OUTSIDE_CELL_M:.2f} m")
         except Exception as e:
             print(f"[LOG] Impossibile inizializzare il CSV dei segmenti: {e}")
 
@@ -4982,7 +4181,7 @@ def easy_walk(options):
         # SENZA toccare il codice, in ordine di precedenza:
         #   1. argomenti:  python3 easy_walk.py --rows 2 --cols 4 --cell 5
         #   2. variabile:  SPOT_MISSION_GRID="righe,colonne,lato_cella"   es. "2,3,3"
-        grid_rows, grid_cols, grid_cell = MISSION_GRID_ROWS, MISSION_GRID_COLS, MISSION_CELL_SIZE_M
+        grid_rows, grid_cols, grid_cell = P.MISSION_GRID_ROWS, P.MISSION_GRID_COLS, P.MISSION_CELL_SIZE_M
         _grid_source = "mission_graph.MISSION_*"
         _env_grid = os.environ.get("SPOT_MISSION_GRID", "").strip()
         if _env_grid:
@@ -5004,15 +4203,15 @@ def easy_walk(options):
               f"({grid_rows * grid_cell:.0f} m a sinistra x {grid_cols * grid_cell:.0f} m davanti; "
               f"fonte: {_grid_source})")
         print(f"[CONFIG] Reticolo: passo richiesto "
-              f"{'suggerito' if MISSION_LATTICE_SPACING_M is None else '%.3f m' % MISSION_LATTICE_SPACING_M}, "
-              f"anelli {MISSION_LATTICE_RINGS if MISSION_LATTICE_RINGS is not None else 'tutti'}")
+              f"{'suggerito' if P.MISSION_LATTICE_SPACING_M is None else '%.3f m' % P.MISSION_LATTICE_SPACING_M}, "
+              f"anelli {P.MISSION_LATTICE_RINGS if P.MISSION_LATTICE_RINGS is not None else 'tutti'}")
         # test_replay legge metodo e archi da questa riga; distribuzione, densita' e seme
         # dalla riga [GRAFO] Nodi casuali, scritta quando il grafo e' costruito.
-        print(f"[CONFIG] Grafo: nodi {MISSION_GRAPH_SAMPLING}"
-              + (f" ({MISSION_RANDOM_DISTRIBUTION}, {MISSION_RANDOM_DENSITY:g} nodi/m2, seme "
-                 f"{'a caso' if MISSION_RANDOM_SEED is None else MISSION_RANDOM_SEED})"
-                 if MISSION_GRAPH_SAMPLING == 'casuale' else "")
-              + f"; archi da {PRM_MIN_EDGE_M:g} a {PRM_MAX_EDGE_M:g} m")
+        print(f"[CONFIG] Grafo: nodi {P.MISSION_GRAPH_SAMPLING}"
+              + (f" ({P.MISSION_RANDOM_DISTRIBUTION}, {P.MISSION_RANDOM_DENSITY:g} nodi/m2, seme "
+                 f"{'a caso' if P.MISSION_RANDOM_SEED is None else P.MISSION_RANDOM_SEED})"
+                 if P.MISSION_GRAPH_SAMPLING == 'casuale' else "")
+              + f"; archi da {P.PRM_MIN_EDGE_M:g} a {P.PRM_MAX_EDGE_M:g} m")
         env = environmentMap.EnvironmentMap(rows=grid_rows, cols=grid_cols, cell_size=grid_cell)  # colonne davanti, righe a sinistra
 
         # --- Andatura per tutta la missione ---
@@ -5033,18 +4232,18 @@ def easy_walk(options):
         yaw_boot = np.arctan2(2.0 * (quat_boot.w * quat_boot.z + quat_boot.x * quat_boot.y),
                               1.0 - 2.0 * (quat_boot.y ** 2 + quat_boot.z ** 2))
         env.set_origin(x_boot, y_boot, yaw_boot, start_row=start_row, start_col=start_col)
-        _set_mission_z0(robot_state_client, z_boot)
+        set_mission_z0(robot_state_client, z_boot)
 
         # Nodi del PRM: il grafo della missione (vedi _build_mission_prm e mission_graph.py).
         # Il punto di accensione e i centri cella sono nodi del grafo, con entrambi i metodi.
         prm, gb_sampler, mission_lattice = _build_mission_prm(env)
-        _MISSION_CTX['prm'] = prm  # per il riepilogo di fine missione (anche se interrotta)
+        MISSION_CTX['prm'] = prm  # per il riepilogo di fine missione (anche se interrotta)
 
         # Gli ARCHI non si creano qui: non c'e' ancora nessun dato di terreno ne' di
         # occupazione. Li crea attempt_enter_cell_from_position() alla prima scansione
         # (vedi _rebuild_prm_edges).
         verification_tracker = arcVerification.ArcVerificationTracker(robot)
-        _MISSION_CTX['tracker'] = verification_tracker
+        MISSION_CTX['tracker'] = verification_tracker
         verification_tracker.start()
 
         recordingInterface.set_download_filepath(graph_folder)
@@ -5184,7 +4383,7 @@ def easy_walk(options):
                             # e torna in coda come le altre (vedi finalize_or_defer_blocked_cell).
                             last_goal = getattr(env, '_last_attempt_goal', None)
                             same_goal = (last_goal is not None and float(np.hypot(
-                                target_x - last_goal[0], target_y - last_goal[1])) <= RECOVERY_SAME_GOAL_M)
+                                target_x - last_goal[0], target_y - last_goal[1])) <= P.RECOVERY_SAME_GOAL_M)
                             if same_goal and path_ids is not None:
                                 print(f"[RECOVERY] L'obiettivo ({target_x:.2f}, {target_y:.2f}) e' "
                                       f"quello del tentativo appena fallito: non riprovo subito, la "
@@ -5280,7 +4479,7 @@ def easy_walk(options):
                     # Prima di partire con GraphNav: da quel waypoint il grafo arriva alla
                     # cella? Se no, il tentativo fallirebbe appena arrivati (vedi
                     # GRAPHNAV_PRECHECK): il lato si segna come provato senza muoversi.
-                    if GRAPHNAV_PRECHECK:
+                    if P.GRAPHNAV_PRECHECK:
                         cand_wp = recordingInterface.get_manual_waypoint_by_cell(*candidate_nearest_cell)
                         wp_xy = (cand_wp.get('x'), cand_wp.get('y')) if isinstance(cand_wp, dict) else (None, None)
                         reach = (graph_reaches_cell(prm, env, wp_xy, candidate_row, candidate_col,
@@ -5476,7 +4675,7 @@ def easy_walk(options):
         # verificati sulle scansioni, correggono la deriva della mappa scaricata e accorciano
         # il ritorno (vedi GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S).
         graphnav_add_shortcuts(recordingInterface, "chiusura della mappa", map_edges=False,
-                               sdk=True, sdk_budget_s=GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S, sdk_fast=False)
+                               sdk=True, sdk_budget_s=P.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S, sdk_fast=False)
         recordingInterface.optimize_anchoring()
         _t_close['chiusura mappa e ancoraggio'] = time.perf_counter() - _t
 
@@ -5510,30 +4709,30 @@ def _parse_args(argv=None):
     import argparse
     p = argparse.ArgumentParser(description="Missione di esplorazione autonoma con Spot")
     p.add_argument('--rows', type=int, default=None,
-                   help=f"righe di celle, a sinistra del robot (default {MISSION_GRID_ROWS})")
+                   help=f"righe di celle, a sinistra del robot (default {P.MISSION_GRID_ROWS})")
     p.add_argument('--cols', type=int, default=None,
-                   help=f"colonne di celle, davanti al robot (default {MISSION_GRID_COLS})")
+                   help=f"colonne di celle, davanti al robot (default {P.MISSION_GRID_COLS})")
     p.add_argument('--cell', type=float, default=None,
-                   help=f"lato della cella in m (default {MISSION_CELL_SIZE_M:g})")
+                   help=f"lato della cella in m (default {P.MISSION_CELL_SIZE_M:g})")
     p.add_argument('--spacing', type=float, default=None,
                    help=f"passo fra i nodi del reticolo in m, arrotondato a cell/n; gli archi "
-                        f"restano >= {PRM_MIN_EDGE_M:g} m (default {MISSION_LATTICE_SPACING_M}; "
+                        f"restano >= {P.PRM_MIN_EDGE_M:g} m (default {P.MISSION_LATTICE_SPACING_M}; "
                         f"0 = suggerito)")
     p.add_argument('--rings', default=None,
-                   help=f"anelli di vicini collegati, o 'tutti' (default {MISSION_LATTICE_RINGS})")
+                   help=f"anelli di vicini collegati, o 'tutti' (default {P.MISSION_LATTICE_RINGS})")
     p.add_argument('--grafo', choices=mission_graph.GRAPH_SAMPLINGS, default=None,
-                   help=f"come si generano i nodi (default {MISSION_GRAPH_SAMPLING})")
+                   help=f"come si generano i nodi (default {P.MISSION_GRAPH_SAMPLING})")
     p.add_argument('--distribuzione', choices=mission_graph.RANDOM_DISTRIBUTIONS, default=None,
-                   help=f"nodi casuali: distribuzione (default {MISSION_RANDOM_DISTRIBUTION})")
+                   help=f"nodi casuali: distribuzione (default {P.MISSION_RANDOM_DISTRIBUTION})")
     p.add_argument('--densita', type=float, default=None,
-                   help=f"nodi casuali: nodi per m2 (default {MISSION_RANDOM_DENSITY:g})")
+                   help=f"nodi casuali: nodi per m2 (default {P.MISSION_RANDOM_DENSITY:g})")
     p.add_argument('--seme', type=int, default=None,
                    help="nodi casuali: seme, per ripetere un grafo (default: estratto a caso, "
                         "scritto nel log)")
     p.add_argument('--min-edge', type=float, default=None,
-                   help=f"lunghezza minima degli archi in m (default {PRM_MIN_EDGE_M:g})")
+                   help=f"lunghezza minima degli archi in m (default {P.PRM_MIN_EDGE_M:g})")
     p.add_argument('--max-edge', type=float, default=None,
-                   help=f"lunghezza massima degli archi in m (default {PRM_MAX_EDGE_M:g})")
+                   help=f"lunghezza massima degli archi in m (default {P.PRM_MAX_EDGE_M:g})")
     a = p.parse_args(argv)
     if a.rows is not None and a.rows < 1 or a.cols is not None and a.cols < 1:
         p.error("--rows e --cols devono essere almeno 1")
@@ -5541,34 +4740,31 @@ def _parse_args(argv=None):
         p.error("--cell deve essere positivo")
     if a.densita is not None and a.densita <= 0:
         p.error("--densita deve essere positiva")
-    lo = PRM_MIN_EDGE_M if a.min_edge is None else a.min_edge
-    hi = PRM_MAX_EDGE_M if a.max_edge is None else a.max_edge
+    lo = P.PRM_MIN_EDGE_M if a.min_edge is None else a.min_edge
+    hi = P.PRM_MAX_EDGE_M if a.max_edge is None else a.max_edge
     if lo <= 0 or hi < lo:
         p.error("serve 0 < --min-edge <= --max-edge")
     return a
 
 
 def main():
-    global MISSION_LATTICE_SPACING_M, MISSION_LATTICE_RINGS, PRM_MIN_EDGE_M, PRM_MAX_EDGE_M
-    global MISSION_GRAPH_SAMPLING, MISSION_RANDOM_DISTRIBUTION, MISSION_RANDOM_DENSITY
-    global MISSION_RANDOM_SEED
     args = _parse_args()
     if args.grafo is not None:
-        MISSION_GRAPH_SAMPLING = args.grafo
+        P.MISSION_GRAPH_SAMPLING = args.grafo
     if args.distribuzione is not None:
-        MISSION_RANDOM_DISTRIBUTION = args.distribuzione
+        P.MISSION_RANDOM_DISTRIBUTION = args.distribuzione
     if args.densita is not None:
-        MISSION_RANDOM_DENSITY = float(args.densita)
+        P.MISSION_RANDOM_DENSITY = float(args.densita)
     if args.seme is not None:
-        MISSION_RANDOM_SEED = int(args.seme)
+        P.MISSION_RANDOM_SEED = int(args.seme)
     if args.min_edge is not None:
-        PRM_MIN_EDGE_M = float(args.min_edge)
+        P.PRM_MIN_EDGE_M = float(args.min_edge)
     if args.max_edge is not None:
-        PRM_MAX_EDGE_M = float(args.max_edge)
+        P.PRM_MAX_EDGE_M = float(args.max_edge)
     if args.spacing is not None:
-        MISSION_LATTICE_SPACING_M = None if args.spacing <= 0 else float(args.spacing)
+        P.MISSION_LATTICE_SPACING_M = None if args.spacing <= 0 else float(args.spacing)
     if args.rings is not None:
-        MISSION_LATTICE_RINGS = (None if str(args.rings).lower() in ('none', 'tutti', 'all', '-1')
+        P.MISSION_LATTICE_RINGS = (None if str(args.rings).lower() in ('none', 'tutti', 'all', '-1')
                                  else int(args.rings))
 
     options = SimpleNamespace()
@@ -5604,7 +4800,7 @@ def main():
         return False
     finally:
         _emit_mission_summary_once()
-        _remove_stdout_tee()
+        remove_stdout_tee()
 
 
 if __name__ == '__main__':

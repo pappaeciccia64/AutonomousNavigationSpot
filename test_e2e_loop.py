@@ -34,6 +34,8 @@ sys.path.insert(1, STUBS)
 import matplotlib  # noqa: E402
 matplotlib.use("Agg")
 import easy_walk     # noqa: E402
+import parametri     # noqa: E402
+import registro      # noqa: E402
 import spotGrid      # noqa: E402
 import arcVerification as av   # noqa: E402
 import prm_graph     # noqa: E402
@@ -316,7 +318,7 @@ easy_walk.get_a_tform_b = fake_get_a_tform_b
 spotUtils.getPosition = lambda rsc: (ROBOT.x, ROBOT.y, -2.7, quat(ROBOT.yaw))
 easy_walk.navigate_to = fake_navigate_to
 movements.move_to_world_point_without_turning = fake_move_no_turn
-easy_walk.FRONTIER_RESCAN_WAIT_S = 0.0
+parametri.FRONTIER_RESCAN_WAIT_S = 0.0
 movements.check_fall = fake_check_fall
 movements.recover_from_fall = fake_recover
 
@@ -329,7 +331,7 @@ class _NoTilt:
                     pitch_peak_abs=0, samples=0, errors=0)
 
 
-easy_walk.BodyTiltRecorder = _NoTilt
+easy_walk.BodyTiltRecorder = registro.BodyTiltRecorder = _NoTilt
 
 
 def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, second_attempt=False,
@@ -350,13 +352,13 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
     import mission_graph
     mg = mission_graph.build_mission_graph(
         rows=2, cols=2, cell_size_m=5.0, spacing_m=0.25, rings=None,
-        origin_xy=(3.5, 3.5), origin_yaw=0.0, min_edge_length=easy_walk.PRM_MIN_EDGE_M,
-        max_edge_length=easy_walk.PRM_MAX_EDGE_M,
-        connection_radius=easy_walk.PRM_CONNECTION_RADIUS_M, verbose=False,
+        origin_xy=(3.5, 3.5), origin_yaw=0.0, min_edge_length=parametri.PRM_MIN_EDGE_M,
+        max_edge_length=parametri.PRM_MAX_EDGE_M,
+        connection_radius=parametri.PRM_CONNECTION_RADIUS_M, verbose=False,
         **dict({'sampling': 'reticolo'}, **GRAPH_KW))
-    prm = prm_graph.PRM(min_edge_length=easy_walk.PRM_MIN_EDGE_M,
-                        max_edge_length=easy_walk.PRM_MAX_EDGE_M,
-                        connection_radius=easy_walk.PRM_CONNECTION_RADIUS_M)
+    prm = prm_graph.PRM(min_edge_length=parametri.PRM_MIN_EDGE_M,
+                        max_edge_length=parametri.PRM_MAX_EDGE_M,
+                        connection_radius=parametri.PRM_CONNECTION_RADIUS_M)
     prm.mission_graph = mg
     mg.into_prm(prm)
     folder = tempfile.mkdtemp(prefix="missione_e2e_")
@@ -402,7 +404,7 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
                 FakeLocalGrid(), gg, None, None, FakeEnv(), target_cell[0], target_cell[1],
                 FakeSampler(), prm, mission_folder=folder, iteration=1,
                 recordingInterface=None, verification_tracker=FakeTracker())
-    easy_walk._VIS_EXECUTOR.submit(lambda: None).result()      # aspetta i salvataggi
+    registro.VIS_EXECUTOR.submit(lambda: None).result()      # aspetta i salvataggi
     # Il codice vero restituisce env.is_point_in_cell(...), che con coordinate numpy e' un
     # np.bool_: il chiamante fa `if check:` e funziona, ma qui i controlli usano `is True`.
     if isinstance(ok, np.bool_):
@@ -410,6 +412,14 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
     if isinstance(ok2, np.bool_):
         ok2 = bool(ok2)
     log = out.getvalue()
+    # Registrazione di riferimento (E2E_LOG_DIR=cartella): il log completo di ogni scenario,
+    # per confrontare il comportamento riga per riga prima e dopo una ristrutturazione del
+    # codice (vedi confronta_log.py).
+    if os.environ.get('E2E_LOG_DIR'):
+        os.makedirs(os.environ['E2E_LOG_DIR'], exist_ok=True)
+        slug = "".join(c if c.isalnum() else "_" for c in name)[:60]
+        with open(os.path.join(os.environ['E2E_LOG_DIR'], slug + ".log"), "w") as fh:
+            fh.write(log)
     n_scans = len(os.listdir(os.path.join(folder, "scans"))) if os.path.isdir(os.path.join(folder, "scans")) else 0
     print(f"\n{name}  ({time.time() - t0:.1f} s)")
     if err:
@@ -532,10 +542,10 @@ if __name__ == '__main__':
     # S12: l'avanzamento multinodo deve passare a ogni gamba
     # l'orientamento VERO del robot. Con archi corti il multinodo scatta, e con un percorso
     # che curva un orientamento vecchio di una gamba manda il robot fuori dal percorso.
-    easy_walk.PRM_MAX_EDGE_M = 0.70711
+    parametri.PRM_MAX_EDGE_M = 0.70711
     r = run("S12. multinodo su percorso che curva: ogni gamba va dove e' stata comandata",
             [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)], (3.5, 3.5, 0.0), (0, 1))
-    easy_walk.PRM_MAX_EDGE_M = 1.25
+    parametri.PRM_MAX_EDGE_M = 1.25
     check(r['err'] is None, "nessuna eccezione")
     check(r['stats'].get('multinode_moves', 0) >= 1,
           f"il multinodo e' scattato ({r['stats'].get('multinode_moves', 0)} movimenti, "
@@ -560,8 +570,8 @@ if __name__ == '__main__':
     check('GRAFO DISCONNESSO' not in r['log'], "il grafo arriva all'obiettivo scelto")
     check(r['ok'] is True, f"la cella vale come raggiunta (posizione finale "
                            f"({r['final'][0]:.2f}, {r['final'][1]:.2f}), bordo a x = 6.00)")
-    check(r['final'][0] >= 6.0 - easy_walk.ARRIVAL_OUTSIDE_CELL_M - 0.02,
-          f"il robot e' fuori dalla cella al massimo di {easy_walk.ARRIVAL_OUTSIDE_CELL_M:.2f} m "
+    check(r['final'][0] >= 6.0 - parametri.ARRIVAL_OUTSIDE_CELL_M - 0.02,
+          f"il robot e' fuori dalla cella al massimo di {parametri.ARRIVAL_OUTSIDE_CELL_M:.2f} m "
           f"({max(0.0, 6.0 - r['final'][0]):.2f} m)")
     check(r['min_clear'] > 0.0, f"non entra nel muro (distanza minima {r['min_clear']:.2f} m)")
 
@@ -569,13 +579,13 @@ if __name__ == '__main__':
     confronto = {}
     for etichetta, maxe in (("archi 0.5-0.707 (missione 16:35)", 0.70711),
                             ("archi 0.5-1.25 (nuovo)", 1.25)):
-        easy_walk.PRM_MAX_EDGE_M = maxe
+        parametri.PRM_MAX_EDGE_M = maxe
         r = run(f"S9. {etichetta}", [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)],
                 (3.5, 3.5, 0.0), (0, 1))
         confronto[etichetta] = (r['commands'], r['walked'], r['stats'].get('multinode_moves', 0),
                                 r['stats'].get('multinode_nodes', 0), r['scans'], r['ok'],
                                 r['turns'], r['turn_deg'])
-    easy_walk.PRM_MAX_EDGE_M = 1.25
+    parametri.PRM_MAX_EDGE_M = 1.25
     print()
     for k, (c, w, mm, mn, sc, ok, tn, td) in confronto.items():
         print(f"  {k:<34} {c:2d} comandi, {w:4.1f} m -> {w / max(1, c):.2f} m/comando; "

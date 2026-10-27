@@ -107,6 +107,7 @@ with _quiet():
     import prm_graph
     import environmentMap
     import easy_walk as ew
+    import parametri as P
 
 
 # --------------------------------------------------------------------------------------
@@ -195,19 +196,19 @@ def replay_mission(job):
     with _quiet():
         env = environmentMap.EnvironmentMap(rows=m['rows'], cols=m['cols'], cell_size=m['cell'])
         env.set_origin(m['origin'][0], m['origin'][1], math.radians(m['yaw_deg']))
-        ew.MISSION_LATTICE_SPACING_M = m['spacing']
+        P.MISSION_LATTICE_SPACING_M = m['spacing']
         g = m['graph']
-        ew.MISSION_GRAPH_SAMPLING = g['sampling']
-        ew.PRM_MIN_EDGE_M, ew.PRM_MAX_EDGE_M = g['min_edge'], g['max_edge']
+        P.MISSION_GRAPH_SAMPLING = g['sampling']
+        P.PRM_MIN_EDGE_M, P.PRM_MAX_EDGE_M = g['min_edge'], g['max_edge']
         if g['sampling'] == 'casuale':
-            ew.MISSION_RANDOM_DISTRIBUTION = g['distribution']
-            ew.MISSION_RANDOM_DENSITY = g['density']
-            ew.MISSION_RANDOM_SEED = g['seed']
+            P.MISSION_RANDOM_DISTRIBUTION = g['distribution']
+            P.MISSION_RANDOM_DENSITY = g['density']
+            P.MISSION_RANDOM_SEED = g['seed']
         # Confronto fra grafi: il grafo chiesto da riga di comando al posto di quello della
         # missione. Gli id dei nodi salvati nelle scansioni allora non valgono piu'.
         foreign = bool(override)
         for k, v in (override or {}).items():
-            setattr(ew, k, v)
+            setattr(P, k, v)
         prm, _sampler, mg = ew._build_mission_prm(env, verbose=False)
         out['grafo'] = mg.describe()
         gm = sg.GlobalGrid()
@@ -261,11 +262,11 @@ def replay_mission(job):
                     local_expected += 1
                     local_used += bool(mg.last_update and mg.last_update[2])
                 if twin is not None:
-                    ew.INCREMENTAL_GRAPH_UPDATE = False
+                    P.INCREMENTAL_GRAPH_UPDATE = False
                     try:
                         ew._rebuild_prm_edges(twin[0], twin[1])
                     finally:
-                        ew.INCREMENTAL_GRAPH_UPDATE = True
+                        P.INCREMENTAL_GRAPH_UPDATE = True
                     full_checks += 1
                     full_same += edges_of(prm) == edges_of(twin[0])
                 # --- percorso verso l'obiettivo, con le restrizioni della missione ------
@@ -545,7 +546,7 @@ def main():
         override['PRM_MIN_EDGE_M'] = args.min_edge
     if args.max_edge is not None:
         override['PRM_MAX_EDGE_M'] = args.max_edge
-    if override and override.get('MISSION_GRAPH_SAMPLING', ew.MISSION_GRAPH_SAMPLING) == 'casuale':
+    if override and override.get('MISSION_GRAPH_SAMPLING', P.MISSION_GRAPH_SAMPLING) == 'casuale':
         # Un solo seme per tutte le missioni, scritto qui sotto per poter ripetere il confronto.
         override['MISSION_RANDOM_SEED'] = (args.seme if args.seme is not None
                                            else mission_graph.draw_seed())

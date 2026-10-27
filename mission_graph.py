@@ -128,40 +128,18 @@ from collections import deque
 
 import numpy as np
 
-# ----------------------------------------------------------------------------------------
-# La flag di default sugli anelli, la stessa della missione (easy_walk la importa come
-# MISSION_LATTICE_RINGS). None = nessun limite per anelli: si collegano tutti i nodi fra
-# DEFAULT_MIN_EDGE_M e DEFAULT_MAX_EDGE_M.
-# ----------------------------------------------------------------------------------------
-LATTICE_RINGS = None
+import parametri as P          # dimensione della missione, metodo dei nodi, archi
 
-# La missione e il passo di default, in UN solo posto: easy_walk li importa da qui, quindi
-# la missione sul robot e le prove da riga di comando (python3 mission_graph.py) partono
-# dagli stessi numeri. Per cambiarli per una sola missione: argomenti di easy_walk.py
-# (--rows --cols --cell --spacing --rings) o SPOT_MISSION_GRID="righe,colonne,lato".
-#   2 x 4 celle da 5 m = 10 m a sinistra x 20 m davanti al robot (colonne in avanti).
-#   Passo 0.25 m = 5/20 con archi da 0.5 m in su (vedi SPAZIATURA e ANELLI): 3321 nodi,
-#   ~26 mila archi sulla 2x4 con rings=2.
+
+# La missione (righe, colonne, lato, passo, metodo dei nodi, archi) si sceglie in
+# parametri.py, cosi' la missione sul robot e le prove da riga di comando (python3
+# mission_graph.py) partono dagli stessi numeri. Questi DEFAULT_* servono solo a compare() e
+# come ripiego se in parametri un valore e' None (2 x 4 celle da 5 m, passo 0.25 m).
 DEFAULT_MISSION_ROWS = 2
 DEFAULT_MISSION_COLS = 4
 DEFAULT_CELL_SIZE_M = 5.0
 DEFAULT_LATTICE_SPACING_M = 0.25
 
-# ----------------------------------------------------------------------------------------
-# LA MISSIONE DA FARE: scrivi qui i valori che vuoi, None = il DEFAULT_* qui sopra.
-# easy_walk li legge con mission_settings() e ci costruisce SIA la mappa delle celle SIA il
-# grafo, quindi i due restano sempre uguali. Anche build_mission_graph() chiamata senza
-# argomenti usa questi. Gli argomenti di easy_walk (--rows --cols --cell --spacing) e
-# SPOT_MISSION_GRID restano piu' forti di questi valori.
-# Oggi: 10 x 10 celle da 2 m = 20 m a sinistra x 20 m davanti al robot (prova al chiuso,
-# nodi casuali poisson, vedi GRAPH_SAMPLING). Il reticolo, quando si usa, e' a 0.5 m
-# (4 nodi/m2): garantisce i passaggi da 1.0 m in su (2 * spotGrid.FRONTIER_CLEARANCE_M +
-# passo), quelli piu' stretti solo se ci cade una fila di nodi.
-# ----------------------------------------------------------------------------------------
-MISSION_ROWS = 8
-MISSION_COLS = 8
-MISSION_CELL_SIZE_M = 2.0
-MISSION_SPACING_M = 0.5
 
 # ----------------------------------------------------------------------------------------
 # COME SI GENERANO I NODI (vedi NODI CASUALI nel commento in cima).
@@ -172,43 +150,26 @@ MISSION_SPACING_M = 0.5
 # ----------------------------------------------------------------------------------------
 GRAPH_SAMPLINGS = ('reticolo', 'casuale')
 RANDOM_DISTRIBUTIONS = ('uniforme', 'poisson', 'perturbata', 'halton')
-GRAPH_SAMPLING = 'casuale'          # prova al chiuso; 'reticolo' per il reticolo
-RANDOM_DISTRIBUTION = 'poisson'
-# 5 nodi/m^2: poco piu' del reticolo a passo 0.5 m (4 nodi/m2, MISSION_SPACING_M), per i
-# passaggi piu' stretti al chiuso; con 4 il numero di nodi e' quello del reticolo.
-RANDOM_DENSITY_PER_M2 = 5.0
-RANDOM_SEED = None              # None = estratto a caso, e scritto nel log
-POISSON_MIN_DIST_M = None       # None = 0.75 / sqrt(densita')
 
 
 def mission_settings(rows=None, cols=None, cell_size_m=None, spacing_m=None):
     """
     (rows, cols, cell_size_m, spacing_m) della missione. Per ognuno vince, nell'ordine:
-    il valore passato qui, il MISSION_* sopra, il DEFAULT_*.
+    il valore passato qui, quello di parametri.py, il DEFAULT_*.
     """
     def pick(value, chosen, default):
         if value is not None:
             return value
         return chosen if chosen is not None else default
-    return (int(pick(rows, MISSION_ROWS, DEFAULT_MISSION_ROWS)),
-            int(pick(cols, MISSION_COLS, DEFAULT_MISSION_COLS)),
-            float(pick(cell_size_m, MISSION_CELL_SIZE_M, DEFAULT_CELL_SIZE_M)),
-            float(pick(spacing_m, MISSION_SPACING_M, DEFAULT_LATTICE_SPACING_M)))
+    return (int(pick(rows, P.MISSION_GRID_ROWS, DEFAULT_MISSION_ROWS)),
+            int(pick(cols, P.MISSION_GRID_COLS, DEFAULT_MISSION_COLS)),
+            float(pick(cell_size_m, P.MISSION_CELL_SIZE_M, DEFAULT_CELL_SIZE_M)),
+            float(pick(spacing_m, P.MISSION_LATTICE_SPACING_M, DEFAULT_LATTICE_SPACING_M)))
 
 
 # Valore di default di spacing_m in build_mission_graph: "prendilo da mission_settings()".
 # Non e' None perche' None vuol gia' dire suggested_spacing().
 _FROM_SETTINGS = "settings"
-
-# Lunghezza minima e massima degli archi della missione, in UN solo posto: easy_walk le
-# importa da qui (PRM_MIN_EDGE_M, PRM_MAX_EDGE_M) e le passa al PRM, quindi anche le prove
-# da riga di comando (python3 mission_graph.py) danno lo stesso grafo della missione. Archi
-# fino a 1.25 m: vedi il commento GRAFO DI MISSIONE in easy_walk. Il raggio di connessione e'
-# quello del PRM (prm_graph.PRM(connection_radius=3)), passato come argomento per non
-# trascinarsi dietro l'SDK.
-DEFAULT_MIN_EDGE_M = 0.5
-DEFAULT_MAX_EDGE_M = 1.25
-DEFAULT_CONNECTION_RADIUS_M = 3.0
 
 
 def covering_radius(spacing):
@@ -233,7 +194,7 @@ def align_spacing(spacing_m, cell_size_m):
     return float(cell_size_m) / n, n
 
 
-def suggested_spacing(cell_size_m=5.0, min_edge_length=DEFAULT_MIN_EDGE_M):
+def suggested_spacing(cell_size_m=5.0, min_edge_length=P.PRM_MIN_EDGE_M):
     """
     Il passo allineato piu' grande la cui copertura non supera min_edge_length. Con celle da
     5 m e min_edge 0.5 m da' cell_size/7 = 0.714 m (copertura 0.505). Se cambia
@@ -977,11 +938,11 @@ class LatticeSampler:
 # ========================================================================================
 
 def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_SETTINGS,
-                        rings=LATTICE_RINGS,
+                        rings=P.MISSION_LATTICE_RINGS,
                         origin_xy=(0.0, 0.0), origin_yaw=0.0, start_cell=(0, 0),
-                        min_edge_length=DEFAULT_MIN_EDGE_M,
-                        max_edge_length=DEFAULT_MAX_EDGE_M,
-                        connection_radius=DEFAULT_CONNECTION_RADIUS_M,
+                        min_edge_length=P.PRM_MIN_EDGE_M,
+                        max_edge_length=P.PRM_MAX_EDGE_M,
+                        connection_radius=P.PRM_CONNECTION_RADIUS_M,
                         border_margin_m=0.0, env=None, verbose=True,
                         sampling=None, distribution=None, density_per_m2=None, seed=None,
                         poisson_min_dist_m=None):
@@ -1026,7 +987,7 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
         spacing_m = chosen_spacing
     if rows < 1 or cols < 1 or cell_size_m <= 0:
         raise ValueError("dimensione della missione non valida")
-    sampling = GRAPH_SAMPLING if sampling is None else sampling
+    sampling = P.MISSION_GRAPH_SAMPLING if sampling is None else sampling
     if sampling not in GRAPH_SAMPLINGS:
         raise ValueError(f"metodo dei nodi sconosciuto {sampling!r}: uno di {GRAPH_SAMPLINGS}")
     if sampling == 'casuale':
@@ -1034,10 +995,10 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
             rows, cols, cell_size_m, start_cell, origin_xy, origin_yaw,
             float(min_edge_length), min(float(connection_radius), float(max_edge_length)),
             float(border_margin_m), verbose,
-            RANDOM_DISTRIBUTION if distribution is None else distribution,
-            RANDOM_DENSITY_PER_M2 if density_per_m2 is None else density_per_m2,
-            RANDOM_SEED if seed is None else seed,
-            POISSON_MIN_DIST_M if poisson_min_dist_m is None else poisson_min_dist_m)
+            P.MISSION_RANDOM_DISTRIBUTION if distribution is None else distribution,
+            P.MISSION_RANDOM_DENSITY if density_per_m2 is None else density_per_m2,
+            P.MISSION_RANDOM_SEED if seed is None else seed,
+            P.MISSION_POISSON_MIN_DIST_M if poisson_min_dist_m is None else poisson_min_dist_m)
 
     if spacing_m is None:
         spacing_m = suggested_spacing(cell_size_m, min_edge_length)
@@ -1407,22 +1368,22 @@ def _main():
     p.add_argument('--spacing', type=float, default=s_spacing,
                    help=f"passo fra i nodi in m, arrotondato a cell/n (default "
                         f"{s_spacing:g}; 0 = suggested_spacing)")
-    p.add_argument('--rings', default=str(LATTICE_RINGS),
+    p.add_argument('--rings', default=str(P.MISSION_LATTICE_RINGS),
                    help="anelli di vicini collegati (k = entro la diagonale dell'anello k), "
                         "o 'tutti' (default: tutti, come in missione)")
-    p.add_argument('--grafo', choices=GRAPH_SAMPLINGS, default=GRAPH_SAMPLING,
-                   help=f"come si generano i nodi (default {GRAPH_SAMPLING})")
-    p.add_argument('--distribuzione', choices=RANDOM_DISTRIBUTIONS, default=RANDOM_DISTRIBUTION,
-                   help=f"nodi casuali: distribuzione (default {RANDOM_DISTRIBUTION})")
-    p.add_argument('--densita', type=float, default=RANDOM_DENSITY_PER_M2,
-                   help=f"nodi casuali: nodi per m2 (default {RANDOM_DENSITY_PER_M2:g})")
-    p.add_argument('--seme', type=int, default=RANDOM_SEED,
+    p.add_argument('--grafo', choices=GRAPH_SAMPLINGS, default=P.MISSION_GRAPH_SAMPLING,
+                   help=f"come si generano i nodi (default {P.MISSION_GRAPH_SAMPLING})")
+    p.add_argument('--distribuzione', choices=RANDOM_DISTRIBUTIONS, default=P.MISSION_RANDOM_DISTRIBUTION,
+                   help=f"nodi casuali: distribuzione (default {P.MISSION_RANDOM_DISTRIBUTION})")
+    p.add_argument('--densita', type=float, default=P.MISSION_RANDOM_DENSITY,
+                   help=f"nodi casuali: nodi per m2 (default {P.MISSION_RANDOM_DENSITY:g})")
+    p.add_argument('--seme', type=int, default=P.MISSION_RANDOM_SEED,
                    help="nodi casuali: seme (default: estratto a caso e scritto nel riepilogo)")
-    p.add_argument('--dist-min', type=float, default=POISSON_MIN_DIST_M,
+    p.add_argument('--dist-min', type=float, default=P.MISSION_POISSON_MIN_DIST_M,
                    help="nodi poisson: distanza minima fra i nodi in m (default 0.75/sqrt(densita'))")
-    p.add_argument('--min-edge', type=float, default=DEFAULT_MIN_EDGE_M)
-    p.add_argument('--max-edge', type=float, default=DEFAULT_MAX_EDGE_M)
-    p.add_argument('--radius', type=float, default=DEFAULT_CONNECTION_RADIUS_M)
+    p.add_argument('--min-edge', type=float, default=P.PRM_MIN_EDGE_M)
+    p.add_argument('--max-edge', type=float, default=P.PRM_MAX_EDGE_M)
+    p.add_argument('--radius', type=float, default=P.PRM_CONNECTION_RADIUS_M)
     p.add_argument('--margin', type=float, default=0.0, help="margine dal bordo in m")
     p.add_argument('--preview', metavar='PNG', help="salva un disegno del reticolo")
     p.add_argument('--zoom', type=float, nargs=4, metavar=('XMIN', 'XMAX', 'YMIN', 'YMAX'),
