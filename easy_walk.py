@@ -2503,7 +2503,11 @@ def easy_walk(options):
                     recordingInterface.create_default_waypoint(cell_row=selected_border[0], cell_col=selected_border[1])
                     env.add_waypoint(x_new, y_new)
                     env.mark_cell_visited(selected_border[0], selected_border[1])
-                    frontier.extend(environmentMap.find_new_borders(env, robot_row, robot_col, path, frontier))
+                    # Le confinanti della cella APPENA VISITATA, non di quella in cui sta il
+                    # robot: con l'arrivo appena fuori dalla cella (ARRIVAL_OUTSIDE_CELL_M) il
+                    # robot puo' essere ancora nella cella di prima.
+                    frontier.extend(environmentMap.find_new_borders(
+                        env, selected_border[0], selected_border[1], path, frontier))
                 else:
                     if (selected_border[0], selected_border[1]) == (robot_row, robot_col):
                         env.update_position(x_new, y_new)
@@ -2625,9 +2629,8 @@ def easy_walk(options):
                                                                                cell_col=selected_border[1])
                                     env.add_waypoint(x_final, y_final)
                                     env.mark_cell_visited(selected_border[0], selected_border[1])
-                                    robot_row_final, robot_col_final = env.get_cell_from_world(x_final, y_final)
-                                    frontier.extend(
-                                        environmentMap.find_new_borders(env, robot_row_final, robot_col_final, path, frontier))
+                                    frontier.extend(environmentMap.find_new_borders(
+                                        env, selected_border[0], selected_border[1], path, frontier))
                                 else:
                                     print(
                                         "[FAIL] Anche il percorso alternativo ha fallito. Abbandono la cella e continuo l'algoritmo normale.")
@@ -2766,8 +2769,8 @@ def easy_walk(options):
                             env.add_waypoint(x_final, y_final)
                             env.mark_cell_visited(target_row, target_col)
                             frontier.remove((target_row, target_col, rank))
-                            robot_row, robot_col = env.get_cell_from_world(x_final, y_final)
-                            frontier.extend(environmentMap.find_new_borders(env, robot_row, robot_col, path, frontier))
+                            frontier.extend(environmentMap.find_new_borders(
+                                env, target_row, target_col, path, frontier))
                         else:
                             # Lato segnato come provato; la cella esce dalla frontiera solo se era
                             # l'ULTIMO lato non provato (cella davvero bloccata).
