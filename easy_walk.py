@@ -1004,23 +1004,36 @@ class TentativoCella:
         self.tried_goals.append((float(self.target_x), float(self.target_y)))
         _refuse_goal(self.env, self.target_row, self.target_col, self.target_x, self.target_y,
                      motivo_esclusione)
-        new_tx, new_ty, _vs, _rs = find_best_point_in_cell(
-            self.robot_x, self.robot_y, self.env, self.target_row, self.target_col, self.pts_up, self.cells_obs_up,
-            self.sampler, global_map=self.global_map, exclude=self.tried_goals,
-            reachable=self._reachable_from_robot)
-        if new_tx is None or new_ty is None:
-            print("[TARGET] Nessun altro punto valido in questa cella.")
-            return None
-        self.target_x, self.target_y = new_tx, new_ty
-        self.best_goal_dist = float('inf')    # nuovo obiettivo: progressi da capo
-        self.goal_id = self.prm_graph.add_stop_node(
-            self.target_x, self.target_y, self.global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
-            label=f"obiettivo riscelto cella ({self.target_row},{self.target_col})",
-            is_robot=False)
-        new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
+        # Fino a GOAL_REPICK_CANDIDATES candidati: il primo puo' non avere un percorso nel grafo.
+        # Se nessuno ce l'ha, obiettivo e percorso tornano quelli di prima (escluso per le scelte
+        # future, ma coerente con il percorso): prima restava il NUOVO obiettivo con il percorso
+        # VECCHIO, verso il punto appena escluso.
+        old = (self.target_x, self.target_y, self.goal_id)
+        new_ids = None
+        for _k in range(P.GOAL_REPICK_CANDIDATES):
+            new_tx, new_ty, _vs, _rs = find_best_point_in_cell(
+                self.robot_x, self.robot_y, self.env, self.target_row, self.target_col, self.pts_up, self.cells_obs_up,
+                self.sampler, global_map=self.global_map, exclude=self.tried_goals,
+                reachable=self._reachable_from_robot)
+            if new_tx is None or new_ty is None:
+                print("[TARGET] Nessun altro punto valido in questa cella.")
+                break
+            goal_id = self.prm_graph.add_stop_node(
+                new_tx, new_ty, self.global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
+                label=f"obiettivo riscelto cella ({self.target_row},{self.target_col})",
+                is_robot=False)
+            new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, goal_id)
+            if new_ids is not None:
+                self.target_x, self.target_y, self.goal_id = new_tx, new_ty, goal_id
+                break
+            print(f"[TARGET] Nessun percorso nel grafo verso ({new_tx:.2f}, {new_ty:.2f}): provo il "
+                  f"punto successivo.")
+            self.tried_goals.append((float(new_tx), float(new_ty)))
         if new_ids is None:
-            print("[TARGET] Nessun percorso nel grafo verso il nuovo obiettivo.")
+            self.target_x, self.target_y, self.goal_id = old
+            print("[TARGET] Nessun nuovo obiettivo con un percorso: resto sul piano di prima.")
             return None
+        self.best_goal_dist = float('inf')    # nuovo obiettivo: progressi da capo
         self.path_waypoints = self._waypoints_from_ids(new_ids)
         self.full_path_coords = [self.prm_graph.get_node_position(nid) for nid in new_ids]
         self.no_progress = 0

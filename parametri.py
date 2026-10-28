@@ -296,6 +296,9 @@ ARRIVAL_OUTSIDE_CELL_M = GOAL_REACHED_TOLERANCE_M - TARGET_CELL_BORDER_M      # 
 # i tratti uno per uno ([SUBITO]): il 22-10 16:04, 45 [SUBITO] su 58 avevano l'ostacolo a
 # ridosso dell'obiettivo; il 26-10 15:11, 18 su 22.
 REFUSED_GOAL_BLOCK_M = 0.35
+# Quando si sceglie un altro obiettivo nella cella, quanti candidati provare prima di
+# rinunciare se nessuno ha un percorso nel grafo (TentativoCella._riscegli_obiettivo).
+GOAL_REPICK_CANDIDATES = 3
 
 # ==================================================================
 # DATI DI MISSIONE.
