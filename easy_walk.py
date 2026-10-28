@@ -48,6 +48,7 @@ import spotLogInUtils
 import environmentMap
 import spotUtils
 import arcVerification
+import batteria
 
 import prm_graph
 import prm_graph as prm_graph_module   # dentro le funzioni `prm_graph` e' spesso il parametro (istanza)
@@ -95,7 +96,21 @@ def mission_switches():
         'spotGrid.ARC_BODY_EXTENSION_M': spotGrid.ARC_BODY_EXTENSION_M,
         'spotGrid.ROBOT_CLEARANCE_AIR_M': spotGrid.ROBOT_CLEARANCE_AIR_M,
         'spotGrid.PLAN_CLEARANCE_EXTRA_M': spotGrid.PLAN_CLEARANCE_EXTRA_M,
+        'parametri.BATTERY_RETURN_PCT': P.BATTERY_RETURN_PCT,
     }
+
+
+def _rientro_batteria(where=None):
+    """Una lettura della batteria (vedi batteria.MonitorBatteria.controlla): True se la
+    missione deve smettere di esplorare e rientrare. False se il monitor non c'e'."""
+    monitor = MISSION_CTX.get('batteria')
+    return monitor.controlla(where) if monitor is not None else False
+
+
+def _batteria_scarica():
+    """Come _rientro_batteria ma senza leggere: solo se il rientro e' gia' deciso."""
+    monitor = MISSION_CTX.get('batteria')
+    return monitor is not None and monitor.rientro
 
 
 def _emit_mission_summary_once():
@@ -163,6 +178,8 @@ def _emit_mission_summary_once():
         print(f"Scansioni scartate (layer mancanti o non allineati): ciclo principale "
               f"{getattr(lg_main, 'rejected_scans', 0)}, controllo in movimento {getattr(lg_trk, 'rejected_scans', 0)}")
         print(f"Pacchetti di scansione salvati: {MISSION_STATS['scan_bundles']}")
+        if MISSION_CTX.get('batteria') is not None:
+            print(MISSION_CTX['batteria'].riepilogo())
         times = MISSION_STATS['time_s']
         if times:
             tot = sum(times.values())
@@ -1011,6 +1028,15 @@ class TentativoCella:
         if self.loop_iter > P.MAX_LOOP_ITERATIONS:
             print(f"[STALLO] {P.MAX_LOOP_ITERATIONS} giri del ciclo di navigazione senza arrivare: "
                   f"interrompo il tentativo sulla cella ({self.target_row},{self.target_col}).")
+            if self.verification_tracker is not None:
+                self.verification_tracker.clear_path()
+            return FALLITO
+
+        # Batteria sotto soglia: il tentativo si ferma qui, la missione chiude e rientra
+        # (vedi Missione.esplora).
+        if _rientro_batteria():
+            print(f"[BATTERIA] Interrompo il tentativo sulla cella ({self.target_row},"
+                  f"{self.target_col}) per il rientro a batteria bassa.")
             if self.verification_tracker is not None:
                 self.verification_tracker.clear_path()
             return FALLITO
@@ -2328,6 +2354,10 @@ class Missione:
     e si tenta da li' (_scegli_cella_lontana, _viaggio_e_tentativo). Un tentativo fallito segna
     il LATO da cui si e' provato (_lato_fallito): la cella si blocca solo quando ogni lato
     raggiungibile e' stato provato (finalize_or_defer_blocked_cell).
+
+    A batteria bassa (vedi batteria.py) l'esplorazione si ferma anche con la frontiera non
+    vuota: un tentativo interrotto per il rientro non segna il lato come provato e la cella
+    resta in frontiera, cosi' lo stato salvato dice cosa restava da esplorare.
     """
 
     def __init__(self, robot_state_client, command_client, recordingInterface, local_grid,
@@ -2401,6 +2431,11 @@ class Missione:
 
         while (True):
             self._progresso()
+            if _rientro_batteria():
+                MISSION_STATS['battery_return_cells_left'] = len(self.frontier)
+                print(f"[BATTERIA] Fine dell'esplorazione per batteria bassa: restano "
+                      f"{len(self.frontier)} celle in frontiera {[(f[0], f[1]) for f in self.frontier]}.")
+                break
             print(self.frontier)
             x, y, z, _ = spotUtils.getPosition(self.robot_state_client)
             robot_row, robot_col = self.env.get_cell_from_world(x, y)
@@ -2477,11 +2512,8 @@ class Missione:
         minutes = (time.time() - self._t0) / 60.0 if self._t0 is not None else 0.0
         done_here = closed - self._closed_at_start
         per_cell = minutes / done_here if done_here > 0 else None
-        try:
-            battery = float(self.robot_state_client.get_robot_state()
-                            .power_state.locomotion_charge_percentage.value)
-        except Exception:
-            battery = None
+        # L'ultima carica letta dal monitor della batteria (batteria.py), senza una lettura in piu'.
+        battery = MISSION_STATS.get('battery_last_pct')
         pct = 100.0 * closed / total
         area_txt = f"area vista {100.0 * area:.0f}%" if area is not None else "area vista ?"
         bat_txt = f"batteria {battery:.0f}%" if battery is not None else "batteria ?"
@@ -2519,6 +2551,9 @@ class Missione:
         if check or (row, col) == (robot_row, robot_col):
             # Fallito ma il robot e' comunque dentro la cella: vale come visitata.
             self._visitata(row, col, x_new, y_new)
+        elif _batteria_scarica():
+            # Tentativo interrotto per il rientro: la cella resta da esplorare.
+            self.frontier.append(selected_border)
         else:
             self._recupero(selected_border, origin_row, origin_col)
 
@@ -2610,6 +2645,8 @@ class Missione:
         if self._tenta(row, col):
             x_final, y_final, _, _ = spotUtils.getPosition(self.robot_state_client)
             self._visitata(row, col, x_final, y_final)
+        elif _batteria_scarica():
+            self.frontier.append(selected_border)
         else:
             print(
                 "[FAIL] Anche il percorso alternativo ha fallito. Abbandono la cella e continuo l'algoritmo normale.")
@@ -2705,6 +2742,10 @@ class Missione:
             return 'caduta'
 
         recordingInterface.start_recording()
+        # Il viaggio puo' essere stato lungo: se la batteria e' scesa sotto soglia non si
+        # tenta la cella, si rientra (la cella resta in frontiera).
+        if _rientro_batteria("dopo lo spostamento GraphNav"):
+            return None
         # Se GraphNav non e' nemmeno arrivato al waypoint di partenza vale come un tentativo
         # fallito. Lato segnato come provato; la cella esce dalla frontiera solo se era
         # l'ULTIMO lato non provato (cella davvero bloccata).
@@ -2712,6 +2753,8 @@ class Missione:
             x_final, y_final, _, _ = spotUtils.getPosition(self.robot_state_client)
             self.frontier.remove((target_row, target_col, rank))
             self._visitata(target_row, target_col, x_final, y_final)
+        elif _batteria_scarica():
+            pass
         elif self._lato_fallito(target_row, target_col, nearest_cell[0], nearest_cell[1]):
             self.frontier.remove((target_row, target_col, rank))
         return None
@@ -2815,6 +2858,9 @@ def _stampa_configurazione():
           f"+ isteresi {arcVerification.OBSTACLE_HYSTERESIS_M:.2f} m attorno a "
           f"{spotGrid.FRONTIER_CLEARANCE_M:.2f} m (rumore misurato 1.5 cm tipici, 7.3 di punta); "
           f"celle-ostacolo escluse dal campionamento della pendenza d'arco")
+    print(f"[CONFIG] BATTERIA: rientro a wp_0 sotto {P.BATTERY_RETURN_PCT:.0f}% "
+          f"({P.BATTERY_RETURN_CONFIRM} letture di fila; 0 = spento), lettura al massimo ogni "
+          f"{P.BATTERY_SAMPLE_S:.0f} s, dati in battery.csv")
     print(f"[CONFIG] OBIETTIVO: tolleranza d'arrivo {P.GOAL_REACHED_TOLERANCE_M:.2f} m "
           f"(= meta' corpo + margine del fronte), riscelta del punto fino a "
           f"{P.MAX_BLOCK_REPLANS} volte se risulta irraggiungibile; ripianificazione alla "
@@ -2894,11 +2940,23 @@ def _chiudi_missione(robot, robot_state_client, command_client, recordingInterfa
     _t_close['chiusura mappa e ancoraggio'] = time.perf_counter() - _t
 
     _t = time.perf_counter()
+    monitor = MISSION_CTX.get('batteria')
+    if monitor is not None:
+        monitor.controlla("inizio del ritorno a wp_0")
+    _pct0 = MISSION_STATS.get('battery_last_pct')
     if navGraphUtils.graphnav_return_to_start(recordingInterface, robot_state_client, command_client):
         navGraphUtils.graphnav_check_start_fiducial(robot, robot_state_client)
     else:
         print("[GRAPHNAV] Ritorno a wp_0 non riuscito: il robot si siede dove si trova.")
     _t_close['ritorno a wp_0'] = time.perf_counter() - _t
+    if monitor is not None:
+        monitor.controlla("fine del ritorno a wp_0")
+        _pct1 = MISSION_STATS.get('battery_last_pct')
+        if _pct0 is not None and _pct1 is not None:
+            # Quanto costa il ritorno: serve a tarare BATTERY_RETURN_PCT.
+            MISSION_STATS['battery_wp0_return_pct'] = round(_pct0 - _pct1, 1)
+            print(f"[BATTERIA] Ritorno a wp_0: da {_pct0:.0f}% a {_pct1:.0f}% "
+                  f"({_pct0 - _pct1:.1f} punti in {_t_close['ritorno a wp_0']:.0f} s)")
 
     _t = time.perf_counter()
     command_client.robot_command(RobotCommandBuilder.synchro_sit_command(), end_time_secs=time.time() + 20)
@@ -2951,6 +3009,10 @@ def easy_walk(options):
         assert robot.is_powered_on(), 'Accensione del robot non riuscita.'
         robot.logger.info('Robot acceso.')
         blocking_stand(command_client)
+
+        # Batteria: prima lettura, poi a ogni giro del ciclo (vedi batteria.py).
+        MISSION_CTX['batteria'] = batteria.MonitorBatteria(robot_state_client)
+        MISSION_CTX['batteria'].controlla("avvio")
 
         # Griglie e mappe locali vengono tutte dalle telecamere di Spot (nessun Velodyne).
         recordingInterface.clear_map()
@@ -3017,6 +3079,9 @@ def easy_walk(options):
         missione.esplora()
 
         env.print_map()
+        if _batteria_scarica():
+            print("[BATTERIA] Missione chiusa prima di finire l'esplorazione: la chiusura e' "
+                  "quella normale (scansione finale, riepilogo, ritorno a wp_0, mappa scaricata).")
         x_final, y_final, _, _ = spotUtils.getPosition(robot_state_client)
         final_row, final_col = env.get_cell_from_world(x_final, y_final)
         recordingInterface.create_default_waypoint(cell_row=final_row, cell_col=final_col)

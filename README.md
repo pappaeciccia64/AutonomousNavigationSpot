@@ -73,10 +73,11 @@ Il tentativo prepara scansione, mappe, grafo e percorso (`_prepara`), poi ripete
 ### Sicurezza
 - Limiti di velocità su ogni comando, arresto a metà movimento, tempo massimo per movimento e per spostamento GraphNav.
 - Rilevazione delle cadute: il robot si rialza, il punto viene segnato pericoloso nella mappa; alla terza caduta la missione si ferma.
+- **Batteria** (`batteria.py`): carica letta a ogni giro e salvata in `battery.csv` con il consumo per minuto e per metro. Sotto `BATTERY_RETURN_PCT` (oggi 30%, provvisorio) la missione smette di esplorare e chiude come a fine missione, con il ritorno a `wp_0`; le celle non esplorate restano in frontiera.
 - GraphNav riaggancia la localizzazione sul waypoint più vicino se si perde; non dichiara mai "arrivato" senza esserlo.
 
 ### Fine missione
-Scansione finale, riepilogo (`[MISSION STATS]`, `[TEMPO]`), chiusura d'anello di Spot sull'intero grafo GraphNav (al massimo 45 s) e ancoraggio, ritorno a `wp_0` con GraphNav (con scorciatoie scelte sulla strada), seduta, spegnimento, scaricamento del grafo GraphNav. Durante l'esplorazione la chiusura d'anello di Spot è spenta: gli spostamenti usano le nostre scorciatoie (archi visti liberi nella mappa globale). A ogni arrivo GraphNav si misura la deriva dell'odometria (`drift.csv`).
+Si arriva qui quando la frontiera è vuota, oppure prima se la batteria scende sotto la soglia di rientro. Scansione finale, riepilogo (`[MISSION STATS]`, `[TEMPO]`), chiusura d'anello di Spot sull'intero grafo GraphNav (al massimo 45 s) e ancoraggio, ritorno a `wp_0` con GraphNav (con scorciatoie scelte sulla strada), seduta, spegnimento, scaricamento del grafo GraphNav. Durante l'esplorazione la chiusura d'anello di Spot è spenta: gli spostamenti usano le nostre scorciatoie (archi visti liberi nella mappa globale). A ogni arrivo GraphNav si misura la deriva dell'odometria (`drift.csv`).
 
 ---
 
@@ -94,6 +95,7 @@ Scansione finale, riepilogo (`[MISSION STATS]`, `[TEMPO]`), chiusura d'anello di
 | `arcVerification.py` | Fronte sicuro e decisioni di movimento: fin dove si può avanzare, rotazione, cono, arretramento, trappole |
 | `movements.py` | Comandi di movimento (velocità, arresto, tempo massimo), scelta dell'andatura, cadute |
 | `navGraphUtils.py` | Tutto GraphNav: registrazione, briciole, spostamenti, scorciatoie, chiusura d'anello, ritorni, deriva |
+| `batteria.py` | Carica e consumo della batteria (`battery.csv`), decisione di rientro a batteria bassa |
 | `spotLogInUtils.py`, `spotUtils.py` | Collegamento al robot, E-Stop, posizione |
 | `mission_report.py`, `mission_viewer.py` | Rapporto e figure, dopo la missione (senza SDK) |
 | `test_e2e_loop.py`, `test_missione.py`, `test_replay.py`, `test_obiettivi.py`, `preflight.py`, `confronta_log.py` | Prove senza robot (vedi sotto) |
@@ -120,6 +122,7 @@ Ognuno permette un confronto acceso/spento sul campo; il log li riporta nella ri
 
 | `parametri.GRAPHNAV_SDK_LOOP_BUDGET_S` | `0.0` | Chiusura d'anello veloce di Spot prima di ogni spostamento GraphNav (0 = spenta) |
 | `parametri.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S` | `45.0` | Chiusura d'anello completa a fine missione, prima dell'ancoraggio (0 = spenta) |
+| `parametri.BATTERY_RETURN_PCT` | `30.0` | Sotto questa carica (2 letture di fila) la missione chiude e torna a `wp_0` (0 = rientro spento, la carica si misura comunque) |
 ---
 
 ## Cosa si salva
@@ -128,7 +131,7 @@ Ogni missione ha un nome `Mission_<giorno-mese-anno>_<ora>` e tre cartelle:
 
 | Cartella | Contenuto | Peso tipico |
 |---|---|---|
-| `MissionLogs/<missione>/` | `mission_log.txt` (tutto l'output, con l'ora a ogni riga), `segments.csv` (un tratto per riga: pendenza, andatura, inclinazione reale), `trajectory.csv` (posizione 5 volte al secondo durante i movimenti), `frontier_live.csv`, `mission_summary.json` | 0.5 MB |
+| `MissionLogs/<missione>/` | `mission_log.txt` (tutto l'output, con l'ora a ogni riga), `segments.csv` (un tratto per riga: pendenza, andatura, inclinazione reale), `trajectory.csv` (posizione 5 volte al secondo durante i movimenti), `frontier_live.csv`, `drift.csv`, `battery.csv` (carica e consumo), `mission_summary.json` | 0.5 MB |
 | `MissionMap/<missione>/` | `scans/` (un pacchetto per scansione: layer grezzi e derivati, fronte, decisione), `*_vis.npz` (viste del grafo), `*_BLOCKED_*.npz`, mappe globali `.pkl` | 70 MB |
 | `graph/<missione>/` | grafo GraphNav scaricato, con le istantanee dei waypoint | 150 MB |
 
@@ -147,7 +150,7 @@ python3 test_replay.py --tutte --grafo casuale --distribuzione halton --seme 7  
 - **`mission_viewer.py`**: le figure si fanno qui, dopo; durante la missione il robot non disegna.
 - **`test_replay.py`**: verifica una modifica senza il robot, sulle scansioni vere di 10 missioni (`--tutte`, circa 5 minuti): invarianti che devono valere sempre, e confronto con il comportamento di riferimento (`test_replay_riferimento.json`). Con `--grafo` (e `--distribuzione`, `--densita`, `--seme`, `--min-edge`, `--max-edge`) rigioca le stesse scansioni con un altro grafo: la tabella finale (percorsi trovati, lunghezza, archi per percorso, tempo del grafo) si confronta con quella del reticolo.
 - **`test_e2e_loop.py`**: il ciclo di navigazione vero contro un robot finto in mondi sintetici (corridoi, trappole, muri).
-- **`test_missione.py`**: la missione intera (`easy_walk.main()` vero) con robot e GraphNav finti, in tre mondi: muri, cella chiusa, blocchi, ritorni, fallimenti forzati.
+- **`test_missione.py`**: la missione intera (`easy_walk.main()` vero) con robot e GraphNav finti, in quattro mondi: muri, cella chiusa, blocchi, ritorni, fallimenti forzati, rientro a batteria bassa.
 - **`test_obiettivi.py`**: la scelta dell'obiettivo rigiocata sulle missioni vere.
 - **`confronta_log.py`**: confronta i log di due versioni (`E2E_LOG_DIR=<cartella> python3 test_e2e_loop.py`, idem `test_missione.py`), togliendo ore e durate: una modifica che non deve cambiare il comportamento deve dare log identici.
 - **`preflight.py`**: controlla che i moduli siano coerenti fra loro.

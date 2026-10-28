@@ -30,6 +30,8 @@ il robot arriva appena fuori dalla cella.
      nessun punto obiettivo, una caduta durante uno spostamento GraphNav. Esercita il nuovo
      tentativo subito dopo il recupero ([RECOVERY]), riuscito e fallito, e i rami della
      missione che i mondi veri raggiungono di rado.
+  D  il mondo A con la batteria finta che scende di un punto a lettura, da 36%: sotto il 30%
+     la missione smette di esplorare e chiude come a fine missione (rientro a wp_0).
 Nel mondo A c'e' anche un fiducial (ID 7) dietro il punto di partenza.
 Cio' che nessuno esercita: le trappole e le cadute dentro un tentativo (le prova
 test_e2e_loop.py).
@@ -53,6 +55,7 @@ from bosdyn.api.graph_nav import graph_nav_pb2, map_pb2, map_processing_pb2, rec
 from bosdyn.client.math_helpers import Quat, SE3Pose
 
 import arcVerification
+import batteria
 import easy_walk
 import movements
 import navGraphUtils
@@ -342,6 +345,27 @@ def _con_fallimenti():
         movements.check_and_recover_fall = real_fall
 
 
+@contextlib.contextmanager
+def _con_batteria(da_pct=36.0, punti_a_lettura=1.0):
+    """Batteria finta: ogni lettura (una per giro del ciclo, intervallo 0 s) un punto in
+    meno, da da_pct."""
+    real_read, real_s = batteria.leggi_batteria, parametri.BATTERY_SAMPLE_S
+    n = {'letture': 0}
+
+    def read(rsc):
+        n['letture'] += 1
+        return {'charge_pct': max(0.0, da_pct - punti_a_lettura * (n['letture'] - 1)),
+                'spot_runtime_min': 40.0}
+
+    batteria.leggi_batteria = read
+    parametri.BATTERY_SAMPLE_S = 0.0
+    try:
+        yield n
+    finally:
+        batteria.leggi_batteria = real_read
+        parametri.BATTERY_SAMPLE_S = real_s
+
+
 def run(walls=None, name='MISSIONE', fiducial=None):
     global FIDUCIAL_TAG
     FIDUCIAL_TAG = fiducial
@@ -405,6 +429,8 @@ def _controlli_mondo(name, r):
     righe = [l for l in log.splitlines() if '[PROGRESSO]' in l and 'Fine' not in l]
     chiuse = [int(l.split('[PROGRESSO] ')[1].split('/')[0]) for l in righe]
     check(chiuse == sorted(set(chiuse)), f"una riga [PROGRESSO] per ogni cella chiusa in piu': {chiuse}")
+    check("[BATTERIA] Carica non disponibile" in log and "RIENTRO" not in log,
+          "senza la carica nello stato del robot la missione va avanti senza rientro")
     if name == 'A':
         check("[PRECHECK]" in log, "il controllo prima dello spostamento GraphNav scatta")
         check("[FIDUCIAL] Fiducial di partenza: tag 7 a 1.00 m, dietro" in log,
@@ -428,6 +454,27 @@ def _controlli_fallimenti(r):
     check("[CADUTA] Rialzato dopo lo spostamento con GraphNav" in log, "caduta durante il viaggio")
 
 
+def _controlli_batteria(r):
+    log = r['log']
+    grid = log.split("--- Mappa delle celle ---")[-1].splitlines()[1:ROWS + 1]
+    visited = sum(v == '1' for line in grid for v in line.split()[1:])
+    check("[BATTERIA] RIENTRO: carica 29% <= soglia 30% (2 letture di fila)" in log,
+          "il rientro scatta alla seconda lettura sotto il 30%")
+    check("[BATTERIA] Fine dell'esplorazione per batteria bassa" in log and 0 < visited < 8,
+          f"l'esplorazione si ferma prima di finire (visitate {visited} celle su 8)")
+    check("[BATTERIA] Ritorno a wp_0: da" in log, "carica misurata prima e dopo il ritorno a wp_0")
+    check("RIENTRO ANTICIPATO" in log, "il riepilogo dice che la missione e' rientrata per la batteria")
+    csv_path = [os.path.join(dp, f) for dp, _, fs in os.walk(os.path.join(r['root'], "MissionLogs"))
+                for f in fs if f == "battery.csv"]
+    check(bool(csv_path) and len(open(csv_path[0]).read().splitlines()) > 5, "battery.csv scritto")
+    js = [os.path.join(dp, f) for dp, _, fs in os.walk(os.path.join(r['root'], "MissionLogs"))
+          for f in fs if f == "mission_summary.json"]
+    import json
+    st = json.load(open(js[0]))['mission_stats'] if js else {}
+    check(st.get('battery_return') is True and st.get('battery_return_cells_left', 0) > 0,
+          f"mission_summary.json: rientro e celle rimaste ({st.get('battery_return_cells_left')})")
+
+
 if __name__ == '__main__':
     for name, walls in WORLDS.items():
         print(f"\nMissione intera nel mondo {name}, robot e GraphNav finti: 3 x 3 celle da 3 m.")
@@ -441,6 +488,12 @@ if __name__ == '__main__':
         r = run(WORLDS['B'], "MISSIONE_C")
     _controlli_comuni(r)
     _controlli_fallimenti(r)
+    shutil.rmtree(r['root'], ignore_errors=True)
+    print("\nMissione intera nel mondo D: il mondo A con la batteria che si scarica.")
+    with _con_batteria():
+        r = run(WORLDS['A'], "MISSIONE_D")
+    _controlli_comuni(r)
+    _controlli_batteria(r)
     shutil.rmtree(r['root'], ignore_errors=True)
     print("\n" + "=" * 70)
     print("TUTTO OK" if not FAILS else f"{len(FAILS)} CONTROLLI FALLITI:\n  - " + "\n  - ".join(FAILS))
