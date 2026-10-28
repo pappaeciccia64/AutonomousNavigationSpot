@@ -291,30 +291,37 @@ def draw_scan(ax, d, layer_idx, title_prefix="", ctx=None):
     pl = d['polyline']
     ax.plot(pl[:, 0], pl[:, 1], '-', color='magenta', lw=2, label='percorso')
     rx, ry = d['robot_xyz'][:2]
-    yaw = float(d['robot_yaw'])
+    yaw = float(d['robot_yaw']) if 'robot_yaw' in d else np.nan
     ax.plot(rx, ry, 'o', color='blue', ms=9)
-    ax.arrow(rx, ry, 0.35 * np.cos(yaw), 0.35 * np.sin(yaw), color='blue', width=0.02)
+    if np.isfinite(yaw):
+        ax.arrow(rx, ry, 0.35 * np.cos(yaw), 0.35 * np.sin(yaw), color='blue', width=0.02)
     # Ingombro del corpo (come la zona del corpo della mappa globale). Alla prima scansione
     # di una missione il terreno sotto il corpo e' spesso "mai scritto" (bianco): il robot si
     # e' appena alzato li' e i sensori non l'hanno mai visto. E' trattato come non visto,
     # non come ostacolo.
-    ax.add_patch(patches.Rectangle((rx - SELF_BODY_LENGTH_M / 2, ry - SELF_BODY_WIDTH_M / 2),
-                                   SELF_BODY_LENGTH_M, SELF_BODY_WIDTH_M, angle=float(np.degrees(yaw)),
-                                   rotation_point=(rx, ry), fill=False, edgecolor='blue', lw=1.2, ls='--',
-                                   zorder=6))
+    if np.isfinite(yaw):
+        ax.add_patch(patches.Rectangle((rx - SELF_BODY_LENGTH_M / 2, ry - SELF_BODY_WIDTH_M / 2),
+                                       SELF_BODY_LENGTH_M, SELF_BODY_WIDTH_M, angle=float(np.degrees(yaw)),
+                                       rotation_point=(rx, ry), fill=False, edgecolor='blue', lw=1.2,
+                                       ls='--', zorder=6))
     reason = str(d['frontier_reason'])
     sx, sy = d['frontier_stop_xy']
-    ax.plot(sx, sy, 'X', color=REASON_COLORS.get(reason, 'k'), ms=13, mec='white',
-            label=f"fronte: {reason}")
+    if np.isfinite(sx):
+        ax.plot(sx, sy, 'X', color=REASON_COLORS.get(reason, 'k'), ms=13, mec='white',
+                label=f"fronte: {reason}")
     tx, ty = d['decision_target']
     if np.isfinite(tx):
         ax.plot(tx, ty, '*', color='lime', ms=14, mec='k', label='punto comandato')
     ax.set_xlim(ext[0], ext[1]); ax.set_ylim(ext[2], ext[3]); ax.set_aspect('equal')
     ax.set_xlabel("X [m] (VISION)"); ax.set_ylabel("Y [m] (VISION)")
-    ax.set_title(f"{title_prefix}{name}\n"
-                 f"fronte {float(d['frontier_dist']):.2f} m ({reason}), avanzamento "
-                 f"{float(d['allowed_advance']):.2f} m, decisione: {str(d['decision_kind'])}"
-                 + (" [senza ruotare]" if bool(d.get('keep_heading', False)) else ""), fontsize=9)
+    if 'extra_kind' in d:
+        sub = (f"{str(d['extra_kind'])}: scansione fuori dal ciclo, ricostruita dalla vista PRM "
+               f"(niente fronte ne' decisione)")
+    else:
+        sub = (f"fronte {float(d['frontier_dist']):.2f} m ({reason}), avanzamento "
+               f"{float(d['allowed_advance']):.2f} m, decisione: {str(d['decision_kind'])}"
+               + (" [senza ruotare]" if bool(d.get('keep_heading', False)) else ""))
+    ax.set_title(f"{title_prefix}{name}\n{sub}", fontsize=9)
     ax.legend(loc='upper left', fontsize=7, framealpha=0.8)
     return im, label
 
@@ -531,17 +538,25 @@ def _vis_times(vis, scans):
 # SCANSIONI FUORI DAL CICLO. In scans/ ci sono solo le scansioni del ciclo di navigazione; la
 # scansione d'inizio di ogni tentativo e quella finale entrano nelle mappe del robot ma non
 # in scans/. Se un tentativo fallisce prima di muoversi, la sua scansione d'inizio e' l'unica
-# che ha visto quella zona (28-10 10:27: il muro davanti alla cella (0,5) mancava nel
-# pannello globale). Quelle scansioni sono pero' nella vista PRM del tentativo
+# fatta in quel punto (28-10 10:27: il muro davanti alla cella (0,5) mancava nel pannello
+# globale; 10:51: fra la scansione 11 e la 12 sembrava che il robot non avesse mai guardato
+# dal punto d'arrivo). Quelle scansioni sono pero' nella vista PRM del tentativo
 # (iteration_I_cell_R_C_vis.npz) e in quella finale (iteration_I_FINAL_SCAN_vis.npz): si
-# ricostruiscono da li'. Approssimazione: la vista non ha le celle "mai scritte", quindi una
-# cella vale come vista se terrain_valid >= spotGrid.TERRAIN_VALID_MIN (sul 28-10 uguale a
-# quella del robot nel 98.8% delle celle). Niente orientamento: niente zona sotto il corpo.
-_VIS_SCAN_NAME = re.compile(r'iteration_\d+_(?:cell_\d+_\d+|FINAL_SCAN)_vis\.npz$')
+# ricostruiscono da li' e si inseriscono fra le altre, in ordine di tempo, sia nello sfoglio
+# sia nelle mappe. Approssimazioni: la vista non ha le celle "mai scritte", quindi una cella
+# vale come vista se terrain_valid >= spotGrid.TERRAIN_VALID_MIN (sul 28-10 uguale a quella
+# del robot nel 98.8% delle celle); la quota grezza e' quella corretta; l'orientamento viene
+# da trajectory.csv (ultimo campione prima, nello stesso punto) e senza quello manca la zona
+# sotto il corpo. Fronte e decisione non esistono: campi vuoti, e il campo 'extra_kind'.
+_VIS_SCAN_NAME = re.compile(r'iteration_(\d+)_(?:cell_(\d+)_(\d+)|FINAL_SCAN)_vis\.npz$')
 
 
-def _scan_from_vis(t, v):
-    """Una vista PRM d'inizio tentativo o finale come scansione per le mappe, None se non basta."""
+def _scan_from_vis(t, name, v, yaw_at=None):
+    """Una vista PRM d'inizio tentativo o finale come scansione (vedi SCANSIONI FUORI DAL
+    CICLO), None se non basta. yaw_at(t, x, y): orientamento del robot, NaN se ignoto."""
+    m = _VIS_SCAN_NAME.search(name)
+    if not m:
+        return None
     try:
         pts = np.asarray(v['pts'], float)
         n = int(round(np.sqrt(len(pts))))
@@ -550,19 +565,63 @@ def _scan_from_vis(t, v):
         xs, ys = pts[:, 0].reshape(n, n), pts[:, 1].reshape(n, n)
         cs = float(np.median(np.diff(xs[0])))
         shape = (n, n)
-        return {
-            'terrain_raw': np.zeros(shape, np.float32),          # serve solo la forma
-            'terrain_corrected': np.asarray(v['terrain'], float).reshape(shape),
+        rx, ry = np.asarray(v['robot_xy'], float).ravel()[:2]
+        terrain = np.asarray(v['terrain'], float).reshape(shape)
+        d = {
+            'terrain_raw': terrain.astype(np.float32),
+            'terrain_corrected': terrain,
+            'terrain_valid_raw': np.asarray(v['terrain_valid'], float).reshape(shape),
             'is_valid': np.asarray(v['terrain_valid'], float).reshape(shape) >= spotGrid.TERRAIN_VALID_MIN,
+            'unwritten': np.zeros(shape, bool),
             'obstacle_mask': np.sign(np.asarray(v['obstacle_mask'], float)).reshape(shape).astype(np.int8),
             'obstacle_distance': np.asarray(v['obstacle_distance'], float).reshape(shape),
+            'gradient': np.asarray(v['gradient'], float).reshape(shape),
+            'roughness': np.asarray(v['roughness'], float).reshape(shape),
             'grid_origin': np.array([xs.min() - cs / 2.0, ys.min() - cs / 2.0]),
             'cell_size': np.array(cs),
-            'robot_xyz': np.append(np.asarray(v['robot_xy'], float).ravel()[:2], np.nan),
+            'robot_xyz': np.array([rx, ry, np.nan]),
             'time': np.array(t),
+            'iteration': np.array(int(m.group(1))),
+            'decision_kind': np.array('inizio tentativo' if m.group(2) else 'scansione finale'),
+            'extra_kind': np.array(f"inizio del tentativo sulla cella ({m.group(2)},{m.group(3)})"
+                                   if m.group(2) else "scansione finale della missione"),
+            'polyline': np.zeros((0, 2)),
+            'frontier_reason': np.array(''),
+            'frontier_stop_xy': np.array([np.nan, np.nan]),
+            'decision_target': np.array([np.nan, np.nan]),
+            'frontier_dist': np.array(np.nan),
+            'allowed_advance': np.array(np.nan),
         }
+        if 'mission_z0' in v:
+            d['mission_z0'] = np.asarray(v['mission_z0'])
+        yaw = yaw_at(t, rx, ry) if yaw_at is not None else np.nan
+        if np.isfinite(yaw):
+            d['robot_yaw'] = np.array(yaw)
+        return d
     except (KeyError, ValueError):
         return None
+
+
+def _yaw_lookup(folder):
+    """yaw_at(t, x, y) da trajectory.csv: l'ultimo campione prima di t, se entro 0.3 m da
+    (x, y); NaN altrimenti o se il file manca."""
+    name = os.path.basename(os.path.normpath(folder))
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.normpath(folder))), "MissionLogs",
+                        name, "trajectory.csv")
+    try:
+        import csv
+        with open(path, newline='') as fh:
+            rows = np.array([(float(r['time']), float(r['x']), float(r['y']), float(r['yaw_deg']))
+                             for r in csv.DictReader(fh)])
+    except Exception:
+        rows = np.zeros((0, 4))
+
+    def yaw_at(t, x, y):
+        k = int(np.searchsorted(rows[:, 0], t)) - 1 if len(rows) else -1
+        if k < 0 or np.hypot(rows[k, 1] - x, rows[k, 2] - y) > 0.3:
+            return np.nan
+        return float(np.radians(rows[k, 3]))
+    return yaw_at
 
 
 class MissionContext:
@@ -577,19 +636,20 @@ class MissionContext:
             except Exception as e:
                 print(f"[viewer] vista PRM non leggibile {os.path.basename(f)}: {e}")
         self.vis = _vis_times(self.vis, scans)
-        # Scansioni fuori dal ciclo (vedi _VIS_SCAN_NAME), per scansione del ciclo: quelle
-        # da aggiungere alle mappe PRIMA di lei. Quelle dopo l'ultima (la finale) vanno con
-        # l'ultima.
-        self.extra_before = [[] for _ in scans]
+        # Scansioni fuori dal ciclo (vedi SCANSIONI FUORI DAL CICLO), fra le altre in ordine di
+        # tempo: da qui in poi self.scans e self.scan_files le comprendono.
         t_sc = [_scalar(d, 'time', np.nan) for d in scans]
         if scans and np.isfinite(t_sc).all():
+            paths = {os.path.basename(p): p for p in vis_files}
+            yaw_at = _yaw_lookup(folder)
+            items = [(t, 0, d, p) for t, d, p in zip(t_sc, scans, scan_files)]
             for t, name, v in self.vis:
-                if not _VIS_SCAN_NAME.search(name):
-                    continue
-                d = _scan_from_vis(t, v)
+                d = _scan_from_vis(t, name, v, yaw_at)
                 if d is not None:
-                    k = int(np.searchsorted(t_sc, t, side='right'))
-                    self.extra_before[min(k, len(scans) - 1)].append(d)
+                    items.append((t, 1, d, paths.get(name, name)))
+            items.sort(key=lambda it: (it[0], it[1]))
+            self.scans = scans = [it[2] for it in items]
+            self.scan_files = scan_files = [it[3] for it in items]
         self.traj = self._load_trajectory(folder)
         occ = self._load_pkl_cells(folder, "global_occupancy_map.pkl", 'grid')
         ter = self._load_pkl_cells(folder, "global_terrain_map.pkl", 'height_count')
@@ -723,17 +783,7 @@ class MissionContext:
             else:
                 c['upto'], c['state'] = -1, init()
         for i in range(c['upto'] + 1, upto + 1):
-            extra = self.extra_before[i]
-            last = i == len(self.scans) - 1
-            t_i = _scalar(self.scans[i], 'time', np.nan)
-            for d in extra:
-                if not last or _scalar(d, 'time', np.nan) <= t_i:
-                    step(c['state'], d)
             step(c['state'], self.scans[i])
-            if last:
-                for d in extra:
-                    if _scalar(d, 'time', np.nan) > t_i:
-                        step(c['state'], d)
             if (i + 1) % CHECKPOINT_EVERY == 0 and i not in c['ckpt']:
                 c['ckpt'][i] = tuple(a.copy() for a in c['state'])
         c['upto'] = upto
@@ -747,8 +797,8 @@ class MissionContext:
         Mappa 0/1/2 (ignoto/libero/ostacolo) delle scansioni 0..upto come la teneva il robot:
         un ostacolo vale solo dopo OCC_CONFIRM_OBS letture consecutive (OCC_CONFIRM_WALKED sulle
         celle su cui il corpo e' passato), e torna libero quando le letture libere lo pareggiano.
-        Con le scansioni d'inizio tentativo e finale ricostruite dalle viste PRM (vedi
-        _VIS_SCAN_NAME); mancano i dischi delle cadute.
+        Con le scansioni d'inizio tentativo e finale (vedi SCANSIONI FUORI DAL CICLO); mancano
+        i dischi delle cadute e le scansioni del recupero.
         """
         def step(st_all, d):
             state, count, walked = st_all
@@ -1561,9 +1611,13 @@ def main():
         scan_files = [target] if os.path.basename(target).startswith("scan_") else []
         vis_files = [target] if target.endswith("_vis.npz") else []
     scans = [_load(f) for f in scan_files]
+    n_loop = len(scans)
     print(f"{len(scans)} scansioni, {len(vis_files)} viste PRM")
     folder = target if os.path.isdir(target) else os.path.dirname(os.path.dirname(os.path.abspath(target)))
     ctx = MissionContext(folder, scans, scan_files, vis_files) if scans else None
+    if ctx is not None:
+        scans, scan_files = ctx.scans, ctx.scan_files     # con le scansioni fuori dal ciclo
+        print(f"  piu' {len(scans) - n_loop} scansioni d'inizio tentativo e finale, dalle viste PRM")
 
     if PNG_MODE:
         os.makedirs(out_dir, exist_ok=True)
@@ -1576,7 +1630,12 @@ def main():
             fig.colorbar(im, ax=axl, label=label, shrink=0.8)
             draw_global(axr, ctx, k, bg=bg0, navgraph=ng0, mframe=mf0)
             fig.tight_layout()
-            fig.savefig(os.path.join(out_dir, os.path.basename(f).replace(".npz", ".png")), dpi=100)
+            png = os.path.basename(f).replace(".npz", ".png")
+            m = _VIS_SCAN_NAME.search(os.path.basename(f))
+            if m:                                         # scansione fuori dal ciclo
+                png = (f"scan_it{int(m.group(1)):03d}_cell{m.group(2)}_{m.group(3)}_000_inizio.png"
+                       if m.group(2) else f"scan_it{int(m.group(1)):03d}_finale.png")
+            fig.savefig(os.path.join(out_dir, png), dpi=100)
             plt.close(fig)
         for f in vis_files:
             fig, ax = plt.subplots(figsize=(11, 11))
