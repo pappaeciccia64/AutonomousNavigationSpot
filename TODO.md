@@ -1,7 +1,8 @@
-# Da decidere
+# Da fare
 
-Domande aperte e decisioni rimandate, con i dati che servono per prenderle. Quando una
-decisione è presa si toglie da qui e va nel `CHANGELOG.md`, con il perché.
+Idee, problemi aperti e decisioni rimandate, con i dati che servono per prenderli. Quando
+una cosa è fatta o una decisione è presa si toglie da qui e va nel `CHANGELOG.md`, con il
+perché: lì si leggono i progressi, qui solo ciò che manca.
 
 ---
 
@@ -24,8 +25,21 @@ Tutte si leggono dal rapporto (`python3 mission_report.py`) e dai file della mis
 ## Lavori già decisi, da fare dopo la ristrutturazione
 
 1. **Erba e ostacoli che "si muovono"** di scansione in scansione. Idea: misurare sui pacchetti di scansione quanto ogni cella sfarfalla fra ostacolo e libero, e incrociarlo con la quota e con `intensity` (il 26-10 il 24% degli ostacoli bassi aveva l'intensità del suolo, contro il 5% di quelli alti). Se il segnale c'è, una regola dietro un interruttore, provata sul rigioco. Per dati etichettati: una prova breve con il robot fermo davanti a erba alta, un cespuglio e un oggetto solido, con foto.
-2. **Movimento più fluido**: girarsi camminando e non fermarsi fra un tratto e l'altro (oggi 0.12 m/s di media). Dietro un interruttore, provato con il test end-to-end, poi poche celle sul campo prima di lasciarlo acceso.
+2. **Movimento più fluido**, in due stadi. *Primo*: girarsi camminando e non fermarsi fra un tratto e l'altro (oggi 0.12 m/s di media). *Secondo, più ambizioso*: rendere movimento, scansione e ripianificazione non bloccanti fra loro, così il robot non si ferma ad aspettare la scansione o il grafo. Oggi il ciclo è sequenziale e l'unica cosa che gira in parallelo è il fronte sicuro. Il secondo stadio cambia la struttura del ciclo, quindi va fatto dopo il primo e con il test end-to-end a confronto riga per riga. Entrambi dietro un interruttore, poi poche celle sul campo prima di lasciarli accesi.
 3. **Correzione della deriva nelle mappe globali**, con i dati di `drift.csv`: riallineare la mappa globale con le localizzazioni di GraphNav, oppure dimenticare più in fretta le osservazioni vecchie quando il robot ci ripassa.
+
+---
+
+## Idee da valutare (28-10)
+
+Non ancora decise: prima serve dire cosa fanno esattamente e come si prova che funzionano.
+
+1. **Percentuale di esplorazione completata.** Oggi il rapporto dà solo i conteggi (tentativi, celle visitate, bloccate): manca un numero unico che dica a che punto è la missione. Da definire su cosa si calcola — celle visitate sul totale è facile ma grossolano, area libera vista sul totale dice di più ma dipende dalla mappa globale. Serve anche decidere se mostrarla solo nel rapporto o anche nel log durante la missione.
+2. **Stato e consumo della batteria, con ripiego a batteria bassa.** Nel codice oggi non c'è nulla: `power_state` si legge solo per sapere se i motori sono accesi. Da fare: registrare la carica a ogni giro (come `drift.csv`), ricavare il consumo per metro e per minuto, e una soglia sotto la quale la missione chiude da sola — tornando a wp_0 finché c'è carica per farlo, non fermandosi dov'è. La soglia va tarata sui consumi veri, non scelta a priori.
+3. **Rientro con GraphNav: evitare la rotazione inutile.** GraphNav porta il robot alla posa del waypoint, imbardata compresa, quindi all'arrivo spesso si gira senza motivo. Da capire se l'orientamento finale si può lasciare libero (opzioni di rotta, o un waypoint con l'imbardata giusta) e quanto tempo si recupera davvero: misurarlo prima su una missione registrata.
+4. **Obiettivo scelto da noi sul grafo globale, a esplorazione finita.** Oggi l'obiettivo è sempre il punto di una cella da esplorare. Serve un modo per dire al robot «vai lì» su una mappa già costruita, usando il grafo e le mappe globali invece di rifare l'esplorazione. È un modo d'uso nuovo, non una modifica al ciclo attuale: probabilmente uno script a parte.
+5. **Infittire il grafo nelle zone strette, in modo locale e dinamico.** Oggi la densità dei nodi è decisa una volta per tutta l'area (`MISSION_RANDOM_DENSITY`). Nei varchi stretti servono più nodi, altrove sono tempo sprecato. Da definire come si riconosce «zona stretta» (lo spazio libero misurato è già disponibile) e se i nodi nuovi si aggiungono al grafo esistente o se si ricostruisce la zona. Si prova sul rigioco prima che sul robot.
+6. **Ricontrollare `find_best_point_in_cell`**, e poi la domanda grossa: **servono ancora le celle?** Se l'obiettivo diventa una traiettoria decisa prima, la griglia di celle e tutta la logica di tentativo/frontiera/rank diventano un'impalcatura di cui si può fare a meno. È il cambiamento più grande dell'elenco: prima il controllo della funzione (c'è già `test_obiettivi.py`), poi una valutazione scritta di cosa si guadagna e cosa si perde, poi semmai il codice.
 
 ---
 
