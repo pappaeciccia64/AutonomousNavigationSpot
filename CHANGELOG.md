@@ -9,6 +9,7 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 ## 2026-10-28 (dopo la prova al chiuso delle 10:27)
 
 - **Visualizzatore: il pannello della mappa globale ora usa anche le scansioni d'inizio tentativo e quella finale.** Le ricostruiva solo dai pacchetti di `scans/`, che contengono le scansioni del ciclo di navigazione; la scansione d'inizio di ogni tentativo entrava nella mappa del robot ma non lì. Alle 10:27 il tentativo sulla cella (0,5) è fallito prima di muoversi (nessuna strada nel grafo), e la sua scansione d'inizio era l'unica ad aver visto il muro davanti: per il robot c'era, nel visualizzatore no. Quelle scansioni si ricostruiscono dalle viste PRM (`iteration_I_cell_R_C_vis.npz`, `iteration_I_FINAL_SCAN_vis.npz`), con una sola approssimazione (vedi `_VIS_SCAN_NAME`). Ostacoli della mappa del robot ritrovati a fine missione: 28-10 da 77% a 98%, 26-10 da 87% a 97%, 22-10 da 90% a 96%. Il codice della missione non cambia.
+- **`prova_grafo.py` usa i parametri della missione** (`parametri.py`) invece di numeri suoi: l'immagine mostra i grafi che la missione costruirebbe davvero, e per ognuno si stampano le righe di `parametri.py` o gli argomenti di `easy_walk.py` per sceglierlo (stesso seme = stesso grafo rispetto al punto di partenza, verificato). Il blocco PROVA resta per provare altri valori.
 
 ## 2026-10-27 (ristrutturazione, comportamento invariato)
 
