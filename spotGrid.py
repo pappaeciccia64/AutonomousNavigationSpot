@@ -22,7 +22,6 @@ except ImportError:
 
 import pickle
 import time
-import os
 
 # =========================================================================
 # SOGLIE DI OSTACOLO, PENDENZA E RUGOSITA'
@@ -737,127 +736,6 @@ def _body_slope(gather, base, x1, y1, x2, y2, dir_x, dir_y, perp_x, perp_y,
     return max(lo, p90(g_long)), max(la, p90(g_lat)), True
 
 
-def _bilinear_height(terrain_2d, grid_origin_x, grid_origin_y, cell_size, px, py):
-    """
-    Quota del terreno nel punto (px, py) per interpolazione bilineare tra i centri delle
-    4 celle vicine (il centro della cella (r, c) sta a origine + (c + 0.5) * cell_size,
-    coerente con offset_grid_pixels). None se uno dei 4 vicini cade fuori griglia o non e'
-    finito. SOLO DIAGNOSTICA: usata da compute_arc_slope_profile_interp().
-    """
-    num_rows, num_cols = terrain_2d.shape
-    fx = (px - grid_origin_x) / cell_size - 0.5
-    fy = (py - grid_origin_y) / cell_size - 0.5
-    c0 = int(np.floor(fx))
-    r0 = int(np.floor(fy))
-    if r0 < 0 or c0 < 0 or r0 + 1 >= num_rows or c0 + 1 >= num_cols:
-        return None
-    wx = fx - c0
-    wy = fy - r0
-    h = (terrain_2d[r0, c0] * (1 - wx) * (1 - wy) + terrain_2d[r0, c0 + 1] * wx * (1 - wy) +
-         terrain_2d[r0 + 1, c0] * (1 - wx) * wy + terrain_2d[r0 + 1, c0 + 1] * wx * wy)
-    return float(h) if np.isfinite(h) else None
-
-
-def compute_arc_slope_profile_interp(terrain_2d, grid_origin_x, grid_origin_y, cell_size,
-                                     x1, y1, x2, y2, perp_sample_spacing_m=0.10):
-    """
-    STIMA DIAGNOSTICA, NON USATA PER DECIDERE NULLA. Variante interpolata bilinearmente,
-    tenuta per il confronto loggato in `[SLOPE-CHECK]` e nelle colonne long_interp /
-    lat_interp del CSV per segmento.
-
-    NOTA (2026-10-05): questa funzione nacque per correggere la lettura "a scalini" di
-    compute_arc_slope_profile (CONTEXT.md, punto A). Quel problema e' ora risolto nella
-    funzione principale per altra via -- base fisica SLOPE_BASELINE_M invece del passo
-    nativo, piu' campionamento NaN-aware -- quindi questa resta solo come riferimento
-    indipendente. Attenzione nel confronto: usa ancora la fetta laterale lunga quanto
-    l'arco e la differenziazione sul passo di campionamento, quindi sui mobili restituira'
-    valori molto piu' alti della stima in uso. E' atteso, non e' un disaccordo da indagare.
-
-    Returns:
-        (longitudinal_slope, lateral_slope, has_data)
-    """
-    if terrain_2d is None or grid_origin_x is None or cell_size is None:
-        return 0.0, 0.0, False
-    dist = float(np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2))
-    if dist < 1e-6:
-        return 0.0, 0.0, False
-
-    dir_x, dir_y = (x2 - x1) / dist, (y2 - y1) / dist
-    perp_x, perp_y = -dir_y, dir_x
-
-    num_along = max(2, int(dist / cell_size) + 1)
-    step_along = dist / (num_along - 1)
-    heights_along = []
-    for i in range(num_along):
-        t = i / (num_along - 1)
-        h = _bilinear_height(terrain_2d, grid_origin_x, grid_origin_y, cell_size,
-                             x1 + t * (x2 - x1), y1 + t * (y2 - y1))
-        if h is not None:
-            heights_along.append(h)
-    if len(heights_along) >= 2:
-        # Se qualche campione e' caduto fuori griglia la serie e' accorciata ma resta contigua
-        # per costruzione (si perdono solo gli estremi), quindi il passo costante vale ancora.
-        longitudinal_slope = float(np.percentile(
-            np.abs(np.gradient(np.array(heights_along), step_along)), 90))
-    else:
-        longitudinal_slope = 0.0
-
-    num_slices = max(1, int(dist / perp_sample_spacing_m) + 1)
-    num_perp = max(2, int(dist / cell_size) + 1)
-    step_perp = dist / (num_perp - 1)
-    pooled = []
-    for s in range(num_slices):
-        t = s / max(1, num_slices - 1) if num_slices > 1 else 0.5
-        cx = x1 + t * (x2 - x1)
-        cy = y1 + t * (y2 - y1)
-        heights_perp = []
-        for j in range(num_perp):
-            u = (j / (num_perp - 1) - 0.5) * dist
-            h = _bilinear_height(terrain_2d, grid_origin_x, grid_origin_y, cell_size,
-                                 cx + u * perp_x, cy + u * perp_y)
-            if h is not None:
-                heights_perp.append(h)
-        if len(heights_perp) >= 2:
-            pooled.extend(np.abs(np.gradient(np.array(heights_perp), step_perp)).tolist())
-    lateral_slope = float(np.percentile(pooled, 90)) if pooled else 0.0
-
-    has_data = len(heights_along) >= 2 and len(pooled) > 0
-    return longitudinal_slope, lateral_slope, has_data
-
-
-def compute_arc_sample_coverage(terrain_2d, grid_origin_x, grid_origin_y, cell_size,
-                                x1, y1, x2, y2, perp_sample_spacing_m=0.10,
-                                lateral_half_width_m=LATERAL_SLICE_HALF_WIDTH_M):
-    """
-    SOLO DIAGNOSTICA (colonne coverage_* del CSV dei segmenti). Frazione dei campioni di un
-    arco che cadono dentro la griglia: (lungo l'arco, nelle fette laterali), in [0, 1], con
-    la stessa geometria di compute_arc_slope_profile.
-    """
-    if terrain_2d is None or grid_origin_x is None or cell_size is None:
-        return 0.0, 0.0
-    dist = float(np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2))
-    if dist < 1e-6:
-        return 0.0, 0.0
-    dir_x, dir_y = (x2 - x1) / dist, (y2 - y1) / dist
-    perp_x, perp_y = -dir_y, dir_x
-
-    num_along = max(2, int(dist / cell_size) + 1)
-    t = np.linspace(0.0, 1.0, num_along)
-    _, inside_along = _gather_heights(terrain_2d, grid_origin_x, grid_origin_y, cell_size,
-                                      x1 + t * (x2 - x1), y1 + t * (y2 - y1))
-
-    num_slices = max(1, int(dist / perp_sample_spacing_m) + 1)
-    num_perp = max(2, int(2 * lateral_half_width_m / cell_size) + 1)
-    u = np.linspace(-lateral_half_width_m, lateral_half_width_m, num_perp)
-    ts = np.linspace(0.0, 1.0, num_slices) if num_slices > 1 else np.array([0.5])
-    xs_perp = (x1 + ts * (x2 - x1))[:, None] + u[None, :] * perp_x
-    ys_perp = (y1 + ts * (y2 - y1))[:, None] + u[None, :] * perp_y
-    _, inside_perp = _gather_heights(terrain_2d, grid_origin_x, grid_origin_y, cell_size,
-                                     xs_perp, ys_perp)
-
-    return float(inside_along.mean()), float(inside_perp.mean())
-
-
 class Scan:
     """
     Una scansione della griglia locale (vedi LocalGrid.fetch_scan e process_scan). Array piatti,
@@ -1125,7 +1003,7 @@ class LocalGrid:
         return tf.position.x, tf.position.y
 
     def process_scan(self, scan, robot_x, robot_y, robot_yaw, footprint=True, fuse=True,
-                     ground_label=None, diag_label=None):
+                     ground_label=None):
         """
         Elabora una scansione letta con fetch_scan, riempiendo la Scan:
           footprint_mask  celle sotto il corpo del robot (footprint=False: nessuna)
@@ -1134,8 +1012,8 @@ class LocalGrid:
           grad, rough     pendenza e rugosita' sul terreno corretto
           obstacle_mask   veto per cella, pura logica di soglia (fuse=False: non calcolata).
                           La pendenza non entra in questo veto: vedi fuse_obstacle_mask
-        ground_label e diag_label: etichette delle righe [GROUND-FILTER] e [FOOTPRINT-DIAG]
-        (None = niente riga). Restituisce la Scan.
+        ground_label: etichetta della riga [GROUND-FILTER] (None = niente riga). Restituisce
+        la Scan.
         """
         s = scan
         s.footprint_mask = (self.compute_robot_footprint_mask(s.pts, robot_x, robot_y, robot_yaw,
@@ -1153,10 +1031,6 @@ class LocalGrid:
             s.obstacle_mask = self.fuse_obstacle_mask(
                 cells_obstacle_dist=s.od, rough_values=s.rough, is_valid=s.is_valid,
                 obstacle_threshold=OBSTACLE_THRESHOLD, rough_threshold=ROUGH_THRESHOLD)
-        if diag_label:
-            log_footprint_diagnostic(self, s.pts, robot_x, robot_y, robot_yaw, s.num_x, s.num_y,
-                                     s.obstacle_mask, diag_label, cells_obstacle_dist=s.od,
-                                     rough_values=s.rough, is_valid=s.is_valid)
         return s
 
     def extra_layers(self, names):
@@ -1569,7 +1443,6 @@ class LocalGrid:
         return obstacle_mask
 
     def compute_robot_footprint_mask(self, pts, robot_x, robot_y, robot_yaw, num_cells_x, num_cells_y, margin=0.05,
-                                     diagnostic_only=False,
                                      body_length=1.10, body_width=0.50):
         """
         Maschera 2D delle celle sotto il corpo del robot (rettangolo orientato, piu' margin).
@@ -1577,17 +1450,14 @@ class LocalGrid:
         scansione il terreno sotto il robot non e' mai stato visto); dopo restituisce None e
         vale il terrain_valid di Spot.
 
-        diagnostic_only=True la calcola senza consumare quell'unica volta (diagnostica
-        [FOOTPRINT-DIAG], vedi log_footprint_diagnostic). body_length / body_width: dimensioni del corpo, da
-        cambiare solo per la diagnostica (confronto col solo nucleo fra le zampe).
+        body_length / body_width: dimensioni del corpo.
 
         Attenzione: la chiama anche il thread del fronte (arcVerification), quindi la maschera
         "una volta sola" puo' consumarla lui per primo.
         """
-        if not diagnostic_only:
-            if not self.footprint_correction_pending:
-                return None
-            self.footprint_correction_pending = False
+        if not self.footprint_correction_pending:
+            return None
+        self.footprint_correction_pending = False
 
         dx = pts[:, 0] - robot_x
         dy = pts[:, 1] - robot_y
@@ -1656,15 +1526,6 @@ class GlobalGrid:
                 self._coarse_occ[ck] = n
             else:
                 self._coarse_occ.pop(ck, None)
-
-    def _rebuild_coarse_index(self):
-        self._coarse_occ = {}
-        self._occ_version = getattr(self, '_occ_version', 0) + 1
-        for key, state in self.grid.items():
-            if state == -1.0:
-                ck = self._coarse_key(*key)
-                self._coarse_occ[ck] = self._coarse_occ.get(ck, 0) + 1
-
 
     def clearance(self, x, y):
         """
@@ -1946,31 +1807,6 @@ class GlobalGrid:
                 'clear_all_n': getattr(self, 'clear_all_n', {}),
             }, f)
         print(f"[MAP] Mappa globale salvata correttamente in {file_path}")
-
-    def load_map(self, file_path):
-        """Ricarica una mappa precedentemente salvata."""
-        if os.path.exists(file_path):
-            with open(file_path, 'rb') as f:
-                data = pickle.load(f)
-                self.resolution = data['resolution']
-                self.grid = data['grid']
-                self.hazards = list(data.get('hazards', []))
-                self.walked_cells = {tuple(k) for k in data.get('walked_cells', ())}
-                self.clear_near_sum = dict(data.get('clear_near_sum', {}))
-                self.clear_near_n = dict(data.get('clear_near_n', {}))
-                self.clear_all_sum = dict(data.get('clear_all_sum', {}))
-                self.clear_all_n = dict(data.get('clear_all_n', {}))
-            self.hazard_cells = set()
-            for hx, hy, hr in self.hazards:          # i dischi delle cadute restano permanenti
-                st = int(np.ceil(hr / self.resolution))
-                gx0, gy0 = int(np.floor(hx / self.resolution)), int(np.floor(hy / self.resolution))
-                self.hazard_cells.update((gx0 + dx, gy0 + dy) for dx in range(-st, st + 1)
-                                         for dy in range(-st, st + 1) if dx * dx + dy * dy <= st * st)
-            self._rebuild_coarse_index()
-            print(f"[MAP] Mappa globale caricata con {len(self.grid)} celle occupate/libere.")
-        else:
-            print(f"[WARNING] File {file_path} non trovato. Inizializzo mappa vuota.")
-
 
 def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
                                 perp_sample_spacing_m=0.10,
@@ -2308,24 +2144,6 @@ class GlobalTerrainGrid:
             }, f)
         print(f"[MAP] Mappa globale del terreno salvata correttamente in {file_path}")
 
-    def load_map(self, file_path):
-        """Ricarica una mappa di altezza precedentemente salvata."""
-        if os.path.exists(file_path):
-            with open(file_path, 'rb') as f:
-                data = pickle.load(f)
-                self.resolution = data['resolution']
-                self.height_sum = data['height_sum']
-                self.height_count = data['height_count']
-                self.mission_z0 = data.get('mission_z0')
-                # zone aggiornate sconosciute per una mappa ricaricata: niente uscite rapide
-                self.update_rects = None
-                self._hh_raster = None
-                self._mh_raster = None
-            print(f"[MAP] Mappa globale del terreno caricata con {len(self.height_count)} celle osservate.")
-        else:
-            print(f"[WARNING] File {file_path} non trovato. Inizializzo mappa terreno vuota.")
-
-
 # =========================================================================================
 # DALLA SCANSIONE ALLE MAPPE GLOBALI, e righe di log sullo stato di griglie e mappe
 # =========================================================================================
@@ -2479,22 +2297,6 @@ def raw_scale(grids_data):
         return None
 
 
-def segment_diagnostics(terrain_2d, origin_x, origin_y, cell_size, x1, y1, x2, y2):
-    """Stima alternativa (interpolata) e copertura dei campioni per un segmento. Solo log:
-    la stima in uso per decidere resta quella di PRM.sample_terrain_between_points."""
-    out = {'long_interp': None, 'lat_interp': None, 'coverage_along': None, 'coverage_lateral': None}
-    try:
-        li, lai, ok = compute_arc_slope_profile_interp(
-            terrain_2d, origin_x, origin_y, cell_size, x1, y1, x2, y2)
-        if ok:
-            out['long_interp'], out['lat_interp'] = li, lai
-        out['coverage_along'], out['coverage_lateral'] = compute_arc_sample_coverage(
-            terrain_2d, origin_x, origin_y, cell_size, x1, y1, x2, y2)
-    except Exception as e:
-        print(f"[LOG] Diagnostica del segmento non disponibile: {e}")
-    return out
-
-
 def log_ground_filter(local_grid, label):
     """
     Una riga solo quando il filtro sull'altezza del suolo ha scartato qualcosa o non ha
@@ -2512,88 +2314,6 @@ def log_ground_filter(local_grid, label):
         print(f"[GROUND-FILTER] {label}: {info['n_unwritten']} celle mai scritte dai sensori "
               f"({info.get('n_unwritten_below', 0)} sotto il suolo) -> trattate come non viste"
               + (f", quota {info['quota_unwritten']:+.4f} m" if info.get('quota_unwritten') is not None else ""))
-
-
-def log_footprint_diagnostic(local_grid, pts, robot_x, robot_y, robot_yaw,
-                              num_x, num_y, obstacle_mask, label,
-                              cells_obstacle_dist=None, rough_values=None, is_valid=None):
-    """
-    Misura quante celle sotto l'impronta del robot risultano ostacolo, e PERCHE'.
-    PURAMENTE OSSERVATIVO: usa diagnostic_only=True, quindi non consuma il flag
-    one-shot di compute_robot_footprint_mask e non cambia nessun comportamento.
-
-    La maschera dell'impronta si applica una volta sola: applicarla a ogni scansione
-    nasconderebbe muri veri in un corridoio stretto. Celle ostacolo NEL NUCLEO, quando
-    compaiono, sono di solito celle mai scritte dai sensori (sotto il corpo non possono
-    scrivere) lasciate alla quota sbagliata, che fanno esplodere la rugosita': le toglie
-    spotGrid._cells_never_written, non questa maschera.
-
-    PERCHE' -- i due veti di fuse_obstacle_mask, ricalcolati identici:
-      - "prossimita'": cells_obstacle_dist <= OBSTACLE_THRESHOLD. NON vuol dire
-        "qui c'e' un ostacolo", vuol dire "qui sei a meno di 15 cm da un ostacolo".
-        Se domina questo, il footprint NON c'entra: il robot sta davvero passando
-        vicino a qualcosa, e mascherare cancellerebbe proprio quell'avviso.
-      - "rugosita'": rough_values > ROUGH_THRESHOLD su celle che il sensore dichiara
-        valide.
-
-    DOVE -- rettangolo intero (1.10 x 0.50 + margine) contro il solo NUCLEO
-    (0.90 x 0.35), cioe' la fascia entro la carreggiata delle zampe. Un ostacolo
-    dentro il nucleo significherebbe che il robot ci sta gia' sopra, quindi mascherare li'
-    non puo' nascondere nulla di raggiungibile, mentre mascherare l'intero rettangolo in un
-    corridoio stretto puo' cancellare un muro vero.
-
-    Nota: anche arcVerification.py chiama compute_robot_footprint_mask, quindi in
-    condizioni di corsa puo' essere il thread di background a consumare l'unica
-    maschera prevista, lasciando senza il ciclo principale.
-    """
-    try:
-        fp = local_grid.compute_robot_footprint_mask(
-            pts, robot_x, robot_y, robot_yaw, num_x, num_y, diagnostic_only=True)
-        if fp is None:
-            return
-        fp_flat = fp.ravel()
-        obs_flat = np.asarray(obstacle_mask).ravel()
-        n_fp = int(fp_flat.sum())
-        if n_fp == 0:
-            return
-        blocked = (obs_flat < 0) & fp_flat
-        n_obs = int(blocked.sum())
-
-        line = (f"[FOOTPRINT-DIAG] {label}: celle sotto il corpo marcate ostacolo: "
-                f"{n_obs}/{n_fp} ({100.0 * n_obs / n_fp:.1f}%)")
-
-        # --- PERCHE': i due veti separati, stessa identica logica di fuse_obstacle_mask ---
-        if n_obs > 0 and cells_obstacle_dist is not None and rough_values is not None \
-                and is_valid is not None:
-            d = np.asarray(cells_obstacle_dist).ravel()
-            r = np.asarray(rough_values).ravel()
-            v = np.asarray(is_valid).ravel()
-            if d.shape == fp_flat.shape and r.shape == fp_flat.shape and v.shape == fp_flat.shape:
-                v1 = (d <= OBSTACLE_THRESHOLD) & v   # prossimita' a un ostacolo
-                v3 = (r > ROUGH_THRESHOLD) & v       # terreno irregolare
-                n_prox = int(np.sum(v1 & fp_flat & ~v3))
-                n_rough = int(np.sum(v3 & fp_flat & ~v1))
-                n_both = int(np.sum(v1 & v3 & fp_flat))
-                n_invalid = int(np.sum(~v & fp_flat))
-                line += (f"\n                 perche': prossimita'={n_prox}  rugosita'={n_rough}  "
-                         f"entrambi={n_both}   (celle non valide sotto il corpo: {n_invalid})")
-
-        # --- DOVE: nucleo (dentro la carreggiata delle zampe) contro corona esterna ---
-        if n_obs > 0:
-            core = local_grid.compute_robot_footprint_mask(
-                pts, robot_x, robot_y, robot_yaw, num_x, num_y,
-                diagnostic_only=True, body_length=0.90, body_width=0.35)
-            if core is not None:
-                core_flat = core.ravel()
-                n_core_fp = int(core_flat.sum())
-                n_core_obs = int(np.sum(blocked & core_flat))
-                n_ring_obs = n_obs - n_core_obs
-                line += (f"\n                 dove: nucleo={n_core_obs}/{n_core_fp}  "
-                         f"corona esterna={n_ring_obs}/{n_fp - n_core_fp}")
-
-        print(line)
-    except Exception as e:
-        print(f"[FOOTPRINT-DIAG] diagnostica non disponibile: {e}")
 
 
 def log_clearance_gap(prm, global_map):

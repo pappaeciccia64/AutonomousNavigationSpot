@@ -63,6 +63,11 @@ RETREAT_MAX_LINEAR_VEL_MPS = 0.3     # all'indietro il robot vede peggio: si va 
 # =========================================================================
 MOVE_TIMEOUT_FACTOR = 3.0
 MOVE_TIMEOUT_MARGIN_S = 10.0
+# Allo scadere del tempo, se mancano al piu' MOVE_TIMEOUT_NEAR_M al punto richiesto il
+# movimento vale come riuscito: il robot c'e' arrivato, e' l'assestamento finale che non
+# finisce (28-10 13:50: salita a 20 gradi in HARD, 0.42 m su 0.44 in piu' di 15 s, e l'arco
+# scartato per sempre come "fallimento meccanico").
+MOVE_TIMEOUT_NEAR_M = 0.05
 MOVE_MAX_RPC_ERRORS = 3
 
 
@@ -339,6 +344,14 @@ def relative_move(dx, dy, dyaw, frame_name, robot_command_client, robot_state_cl
     distance_traveled = 0.0
     while True:
         if time.time() - t_start > timeout_s:
+            requested = float(np.hypot(dx, dy))
+            if requested > 0.0 and distance_traveled >= requested - MOVE_TIMEOUT_NEAR_M:
+                stop_robot(robot_command_client,
+                           reason=f"tempo massimo {timeout_s:.0f} s superato a {requested - distance_traveled:.2f} m "
+                                  f"dall'arrivo")
+                print(f"[MOVIMENTO] Arrivato allo scadere del tempo: percorsi {distance_traveled:.2f} m su "
+                      f"{requested:.2f} richiesti (entro {MOVE_TIMEOUT_NEAR_M:.2f} m): vale come riuscito.")
+                return True, distance_traveled
             stop_robot(robot_command_client,
                        reason=f"tempo massimo {timeout_s:.0f} s superato (percorsi {distance_traveled:.2f}m)")
             return False, distance_traveled

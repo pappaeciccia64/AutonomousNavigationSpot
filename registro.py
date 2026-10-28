@@ -113,8 +113,8 @@ MISSION_CTX = {
 _SEGMENT_COLUMNS = [
     'timestamp', 'iteration', 'cell_row', 'cell_col', 'node_from', 'node_to',
     'x_from', 'y_from', 'x_to', 'y_to', 'dist_m',
-    'slope_source', 'long_slope', 'lat_slope', 'long_interp', 'lat_interp',
-    'roughness', 'coverage_along', 'coverage_lateral',
+    'slope_source', 'long_slope', 'lat_slope',
+    'roughness',
     'cost_dist', 'cost_long', 'cost_lat', 'cost_rough', 'cost_total',
     'tier', 'gait_override', 'success', 'dist_traveled_m', 'dist_commanded_m', 'duration_s',
     'roll_start_deg', 'pitch_start_deg', 'roll_end_deg', 'pitch_end_deg',

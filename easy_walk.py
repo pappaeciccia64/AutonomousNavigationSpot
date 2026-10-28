@@ -694,7 +694,7 @@ class TentativoCella:
         # 2. Impronta del corpo, terreno corretto (da qui in poi si usa solo terrain_real),
         # pendenza e rugosita', maschera degli ostacoli
         self.local_grid.process_scan(scan, self.robot_x, self.robot_y, self.robot_yaw,
-                                ground_label="scan-iniziale", diag_label="scan-cella")
+                                ground_label="scan-iniziale")
         self.footprint_mask_2d, terrain_real, is_valid = scan.footprint_mask, scan.terrain, scan.is_valid
         grad_values, rough_values, obstacle_mask = scan.grad, scan.rough, scan.obstacle_mask
         grad_for_prm = grad_values.copy()
@@ -933,6 +933,7 @@ class TentativoCella:
         self.retreats_in_a_row = 0   # arretramenti consecutivi: azzerato da un avanzamento vero
         self.early_replans = 0       # ripianificazioni alla prima cella bloccante (ramo 'wait')
         self.arrival_refusals = 0    # passi rifiutati perche' la posa d'arrivo non ha uscite
+        self.subito_tratti = set()   # tratti gia' scartati da [SUBITO] in questo tentativo
         self.goal_repicks = 0        # quante volte si e' riscelto il punto obiettivo
         self.tried_goals = []        # punti obiettivo gia' provati e risultati irraggiungibili
         self.arrived_near_goal = False   # arrivo accettato con il robot appena fuori dalla cella
@@ -1103,7 +1104,7 @@ class TentativoCella:
         self.grid_origin_x_up, self.grid_origin_y_up = self.local_grid.grid_origin(scan)
 
         self.local_grid.process_scan(scan, self.robot_x, self.robot_y, self.robot_yaw,
-                                ground_label="scan-passo", diag_label="scan-passo")
+                                ground_label="scan-passo")
         self.footprint_mask_2d = scan.footprint_mask
         self.terrain_real_up, self.is_valid_up, self.unwritten_up = scan.terrain, scan.is_valid, scan.unwritten
         self.grad_up, self.rough_up, self.obstacle_mask_updated = scan.grad, scan.rough, scan.obstacle_mask
@@ -1623,6 +1624,19 @@ class TentativoCella:
                 # Scarto NON permanente: dopo una sola scansione l'arco va tolto dal piano,
                 # non condannato per la missione (vedi mark_edge_blocked_soft).
                 prm_graph_module.mark_edge_blocked_soft(self.prm_graph, ea, eb)
+                # Ma se e' la SECONDA volta sullo stesso tratto, lo scarto "per ora" non e'
+                # bastato: il refresh lo ha rimesso nel grafo (lo scarto preliminare guarda una
+                # scansione a 0.25 m, il fronte la mediana di tre con l'isteresi fino a 0.29),
+                # e il piano e' tornato quello di prima. Fuori dal piano per il resto del
+                # tentativo, come i ritorni e [ARRIVO]. Il 28-10 14:23, 8 [SUBITO] su 14 erano
+                # ripetizioni dello stesso tratto (197->569 quattro volte di fila).
+                key_s = (min(ea, eb), max(ea, eb))
+                if key_s in self.subito_tratti:
+                    self.prm_graph.edge_penalty_persistent[key_s] = self.prm_graph._ATTEMPT_MARK
+                    MISSION_STATS['early_replans_repeated'] = MISSION_STATS.get('early_replans_repeated', 0) + 1
+                    print(f"[SUBITO] Il tratto {ea}->{eb} era gia' stato scartato in questo tentativo e "
+                          f"il piano ci e' tornato: fuori dal piano per il resto del tentativo.")
+                self.subito_tratti.add(key_s)
                 new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
                 if new_ids is not None and len(new_ids) > 1:
                     self.path_waypoints = self._waypoints_from_ids(new_ids)
@@ -1908,17 +1922,6 @@ class TentativoCella:
                   f"{str(slope_source).upper()} "
                   f"(long={segment_long_slope:.3f}, lat={segment_lat_slope:.3f})")
 
-            seg_diag = spotGrid.segment_diagnostics(self.terrain_up_2d, self.grid_origin_x_up, self.grid_origin_y_up, self.cell_size_up,
-                                            self.robot_x, self.robot_y, move_x, move_y)
-            if seg_diag['long_interp'] is not None:
-                print(f"[SLOPE-CHECK] Arco {self.robot_node_id}->{self.next_node_id}: in uso long={segment_long_slope:.3f} "
-                      f"lat={segment_lat_slope:.3f} | interpolata long={seg_diag['long_interp']:.3f} "
-                      f"lat={seg_diag['lat_interp']:.3f} | campioni dentro griglia: "
-                      f"lungo arco {seg_diag['coverage_along']:.0%}, laterali {seg_diag['coverage_lateral']:.0%}")
-            else:
-                print(f"[SLOPE-CHECK] Arco {self.robot_node_id}->{self.next_node_id}: nessun dato di terreno live "
-                      f"per la stima interpolata (fonte pendenza: {str(slope_source).upper()})")
-
             near_thresh = spotGrid.SLOPE_THRESHOLD * (1.0 - spotGrid.NEAR_THRESHOLD_MARGIN_FRACTION)
             if (segment_long_slope >= near_thresh or segment_lat_slope >= near_thresh) and self.mission_folder is not None:
                 try:
@@ -1933,8 +1936,6 @@ class TentativoCella:
                         grid_origin_x=self.grid_origin_x_up, grid_origin_y=self.grid_origin_y_up, cell_size=self.cell_size_up,
                         arc_xy=np.array([self.robot_x, self.robot_y, move_x, move_y]),
                         long_slope=segment_long_slope, lat_slope=segment_lat_slope,
-                        long_interp=np.nan if seg_diag['long_interp'] is None else seg_diag['long_interp'],
-                        lat_interp=np.nan if seg_diag['lat_interp'] is None else seg_diag['lat_interp'],
                         slope_threshold=spotGrid.SLOPE_THRESHOLD)
                     MISSION_STATS['near_threshold_saves'] += 1
                     margine = spotGrid.SLOPE_THRESHOLD - max(segment_long_slope, segment_lat_slope)
@@ -2028,9 +2029,7 @@ class TentativoCella:
                     'dist_m': seg_dist,
                     'slope_source': slope_source,
                     'long_slope': segment_long_slope, 'lat_slope': segment_lat_slope,
-                    'long_interp': seg_diag['long_interp'], 'lat_interp': seg_diag['lat_interp'],
                     'roughness': segment_roughness,
-                    'coverage_along': seg_diag['coverage_along'], 'coverage_lateral': seg_diag['coverage_lateral'],
                     'cost_dist': cost_dist, 'cost_long': cost_long, 'cost_lat': cost_lat,
                     'cost_rough': cost_rough, 'cost_total': cost_dist + cost_long + cost_lat + cost_rough,
                     'tier': segment_tier, 'gait_override': bool(self.mobility_kwargs),
@@ -2408,7 +2407,6 @@ class Missione:
         nuove candidate attorno a lei."""
         self.env.update_position(x, y)
         self.recordingInterface.create_default_waypoint(cell_row=row, cell_col=col)
-        self.env.add_waypoint(x, y)
         self.env.mark_cell_visited(row, col)
         self._ultima_visitata = (int(row), int(col))
         # Le confinanti della cella APPENA VISITATA, non di quella in cui sta il robot: con
@@ -2876,6 +2874,27 @@ class Missione:
         print("[FINAL SCAN] Fatto: l'ultima scansione e' nelle mappe globali.")
 
 
+def _accendi_motori(robot, tentativi=None, attesa_s=None):
+    """
+    robot.power_on(), riprovando se Spot risponde KeepaliveMotorsOffError (vedi
+    P.POWER_ON_RETRIES): un altro client chiede motori spenti, di solito per pochi secondi
+    dopo uno spegnimento. Ogni altro errore, o l'ultimo tentativo, risale come prima.
+    """
+    tentativi = P.POWER_ON_RETRIES if tentativi is None else tentativi
+    attesa_s = P.POWER_ON_RETRY_WAIT_S if attesa_s is None else attesa_s
+    for k in range(1, int(tentativi) + 1):
+        try:
+            robot.power_on()
+            return
+        except Exception as e:
+            if 'KeepaliveMotorsOff' not in type(e).__name__ or k >= tentativi:
+                raise
+            print(f"[ACCENSIONE] Spot non accende i motori: il servizio Keepalive li chiede spenti "
+                  f"(un altro client, per esempio il tablet o la missione appena finita). Riprovo fra "
+                  f"{attesa_s:.0f} s ({k}/{tentativi}).")
+            time.sleep(attesa_s)
+
+
 def _cartelle_di_missione():
     """Cartelle di missione (graph/, MissionMap/, MissionLogs/ con la data): (grafo, dati e
     immagini, log)."""
@@ -3087,7 +3106,7 @@ def easy_walk(options):
         command_client = robot.ensure_client(RobotCommandClient.default_service_name)
         robot.time_sync.wait_for_sync()
         robot.logger.info('Accensione del robot...')
-        robot.power_on()
+        _accendi_motori(robot)
         assert robot.is_powered_on(), 'Accensione del robot non riuscita.'
         robot.logger.info('Robot acceso.')
         blocking_stand(command_client)

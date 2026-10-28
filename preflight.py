@@ -41,7 +41,6 @@ METHODS = [
     ("spotGrid.py", "GlobalGrid", "is_occupied"),
     ("spotGrid.py", "GlobalGrid", "is_known"),
     ("spotGrid.py", "GlobalGrid", "_set_state"),
-    ("spotGrid.py", "GlobalGrid", "_rebuild_coarse_index"),
     ("spotGrid.py", "GlobalGrid", "mark_hazard"),
     ("spotGrid.py", "GlobalGrid", "segment_hits_hazard"),
     ("spotGrid.py", "GlobalTerrainGrid", "compute_arc_slope_profile"),

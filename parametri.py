@@ -327,12 +327,9 @@ FALL_HAZARD_RADIUS_M = 0.5
 #                            tornare al punto di partenza.
 #   RETREAT_MIN_SEGMENT_M -- sotto questa lunghezza il tratto si salta (non vale un
 #                            comando di movimento a se').
-#   RETREAT_AFTER_ABORT_M -- quanto arretrare subito dopo un arresto a meta'
-#                            movimento, per staccarsi da cio' che ha fatto fermare.
 # ==================================================================
 RETREAT_MAX_SEGMENTS = 3
 RETREAT_MIN_SEGMENT_M = 0.20
-RETREAT_AFTER_ABORT_M = 0.40
 #   RETREAT_CONTINUITY_M  -- si arretra lungo un tratto registrato solo se il robot sta
 #                            davvero dove quel tratto finiva. Dopo uno spostamento con GraphNav
 #                            fra celle (che non registra tratti) l'ultimo tratto registrato puo'
@@ -394,6 +391,17 @@ GRAPHNAV_LOST_DETECTOR_STRICTNESS = 'LOST_DETECTOR_STRICTNESS_PERMISSIVE'   # No
 # (38 s in tutto); lasciandolo libero sarebbero stati 82, girato verso l'obiettivo 22.
 GRAPHNAV_ARRIVAL_HEADING = 'verso_obiettivo'
 GRAPHNAV_ARRIVAL_HEADING_MIN_M = 0.5   # obiettivo piu' vicino di cosi' al waypoint: direzione non affidabile, si usa quella del waypoint
+# ACCENSIONE: se Spot rifiuta di accendere i motori perche' il servizio Keepalive chiede
+# motori spenti (KeepaliveMotorsOffError: lo lascia un altro client che ha appena spento il
+# robot, il tablet o la missione precedente), si aspetta e si riprova. Il 28-10 14:16 e'
+# bastato rilanciare 40 s dopo.
+POWER_ON_RETRIES = 4
+POWER_ON_RETRY_WAIT_S = 10.0
+
+# Ritorno a wp_0 fermato da GraphNav (STUCK, tempo scaduto) con il robot entro questa distanza
+# da wp_0, secondo la localizzazione di GraphNav: vale come arrivato (13:50 del 28-10: fermo a
+# 0.63 m per l'erba alta attorno alla partenza).
+GRAPHNAV_WP0_NEAR_M = 1.0
 GRAPHNAV_MAX_RELOCALIZATIONS = 3       # riagganci per singolo spostamento GraphNav
 GRAPHNAV_RELOC_MAX_DIST_M = 0.5        # raggio di ricerca dell'ICP attorno alla stima
 GRAPHNAV_RELOC_MAX_YAW_RAD = float(np.radians(20.0))

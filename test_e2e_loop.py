@@ -14,6 +14,7 @@ nodi di sosta, fronte, decisioni, blocchi, ripianificazioni, ritirata, salvatagg
 import contextlib
 import io
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -484,6 +485,12 @@ if __name__ == '__main__':
     check(r['err'] is None, "nessuna eccezione")
     check(r['ok'] is False, "tentativo fallito in modo ordinato (cella irraggiungibile)")
     check(r['min_clear'] > 0.0, f"non entra mai nel muro (distanza minima {r['min_clear']:.2f} m)")
+    # Il secondo [SUBITO] sullo stesso tratto lo toglie dal piano per il resto del tentativo
+    # (28-10 14:23: lo stesso tratto scartato quattro volte di fila).
+    tratti = re.findall(r"\[SUBITO\] \w+ in \([^)]*\) sul tratto (\d+->\d+)", r['log'])
+    check("fuori dal piano per il resto del tentativo" in r['log'] and max(
+          [tratti.count(t) for t in tratti] or [0]) <= 2,
+          f"[SUBITO] ripetuto: alla seconda volta il tratto esce dal piano ({tratti})")
 
     r = run("S5. partenza in uno spazio stretto: 0.45 m dal muro, bersaglio a 90 gradi",
             [(2.45, 2.65, 0.0, 6.0)], (2.0, 3.0, 1.5708), (0, 0))
@@ -693,6 +700,36 @@ if __name__ == '__main__':
     check(r['tags']['[ARRIVO]'] == 0, f"nessun rifiuto [ARRIVO] ({r['tags']['[ARRIVO]']}; "
                                       f"prima della correzione 3, l'ultimo poi eseguito lo stesso)")
     check(r['scans'] <= 8, f"{r['scans']} scansioni (prima 10)")
+
+    # S17: tempo massimo scaduto a pochi centimetri dall'arrivo (28-10 13:50: 0.42 m su 0.44 in
+    # salita, arco scartato per sempre). relative_move vera, con client finti: il comando resta
+    # "in corso" e il corpo si ferma a 2 cm (poi a 20 cm) dal punto richiesto.
+    print("\nS17. tempo scaduto a pochi centimetri dall'arrivo")
+    from bosdyn.client import math_helpers as _mh
+    real_se2, real_factor, real_margin = movements.get_se2_a_tform_b, movements.MOVE_TIMEOUT_FACTOR, \
+        movements.MOVE_TIMEOUT_MARGIN_S
+    for fatti, atteso in ((0.42, True), (0.24, False)):
+        calls = {'n': 0}
+
+        def _se2(transforms, a, b, _f=fatti):
+            calls['n'] += 1
+            return _mh.SE2Pose(x=0.0 if calls['n'] <= 2 else _f, y=0.0, angle=0.0)
+        fb = NS(feedback=NS(synchronized_feedback=NS(mobility_command_feedback=NS(
+            status=movements.RobotCommandFeedbackStatus.STATUS_PROCESSING,
+            se2_trajectory_feedback=NS(status=0, STATUS_AT_GOAL=1, body_movement_status=0,
+                                       BODY_STATUS_SETTLED=1)))))
+        cc = NS(robot_command=lambda *a, **k: 1, robot_command_feedback=lambda cid: fb)
+        rsc = NS(get_robot_state=lambda: NS(kinematic_state=NS(transforms_snapshot=None)))
+        movements.get_se2_a_tform_b = _se2
+        movements.MOVE_TIMEOUT_FACTOR, movements.MOVE_TIMEOUT_MARGIN_S = 0.05, 0.0
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                ok, dist = movements.relative_move(0.44, 0.0, 0.0, "vision", cc, rsc, poll_period_s=0.01)
+        finally:
+            movements.get_se2_a_tform_b = real_se2
+            movements.MOVE_TIMEOUT_FACTOR, movements.MOVE_TIMEOUT_MARGIN_S = real_factor, real_margin
+        check(ok is atteso, f"percorsi {fatti:.2f} m su 0.44 allo scadere del tempo: "
+                            f"{'vale come riuscito' if atteso else 'resta un fallimento'} (esito {ok})")
 
     for d in [x for x in os.listdir(tempfile.gettempdir()) if x.startswith("missione_e2e_")]:
         shutil.rmtree(os.path.join(tempfile.gettempdir(), d), ignore_errors=True)

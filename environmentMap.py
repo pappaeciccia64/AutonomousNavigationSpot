@@ -24,7 +24,6 @@ class EnvironmentMap(object):
         self.start_cell = (0, 0)  # cella di partenza (riga, colonna)
         self.current_cell = (0, 0)
         self.explored_sides = {}
-        self.waypoints = []
 
     def mark_cell_visited(self, row, col):
         """Segna la cella come visitata (1). False se e' fuori dalla griglia."""
@@ -399,11 +398,6 @@ class EnvironmentMap(object):
 
             return (x, y)
         return None
-
-    def add_waypoint(self, x, y):
-        """Registra un waypoint nel punto (x, y) del mondo."""
-        self.waypoints.append((x, y))
-        print(f"[WAYPOINT] Registrato il waypoint n. {len(self.waypoints)} in ({x:.3f}, {y:.3f})")
 
     def print_map(self):
         """Stampa la mappa delle celle."""
