@@ -286,6 +286,11 @@ def section_return(log, graph_dirs):
     out = {}
     m = re.search(r'ritorno a wp_0: arrivato in (\d+) s', log)
     out['tempo_s'] = int(m.group(1)) if m else None
+    # Dal 28-10 sera: ritorno non riuscito, con il robot fermo vicino a wp_0 o lontano.
+    m = re.search(r"Ritorno a wp_0 NON riuscito( ma vicino)?: fermo (?:a ([\d.]+) m da wp_0)?.*?\(motivo: (.*?)(?:; distanza .*)?\)\.", log)
+    if m:
+        out['fallito'] = dict(vicino=bool(m.group(1)), metri=float(m.group(2)) if m.group(2) else None,
+                              motivo=m.group(3))
     m = re.search(r'strada verso wp_0 ([\d.]+) m -> ([\d.]+) m con (\d+) scorciatoie', log)
     if m:
         out['strada_m'] = (float(m.group(1)), float(m.group(2)), int(m.group(3)))
@@ -387,6 +392,7 @@ def section_checks(log, segments):
         r'strada verso \S+ ([\d.]+) m -> ([\d.]+) m con (\d+) scorciatoie', log)]
     refused = len(re.findall(r'\[GRAPHNAV\] Scorciatoia \S+ rifiutata', log))
     ret = re.search(r'ritorno a wp_0: arrivato in (\d+) s', log)
+    near = re.search(r"Ritorno a wp_0 NON riuscito ma vicino: fermo a ([\d.]+) m da wp_0 \(motivo: (.*?); distanza", log)
     wp0 = re.findall(r'strada verso wp_0 ([\d.]+) m -> ([\d.]+) m', log)
     if not roads:
         out.append(("Scorciatoie GraphNav sulla strada", 'NON SCATTATO', "nessuna riga 'strada verso'"))
@@ -396,6 +402,8 @@ def section_checks(log, segments):
         if wp0:
             det += f"; wp_0: {float(wp0[-1][0]):.1f} -> {float(wp0[-1][1]):.1f} m"
         det += f", ritorno {'in ' + ret.group(1) + ' s' if ret else 'NON arrivato'}"
+        if near:
+            det += f" (fermo a {near.group(1)} m da wp_0, {near.group(2)}: fiducial e deriva misurati comunque)"
         if refused:
             det += f"; {refused} scorciatoie rifiutate da Spot"
         out.append(("Scorciatoie GraphNav sulla strada", 'OK' if ret and not refused else 'DA GUARDARE',
@@ -651,8 +659,13 @@ def report(name):
         print("\n" + b)
 
     r = section_return(log, f['graph'])
-    if r.get('tempo_s') is not None or r.get('grafo'):
+    if r.get('tempo_s') is not None or r.get('grafo') or r.get('fallito'):
         line = f"\nRitorno a wp_0: {r['tempo_s']} s" if r.get('tempo_s') is not None else "\nRitorno a wp_0:"
+        if r.get('fallito'):
+            fl = r['fallito']
+            line += (" NON riuscito, fermo " + (f"a {fl['metri']:.2f} m da wp_0" if fl['metri'] is not None
+                                                else "a distanza sconosciuta")
+                     + f" ({fl['motivo']})" + ("; fiducial e deriva misurati comunque" if fl['vicino'] else ""))
         if r.get('strada_m'):
             a, b, n = r['strada_m']
             line += f", strada {a:.1f} m -> {b:.1f} m con {n} scorciatoie"

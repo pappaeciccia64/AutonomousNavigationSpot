@@ -363,6 +363,14 @@ BATTERY_RETURN_PCT = 30.0
 BATTERY_RETURN_CONFIRM = 2     # letture di fila sotto soglia (contro un valore isolato)
 BATTERY_SAMPLE_S = 5.0         # al massimo una lettura ogni tanti secondi nel ciclo
 GRAPHNAV_TIMEOUT_S = 240.0
+# Ritorno a wp_0 fermo entro questa distanza (STUCK, tempo scaduto): resta un ritorno NON
+# riuscito, ma fiducial e deriva si misurano lo stesso (vedi graphnav_return_to_start).
+GRAPHNAV_RETURN_NEAR_M = 1.0
+
+# Un tratto del ciclo il cui comando finisce male (tempo scaduto, Spot che non si assesta)
+# senza un arresto del fronte, con il robot entro questa distanza dal punto d'arrivo, vale
+# come riuscito invece che come fallimento fisico (arco scartato per sempre). 0 = spento.
+MOVE_NEAR_GOAL_M = 0.10
 GRAPHNAV_MAX_LINEAR_VEL_MPS = 0.5
 GRAPHNAV_MAX_ANGULAR_VEL_RPS = 0.6
 
@@ -391,17 +399,6 @@ GRAPHNAV_LOST_DETECTOR_STRICTNESS = 'LOST_DETECTOR_STRICTNESS_PERMISSIVE'   # No
 # (38 s in tutto); lasciandolo libero sarebbero stati 82, girato verso l'obiettivo 22.
 GRAPHNAV_ARRIVAL_HEADING = 'verso_obiettivo'
 GRAPHNAV_ARRIVAL_HEADING_MIN_M = 0.5   # obiettivo piu' vicino di cosi' al waypoint: direzione non affidabile, si usa quella del waypoint
-# ACCENSIONE: se Spot rifiuta di accendere i motori perche' il servizio Keepalive chiede
-# motori spenti (KeepaliveMotorsOffError: lo lascia un altro client che ha appena spento il
-# robot, il tablet o la missione precedente), si aspetta e si riprova. Il 28-10 14:16 e'
-# bastato rilanciare 40 s dopo.
-POWER_ON_RETRIES = 4
-POWER_ON_RETRY_WAIT_S = 10.0
-
-# Ritorno a wp_0 fermato da GraphNav (STUCK, tempo scaduto) con il robot entro questa distanza
-# da wp_0, secondo la localizzazione di GraphNav: vale come arrivato (13:50 del 28-10: fermo a
-# 0.63 m per l'erba alta attorno alla partenza).
-GRAPHNAV_WP0_NEAR_M = 1.0
 GRAPHNAV_MAX_RELOCALIZATIONS = 3       # riagganci per singolo spostamento GraphNav
 GRAPHNAV_RELOC_MAX_DIST_M = 0.5        # raggio di ricerca dell'ICP attorno alla stima
 GRAPHNAV_RELOC_MAX_YAW_RAD = float(np.radians(20.0))

@@ -27,7 +27,8 @@ il robot arriva appena fuori dalla cella.
      controllo prima dello spostamento GraphNav.
   B  il muro piu' lungo e un ostacolo dentro (1,2): blocchi confermati e ritorni con GraphNav.
   C  il mondo B con fallimenti forzati (vedi _con_fallimenti): tentativi falliti d'ufficio,
-     nessun punto obiettivo, una caduta durante uno spostamento GraphNav. Esercita il nuovo
+     nessun punto obiettivo, una caduta durante uno spostamento GraphNav, il ritorno a wp_0
+     fermo (STUCK) a 0.60 m dalla partenza. Esercita il nuovo
      tentativo subito dopo il recupero ([RECOVERY]), riuscito e fallito, e i rami della
      missione che i mondi veri raggiungono di rado.
   D  il mondo A con la batteria finta che scende di un punto a lettura, da 36%: sotto il 30%
@@ -99,8 +100,8 @@ class FakeGraphNav:
         self.n = 0
         self.trips = []                # (da, a) degli spostamenti
         self.headings = []             # angoli d'arrivo chiesti (rispetto al waypoint)
-        self.stuck_wp0 = None          # (dx, dy): il ritorno a wp_0 si ferma (STUCK) li' accanto
-        self._stuck = False
+        self.stuck_wp0_m = None        # ritorno a wp_0 fermo (STUCK) a questa distanza
+        self.status = graph_nav_pb2.NavigationFeedbackResponse.STATUS_REACHED_GOAL
 
     # --- registrazione -------------------------------------------------------------
     def _new_waypoint(self, name):
@@ -190,23 +191,22 @@ class FakeGraphNav:
             yaw += destination_waypoint_tform_body_goal.angle
             self.headings.append(destination_waypoint_tform_body_goal.angle)
         self.trips.append((self._nearest(), waypoint_id))
-        name = next((w.annotations.name for w in self.graph.waypoints if w.id == waypoint_id), None)
-        self._stuck = self.stuck_wp0 is not None and name == "wp_0"
-        if self._stuck:                # 13:50 del 28-10: fermo nell'erba a 0.6 m dall'arrivo
-            x, y = x + self.stuck_wp0[0], y + self.stuck_wp0[1]
+        self.status = graph_nav_pb2.NavigationFeedbackResponse.STATUS_REACHED_GOAL
+        name = next(w.annotations.name for w in self.graph.waypoints if w.id == waypoint_id)
+        if name == 'wp_0' and self.stuck_wp0_m is not None:
+            x += self.stuck_wp0_m                 # fermo prima, sulla strada da +x
+            self.status = graph_nav_pb2.NavigationFeedbackResponse.STATUS_STUCK
         T.ROBOT.x, T.ROBOT.y, T.ROBOT.yaw = x, y, yaw
         T.ROBOT.track.append((x, y))
         return 1
 
     def navigation_feedback(self, command_id, **kw):
-        if self._stuck:
-            return NS(status=graph_nav_pb2.NavigationFeedbackResponse.STATUS_STUCK)
-        return NS(status=graph_nav_pb2.NavigationFeedbackResponse.STATUS_REACHED_GOAL)
+        return NS(status=self.status)
 
     def clear_graph(self, **kw):
-        stuck = self.stuck_wp0         # opzione della prova, non stato della mappa
+        stuck = self.stuck_wp0_m
         self.__init__()
-        self.stuck_wp0 = stuck
+        self.stuck_wp0_m = stuck
 
     def upload_graph(self, graph=None, **kw):
         for e in graph.edges:
@@ -381,13 +381,13 @@ def _con_batteria(da_pct=36.0, punti_a_lettura=1.0):
         parametri.BATTERY_SAMPLE_S = real_s
 
 
-def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0=None):
+def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0_m=None):
     global FIDUCIAL_TAG
     FIDUCIAL_TAG = fiducial
     T.WORLD, T.ROBOT = T.World(WALLS if walls is None else walls, ghosts=True), T.Robot(*START)
     arcVerification.OBSTACLE_HISTORY.reset()
     gn = FakeGraphNav()
-    gn.stuck_wp0 = stuck_wp0
+    gn.stuck_wp0_m = stuck_wp0_m
     robot = FakeRobot(gn)
     spotLogInUtils.setLogInfo = lambda o: (robot, NS(), robot.state, None)
     spotLogInUtils.SimpleEstop = lambda r, n: NS(stop=lambda: None, allow=lambda: None)
@@ -420,12 +420,13 @@ def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0=None):
     return dict(ok=ok, log=log, gn=gn, root=root, seconds=time.time() - t0, out=out.getvalue())
 
 
-def _controlli_comuni(r):
+def _controlli_comuni(r, ritorno=True):
     log = r['log']
     print(f"  ({r['seconds']:.0f} s)")
     check(r['ok'] is True, "main() arriva in fondo senza eccezioni")
     check('Traceback' not in log and 'Traceback' not in r['out'], "nessuna eccezione nel log")
-    check("ritorno a wp_0: arrivato" in log, "ritorno a wp_0 riuscito")
+    if ritorno:
+        check("ritorno a wp_0: arrivato" in log, "ritorno a wp_0 riuscito")
     check("[FINAL SCAN] Fatto" in log, "scansione finale fatta")
     check("[ANCHORING]" in log, "ancoraggio finale chiamato")
 
@@ -459,8 +460,6 @@ def _controlli_mondo(name, r):
               "localizzazione sul fiducial trovato, dopo wp_0")
         check("rivedo il tag 7" in log and "si e' spostato di 0.00 m" in log,
               "al ritorno su wp_0 il tag si rivede e la deriva si misura")
-        check("fermo a 0.60 m da wp_0 secondo GraphNav (entro 1.0 m): vale come arrivato" in log,
-              "ritorno fermato (STUCK) a 0.6 m da wp_0: vale come arrivato, e il tag si controlla")
     else:
         check("[FIDUCIAL] Nessun fiducial" in log and "[FIDUCIAL INIT]" not in log,
               "senza fiducial si parte senza, e senza tentare la localizzazione")
@@ -470,42 +469,17 @@ def _controlli_mondo(name, r):
 
 def _controlli_fallimenti(r):
     log = r['log']
+    check("ritorno a wp_0: arrivato" not in log
+          and "Ritorno a wp_0 NON riuscito ma vicino: fermo a 0.60 m da wp_0 (motivo: bloccato (STUCK)" in log,
+          "ritorno a wp_0 fermo a 0.60 m: NON riuscito, ma vicino")
+    check("[DERIVA] ritorno a wp_0 (fermo vicino)" in log, "deriva misurata anche fermo vicino a wp_0")
+    check("Ritorno a wp_0 non riuscito: il robot si siede" in log, "il robot si siede dove si trova")
     check("[RECOVERY] Trovato percorso alternativo" in log, "nuovo tentativo subito dopo il recupero")
     check("[FAIL] Anche il percorso alternativo" in log, "nuovo tentativo fallito: lato segnato")
     check("[SKIP] Nessun punto obiettivo valido" in log, "nessun punto obiettivo nel recupero")
     check("[CADUTA] Rialzato dopo lo spostamento con GraphNav" in log, "caduta durante il viaggio")
     check("[PROGRESSO] Fine esplorazione: 9/9 celle chiuse" in log and "SKIP-ROUND" not in log,
           "nessuna cella persa dalla frontiera: ogni cella rimandata ritentata dagli altri lati")
-
-
-def _controlli_accensione():
-    """28-10 14:16: KeepaliveMotorsOffError all'accensione. Si riprova; ogni altro errore no."""
-    print("\nAccensione: Spot rifiuta i motori per qualche secondo (28-10 14:16)")
-
-    class KeepaliveMotorsOffError(Exception):
-        pass
-
-    class _Robot:
-        def __init__(self, fail, err):
-            self.fail, self.err, self.calls = fail, err, 0
-
-        def power_on(self):
-            self.calls += 1
-            if self.calls <= self.fail:
-                raise self.err("Cannot power on while Keepalive requests motors off.")
-    r_ = _Robot(2, KeepaliveMotorsOffError)
-    with contextlib.redirect_stdout(io.StringIO()) as out:
-        easy_walk._accendi_motori(r_, tentativi=4, attesa_s=0)
-    check(r_.calls == 3 and "[ACCENSIONE]" in out.getvalue(),
-          f"due rifiuti poi motori accesi al terzo tentativo ({r_.calls} chiamate)")
-    r_ = _Robot(1, RuntimeError)
-    try:
-        with contextlib.redirect_stdout(io.StringIO()):
-            easy_walk._accendi_motori(r_, tentativi=4, attesa_s=0)
-        risale = False
-    except RuntimeError:
-        risale = True
-    check(risale and r_.calls == 1, "un altro errore di accensione risale subito, senza riprovare")
 
 
 def _controlli_scelta_celle():
@@ -569,19 +543,17 @@ if __name__ == '__main__':
     for name, walls in WORLDS.items():
         print(f"\nMissione intera nel mondo {name}, robot e GraphNav finti: 3 x 3 celle da 3 m.")
         r = run(walls, f"MISSIONE_{name}",
-                fiducial=(7, START[0] - 1.0, START[1]) if name == 'A' else None,
-                stuck_wp0=(0.6, 0.0) if name == 'A' else None)
+                fiducial=(7, START[0] - 1.0, START[1]) if name == 'A' else None)
         _controlli_comuni(r)
         _controlli_mondo(name, r)
         shutil.rmtree(r['root'], ignore_errors=True)
     print("\nMissione intera nel mondo C: il B con fallimenti forzati.")
     with _con_fallimenti():
-        r = run(WORLDS['B'], "MISSIONE_C")
-    _controlli_comuni(r)
+        r = run(WORLDS['B'], "MISSIONE_C", stuck_wp0_m=0.6)
+    _controlli_comuni(r, ritorno=False)
     _controlli_fallimenti(r)
     shutil.rmtree(r['root'], ignore_errors=True)
     _controlli_scelta_celle()
-    _controlli_accensione()
     print("\nMissione intera nel mondo E: partenza chiusa tutto intorno (28-10 14:17, erba alta).")
     chiuso = [(0.4, 2.6, 0.4, 0.6), (0.4, 2.6, 2.4, 2.6), (0.4, 0.6, 0.4, 2.6), (2.4, 2.6, 0.4, 2.6)]
     r = run(chiuso, "MISSIONE_E")

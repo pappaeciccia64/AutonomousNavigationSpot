@@ -11,7 +11,7 @@ perché: lì si leggono i progressi, qui solo ciò che manca.
 Dalle prove all'aperto del 28-10 (13:50, 14:17, 14:19, 14:23). Correzioni piccole, ognuna con
 la sua prova senza robot, prima di portare il branch su `main`.
 
-**Codice**: fatto il 28-10 sera (vedi CHANGELOG): `[SUBITO]` ripetuti, ritorno quasi arrivato, tempo scaduto a pochi cm, accensione, codice superfluo. Resta facoltativo spostare gli strumenti da riga di comando di `mission_graph.py` in `prova_grafo.py`.
+**Codice**: fatto il 28-10 sera (vedi CHANGELOG): `[SUBITO]` ripetuti sullo stesso tratto, ritorno a wp_0 con tre esiti, tratto non concluso ma arrivato (`[QUASI]`), codice superfluo. Accensione con `KeepaliveMotorsOffError`: non si fa, il traceback va bene e si riavvia a mano. Resta facoltativo spostare gli strumenti da riga di comando di `mission_graph.py` in `prova_grafo.py`.
 
 **Prima di `main`**: una giornata di missioni con il codice di oggi (scelta delle celle corretta, arrivo GraphNav girato, `[FINE]`, le correzioni sopra) su terreno senza erba alta; se vanno come la 14:23, il branch va su `main`. Da aggiungere alle validazioni su GitHub la missione del 28-10 14:23.
 
