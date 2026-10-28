@@ -6,6 +6,10 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 
 ---
 
+## 2026-10-28 (dopo la prova al chiuso delle 10:27)
+
+- **Visualizzatore: il pannello della mappa globale ora usa anche le scansioni d'inizio tentativo e quella finale.** Le ricostruiva solo dai pacchetti di `scans/`, che contengono le scansioni del ciclo di navigazione; la scansione d'inizio di ogni tentativo entrava nella mappa del robot ma non lì. Alle 10:27 il tentativo sulla cella (0,5) è fallito prima di muoversi (nessuna strada nel grafo), e la sua scansione d'inizio era l'unica ad aver visto il muro davanti: per il robot c'era, nel visualizzatore no. Quelle scansioni si ricostruiscono dalle viste PRM (`iteration_I_cell_R_C_vis.npz`, `iteration_I_FINAL_SCAN_vis.npz`), con una sola approssimazione (vedi `_VIS_SCAN_NAME`). Ostacoli della mappa del robot ritrovati a fine missione: 28-10 da 77% a 98%, 26-10 da 87% a 97%, 22-10 da 90% a 96%. Il codice della missione non cambia.
+
 ## 2026-10-27 (ristrutturazione, comportamento invariato)
 
 `easy_walk.py` da 5611 a circa 2900 righe; il comportamento del robot non cambia. Ogni passo verificato con: log del test end-to-end **identici riga per riga** alla registrazione di riferimento in tutti i 19 scenari (`E2E_LOG_DIR` + `confronta_log.py`, nuovi), rigioco delle 10 missioni identico al riferimento, `test_obiettivi.py` identico, controllo statico dei nomi, `preflight.py`; le parti GraphNav, che nessun test esercita, provate con un GraphNav finto (spostamento, blocco, ritorno a wp_0, chiusura d'anello, deriva).

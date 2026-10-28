@@ -528,6 +528,43 @@ def _vis_times(vis, scans):
     return out
 
 
+# SCANSIONI FUORI DAL CICLO. In scans/ ci sono solo le scansioni del ciclo di navigazione; la
+# scansione d'inizio di ogni tentativo e quella finale entrano nelle mappe del robot ma non
+# in scans/. Se un tentativo fallisce prima di muoversi, la sua scansione d'inizio e' l'unica
+# che ha visto quella zona (28-10 10:27: il muro davanti alla cella (0,5) mancava nel
+# pannello globale). Quelle scansioni sono pero' nella vista PRM del tentativo
+# (iteration_I_cell_R_C_vis.npz) e in quella finale (iteration_I_FINAL_SCAN_vis.npz): si
+# ricostruiscono da li'. Approssimazione: la vista non ha le celle "mai scritte", quindi una
+# cella vale come vista se terrain_valid >= spotGrid.TERRAIN_VALID_MIN (sul 28-10 uguale a
+# quella del robot nel 98.8% delle celle). Niente orientamento: niente zona sotto il corpo.
+_VIS_SCAN_NAME = re.compile(r'iteration_\d+_(?:cell_\d+_\d+|FINAL_SCAN)_vis\.npz$')
+
+
+def _scan_from_vis(t, v):
+    """Una vista PRM d'inizio tentativo o finale come scansione per le mappe, None se non basta."""
+    try:
+        pts = np.asarray(v['pts'], float)
+        n = int(round(np.sqrt(len(pts))))
+        if n * n != len(pts):
+            return None
+        xs, ys = pts[:, 0].reshape(n, n), pts[:, 1].reshape(n, n)
+        cs = float(np.median(np.diff(xs[0])))
+        shape = (n, n)
+        return {
+            'terrain_raw': np.zeros(shape, np.float32),          # serve solo la forma
+            'terrain_corrected': np.asarray(v['terrain'], float).reshape(shape),
+            'is_valid': np.asarray(v['terrain_valid'], float).reshape(shape) >= spotGrid.TERRAIN_VALID_MIN,
+            'obstacle_mask': np.sign(np.asarray(v['obstacle_mask'], float)).reshape(shape).astype(np.int8),
+            'obstacle_distance': np.asarray(v['obstacle_distance'], float).reshape(shape),
+            'grid_origin': np.array([xs.min() - cs / 2.0, ys.min() - cs / 2.0]),
+            'cell_size': np.array(cs),
+            'robot_xyz': np.append(np.asarray(v['robot_xy'], float).ravel()[:2], np.nan),
+            'time': np.array(t),
+        }
+    except (KeyError, ValueError):
+        return None
+
+
 class MissionContext:
     """Dati di tutta la missione, caricati una volta: scansioni, viste PRM, traiettoria."""
 
@@ -540,6 +577,19 @@ class MissionContext:
             except Exception as e:
                 print(f"[viewer] vista PRM non leggibile {os.path.basename(f)}: {e}")
         self.vis = _vis_times(self.vis, scans)
+        # Scansioni fuori dal ciclo (vedi _VIS_SCAN_NAME), per scansione del ciclo: quelle
+        # da aggiungere alle mappe PRIMA di lei. Quelle dopo l'ultima (la finale) vanno con
+        # l'ultima.
+        self.extra_before = [[] for _ in scans]
+        t_sc = [_scalar(d, 'time', np.nan) for d in scans]
+        if scans and np.isfinite(t_sc).all():
+            for t, name, v in self.vis:
+                if not _VIS_SCAN_NAME.search(name):
+                    continue
+                d = _scan_from_vis(t, v)
+                if d is not None:
+                    k = int(np.searchsorted(t_sc, t, side='right'))
+                    self.extra_before[min(k, len(scans) - 1)].append(d)
         self.traj = self._load_trajectory(folder)
         occ = self._load_pkl_cells(folder, "global_occupancy_map.pkl", 'grid')
         ter = self._load_pkl_cells(folder, "global_terrain_map.pkl", 'height_count')
@@ -673,7 +723,17 @@ class MissionContext:
             else:
                 c['upto'], c['state'] = -1, init()
         for i in range(c['upto'] + 1, upto + 1):
+            extra = self.extra_before[i]
+            last = i == len(self.scans) - 1
+            t_i = _scalar(self.scans[i], 'time', np.nan)
+            for d in extra:
+                if not last or _scalar(d, 'time', np.nan) <= t_i:
+                    step(c['state'], d)
             step(c['state'], self.scans[i])
+            if last:
+                for d in extra:
+                    if _scalar(d, 'time', np.nan) > t_i:
+                        step(c['state'], d)
             if (i + 1) % CHECKPOINT_EVERY == 0 and i not in c['ckpt']:
                 c['ckpt'][i] = tuple(a.copy() for a in c['state'])
         c['upto'] = upto
@@ -687,7 +747,8 @@ class MissionContext:
         Mappa 0/1/2 (ignoto/libero/ostacolo) delle scansioni 0..upto come la teneva il robot:
         un ostacolo vale solo dopo OCC_CONFIRM_OBS letture consecutive (OCC_CONFIRM_WALKED sulle
         celle su cui il corpo e' passato), e torna libero quando le letture libere lo pareggiano.
-        Mancano i dischi delle cadute e la scansione iniziale e finale (non salvate in scans/).
+        Con le scansioni d'inizio tentativo e finale ricostruite dalle viste PRM (vedi
+        _VIS_SCAN_NAME); mancano i dischi delle cadute.
         """
         def step(st_all, d):
             state, count, walked = st_all
