@@ -2381,6 +2381,7 @@ class Missione:
         # all'ultima riga stampata, punti del rettangolo della missione per l'area vista.
         self._t0 = None
         self._closed_at_start = 0
+        self._ultima_visitata = None      # vedi _cella_del_robot
         self._closed_logged = None
         self._area_points = None
 
@@ -2403,11 +2404,63 @@ class Missione:
         self.recordingInterface.create_default_waypoint(cell_row=row, cell_col=col)
         self.env.add_waypoint(x, y)
         self.env.mark_cell_visited(row, col)
+        self._ultima_visitata = (int(row), int(col))
         # Le confinanti della cella APPENA VISITATA, non di quella in cui sta il robot: con
         # l'arrivo appena fuori dalla cella (ARRIVAL_OUTSIDE_CELL_M) il robot puo' essere
         # ancora nella cella di prima.
         self.frontier.extend(environmentMap.find_new_borders(
             self.env, row, col, self.path, self.frontier))
+
+    def _cella_del_robot(self):
+        """
+        La cella da cui il robot cerca le confinanti e segna i lati provati. Di solito quella
+        in cui sta; ma se l'ultima cella visitata e' stata accettata con il robot appena FUORI
+        (ARRIVAL_OUTSIDE_CELL_M) e il robot e' ancora li', vale quella: il 28-10 13:50 la (7,2)
+        e' stata visitata con il robot 0.29 m fuori, nella (6,3), e la (7,1) che le stava
+        accanto non e' mai stata tentata da li'.
+        """
+        x, y, _, _ = spotUtils.getPosition(self.robot_state_client)
+        cell = tuple(int(v) for v in self.env.get_cell_from_world(x, y))
+        uv = self._ultima_visitata
+        if uv is not None and cell != uv:
+            border = environmentMap.cell_border_distance(self.env, uv[0], uv[1], x, y)
+            if border is not None and -border <= P.ARRIVAL_OUTSIDE_CELL_M:
+                print(f"[CELLA] Il robot e' nella cella {cell}, ma {-border:.2f} m fuori dalla "
+                      f"{uv} appena visitata: cerco le confinanti dalla {uv}.")
+                return uv
+        return cell
+
+    def _cella_di_partenza_per(self, row, col, waypoints_by_cell):
+        """
+        La cella visitata (con un waypoint GraphNav) da cui avvicinarsi alla candidata (row,
+        col): fra le CONFINANTI, una il cui lato verso la candidata non e' ancora stato
+        provato, la piu' vicina al robot. Se nessuna confinante ha un lato libero, la regola
+        di sempre (find_nearest_waypoint_cell_to_target), che il chiamante poi salta se quel
+        lato e' gia' provato. Prima si prendeva sempre la prima confinante in ordine fisso
+        (nord, sud, ovest, est): provato quel lato, la cella non veniva piu' tentata dagli
+        altri e usciva dalla frontiera (28-10 13:50, celle (7,0) e (7,1)).
+        """
+        env, ri = self.env, self.recordingInterface
+        sides = env.get_cell_sides_status(row, col)
+        x, y, _, _ = spotUtils.getPosition(self.robot_state_client)
+        cands = []
+        for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            r, c = row + dr, col + dc
+            if not (0 <= r < env.rows and 0 <= c < env.cols) or env.map[r][c] != 1:
+                continue
+            if (r, c) not in waypoints_by_cell or ri.get_manual_waypoint_by_cell(r, c) is None:
+                continue
+            if sides & env.get_side_bit_facing_origin(r, c, row, col):
+                continue
+            wx, wy = env.get_world_position_from_cell(r, c)
+            cands.append((float(np.hypot(wx - x, wy - y)), (r, c)))
+        if cands:
+            d, cell = min(cands)
+            print(f"[NEAREST_WP] Cella ({row},{col}): mi avvicino dalla confinante {cell}, lato non "
+                  f"ancora provato, a {d:.1f} m dal robot"
+                  + (f" ({len(cands)} lati liberi)" if len(cands) > 1 else "") + ".")
+            return cell
+        return ri.find_nearest_waypoint_cell_to_target((row, col), waypoints_by_cell, env)
 
     def _lato_fallito(self, row, col, from_row, from_col):
         """Segna come provato il lato della cella (row, col) che guarda la cella (from_row,
@@ -2437,8 +2490,7 @@ class Missione:
                       f"{len(self.frontier)} celle in frontiera {[(f[0], f[1]) for f in self.frontier]}.")
                 break
             print(self.frontier)
-            x, y, z, _ = spotUtils.getPosition(self.robot_state_client)
-            robot_row, robot_col = self.env.get_cell_from_world(x, y)
+            robot_row, robot_col = self._cella_del_robot()
 
             borders = self.env.get_adjacent_frontier_cells(robot_row, robot_col, self.path)
             borders_in_frontier = [b for b in borders
@@ -2669,8 +2721,8 @@ class Missione:
                 return None
             candidate_row, candidate_col, candidate_rank = lowest_rank_cell
             waypoints_by_cell = recordingInterface.get_all_manual_waypoints_with_cells()
-            candidate_nearest_cell = recordingInterface.find_nearest_waypoint_cell_to_target(
-                (candidate_row, candidate_col), waypoints_by_cell, env)
+            candidate_nearest_cell = self._cella_di_partenza_per(candidate_row, candidate_col,
+                                                                 waypoints_by_cell)
             if candidate_nearest_cell is None or \
                     recordingInterface.get_manual_waypoint_by_cell(*candidate_nearest_cell) is None:
                 # Nessuna cella visitata con waypoint da cui partire: si passa alla candidata

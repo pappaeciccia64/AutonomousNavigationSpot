@@ -6,6 +6,10 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 
 ---
 
+## 2026-10-28 sera (dopo le prove all'aperto)
+
+- **Scelta delle celle: nessuna cella persa dalla frontiera.** 13:50, celle (7,0) e (7,1): la (7,2) era stata visitata con il robot 0.29 m fuori (nella (6,3)), e il ciclo cercava le confinanti dalla cella in cui stava il robot, non da quella appena visitata: la (7,1), accanto alla (7,2), non è mai stata tentata da lì. Poi, per avvicinarsi con GraphNav, si prendeva sempre la prima confinante visitata in ordine fisso (nord, sud, ovest, est): per la (7,1) la (6,1), lato già provato, quindi salto; senza candidate praticabili la frontiera perdeva una cella a giro, e (7,0) e (7,1) sono uscite senza altri tentativi, nonostante il `[DEFER]` ("si ritenterà da un altro lato"). Ora: se l'ultima cella visitata è stata accettata con il robot appena fuori e il robot è ancora lì, le confinanti si cercano da quella (`Missione._cella_del_robot`); e fra le confinanti visitate si sceglie quella il cui lato verso la candidata non è ancora provato, la più vicina al robot (`Missione._cella_di_partenza_per`). Prova: `test_missione.py`, controllo diretto del caso delle 13:50 sulla griglia 8 x 7; mondo C (fallimenti forzati) da 5/9 celle chiuse (4 mai raggiunte, 7 salti) a 9/9 (7 visitate, 2 bloccate); mondi A e B con un viaggio GraphNav in meno. Le prove end-to-end e il rigioco non cambiano (il ciclo dentro la cella non è toccato).
+
 ## 2026-10-28 sera: batteria
 
 - **Carica e consumo della batteria, con rientro a batteria bassa** (`batteria.py`, nuovo; era l'idea 2 del 28-10 in `TODO.md`). Prima nel codice non c'era nulla: `power_state` si leggeva solo per sapere se i motori erano accesi.

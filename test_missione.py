@@ -305,7 +305,7 @@ class _Tracker(T.FakeTracker):
 @contextlib.contextmanager
 def _con_fallimenti():
     """Fallimenti forzati, sempre gli stessi: il 1o, 4o, 7o... tentativo e il 2o falliscono
-    senza muovere il robot, una scelta dell'obiettivo su 5 non trova punti, il secondo
+    senza muovere il robot, una scelta dell'obiettivo su 5 non trova punti, il primo
     spostamento GraphNav finisce con una caduta (finta: il robot e' gia' in piedi)."""
     real_attempt = easy_walk.attempt_enter_cell_from_position
     real_best = easy_walk.find_best_point_in_cell
@@ -329,7 +329,7 @@ def _con_fallimenti():
     def fall(rsc, cc, gm, why, *a, **k):
         if why == "durante lo spostamento con GraphNav":
             n['viaggi'] += 1
-            if n['viaggi'] == 2:
+            if n['viaggi'] == 1:
                 print("[FINTO] caduta durante lo spostamento GraphNav")
                 return 'caduto'
         return real_fall(rsc, cc, gm, why, *a, **k)
@@ -452,6 +452,44 @@ def _controlli_fallimenti(r):
     check("[FAIL] Anche il percorso alternativo" in log, "nuovo tentativo fallito: lato segnato")
     check("[SKIP] Nessun punto obiettivo valido" in log, "nessun punto obiettivo nel recupero")
     check("[CADUTA] Rialzato dopo lo spostamento con GraphNav" in log, "caduta durante il viaggio")
+    check("[PROGRESSO] Fine esplorazione: 9/9 celle chiuse" in log and "SKIP-ROUND" not in log,
+          "nessuna cella persa dalla frontiera: ogni cella rimandata ritentata dagli altri lati")
+
+
+def _controlli_scelta_celle():
+    """
+    Il caso del 28-10 13:50, griglia 8 x 7 da 2 m: la (7,2) e' stata visitata con il robot
+    appena fuori, nella (6,3), e la (7,1) era gia' stata provata dal lato della (6,1). Il robot
+    deve cercare le confinanti dalla (7,2), e avvicinarsi alla (7,1) dalla (7,2), non di nuovo
+    dalla (6,1) (prima: salto, poi la cella usciva dalla frontiera).
+    """
+    print("\nScelta delle celle: il caso delle 13:50 (celle (7,1) e (7,2))")
+    import environmentMap
+    env = environmentMap.EnvironmentMap(rows=8, cols=7, cell_size=2.0)
+    with contextlib.redirect_stdout(io.StringIO()):
+        env.set_origin(0.0, 0.0, 0.0)
+        for r_ in range(8):
+            for c_ in range(7):
+                if (r_, c_) not in ((7, 0), (7, 1)):
+                    env.mark_cell_visited(r_, c_)
+        env.mark_cell_side_explored(7, 1, env.get_side_bit_facing_origin(6, 1, 7, 1))
+    wps = {(r_, c_): {'id': f"wp_{r_}_{c_}", 'x': 2.0 * c_, 'y': 2.0 * r_}
+           for r_ in range(8) for c_ in range(7) if env.map[r_][c_] == 1}
+    ri = NS(get_manual_waypoint_by_cell=lambda r_, c_: wps.get((r_, c_)),
+            find_nearest_waypoint_cell_to_target=lambda *a: (6, 1))
+    m = easy_walk.Missione.__new__(easy_walk.Missione)
+    m.env, m.recordingInterface, m.robot_state_client = env, ri, None
+    m._ultima_visitata = (7, 2)
+    T.ROBOT.x, T.ROBOT.y = 4.0, 12.75                 # 0.25 m fuori dalla (7,2), nella (6,2)
+    with contextlib.redirect_stdout(io.StringIO()):
+        cella = m._cella_del_robot()
+        partenza = m._cella_di_partenza_per(7, 1, wps)
+    check(cella == (7, 2), f"robot appena fuori dalla (7,2) appena visitata: cella del robot {cella}")
+    check(partenza == (7, 2), f"avvicinamento alla (7,1) dal lato non ancora provato: dalla {partenza}")
+    T.ROBOT.x, T.ROBOT.y = 4.0, 11.5                  # ben dentro la (6,2): vale la cella vera
+    with contextlib.redirect_stdout(io.StringIO()):
+        cella = m._cella_del_robot()
+    check(cella == (6, 2), f"robot lontano dalla cella visitata: vale quella in cui sta ({cella})")
 
 
 def _controlli_batteria(r):
@@ -489,6 +527,7 @@ if __name__ == '__main__':
     _controlli_comuni(r)
     _controlli_fallimenti(r)
     shutil.rmtree(r['root'], ignore_errors=True)
+    _controlli_scelta_celle()
     print("\nMissione intera nel mondo D: il mondo A con la batteria che si scarica.")
     with _con_batteria():
         r = run(WORLDS['A'], "MISSIONE_D")
