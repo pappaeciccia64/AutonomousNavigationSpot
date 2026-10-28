@@ -2895,6 +2895,46 @@ class Missione:
         print("[FINAL SCAN] Fatto: l'ultima scansione e' nelle mappe globali.")
 
 
+def _chiusura_di_emergenza(robot, command_client, recordingInterface, exc):
+    """
+    Missione interrotta (eccezione o Ctrl+C) con il robot acceso e il lease ancora in mano:
+    fermarlo, farlo sedere e spegnere i motori, poi scaricare la mappa GraphNav, che resta
+    solo sul robot e all'avvio della missione successiva verrebbe cancellata. Prima il
+    programma usciva e basta: robot in piedi finche' l'E-Stop software, non piu' rinnovato,
+    toglieva la potenza (~9 s), e mappa persa. Se il robot e' caduto non lo si fa sedere (e'
+    gia' a terra). Ogni passo e' tentato a se': mai eccezioni da qui.
+    """
+    caduto = isinstance(exc, movements.RobotFallenError)
+    print(f"\n[EMERGENZA] Missione interrotta ({type(exc).__name__}): "
+          + ("il robot e' a terra, " if caduto else "fermo il robot, lo faccio sedere, ")
+          + "salvo la mappa GraphNav.")
+    tracker = MISSION_CTX.get('tracker')
+    if tracker is not None:
+        try:
+            tracker.clear_path()
+        except Exception:
+            pass
+    if not caduto:
+        try:
+            movements.stop_robot(command_client, reason="missione interrotta")
+            command_client.robot_command(RobotCommandBuilder.synchro_sit_command(),
+                                         end_time_secs=time.time() + 20)
+            sleep(3)
+            robot.power_off(cut_immediately=False)
+            print("[EMERGENZA] Robot seduto e motori spenti.")
+        except BaseException as e:
+            print(f"[EMERGENZA] Non sono riuscito a far sedere il robot ({e!r}): usare il tablet.")
+    try:
+        recordingInterface.stop_recording()
+    except BaseException:
+        pass
+    try:
+        recordingInterface.download_full_graph()
+        print("[EMERGENZA] Mappa GraphNav scaricata.")
+    except BaseException as e:
+        print(f"[EMERGENZA] Mappa GraphNav non scaricata ({e!r}).")
+
+
 def _cartelle_di_missione():
     """Cartelle di missione (graph/, MissionMap/, MissionLogs/ con la data): (grafo, dati e
     immagini, log)."""
@@ -3111,91 +3151,95 @@ def easy_walk(options):
         robot.power_on()
         assert robot.is_powered_on(), 'Accensione del robot non riuscita.'
         robot.logger.info('Robot acceso.')
-        blocking_stand(command_client)
+        try:
+            blocking_stand(command_client)
 
-        # Batteria: prima lettura, poi a ogni giro del ciclo (vedi batteria.py).
-        MISSION_CTX['batteria'] = batteria.MonitorBatteria(robot_state_client)
-        MISSION_CTX['batteria'].controlla("avvio")
+            # Batteria: prima lettura, poi a ogni giro del ciclo (vedi batteria.py).
+            MISSION_CTX['batteria'] = batteria.MonitorBatteria(robot_state_client)
+            MISSION_CTX['batteria'].controlla("avvio")
 
-        # Griglie e mappe locali vengono tutte dalle telecamere di Spot (nessun Velodyne).
-        recordingInterface.clear_map()
-        recordingInterface.start_recording()
+            # Griglie e mappe locali vengono tutte dalle telecamere di Spot (nessun Velodyne).
+            recordingInterface.clear_map()
+            recordingInterface.start_recording()
 
-        # Fiducial di partenza (vedi START_FIDUCIAL_ID): cercato PRIMA di creare wp_0, cosi'
-        # entra nella sua istantanea e la localizzazione sul fiducial ha qualcosa da trovare.
-        fiducials = navGraphUtils.find_fiducials(robot, robot_state_client,
-                                                 wait_s=P.START_FIDUCIAL_WAIT_S,
-                                                 fiducial_id=P.START_FIDUCIAL_ID)
-        MISSION_CTX['start_fiducial'] = fiducials[0] if fiducials else None
-        if fiducials:
-            print(f"[FIDUCIAL] Fiducial di partenza: {navGraphUtils.describe_fiducial(fiducials[0])}"
-                  + (f"; ne vedo altri {len(fiducials) - 1}: "
-                     + ", ".join(str(f['id']) for f in fiducials[1:]) if len(fiducials) > 1 else ""))
-        else:
-            print(f"[FIDUCIAL] Nessun fiducial "
-                  f"{'' if P.START_FIDUCIAL_ID is None else f'con ID {P.START_FIDUCIAL_ID} '}"
-                  f"visto in {P.START_FIDUCIAL_WAIT_S:.0f} s da nessuna telecamera: si parte senza. "
-                  f"Spot riconosce solo gli AprilTag 36h11 (i fiducial di Boston Dynamics).")
+            # Fiducial di partenza (vedi START_FIDUCIAL_ID): cercato PRIMA di creare wp_0, cosi'
+            # entra nella sua istantanea e la localizzazione sul fiducial ha qualcosa da trovare.
+            fiducials = navGraphUtils.find_fiducials(robot, robot_state_client,
+                                                     wait_s=P.START_FIDUCIAL_WAIT_S,
+                                                     fiducial_id=P.START_FIDUCIAL_ID)
+            MISSION_CTX['start_fiducial'] = fiducials[0] if fiducials else None
+            if fiducials:
+                print(f"[FIDUCIAL] Fiducial di partenza: {navGraphUtils.describe_fiducial(fiducials[0])}"
+                      + (f"; ne vedo altri {len(fiducials) - 1}: "
+                         + ", ".join(str(f['id']) for f in fiducials[1:]) if len(fiducials) > 1 else ""))
+            else:
+                print(f"[FIDUCIAL] Nessun fiducial "
+                      f"{'' if P.START_FIDUCIAL_ID is None else f'con ID {P.START_FIDUCIAL_ID} '}"
+                      f"visto in {P.START_FIDUCIAL_WAIT_S:.0f} s da nessuna telecamera: si parte senza. "
+                      f"Spot riconosce solo gli AprilTag 36h11 (i fiducial di Boston Dynamics).")
 
-        start_row, start_col = 0, 0
-        recordingInterface.create_default_waypoint(cell_row=start_row, cell_col=start_col)
-        if fiducials:
-            recordingInterface.initialize_with_fiducial(robot_state_client, fiducials[0]['id'])
+            start_row, start_col = 0, 0
+            recordingInterface.create_default_waypoint(cell_row=start_row, cell_col=start_col)
+            if fiducials:
+                recordingInterface.initialize_with_fiducial(robot_state_client, fiducials[0]['id'])
 
-        env = _griglia_di_missione(options)
+            env = _griglia_di_missione(options)
 
-        # --- Andatura per tutta la missione ---
-        # Vuoto: andatura, altezza del passo e ground_mu_hint si scelgono TRATTO PER TRATTO in
-        # base al terreno (vedi movements.select_mobility_params). Per imporre un profilo fisso
-        # (per esempio in prova) basta un dict non vuoto qui: TentativoCella lo usa per tutti i
-        # tratti e salta la scelta automatica. Esempio:
-        #   mobility_kwargs = dict(
-        #       locomotion_hint=spot_command_pb2.HINT_CRAWL,
-        #       ground_mu_hint=0.4,
-        #       swing_height=spot_command_pb2.SWING_HEIGHT_HIGH
-        #   )
-        mobility_kwargs = {}
+            # --- Andatura per tutta la missione ---
+            # Vuoto: andatura, altezza del passo e ground_mu_hint si scelgono TRATTO PER TRATTO in
+            # base al terreno (vedi movements.select_mobility_params). Per imporre un profilo fisso
+            # (per esempio in prova) basta un dict non vuoto qui: TentativoCella lo usa per tutti i
+            # tratti e salta la scelta automatica. Esempio:
+            #   mobility_kwargs = dict(
+            #       locomotion_hint=spot_command_pb2.HINT_CRAWL,
+            #       ground_mu_hint=0.4,
+            #       swing_height=spot_command_pb2.SWING_HEIGHT_HIGH
+            #   )
+            mobility_kwargs = {}
 
-        # --- Posa di partenza, PRIMA di costruire il grafo: il reticolo e' riferito a questa ---
-        x_boot, y_boot, z_boot, quat_boot = spotUtils.getPosition(robot_state_client)
-        yaw_boot = np.arctan2(2.0 * (quat_boot.w * quat_boot.z + quat_boot.x * quat_boot.y),
-                              1.0 - 2.0 * (quat_boot.y ** 2 + quat_boot.z ** 2))
-        env.set_origin(x_boot, y_boot, yaw_boot, start_row=start_row, start_col=start_col)
-        set_mission_z0(robot_state_client, z_boot)
+            # --- Posa di partenza, PRIMA di costruire il grafo: il reticolo e' riferito a questa ---
+            x_boot, y_boot, z_boot, quat_boot = spotUtils.getPosition(robot_state_client)
+            yaw_boot = np.arctan2(2.0 * (quat_boot.w * quat_boot.z + quat_boot.x * quat_boot.y),
+                                  1.0 - 2.0 * (quat_boot.y ** 2 + quat_boot.z ** 2))
+            env.set_origin(x_boot, y_boot, yaw_boot, start_row=start_row, start_col=start_col)
+            set_mission_z0(robot_state_client, z_boot)
 
-        # Nodi del PRM: il grafo della missione (vedi mission_graph.build_mission_prm). Il punto
-        # di accensione e i centri cella sono nodi del grafo, con entrambi i metodi. Gli ARCHI
-        # non si creano qui: non c'e' ancora nessun dato di terreno ne' di occupazione. Li crea
-        # TentativoCella alla prima scansione (vedi mission_graph.rebuild_prm_edges).
-        prm, gb_sampler, mission_lattice = mission_graph.build_mission_prm(env)
-        MISSION_CTX['prm'] = prm  # per il riepilogo di fine missione (anche se interrotta)
+            # Nodi del PRM: il grafo della missione (vedi mission_graph.build_mission_prm). Il punto
+            # di accensione e i centri cella sono nodi del grafo, con entrambi i metodi. Gli ARCHI
+            # non si creano qui: non c'e' ancora nessun dato di terreno ne' di occupazione. Li crea
+            # TentativoCella alla prima scansione (vedi mission_graph.rebuild_prm_edges).
+            prm, gb_sampler, mission_lattice = mission_graph.build_mission_prm(env)
+            MISSION_CTX['prm'] = prm  # per il riepilogo di fine missione (anche se interrotta)
 
-        verification_tracker = arcVerification.ArcVerificationTracker(robot)
-        MISSION_CTX['tracker'] = verification_tracker
-        verification_tracker.start()
+            verification_tracker = arcVerification.ArcVerificationTracker(robot)
+            MISSION_CTX['tracker'] = verification_tracker
+            verification_tracker.start()
 
-        recordingInterface.set_download_filepath(graph_folder)
+            recordingInterface.set_download_filepath(graph_folder)
 
-        missione = Missione(robot_state_client, command_client, recordingInterface, local_grid,
-                            global_grid, env, prm, gb_sampler, verification_tracker,
-                            mission_folder, mobility_kwargs)
-        missione.esplora()
+            missione = Missione(robot_state_client, command_client, recordingInterface, local_grid,
+                                global_grid, env, prm, gb_sampler, verification_tracker,
+                                mission_folder, mobility_kwargs)
+            missione.esplora()
 
-        env.print_map()
-        if _batteria_scarica():
-            print("[BATTERIA] Missione chiusa prima di finire l'esplorazione: la chiusura e' "
-                  "quella normale (scansione finale, riepilogo, ritorno a wp_0, mappa scaricata).")
-        x_final, y_final, _, _ = spotUtils.getPosition(robot_state_client)
-        final_row, final_col = env.get_cell_from_world(x_final, y_final)
-        recordingInterface.create_default_waypoint(cell_row=final_row, cell_col=final_col)
+            env.print_map()
+            if _batteria_scarica():
+                print("[BATTERIA] Missione chiusa prima di finire l'esplorazione: la chiusura e' "
+                      "quella normale (scansione finale, riepilogo, ritorno a wp_0, mappa scaricata).")
+            x_final, y_final, _, _ = spotUtils.getPosition(robot_state_client)
+            final_row, final_col = env.get_cell_from_world(x_final, y_final)
+            recordingInterface.create_default_waypoint(cell_row=final_row, cell_col=final_col)
 
-        missione.scansione_finale()
+            missione.scansione_finale()
 
-        # RIEPILOGO DI MISSIONE -- solo diagnostica, va letto dopo il volo.
-        _emit_mission_summary_once()
+            # RIEPILOGO DI MISSIONE -- solo diagnostica, va letto dopo il volo.
+            _emit_mission_summary_once()
 
-        _chiudi_missione(robot, robot_state_client, command_client, recordingInterface)
-        estop.stop()
+            _chiudi_missione(robot, robot_state_client, command_client, recordingInterface)
+            estop.stop()
+        except BaseException as exc:
+            _chiusura_di_emergenza(robot, command_client, recordingInterface, exc)
+            raise
 
 
 # =========================================================================

@@ -38,6 +38,7 @@ Cio' che nessuno esercita: le trappole e le cadute dentro un tentativo (le prova
 test_e2e_loop.py).
 """
 import contextlib
+import glob
 import io
 import logging
 import os
@@ -482,6 +483,39 @@ def _controlli_fallimenti(r):
           "nessuna cella persa dalla frontiera: ogni cella rimandata ritentata dagli altri lati")
 
 
+def _controlli_emergenza():
+    """Missione interrotta a meta' (eccezione o Ctrl+C): il robot si siede, i motori si spengono e
+    la mappa GraphNav si scarica, poi l'errore risale come prima."""
+    for nome, err in (("eccezione", RuntimeError("guasto finto")), ("Ctrl+C", KeyboardInterrupt())):
+        print(f"\nMissione intera nel mondo F: interrotta da {nome} al terzo tentativo.")
+        real = easy_walk.attempt_enter_cell_from_position
+        n = {'k': 0}
+
+        def attempt(*a, _err=err, **k):
+            n['k'] += 1
+            if n['k'] == 3:
+                raise _err
+            return real(*a, **k)
+        easy_walk.attempt_enter_cell_from_position = attempt
+        try:
+            try:
+                r = run(WORLDS['A'], f"MISSIONE_F_{'eccezione' if nome == 'eccezione' else 'ctrlc'}")
+                risalita = r['ok'] is False
+            except KeyboardInterrupt:
+                risalita, r = True, None
+        finally:
+            easy_walk.attempt_enter_cell_from_position = real
+        if r is None:      # Ctrl+C: il log e' nella cartella della missione
+            logs = sorted(glob.glob(os.path.join(tempfile.gettempdir(), "missione_finta_*", "MissionLogs",
+                                                 "*", "mission_log.txt")), key=os.path.getmtime)
+            log = open(logs[-1]).read() if logs else ""
+        else:
+            log = r['log']
+        check(risalita, f"{nome}: la missione finisce con l'errore, come prima")
+        check("[EMERGENZA] Robot seduto e motori spenti." in log, f"{nome}: robot seduto e motori spenti")
+        check("[EMERGENZA] Mappa GraphNav scaricata." in log, f"{nome}: mappa GraphNav scaricata")
+
+
 def _controlli_scelta_celle():
     """
     Il caso del 28-10 13:50, griglia 8 x 7 da 2 m: la (7,2) e' stata visitata con il robot
@@ -554,6 +588,7 @@ if __name__ == '__main__':
     _controlli_fallimenti(r)
     shutil.rmtree(r['root'], ignore_errors=True)
     _controlli_scelta_celle()
+    _controlli_emergenza()
     print("\nMissione intera nel mondo E: partenza chiusa tutto intorno (28-10 14:17, erba alta).")
     chiuso = [(0.4, 2.6, 0.4, 0.6), (0.4, 2.6, 2.4, 2.6), (0.4, 0.6, 0.4, 2.6), (2.4, 2.6, 0.4, 2.6)]
     r = run(chiuso, "MISSIONE_E")
