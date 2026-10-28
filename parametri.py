@@ -299,6 +299,15 @@ REFUSED_GOAL_BLOCK_M = 0.35
 # Quando si sceglie un altro obiettivo nella cella, quanti candidati provare prima di
 # rinunciare se nessuno ha un percorso nel grafo (TentativoCella._riscegli_obiettivo).
 GOAL_REPICK_CANDIDATES = 3
+# Ripianificazione fallita (il grafo aggiornato non ha piu' un percorso verso l'obiettivo):
+# se dal robot il grafo arriva ancora ad almeno REPLAN_FAIL_ROBOT_FREE_NODES nodi, isolato
+# e' l'obiettivo, non il robot, e se ne sceglie subito un altro con un percorso
+# (TentativoCella._riscegli_obiettivo). Prima si teneva il piano rotto e decideva il fronte:
+# il 28-10 14:23, 20 [REPLAN FALLITO]; alle 14:37, 14:41 e 14:48 tre scansioni ferme, blocco
+# e cella rimandata con 19-21 direzioni libere su 24; alle 14:27 e 14:34 un passo in piu'
+# sul piano rotto. False = come prima.
+REPICK_ON_REPLAN_FAIL = True
+REPLAN_FAIL_ROBOT_FREE_NODES = 6
 
 # ==================================================================
 # DATI DI MISSIONE.

@@ -1353,6 +1353,27 @@ class PRM:
 
         return current_path_ids
 
+    def reachable_count(self, start_idx: int, limit: int) -> int:
+        """
+        Quanti nodi si raggiungono da start_idx con le stesse regole di find_path_dijkstra
+        (archi con costo finito, dentro allowed_nodes), fermandosi a `limit`. Serve a capire,
+        quando un obiettivo non ha piu' un percorso, se e' isolato l'obiettivo o il robot.
+        """
+        if start_idx not in self.nodes:
+            return 0
+        allowed = self.allowed_nodes
+        seen, stack = {start_idx}, [start_idx]
+        while stack and len(seen) < limit:
+            u = stack.pop()
+            for v, w in self.edges.get(u, []):
+                if v in seen or (allowed is not None and v not in allowed):
+                    continue
+                if not np.isfinite(self.effective_weight(u, v, w)):
+                    continue
+                seen.add(v)
+                stack.append(v)
+        return min(len(seen), limit)
+
     def get_node_position(self, node_idx: int) -> Optional[Tuple[float, float]]:
         """Posizione (x, y) del nodo, None se non esiste."""
         return self.nodes.get(node_idx)

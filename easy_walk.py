@@ -84,6 +84,7 @@ def mission_switches():
         'parametri.PLAN_ONLY_EXPLORED_CELLS': P.PLAN_ONLY_EXPLORED_CELLS,
         'parametri.GRAPHNAV_SHORTCUTS': P.GRAPHNAV_SHORTCUTS,
         'parametri.GRAPHNAV_PRECHECK': P.GRAPHNAV_PRECHECK,
+        'parametri.REPICK_ON_REPLAN_FAIL': P.REPICK_ON_REPLAN_FAIL,
         'parametri.GRAPHNAV_ARRIVAL_HEADING': P.GRAPHNAV_ARRIVAL_HEADING,
         'parametri.MOVE_NEAR_GOAL_M': P.MOVE_NEAR_GOAL_M,
         'parametri.GRAPHNAV_SDK_LOOP_CLOSURE': P.GRAPHNAV_SDK_LOOP_CLOSURE,
@@ -1237,9 +1238,22 @@ class TentativoCella:
                                                            current_path_ids=current_plan_ids, margin=0.10)
 
             if chosen_path_ids is None:
-                print(f"[REPLAN FALLITO] Nessun percorso esistente da {self.robot_node_id} a "
-                      f"{self.goal_id} nel grafo aggiornato. Mantengo il percorso precedente: il "
-                      f"fronte sicuro decide comunque fin dove si puo' avanzare.")
+                n_free = self.prm_graph.reachable_count(self.robot_node_id, P.REPLAN_FAIL_ROBOT_FREE_NODES)
+                if (P.REPICK_ON_REPLAN_FAIL and self.goal_repicks < P.MAX_BLOCK_REPLANS
+                        and n_free >= P.REPLAN_FAIL_ROBOT_FREE_NODES):
+                    # Dal robot il grafo va ancora da qualche parte: e' l'obiettivo a essere
+                    # rimasto isolato. Se ne cerca subito un altro con un percorso; se non
+                    # c'e', resta il piano di prima come sotto.
+                    MISSION_STATS['replan_fail_repicks'] = MISSION_STATS.get('replan_fail_repicks', 0) + 1
+                    self._riscegli_obiettivo(
+                        f"Ripianificazione fallita: nessun percorso da {self.robot_node_id} all'obiettivo "
+                        f"({self.target_x:.2f}, {self.target_y:.2f}) nel grafo aggiornato, mentre "
+                        f"dal robot il grafo prosegue: e' isolato l'obiettivo.",
+                        "nessun percorso nel grafo aggiornato")
+                else:
+                    print(f"[REPLAN FALLITO] Nessun percorso esistente da {self.robot_node_id} a "
+                          f"{self.goal_id} nel grafo aggiornato. Mantengo il percorso precedente: il "
+                          f"fronte sicuro decide comunque fin dove si puo' avanzare.")
             elif chosen_path_ids != current_plan_ids:
                 self.path_waypoints = self._waypoints_from_ids(chosen_path_ids)
                 self.full_path_coords = [self.prm_graph.get_node_position(nid) for nid in chosen_path_ids]
