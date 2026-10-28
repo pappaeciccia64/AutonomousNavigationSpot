@@ -607,6 +607,53 @@ if __name__ == '__main__':
               f"{r['turns']} ({r['turn_deg']:.0f} gradi), {r['scans']} scansioni")
     GRAPH_KW.clear()
 
+    # S15: un ostacolo subito OLTRE l'obiettivo (28-10 11:36, cella (0,2)). Il fronte controlla
+    # il percorso prolungato di mezzo corpo per il muso, e si ferma sull'ostacolo: nessun
+    # percorso verso quell'obiettivo puo' passare. Prima si scartavano i tratti uno per uno
+    # ([SUBITO], fino a 8) fino al blocco, e su questi stessi casi il codice del 28-10 mattina
+    # falliva la cella 7 volte su 24 (seme 9: 143 comandi). Nodi casuali come in missione.
+    obstacle_beyond = [(8.75, 9.15, 2.0, 5.0)]
+    for etichetta, seed, x0, attesa in (("passo finale sotto il passo minimo", 4, 8.85, 'passo'),
+                                        ("nuovo obiettivo alla prima fermata", 9, 8.75, 'attesa')):
+        GRAPH_KW.clear()
+        GRAPH_KW.update(sampling='casuale', distribution='poisson', density_per_m2=4.0, seed=seed)
+        r = run(f"S15. ostacolo subito oltre l'obiettivo: {etichetta}",
+                [(x0, x0 + 0.4, 2.0, 5.0)], (2.0, 3.0, 0.0), (0, 1))
+        check(r['err'] is None and r['ok'] is True, f"{etichetta}: cella raggiunta senza eccezioni")
+        check(r['tags']['[SUBITO]'] == 0 and r['tags']['[BLOCCO] Confermato'] == 0,
+              f"{etichetta}: nessun [SUBITO] ne' blocco ({r['tags']['[SUBITO]']}, "
+              f"{r['tags']['[BLOCCO] Confermato']})")
+        if attesa == 'passo':
+            check('[PASSO FINALE]' in r['log'], "il passo sotto 0.40 m che basta per arrivare si fa")
+        else:
+            check("[TARGET] Il fronte si ferma" in r['log'] and "oltre la fine del percorso" in r['log'],
+                  "il fronte fermo oltre l'obiettivo fa scegliere subito un altro obiettivo")
+        check(r['scans'] <= 9, f"{etichetta}: {r['scans']} scansioni")
+
+    # Lo stesso caso con la regola dell'attesa tolta: il blocco confermato a ridosso
+    # dell'obiettivo deve far scegliere un altro obiettivo, non ripianificare verso quello
+    # appena escluso (28-10 11:36: "escluso", e subito dopo un percorso verso lo stesso nodo).
+    real_check = easy_walk.TentativoCella._fronte_fermo_sull_obiettivo
+
+    def _solo_nel_blocco(self):
+        return sys._getframe(1).f_code.co_name != '_attesa' and real_check(self)
+    easy_walk.TentativoCella._fronte_fermo_sull_obiettivo = _solo_nel_blocco
+    parametri_early = parametri.MAX_EARLY_REPLANS
+    parametri.MAX_EARLY_REPLANS = 0
+    try:
+        GRAPH_KW.clear()
+        GRAPH_KW.update(sampling='casuale', distribution='poisson', density_per_m2=4.0, seed=9)
+        r = run("S15. ostacolo subito oltre l'obiettivo: blocco, poi nuovo obiettivo",
+                obstacle_beyond, (2.0, 3.0, 0.0), (0, 1))
+    finally:
+        easy_walk.TentativoCella._fronte_fermo_sull_obiettivo = real_check
+        parametri.MAX_EARLY_REPLANS = parametri_early
+    check(r['err'] is None and r['ok'] is True, "blocco vicino all'obiettivo: cella raggiunta")
+    check("[TARGET] Blocco a" in r['log'] and "[REPLAN] Dopo il blocco" not in r['log'],
+          "dopo il blocco a ridosso dell'obiettivo se ne sceglie un altro, senza ripianificare "
+          "verso quello escluso")
+    GRAPH_KW.clear()
+
     for d in [x for x in os.listdir(tempfile.gettempdir()) if x.startswith("missione_e2e_")]:
         shutil.rmtree(os.path.join(tempfile.gettempdir(), d), ignore_errors=True)
     shutil.rmtree(STUBS, ignore_errors=True)

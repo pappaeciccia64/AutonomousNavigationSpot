@@ -89,6 +89,12 @@ PLAN_DETOUR_SLACK_M = 1.0
 #   MAX_LOOP_ITERATIONS          -- salvaguardia anti-stallo del ciclo.
 # ==================================================================
 MIN_PARTIAL_STEP_M = 0.40
+# PASSO FINALE: un passo sotto MIN_PARTIAL_STEP_M (ma almeno FINAL_STEP_MIN_M) si fa
+# comunque se porta il robot entro GOAL_REACHED_TOLERANCE_M dall'obiettivo, con il robot
+# nella cella: e' l'ultimo, dopo il quale l'arrivo vale. Senza, il 28-10 11:36 il robot e'
+# rimasto fermo a 0.85 m dall'obiettivo potendo avanzare di 0.38 m (sarebbe arrivato a 0.47);
+# il 22-10 16:04 e' successo fino a 15 volte, il 26-10 15:11 fino a 8.
+FINAL_STEP_MIN_M = 0.10
 FRONTIER_BLOCK_CONFIRM_SCANS = 3
 FRONTIER_RESCAN_WAIT_S = 0.3
 MAX_BLOCK_REPLANS = 3
@@ -283,7 +289,12 @@ TARGET_CELL_BORDER_M = 0.30
 ARRIVAL_OUTSIDE_CELL_M = GOAL_REACHED_TOLERANCE_M - TARGET_CELL_BORDER_M      # = 0.35
 # Un obiettivo rifiutato dal fronte (spazio libero dal vivo sotto la soglia, o blocco
 # confermato entro questa distanza da lui) resta escluso per la sua cella fino alla fine
-# della missione: vedi _refuse_goal.
+# della missione: vedi _refuse_goal. Vale gia' alla PRIMA fermata del fronte: se il fronte si
+# ferma per un ostacolo entro questa distanza dall'obiettivo, o oltre la fine del percorso
+# (nel prolungamento di mezzo corpo per il muso), e' l'obiettivo a non andare, non la strada,
+# e se ne sceglie subito un altro (TentativoCella._riscegli_obiettivo). Prima si scartavano
+# i tratti uno per uno ([SUBITO]): il 22-10 16:04, 45 [SUBITO] su 58 avevano l'ostacolo a
+# ridosso dell'obiettivo; il 26-10 15:11, 18 su 22.
 REFUSED_GOAL_BLOCK_M = 0.35
 
 # ==================================================================

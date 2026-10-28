@@ -955,6 +955,55 @@ class TentativoCella:
         self.best_goal_dist = float('inf')
         return True
 
+    def _fronte_fermo_sull_obiettivo(self):
+        """Il fronte si ferma per un ostacolo (o rugosita', pendenza) a ridosso dell'obiettivo
+        (entro REFUSED_GOAL_BLOCK_M) o oltre la fine del percorso, nel prolungamento per il
+        muso: nessun percorso verso questo obiettivo puo' passare, il problema e' il punto."""
+        if self.frontier['reason'] not in ('ostacolo', 'rugosita', 'pendenza'):
+            return False
+        sx, sy = self.frontier['stop_xy']
+        return (self.frontier['dist'] >= self.frontier['path_len']
+                or float(np.hypot(sx - self.target_x, sy - self.target_y)) <= P.REFUSED_GOAL_BLOCK_M)
+
+    def _riscegli_obiettivo(self, perche, motivo_esclusione):
+        """
+        Esclude l'obiettivo corrente (per la missione, vedi _refuse_goal) e ne sceglie un altro
+        nella cella, raggiungibile dal robot. CONTINUA se c'e' un nuovo obiettivo con un
+        percorso; None se non ce n'e' (l'obiettivo resta escluso, il chiamante prosegue).
+        Al massimo MAX_BLOCK_REPLANS volte per tentativo.
+        """
+        self.goal_repicks += 1
+        self.need_refresh = True          # piano cambiato: vedi REFRESH A EVENTI
+        MISSION_STATS['goal_repicks'] += 1
+        print(f"[TARGET] {perche} Ne cerco un altro nella cella "
+              f"({self.goal_repicks}/{P.MAX_BLOCK_REPLANS}).")
+        self.tried_goals.append((float(self.target_x), float(self.target_y)))
+        _refuse_goal(self.env, self.target_row, self.target_col, self.target_x, self.target_y,
+                     motivo_esclusione)
+        new_tx, new_ty, _vs, _rs = find_best_point_in_cell(
+            self.robot_x, self.robot_y, self.env, self.target_row, self.target_col, self.pts_up, self.cells_obs_up,
+            self.sampler, global_map=self.global_map, exclude=self.tried_goals,
+            reachable=self._reachable_from_robot)
+        if new_tx is None or new_ty is None:
+            print("[TARGET] Nessun altro punto valido in questa cella.")
+            return None
+        self.target_x, self.target_y = new_tx, new_ty
+        self.best_goal_dist = float('inf')    # nuovo obiettivo: progressi da capo
+        self.goal_id = self.prm_graph.add_stop_node(
+            self.target_x, self.target_y, self.global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
+            label=f"obiettivo riscelto cella ({self.target_row},{self.target_col})",
+            is_robot=False)
+        new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
+        if new_ids is None:
+            print("[TARGET] Nessun percorso nel grafo verso il nuovo obiettivo.")
+            return None
+        self.path_waypoints = self._waypoints_from_ids(new_ids)
+        self.full_path_coords = [self.prm_graph.get_node_position(nid) for nid in new_ids]
+        self.no_progress = 0
+        print(f"[REPLAN] Verso il nuovo obiettivo ({self.target_x:.2f}, "
+              f"{self.target_y:.2f}): {len(self.path_waypoints)} waypoint.")
+        return CONTINUA
+
     def _guardie(self):
         """Limiti del ciclo: troppi giri (MAX_LOOP_ITERATIONS), caduta, troppi giri fermi."""
         self.loop_iter += 1
@@ -1209,6 +1258,12 @@ class TentativoCella:
                      and -robot_border <= P.ARRIVAL_OUTSIDE_CELL_M)
         self.decision = arcVerification.decide_next_move((self.robot_x, self.robot_y), self.path_waypoints, self.frontier, self.no_progress,
                                     in_target_cell=in_target_cell or near_goal)
+        if self.decision.get('final'):
+            MISSION_STATS['final_steps'] = MISSION_STATS.get('final_steps', 0) + 1
+            print(f"[PASSO FINALE] Il fronte permette solo {self.decision['dist']:.2f} m, sotto il "
+                  f"passo minimo di {P.MIN_PARTIAL_STEP_M:.2f} m, ma bastano: dopo il passo "
+                  f"l'obiettivo e' a {self.frontier['path_len'] - self.decision['dist']:.2f} m, entro "
+                  f"la tolleranza d'arrivo di {P.GOAL_REACHED_TOLERANCE_M:.2f} m.")
         if self.decision['kind'] == 'arrived' and near_goal:
             self.arrived_near_goal = True
             MISSION_STATS['arrivals_near_goal'] += 1
@@ -1474,43 +1529,30 @@ class TentativoCella:
             # punto viene scelto all'inizio del tentativo, da metri di distanza, quando la
             # cella e' ancora tutta ignota; arrivandoci puo' risultare a ridosso di un muro,
             # e allora nessun numero di scansioni lo rendera' raggiungibile.
-            if self.goal_repicks < P.MAX_BLOCK_REPLANS and not arcVerification.goal_still_reachable(self.snap, self.target_x, self.target_y):
-                self.goal_repicks += 1
-                self.need_refresh = True          # piano cambiato: vedi REFRESH A EVENTI
-                MISSION_STATS['goal_repicks'] += 1
-                r_g, c_g, in_g = arcVerification._cells(
-                    self.snap, np.array([float(self.target_x)]), np.array([float(self.target_y)]))
-                od_goal = float(self.snap.obstacle_dist[r_g[0], c_g[0]]) if in_g[0] else float('nan')
-                print(f"[TARGET] L'obiettivo ({self.target_x:.2f}, {self.target_y:.2f}) ha "
-                      f"obstacle_distance {od_goal:.2f} m, sotto i "
-                      f"{spotGrid.FRONTIER_CLEARANCE_M:.2f} m che il fronte pretende: non e' "
-                      f"raggiungibile da nessuna direzione. Ne cerco un altro nella cella "
-                      f"({self.goal_repicks}/{P.MAX_BLOCK_REPLANS}).")
-                self.tried_goals.append((float(self.target_x), float(self.target_y)))
-                _refuse_goal(self.env, self.target_row, self.target_col, self.target_x, self.target_y,
-                             f"spazio libero dal vivo {od_goal:.2f} m")
-                new_tx, new_ty, _vs, _rs = find_best_point_in_cell(
-                    self.robot_x, self.robot_y, self.env, self.target_row, self.target_col, self.pts_up, self.cells_obs_up,
-                    self.sampler, global_map=self.global_map, exclude=self.tried_goals,
-                    reachable=self._reachable_from_robot)
-                if new_tx is not None and new_ty is not None:
-                    self.target_x, self.target_y = new_tx, new_ty
-                    self.best_goal_dist = float('inf')    # nuovo obiettivo: progressi da capo
-                    self.goal_id = self.prm_graph.add_stop_node(
-                        self.target_x, self.target_y, self.global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
-                        label=f"obiettivo riscelto cella ({self.target_row},{self.target_col})",
-                        is_robot=False)
-                    new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
-                    if new_ids is not None:
-                        self.path_waypoints = self._waypoints_from_ids(new_ids)
-                        self.full_path_coords = [self.prm_graph.get_node_position(nid) for nid in new_ids]
-                        self.no_progress = 0
-                        print(f"[REPLAN] Verso il nuovo obiettivo ({self.target_x:.2f}, "
-                              f"{self.target_y:.2f}): {len(self.path_waypoints)} waypoint.")
-                        return CONTINUA
-                    print("[TARGET] Nessun percorso nel grafo verso il nuovo obiettivo.")
-                else:
-                    print("[TARGET] Nessun altro punto valido in questa cella.")
+            if self.goal_repicks < P.MAX_BLOCK_REPLANS:
+                if not arcVerification.goal_still_reachable(self.snap, self.target_x, self.target_y):
+                    r_g, c_g, in_g = arcVerification._cells(
+                        self.snap, np.array([float(self.target_x)]), np.array([float(self.target_y)]))
+                    od_goal = float(self.snap.obstacle_dist[r_g[0], c_g[0]]) if in_g[0] else float('nan')
+                    esito = self._riscegli_obiettivo(
+                        f"L'obiettivo ({self.target_x:.2f}, {self.target_y:.2f}) ha obstacle_distance "
+                        f"{od_goal:.2f} m, sotto i {spotGrid.FRONTIER_CLEARANCE_M:.2f} m che il fronte "
+                        f"pretende: non e' raggiungibile da nessuna direzione.",
+                        f"spazio libero dal vivo {od_goal:.2f} m")
+                    if esito is not None:
+                        return esito
+                elif self._fronte_fermo_sull_obiettivo():
+                    sx_g, sy_g = self.frontier['stop_xy']
+                    d_g = float(np.hypot(sx_g - self.target_x, sy_g - self.target_y))
+                    oltre = self.frontier['dist'] >= self.frontier['path_len']
+                    esito = self._riscegli_obiettivo(
+                        f"Il fronte si ferma per {self.frontier['reason']} in ({sx_g:.2f}, {sy_g:.2f}), a "
+                        f"{d_g:.2f} m dall'obiettivo ({self.target_x:.2f}, {self.target_y:.2f})"
+                        + (", oltre la fine del percorso, dove andrebbe il muso" if oltre else "")
+                        + ": e' l'obiettivo a non andare, non la strada.",
+                        f"il fronte si ferma a {d_g:.2f} m da lui ({self.frontier['reason']})")
+                    if esito is not None:
+                        return esito
 
             # RIPIANIFICA SUBITO, alla PRIMA cella bloccante, invece di restare fermo tre
             # scansioni sullo stesso arco. Il rumore di obstacle_distance e' gia' filtrato
@@ -1580,12 +1622,15 @@ class TentativoCella:
                   f"senza poter avanzare. Motivo: {self.frontier['reason']} in ({sx:.2f}, {sy:.2f}), "
                   f"sul tratto {edge_a}->{edge_b}.")
             MISSION_STATS['frontier_blocks'] += 1
-            # Bloccato a ridosso dell'obiettivo: e' l'obiettivo a non andare, non la strada.
-            if (self.frontier['reason'] in ('ostacolo', 'rugosita', 'pendenza')
-                    and float(np.hypot(sx - self.target_x, sy - self.target_y)) <= P.REFUSED_GOAL_BLOCK_M):
+            # Bloccato a ridosso dell'obiettivo (o oltre): e' l'obiettivo a non andare, non la
+            # strada. Si esclude e, se si puo', se ne sceglie un altro (sotto, dopo la trappola)
+            # invece di scartare il tratto e ripianificare verso lo stesso obiettivo.
+            goal_blocked = self._fronte_fermo_sull_obiettivo()
+            d_goal = float(np.hypot(sx - self.target_x, sy - self.target_y))
+            why_goal = f"blocco confermato a {d_goal:.2f} m da lui ({self.frontier['reason']})"
+            if goal_blocked:
                 _refuse_goal(self.env, self.target_row, self.target_col, self.target_x, self.target_y,
-                             f"blocco confermato a {float(np.hypot(sx - self.target_x, sy - self.target_y)):.2f} m "
-                             f"da lui ({self.frontier['reason']})")
+                             why_goal)
 
             if self.mission_folder is not None:
                 try:
@@ -1622,6 +1667,14 @@ class TentativoCella:
                 if self._ritorno((edge_a, edge_b), f"dal nodo {self.robot_node_id}"):
                     return CONTINUA
                 return FALLITO
+
+            if goal_blocked and self.goal_repicks < P.MAX_BLOCK_REPLANS:
+                esito = self._riscegli_obiettivo(
+                    f"Blocco a {d_goal:.2f} m dall'obiettivo ({self.target_x:.2f}, "
+                    f"{self.target_y:.2f}): e' l'obiettivo a non andare, non il tratto {edge_a}->{edge_b}.",
+                    why_goal)
+                if esito is not None:
+                    return esito
 
             # Qui il blocco e' confermato da FRONTIER_BLOCK_CONFIRM_SCANS scansioni ferme:
             # l'invalidazione resta permanente (a differenza di [SUBITO], vedi
