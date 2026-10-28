@@ -30,6 +30,7 @@ il robot arriva appena fuori dalla cella.
      nessun punto obiettivo, una caduta durante uno spostamento GraphNav. Esercita il nuovo
      tentativo subito dopo il recupero ([RECOVERY]), riuscito e fallito, e i rami della
      missione che i mondi veri raggiungono di rado.
+Nel mondo A c'e' anche un fiducial (ID 7) dietro il punto di partenza.
 Cio' che nessuno esercita: le trappole e le cadute dentro un tentativo (le prova
 test_e2e_loop.py).
 """
@@ -47,6 +48,7 @@ import numpy as np
 
 import test_e2e_loop as T          # mondo, robot e griglia locale finti; applica le sue patch
 import bosdyn.client.lease
+from bosdyn.api import world_object_pb2
 from bosdyn.api.graph_nav import graph_nav_pb2, map_pb2, map_processing_pb2, recording_pb2
 from bosdyn.client.math_helpers import Quat, SE3Pose
 
@@ -68,6 +70,9 @@ WORLDS = {
     'B': [(5.9, 6.1, 0.0, 4.6)] + _CHIUSA_22 + [(4.2, 4.8, 4.2, 4.8), (7.0, 7.4, 3.6, 5.4)],
 }
 WALLS = WORLDS['A']
+# Fiducial del mondo in corso: (ID, x, y), None = nessuno. Nel mondo A un tag 1 m DIETRO il
+# punto di partenza (lo vede la telecamera posteriore).
+FIDUCIAL_TAG = None
 FAILS = []
 
 
@@ -167,6 +172,9 @@ class FakeGraphNav:
         return st
 
     def set_localization(self, **kw):
+        if (FIDUCIAL_TAG is not None and kw.get('use_fiducial_id') == FIDUCIAL_TAG[0]
+                and kw.get('fiducial_init') == graph_nav_pb2.SetLocalizationRequest.FIDUCIAL_INIT_SPECIFIC):
+            return graph_nav_pb2.SetLocalizationResponse(status=graph_nav_pb2.SetLocalizationResponse.STATUS_OK)
         raise RuntimeError("STATUS_NO_MATCHING_FIDUCIAL (finto: nessun fiducial nel mondo)")
 
     def navigate_to(self, waypoint_id, cmd_duration, command_id=None, travel_params=None, **kw):
@@ -204,6 +212,52 @@ class FakeGraphNav:
         return r
 
 
+class FakeWorldObjects:
+    """Il servizio degli oggetti visti: il tag FIDUCIAL_TAG, sempre in vista, o nessuno."""
+
+    def list_world_objects(self, object_type=None, **kw):
+        resp = world_object_pb2.ListWorldObjectResponse()
+        if FIDUCIAL_TAG is None:
+            return resp
+        tid, x, y = FIDUCIAL_TAG
+        o = resp.world_objects.add()
+        o.apriltag_properties.tag_id = tid
+        o.apriltag_properties.frame_name_fiducial = f"fiducial_{tid}"
+        o.apriltag_properties.frame_name_camera = "back"
+        edges = o.transforms_snapshot.child_to_parent_edge_map
+        edges['vision'].parent_frame_name = ''
+        edges['vision'].parent_tform_child.rotation.w = 1.0
+        e = edges[f"fiducial_{tid}"]
+        e.parent_frame_name = 'vision'
+        e.parent_tform_child.position.x, e.parent_tform_child.position.y = x, y
+        e.parent_tform_child.rotation.w = 1.0
+        return resp
+
+
+def _robot_state_with_odom():
+    """Stato del robot con il solo odom -> corpo alla posa del robot finto (per
+    initialize_with_fiducial: il resto del test vuole uno stato che fallisce)."""
+    from bosdyn.api import robot_state_pb2
+    st = robot_state_pb2.RobotState()
+    edges = st.kinematic_state.transforms_snapshot.child_to_parent_edge_map
+    edges['odom'].parent_frame_name = ''
+    edges['odom'].parent_tform_child.rotation.w = 1.0
+    body = SE3Pose(T.ROBOT.x, T.ROBOT.y, 0, Quat.from_yaw(T.ROBOT.yaw))
+    edges['body'].parent_frame_name = 'odom'
+    edges['body'].parent_tform_child.CopyFrom(body.to_proto())
+    return st
+
+
+_real_initialize_with_fiducial = navGraphUtils.RecordingInterface.initialize_with_fiducial
+
+
+def _initialize_with_fiducial(self, robot_state_client, fiducial_id=None):
+    return _real_initialize_with_fiducial(self, NS(get_robot_state=_robot_state_with_odom), fiducial_id)
+
+
+navGraphUtils.RecordingInterface.initialize_with_fiducial = _initialize_with_fiducial
+
+
 class FakeRobot:
     def __init__(self, gn):
         self.gn = gn
@@ -219,6 +273,8 @@ class FakeRobot:
             return self.gn
         if name == 'robot-state':
             return self.state
+        if name == 'world-objects':
+            return FakeWorldObjects()
         return self.commands
 
     def power_on(self, **kw):
@@ -286,7 +342,9 @@ def _con_fallimenti():
         movements.check_and_recover_fall = real_fall
 
 
-def run(walls=None, name='MISSIONE'):
+def run(walls=None, name='MISSIONE', fiducial=None):
+    global FIDUCIAL_TAG
+    FIDUCIAL_TAG = fiducial
     T.WORLD, T.ROBOT = T.World(WALLS if walls is None else walls, ghosts=True), T.Robot(*START)
     arcVerification.OBSTACLE_HISTORY.reset()
     gn = FakeGraphNav()
@@ -344,6 +402,15 @@ def _controlli_mondo(name, r):
     check(len(r['gn'].trips) >= 2, f"spostamenti GraphNav: {len(r['gn'].trips)}")
     if name == 'A':
         check("[PRECHECK]" in log, "il controllo prima dello spostamento GraphNav scatta")
+        check("[FIDUCIAL] Fiducial di partenza: tag 7 a 1.00 m, dietro" in log,
+              "fiducial di partenza visto dietro il robot, qualunque ID")
+        check("[FIDUCIAL INIT] Fiducial cercato: ID 7" in log and "[FIDUCIAL INIT] ✓" in log,
+              "localizzazione sul fiducial trovato, dopo wp_0")
+        check("rivedo il tag 7" in log and "si e' spostato di 0.00 m" in log,
+              "al ritorno su wp_0 il tag si rivede e la deriva si misura")
+    else:
+        check("[FIDUCIAL] Nessun fiducial" in log and "[FIDUCIAL INIT]" not in log,
+              "senza fiducial si parte senza, e senza tentare la localizzazione")
     if name == 'B':
         check("[BLOCCO] Confermato" in log and "[RITORNO]" in log, "blocco confermato e ritorno con GraphNav")
 
@@ -359,7 +426,8 @@ def _controlli_fallimenti(r):
 if __name__ == '__main__':
     for name, walls in WORLDS.items():
         print(f"\nMissione intera nel mondo {name}, robot e GraphNav finti: 3 x 3 celle da 3 m.")
-        r = run(walls, f"MISSIONE_{name}")
+        r = run(walls, f"MISSIONE_{name}",
+                fiducial=(7, START[0] - 1.0, START[1]) if name == 'A' else None)
         _controlli_comuni(r)
         _controlli_mondo(name, r)
         shutil.rmtree(r['root'], ignore_errors=True)

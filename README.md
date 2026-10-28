@@ -15,7 +15,7 @@ La storia delle modifiche, con le misure delle missioni che le hanno motivate, s
    ```bash
    python3 preflight.py          # deve dire "Tutti i file sono allineati fra loro."
    ```
-3. Mettere il robot al punto di partenza, rivolto verso l'area da esplorare (facoltativo: il tag fiducial 549 a circa 1 m davanti).
+3. Mettere il robot al punto di partenza, rivolto verso l'area da esplorare (facoltativo: un fiducial qualunque a 1–2 m, davanti o dietro; Spot riconosce gli AprilTag 36h11 di Boston Dynamics, non gli ArUco. Vedi `START_FIDUCIAL_ID` in `parametri.py`).
 4. Avviare:
    ```bash
    python3 easy_walk.py

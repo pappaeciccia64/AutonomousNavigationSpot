@@ -185,6 +185,7 @@ def _emit_mission_summary_once():
                 'terrain_valid_min': spotGrid.TERRAIN_VALID_MIN,
                 'goal_reached_tolerance_m': P.GOAL_REACHED_TOLERANCE_M,
                 'interruttori': mission_switches(),
+                'fiducial_partenza': MISSION_CTX.get('start_fiducial'),
             }
             mg = getattr(prm, 'mission_graph', None)
             if mg is not None:
@@ -2747,7 +2748,9 @@ def _chiudi_missione(robot, robot_state_client, command_client, recordingInterfa
     _t_close['chiusura mappa e ancoraggio'] = time.perf_counter() - _t
 
     _t = time.perf_counter()
-    if not navGraphUtils.graphnav_return_to_start(recordingInterface, robot_state_client, command_client):
+    if navGraphUtils.graphnav_return_to_start(recordingInterface, robot_state_client, command_client):
+        navGraphUtils.graphnav_check_start_fiducial(robot, robot_state_client)
+    else:
         print("[GRAPHNAV] Ritorno a wp_0 non riuscito: il robot si siede dove si trova.")
     _t_close['ritorno a wp_0'] = time.perf_counter() - _t
 
@@ -2807,10 +2810,26 @@ def easy_walk(options):
         recordingInterface.clear_map()
         recordingInterface.start_recording()
 
-        recordingInterface.initialize_with_fiducial(robot_state_client, 549)
+        # Fiducial di partenza (vedi START_FIDUCIAL_ID): cercato PRIMA di creare wp_0, cosi'
+        # entra nella sua istantanea e la localizzazione sul fiducial ha qualcosa da trovare.
+        fiducials = navGraphUtils.find_fiducials(robot, robot_state_client,
+                                                 wait_s=P.START_FIDUCIAL_WAIT_S,
+                                                 fiducial_id=P.START_FIDUCIAL_ID)
+        MISSION_CTX['start_fiducial'] = fiducials[0] if fiducials else None
+        if fiducials:
+            print(f"[FIDUCIAL] Fiducial di partenza: {navGraphUtils.describe_fiducial(fiducials[0])}"
+                  + (f"; ne vedo altri {len(fiducials) - 1}: "
+                     + ", ".join(str(f['id']) for f in fiducials[1:]) if len(fiducials) > 1 else ""))
+        else:
+            print(f"[FIDUCIAL] Nessun fiducial "
+                  f"{'' if P.START_FIDUCIAL_ID is None else f'con ID {P.START_FIDUCIAL_ID} '}"
+                  f"visto in {P.START_FIDUCIAL_WAIT_S:.0f} s da nessuna telecamera: si parte senza. "
+                  f"Spot riconosce solo gli AprilTag 36h11 (i fiducial di Boston Dynamics).")
 
         start_row, start_col = 0, 0
         recordingInterface.create_default_waypoint(cell_row=start_row, cell_col=start_col)
+        if fiducials:
+            recordingInterface.initialize_with_fiducial(robot_state_client, fiducials[0]['id'])
 
         env = _griglia_di_missione(options)
 

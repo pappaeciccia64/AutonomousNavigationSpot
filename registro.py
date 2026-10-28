@@ -104,6 +104,9 @@ MISSION_CTX = {
     # rispetto ad esso. I CALCOLI non ne dipendono: usano solo differenze di quota e il
     # suolo stimato sotto il robot a ogni scansione (vedi spotGrid.GROUND_HEIGHT_TOLERANCE_M).
     'mission_z0': None,
+    # Fiducial visto alla partenza (navGraphUtils.find_fiducials): ID e posizione VISION, per
+    # rivederlo al ritorno su wp_0 (graphnav_check_start_fiducial). None = nessuno.
+    'start_fiducial': None,
 }
 
 

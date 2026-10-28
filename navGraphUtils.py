@@ -24,7 +24,7 @@ import bosdyn.client.lease
 import bosdyn.client.util
 import bosdyn.geometry
 from bosdyn.api.graph_nav import graph_nav_pb2, recording_pb2, nav_pb2, map_processing_pb2
-from bosdyn.client.frame_helpers import get_odom_tform_body
+from bosdyn.client.frame_helpers import VISION_FRAME_NAME, get_a_tform_b, get_odom_tform_body
 from bosdyn.client.graph_nav import GraphNavClient, map_pb2
 from bosdyn.client.map_processing import MapProcessingServiceClient
 from bosdyn.client.recording import GraphNavRecordingServiceClient
@@ -243,12 +243,11 @@ class RecordingInterface(object):
 
     def initialize_with_fiducial(self, robot_state_client, fiducial_id=None):
         """
-        Localizza il robot sulla mappa di GraphNav usando un fiducial visibile, che diventa
-        l'origine della mappa. fiducial_id: un tag preciso (es. 305); None = il piu' vicino.
-        True se riesce.
+        Localizza il robot sulla mappa di GraphNav usando un fiducial visibile. fiducial_id:
+        un tag preciso; None = il piu' vicino. True se riesce.
 
-        Il robot deve stare a circa 1 m dal fiducial e guardarlo; per partire da una mappa
-        vuota si chiama prima clear_map().
+        Il fiducial deve essere GIA' nella mappa: in missione si chiama dopo aver creato wp_0
+        con il tag in vista, cosi' e' nella sua istantanea (vedi find_fiducials).
         """
         import time
 
@@ -286,7 +285,7 @@ class RecordingInterface(object):
 
             # Un attimo perche' GraphNav applichi la localizzazione
             time.sleep(0.5)
-            print(f"[FIDUCIAL INIT] ✓ RIUSCITO: robot localizzato. L'origine della mappa e' il fiducial.")
+            print(f"[FIDUCIAL INIT] ✓ RIUSCITO: robot localizzato sul fiducial, che resta nella mappa.")
             print(f"[{'=' * 40}]\n")
             return True
 
@@ -294,11 +293,10 @@ class RecordingInterface(object):
             print(f"[FIDUCIAL INIT] ✗ NON RIUSCITO: {e}")
             print(f"[FIDUCIAL INIT] Possibili cause:")
             print(f"  1. Il fiducial {fiducial_id if fiducial_id else '(qualunque)'} non e' visibile")
-            print(f"  2. Il robot e' troppo lontano dal fiducial (deve stare a ~1 m)")
-            print(f"  3. Il robot non guarda il fiducial")
+            print(f"  2. Il robot e' troppo lontano dal fiducial (meglio entro 1-2 m)")
+            print(f"  3. Il fiducial non e' nell'istantanea di wp_0 (non era in vista quando e' stato creato)")
             print(f"  4. Luce insufficiente")
-            print(f"  5. Mappa non svuotata prima dell'inizializzazione (chiamare prima clear_map())")
-            print(f"[FIDUCIAL INIT] Si prosegue senza fiducial: l'origine sara' il primo waypoint.")
+            print(f"[FIDUCIAL INIT] Si prosegue senza localizzazione sul fiducial.")
             print(f"[{'=' * 40}]\n")
             return False
 
@@ -1207,6 +1205,80 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
     movements.stop_robot(command_client, reason="GraphNav: tempo massimo superato")
     MISSION_STATS['graphnav_fail'] += 1
     return False
+
+
+def find_fiducials(robot, robot_state_client, wait_s=0.0, fiducial_id=None):
+    """
+    Fiducial (AprilTag) che Spot vede adesso da una qualunque telecamera, dal piu' vicino:
+    [{'id', 'xy' (frame VISION), 'dist', 'avanti', 'sinistra' (m, nel frame del corpo),
+    'camera'}]. fiducial_id: solo quello. Riprova fino a wait_s secondi se non ne vede.
+    Lista vuota se nessuno, o se il servizio non risponde (mai eccezioni).
+    """
+    try:
+        from bosdyn.api import world_object_pb2
+        from bosdyn.client.world_object import WorldObjectClient
+        client = robot.ensure_client(WorldObjectClient.default_service_name)
+    except Exception as e:
+        print(f"[FIDUCIAL] Servizio degli oggetti visti non disponibile: {e}")
+        return []
+    t_end = time.time() + max(0.0, wait_s)
+    while True:
+        found = []
+        try:
+            rx, ry, _, q = spotUtils.getPosition(robot_state_client)
+            yaw = float(np.arctan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y ** 2 + q.z ** 2)))
+            resp = client.list_world_objects(object_type=[world_object_pb2.WORLD_OBJECT_APRILTAG])
+            for o in resp.world_objects:
+                tag = o.apriltag_properties
+                if fiducial_id is not None and tag.tag_id != int(fiducial_id):
+                    continue
+                frame = tag.frame_name_fiducial_filtered or tag.frame_name_fiducial
+                pose = get_a_tform_b(o.transforms_snapshot, VISION_FRAME_NAME, frame)
+                if pose is None:
+                    continue
+                dx, dy = pose.x - rx, pose.y - ry
+                found.append({'id': int(tag.tag_id), 'xy': (float(pose.x), float(pose.y)),
+                              'dist': float(np.hypot(dx, dy)),
+                              'avanti': float(dx * np.cos(yaw) + dy * np.sin(yaw)),
+                              'sinistra': float(-dx * np.sin(yaw) + dy * np.cos(yaw)),
+                              'camera': tag.frame_name_camera})
+        except Exception as e:
+            print(f"[FIDUCIAL] Lettura dei fiducial non riuscita: {e}")
+            return []
+        if found or time.time() >= t_end:
+            return sorted(found, key=lambda f: f['dist'])
+        time.sleep(0.3)
+
+
+def describe_fiducial(f):
+    """Una riga di log per un fiducial di find_fiducials."""
+    side = 'davanti' if f['avanti'] >= 0 else 'dietro'
+    return (f"tag {f['id']} a {f['dist']:.2f} m, {side} ({f['avanti']:+.2f} m avanti, "
+            f"{f['sinistra']:+.2f} m a sinistra), telecamera {f['camera'] or '?'}")
+
+
+def graphnav_check_start_fiducial(robot, robot_state_client):
+    """
+    Al ritorno su wp_0: rivede il fiducial di partenza (MISSION_CTX['start_fiducial'])? Il
+    tag non si e' mosso, quindi lo spostamento della sua posizione nel frame VISION e' la
+    deriva dell'odometria accumulata in tutta la missione. Solo misura e log.
+    """
+    start = MISSION_CTX.get('start_fiducial')
+    if not start:
+        return None
+    now = find_fiducials(robot, robot_state_client, wait_s=P.START_FIDUCIAL_WAIT_S,
+                         fiducial_id=start['id'])
+    if not now:
+        print(f"[FIDUCIAL] Al ritorno su wp_0 il tag {start['id']} di partenza non si vede: "
+              f"niente misura della deriva di fine missione.")
+        return None
+    dx, dy = now[0]['xy'][0] - start['xy'][0], now[0]['xy'][1] - start['xy'][1]
+    drift = float(np.hypot(dx, dy))
+    MISSION_STATS['start_fiducial_drift_m'] = drift
+    print(f"[FIDUCIAL] Al ritorno su wp_0 rivedo il {describe_fiducial(now[0])}. Nel frame "
+          f"VISION si e' spostato di {drift:.2f} m (dx {dx:+.2f}, dy {dy:+.2f}) da quando "
+          f"l'ho visto alla partenza: e' la deriva dell'odometria di tutta la missione.")
+    return drift
 
 
 def graphnav_return_to_start(recordingInterface, robot_state_client, command_client):

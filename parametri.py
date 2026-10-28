@@ -34,7 +34,7 @@ MISSION_GRAPH_SAMPLING = 'casuale'
 MISSION_RANDOM_DISTRIBUTION = 'poisson'
 # Nodi per m2: con 4 il numero di nodi e' quello del reticolo a passo 0.5 m; 5 un po' di
 # piu', per i passaggi stretti.
-MISSION_RANDOM_DENSITY = 5.0
+MISSION_RANDOM_DENSITY = 4.0
 MISSION_RANDOM_SEED = None              # None = estratto a caso, e scritto nel log
 MISSION_POISSON_MIN_DIST_M = None       # None = 0.75 / sqrt(densita')
 
@@ -370,6 +370,16 @@ GRAPHNAV_RELOC_MAX_WP_DIST_M = 3.0     # oltre questa distanza dal waypoint piu'
 # "GRAFO DISCONNESSO", che il grafo sapeva gia' prima di partire: ~25 s su 3 minuti.
 # False = si parte comunque e decide il tentativo.
 GRAPHNAV_PRECHECK = True
+
+# FIDUCIAL DI PARTENZA. All'avvio si cerca un fiducial visto da una qualunque telecamera
+# (anche quella posteriore) e lo si ricorda: entra nell'istantanea di wp_0, ci si localizza
+# sopra, e al ritorno su wp_0 lo si cerca di nuovo per misurare la deriva dell'odometria di
+# tutta la missione. Spot riconosce solo i fiducial AprilTag (famiglia 36h11, quelli di Boston
+# Dynamics), non gli ArUco.
+#   START_FIDUCIAL_ID     -- None = il piu' vicino, qualunque ID; un numero = solo quello.
+#   START_FIDUCIAL_WAIT_S -- quanto aspettare che Spot lo veda (appena in piedi ci mette un po').
+START_FIDUCIAL_ID = None
+START_FIDUCIAL_WAIT_S = 3.0
 
 # True: all'inizio di ogni cella si rivalutano solo gli archi vicini alle zone con dati
 # nuovi (vedi mission_graph.MissionGraph.add_edges_to_prm, incremental). False = si

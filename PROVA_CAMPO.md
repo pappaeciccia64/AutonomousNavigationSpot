@@ -12,7 +12,7 @@ Tutti gli interruttori e i numeri della missione si cambiano in **`parametri.py`
 2. Sul PC del robot: `python3 preflight.py` → deve dire **"Tutti i file sono allineati fra loro."**
 3. **Dimensione della missione.** Si sceglie in `parametri.py`: `MISSION_GRID_ROWS`, `MISSION_GRID_COLS`, `MISSION_CELL_SIZE_M = 2`, oggi 8 × 7, cioè 16 m a sinistra × 14 m davanti al robot, 56 celle (la prova del 26-10 15:11); come la prova all'aperto del 22-10 16:04 (42 minuti di missione più 6 di chiusura). Se l'area è diversa, senza toccare il codice: `python3 easy_walk.py --rows 6 --cols 6 --cell 2`. La prima riga `[CONFIG] Griglia di missione` del log la conferma.
 4. **Grafo.** Default: nodi casuali poisson, 5 nodi/m², seme estratto a caso. Le righe `[CONFIG] Grafo` e `[GRAFO] Nodi casuali` del log riportano il seme e il comando per rifare lo stesso grafo.
-5. Facoltativo: il tag **549** a circa 1 m davanti al robot alla partenza. Senza, la missione parte lo stesso (l'origine è il primo waypoint), come il 13-10.
+5. Facoltativo: **un fiducial qualunque** (AprilTag 36h11, quelli di Boston Dynamics; non un ArUco) a 1–2 m dal robot alla partenza, davanti o dietro: lo vede da qualunque telecamera. Il log lo conferma all'avvio con `[FIDUCIAL] Fiducial di partenza: tag N a X m, dietro/davanti`; senza, la missione parte lo stesso. Al ritorno su wp_0 la riga `[FIDUCIAL] Al ritorno su wp_0 rivedo il tag N … si e' spostato di D m` è la deriva dell'odometria di tutta la missione: per averla il tag deve restare dov'è.
 
 ---
 
