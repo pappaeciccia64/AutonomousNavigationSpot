@@ -497,6 +497,21 @@ def report(name):
     print(f"Griglia: {f'{g[0]} x {g[1]} celle da {g[2]:.1f} m' if g else 'non indicata nel log'}"
           f" | durata {c['duration_s'] / 60:.1f} min" if c['duration_s'] else "")
     print(f"Celle: {c['visited']} visitate, {c['blocked']} bloccate, {c['attempts']} tentativi")
+    # Avanzamento (dal 28-10): da mission_summary.json, o dall'ultima riga [PROGRESSO] del log
+    # (missione interrotta prima del riepilogo).
+    pr = ((summary or {}).get('mission_stats') or {}).get('progresso')
+    if pr:
+        print(f"Avanzamento: {pr['celle_chiuse']}/{pr['celle_totali']} celle chiuse "
+              f"({pr['percentuale']:.0f}%, compresa quella di partenza), area vista "
+              + (f"{pr['area_vista']:.0f}%" if pr.get('area_vista') is not None else "?")
+              + f", {pr['minuti']:.1f} min di esplorazione"
+              + (f" ({pr['minuti_a_cella']:.2f} min a cella)" if pr.get('minuti_a_cella') else "")
+              + (f", batteria alla fine {pr['batteria']:.0f}%" if pr.get('batteria') is not None else "")
+              + ("" if pr.get('finale') else "  [MISSIONE INTERROTTA: ultimo valore registrato]"))
+    else:
+        righe = [l for l in log.splitlines() if '[PROGRESSO]' in l]
+        if righe:
+            print("Avanzamento (ultima riga del log): " + righe[-1].split('[PROGRESSO]', 1)[1].strip())
     # Interruttori della missione (dal 21-10): dal riepilogo, o dalla riga [CONFIG] del log.
     sw = (summary or {}).get('interruttori')
     if sw:

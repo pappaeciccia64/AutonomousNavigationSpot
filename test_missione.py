@@ -400,6 +400,11 @@ def _controlli_mondo(name, r):
     check("[OBIETTIVO] Il robot e' fuori dalla cella (1,1)" in log,
           "in (1,1) l'arrivo vale con il robot appena fuori dalla cella")
     check(len(r['gn'].trips) >= 2, f"spostamenti GraphNav: {len(r['gn'].trips)}")
+    check("[PROGRESSO] Fine esplorazione: 9/9 celle chiuse (100%): 8 visitate, 1 bloccate" in log,
+          "avanzamento finale: 9/9 celle chiuse, 8 visitate e 1 bloccata")
+    righe = [l for l in log.splitlines() if '[PROGRESSO]' in l and 'Fine' not in l]
+    chiuse = [int(l.split('[PROGRESSO] ')[1].split('/')[0]) for l in righe]
+    check(chiuse == sorted(set(chiuse)), f"una riga [PROGRESSO] per ogni cella chiusa in piu': {chiuse}")
     if name == 'A':
         check("[PRECHECK]" in log, "il controllo prima dello spostamento GraphNav scatta")
         check("[FIDUCIAL] Fiducial di partenza: tag 7 a 1.00 m, dietro" in log,

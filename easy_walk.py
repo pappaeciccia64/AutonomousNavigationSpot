@@ -2347,6 +2347,12 @@ class Missione:
         self.path = env.generate_serpentine_path(start_cell=env.start_cell)
         self.frontier = []
         self.visualization_counter = 0   # numero progressivo delle immagini salvate
+        # Avanzamento (vedi _progresso): istante d'inizio, celle chiuse all'inizio e
+        # all'ultima riga stampata, punti del rettangolo della missione per l'area vista.
+        self._t0 = None
+        self._closed_at_start = 0
+        self._closed_logged = None
+        self._area_points = None
 
     # --- Pezzi comuni --------------------------------------------------------------------
 
@@ -2390,8 +2396,11 @@ class Missione:
         robot_row, robot_col = self.env.get_cell_from_world(x, y)
         self.frontier.extend(environmentMap.find_new_borders(
             self.env, robot_row, robot_col, self.path, self.frontier))
+        self._t0 = time.time()
+        self._closed_at_start = self._celle()[0]
 
         while (True):
+            self._progresso()
             print(self.frontier)
             x, y, z, _ = spotUtils.getPosition(self.robot_state_client)
             robot_row, robot_col = self.env.get_cell_from_world(x, y)
@@ -2416,6 +2425,83 @@ class Missione:
 
             if len(self.frontier) == 0:
                 break
+        self._progresso(finale=True)
+
+    # --- Avanzamento ---------------------------------------------------------------------
+
+    def _celle(self):
+        """(chiuse, visitate, bloccate, totale): chiusa = visitata o bloccata."""
+        vals = [v for row in self.env.map for v in row]
+        visited = sum(1 for v in vals if v == 1)
+        blocked = sum(1 for v in vals if v == -1)
+        return visited + blocked, visited, blocked, len(vals)
+
+    def _area_vista(self):
+        """Frazione del rettangolo della missione gia' osservata (libera o ostacolo) nella
+        mappa globale, su punti ogni 0.1 m. None se la mappa non c'e' ancora."""
+        gm = self.global_grid.global_occupancy_map
+        if gm is None:
+            return None
+        if self._area_points is None:
+            env = self.env
+            k = np.arange(-env.cell_size / 2.0 + 0.05, env.cell_size / 2.0, 0.1)
+            ox, oy = np.meshgrid(k, k)
+            c, s_ = np.cos(env.origin_yaw), np.sin(env.origin_yaw)
+            pts = []
+            for r in range(env.rows):
+                for col in range(env.cols):
+                    cx, cy = env.get_world_position_from_cell(r, col)
+                    pts.append(np.c_[cx + ox.ravel() * c - oy.ravel() * s_,
+                                     cy + ox.ravel() * s_ + oy.ravel() * c])
+            self._area_points = np.vstack(pts)
+        res = gm.resolution
+        keys = np.floor(self._area_points / res).astype(int)
+        return sum(1 for gx, gy in keys if (gx, gy) in gm.grid) / len(keys)
+
+    def _progresso(self, finale=False):
+        """
+        A che punto e' la missione: una riga [PROGRESSO] quando cambiano le celle chiuse
+        (visitate o bloccate), e una alla fine. Celle chiuse sul totale (il numero
+        principale), area della missione gia' vista nella mappa globale, tempo, stima del
+        tempo che manca dal tempo medio per cella, batteria. Solo log e MISSION_STATS
+        ['progresso'] (rapporto, mission_summary.json): nessuna decisione ne dipende.
+        """
+        closed, visited, blocked, total = self._celle()
+        if not finale and closed == self._closed_logged:
+            return
+        self._closed_logged = closed
+        try:
+            area = self._area_vista()
+        except Exception:
+            area = None
+        minutes = (time.time() - self._t0) / 60.0 if self._t0 is not None else 0.0
+        done_here = closed - self._closed_at_start
+        per_cell = minutes / done_here if done_here > 0 else None
+        try:
+            battery = float(self.robot_state_client.get_robot_state()
+                            .power_state.locomotion_charge_percentage.value)
+        except Exception:
+            battery = None
+        pct = 100.0 * closed / total
+        area_txt = f"area vista {100.0 * area:.0f}%" if area is not None else "area vista ?"
+        bat_txt = f"batteria {battery:.0f}%" if battery is not None else "batteria ?"
+        if finale:
+            tempo = (f"{minutes:.1f} min di esplorazione"
+                     + (f" ({per_cell:.2f} min a cella)" if per_cell else "")
+                     + (f", {total - closed} celle mai raggiunte" if total > closed else ""))
+        else:
+            tempo = (f"{minutes:.1f} min trascorsi"
+                     + (f", ~{(total - closed) * per_cell:.0f} min alla fine ({per_cell:.2f} min a cella)"
+                        if per_cell else ""))
+        print(f"[PROGRESSO] {'Fine esplorazione: ' if finale else ''}{closed}/{total} celle chiuse "
+              f"({pct:.0f}%): {visited} visitate, {blocked} bloccate, {total - closed} da fare | "
+              f"{area_txt}\n            {tempo} | {bat_txt}")
+        MISSION_STATS['progresso'] = {
+            'celle_chiuse': closed, 'celle_totali': total, 'percentuale': round(pct, 1),
+            'visitate': visited, 'bloccate': blocked,
+            'area_vista': None if area is None else round(100.0 * area, 1),
+            'minuti': round(minutes, 1), 'minuti_a_cella': None if per_cell is None else round(per_cell, 2),
+            'batteria': battery, 'finale': bool(finale)}
 
     def _cella_confinante(self, selected_border, robot_row, robot_col):
         """Tentativo su una cella della frontiera che confina con quella del robot."""
