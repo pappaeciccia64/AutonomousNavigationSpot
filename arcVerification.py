@@ -683,6 +683,8 @@ def decide_next_move(robot_xy, path_waypoints, frontier, no_progress_count, in_t
     Restituisce un dict con 'kind':
       'reached_node'  il prossimo nodo e' gia' sotto il robot (< 5 cm): consumarlo e basta
       'move'          muoversi verso 'target'; 'full' = True se il target e' il nodo stesso.
+                      'final' = True: passo sotto MIN_PARTIAL_STEP_M che porta entro la
+                      tolleranza d'arrivo (vedi FINAL_STEP_MIN_M).
                       'nodes' = quanti nodi del percorso stanno dentro l'avanzamento
                       consentito dal fronte: il ciclo li percorre uno dopo l'altro senza
                       riscansionare (vedi AVANZAMENTO MULTINODO). Vale 1 o piu' quando
@@ -725,10 +727,18 @@ def decide_next_move(robot_xy, path_waypoints, frontier, no_progress_count, in_t
             px, py, nodes = wx, wy, nodes + 1
         return {'kind': 'move', 'target': (nx, ny), 'full': True, 'dist': seg_len,
                 'nodes': max(1, nodes)}
-    if adv >= P.MIN_PARTIAL_STEP_M:
+    # PASSO FINALE (vedi FINAL_STEP_MIN_M): anche sotto il passo minimo, se dopo il passo
+    # l'obiettivo e' entro la tolleranza d'arrivo e il robot e' nella cella.
+    final = (in_target_cell and adv >= P.FINAL_STEP_MIN_M
+             and frontier['path_len'] > P.GOAL_REACHED_TOLERANCE_M
+             and frontier['path_len'] - adv <= P.GOAL_REACHED_TOLERANCE_M)
+    if adv >= P.MIN_PARTIAL_STEP_M or final:
         f = adv / seg_len
-        return {'kind': 'move', 'target': (rx + f * (nx - rx), ry + f * (ny - ry)),
-                'full': False, 'dist': adv}
+        out = {'kind': 'move', 'target': (rx + f * (nx - rx), ry + f * (ny - ry)),
+               'full': False, 'dist': adv}
+        if final and adv < P.MIN_PARTIAL_STEP_M:
+            out['final'] = True
+        return out
 
     if frontier['path_len'] <= P.GOAL_REACHED_TOLERANCE_M and in_target_cell:
         return {'kind': 'arrived'}
@@ -934,7 +944,12 @@ def arrival_has_exit(snap, arrival_xy, heading, min_advance_m=P.ESCAPE_FAN_MIN_A
         snap.origin_x, snap.origin_y, snap.cell_size, ax, ay,
         timestamp=snap.time, valid=snap.valid, blocked_latch=snap.blocked_latch)
     dirs = scan_escape_directions((ax, ay), float(heading), probe, min_advance_m=min_advance_m)
-    return any(d['usable'] for d in dirs), dirs
+    # Una direzione girabile che si ferma perche' FINISCONO I DATI conta come uscita: dal
+    # punto d'arrivo il robot vedra' di piu', e "non visto" non vuol dire "chiuso". Senza,
+    # in un corridoio la direzione avanti finiva sul bordo della scansione (0.09 m) e il
+    # passo veniva rifiutato; al terzo rifiuto si andava lo stesso, ed era il passo giusto
+    # (28-10 12:16, e lo scenario S16 di test_e2e_loop.py).
+    return any(d['usable'] or (d['rotatable'] and d['reason'] == 'fine_dati') for d in dirs), dirs
 
 
 def plan_cone_move(robot_xy, robot_yaw, snap, goal_xy, max_dyaw_deg=P.CONE_SWEEP_MAX_DEG,
