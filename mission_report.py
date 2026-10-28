@@ -13,7 +13,7 @@ numpy, NON l'SDK di Spot (che se c'e' viene usato per la strada di ritorno nel g
 
 File letti (quelli che mancano vengono saltati: le missioni vecchie ne hanno meno):
     MissionLogs/Mission_<nome>/mission_log.txt, mission_summary.json, segments.csv, trajectory.csv,
-        drift.csv (dal 26-10 sera)
+        drift.csv (dal 26-10 sera), battery.csv (dal 28-10)
     MissionMap/Mission_<nome>/scans/*.npz       le scansioni del ciclo di navigazione
     graph/Mission_<nome>/Grafo_*/               il grafo GraphNav scaricato a fine missione
 """
@@ -217,6 +217,28 @@ def section_frontier(scans, thresholds=(0.30, 0.20)):
                f'visto prima fra {lo:.2f} e {hi:.2f} m' if before < hi else
                f'visto prima sopra {hi:.2f} m (letto da lontano)'] += 1
     return dict(reasons=reasons, stops=len(events), bands=bands, origin=origin)
+
+
+def section_battery(stats, log):
+    """Carica e consumo (batteria.py, dal 28-10): una riga, None se la missione non li ha."""
+    if 'battery_start_pct' not in stats:
+        return ("Batteria: carica mai letta dallo stato del robot"
+                if stats.get('battery_reads_failed') else None)
+    line = (f"Batteria: da {stats['battery_start_pct']:.0f}% a {stats['battery_last_pct']:.0f}% in "
+            f"{stats.get('battery_elapsed_min', 0):.0f} min e {stats.get('battery_dist_m', 0):.0f} m")
+    if stats.get('battery_pct_per_min') is not None:
+        line += f", {stats['battery_pct_per_min']:.2f} %/min"
+    if stats.get('battery_pct_per_m') is not None:
+        line += f", {stats['battery_pct_per_m']:.3f} %/m"
+    # Il ritorno a wp_0 viene dopo il riepilogo: si legge dal log.
+    m = re.search(r"\[BATTERIA\] Ritorno a wp_0: da (\d+)% a (\d+)% \(([\d.]+) punti in (\d+) s\)", log)
+    if m:
+        line += f"; ritorno a wp_0 {m.group(3)} punti in {m.group(4)} s"
+    if stats.get('battery_return'):
+        line += (f" | RIENTRO ANTICIPATO a {stats['battery_return_pct']:.0f}% dopo "
+                 f"{stats['battery_return_min']:.0f} min, {stats.get('battery_return_cells_left', '?')} "
+                 f"celle lasciate in frontiera")
+    return line
 
 
 def section_return(log, graph_dirs):
@@ -567,6 +589,10 @@ def report(name):
               f"{stats.get('graphnav_backtracks', '?')}, cadute {stats.get('falls', 0)}"
               + (f", spostamenti GraphNav evitati (il grafo non arrivava alla cella) "
                  f"{stats['graphnav_trips_avoided']}" if 'graphnav_trips_avoided' in stats else ""))
+
+    b = section_battery(stats, log)
+    if b:
+        print("\n" + b)
 
     r = section_return(log, f['graph'])
     if r.get('tempo_s') is not None or r.get('grafo'):

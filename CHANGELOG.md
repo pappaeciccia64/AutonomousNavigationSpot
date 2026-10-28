@@ -6,6 +6,14 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 
 ---
 
+## 2026-10-28 sera: batteria
+
+- **Carica e consumo della batteria, con rientro a batteria bassa** (`batteria.py`, nuovo; era l'idea 2 del 28-10 in `TODO.md`). Prima nel codice non c'era nulla: `power_state` si leggeva solo per sapere se i motori erano accesi.
+  - *Misura.* La carica si legge dallo stato del robot (`battery_states`, o `locomotion_charge_percentage` se manca) all'avvio, a ogni giro del ciclo di navigazione e dell'esplorazione (al massimo una lettura ogni `BATTERY_SAMPLE_S = 5` s), dopo ogni spostamento GraphNav fra celle, prima e dopo il ritorno a wp_0. Ogni lettura va in **`battery.csv`** (carica, autonomia stimata da Spot, tensione, corrente, temperatura, metri percorsi, consumo medio in %/min e %/m); nel log una riga `[BATTERIA]` a ogni punto perso. Il riepilogo e il rapporto hanno una riga "Batteria", con quanti punti è costato il ritorno a wp_0: è il numero per tarare la soglia.
+  - *Rientro.* Sotto `BATTERY_RETURN_PCT = 30%` (provvisorio), confermato su 2 letture di fila, il tentativo in corso si ferma e la missione chiude come a fine esplorazione: scansione finale, riepilogo e `mission_summary.json`, chiusura d'anello e ancoraggio, ritorno a wp_0 con GraphNav, seduta, scaricamento della mappa. Le celle non ancora esplorate restano in frontiera (un tentativo interrotto per la batteria non segna il lato come provato); quante sono va nel log e in `battery_return_cells_left`. `BATTERY_RETURN_PCT = 0` spegne il rientro (la misura resta).
+  - Se lo stato del robot non dice la carica, la missione va avanti senza rientro (una riga nel log). I metri sono la somma degli spostamenti in linea retta fra una lettura e l'altra: sugli spostamenti GraphNav lunghi sono pochi, quindi il consumo per metro è per eccesso.
+  - `test_missione.py`: mondo D, il mondo A con una batteria finta che perde un punto a lettura da 36%: il rientro scatta a 29%, l'esplorazione si ferma con 3 celle in frontiera, il ritorno a wp_0 riesce. Mai provato sul robot.
+
 ## 2026-10-28 (dopo la prova al chiuso delle 10:27)
 
 - **`DA_DECIDERE.md` si chiama `TODO.md`.** Stesso contenuto e stesso ruolo, allargato da «decisioni rimandate» a «idee, problemi aperti e cose da fare»: era già quello che conteneva, e il nome vecchio non lo diceva. Link nel `README.md` aggiornato. Nessuna modifica al codice.

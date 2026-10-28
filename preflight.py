@@ -33,7 +33,7 @@ import sys
 MISSION_FILES = [
     "easy_walk.py", "parametri.py", "registro.py", "spotGrid.py", "navGraphUtils.py",
     "prm_graph.py", "mission_graph.py", "arcVerification.py", "movements.py",
-    "environmentMap.py", "spotUtils.py", "spotLogInUtils.py",
+    "environmentMap.py", "spotUtils.py", "spotLogInUtils.py", "batteria.py",
 ]
 
 # Metodi chiamati sugli oggetti: (file, classe, metodo).

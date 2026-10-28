@@ -343,6 +343,17 @@ RETREAT_MAX_SEGMENT_M = 2.50
 #     robot potrebbe trovarsi altrove.
 # ==================================================================
 MAX_FALLS_PER_MISSION = 3      # alla terza caduta il robot si rialza e la missione si ferma
+
+# BATTERIA (vedi batteria.py). La carica si legge a ogni giro del ciclo e prima/dopo gli
+# spostamenti GraphNav, e va in battery.csv con il consumo per minuto e per metro. Sotto
+# BATTERY_RETURN_PCT, confermato su BATTERY_RETURN_CONFIRM letture di fila, la missione smette
+# di esplorare e chiude come a fine missione: scansione finale, salvataggi, ritorno a wp_0
+# con GraphNav. 30% e' provvisorio: va tarato sui consumi misurati (battery.csv, e la carica
+# spesa nel ritorno a wp_0, riga [BATTERIA] della chiusura). 0 = rientro spento (si misura
+# comunque).
+BATTERY_RETURN_PCT = 30.0
+BATTERY_RETURN_CONFIRM = 2     # letture di fila sotto soglia (contro un valore isolato)
+BATTERY_SAMPLE_S = 5.0         # al massimo una lettura ogni tanti secondi nel ciclo
 GRAPHNAV_TIMEOUT_S = 240.0
 GRAPHNAV_MAX_LINEAR_VEL_MPS = 0.5
 GRAPHNAV_MAX_ANGULAR_VEL_RPS = 0.6
