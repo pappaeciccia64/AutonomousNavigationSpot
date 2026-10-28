@@ -1,7 +1,8 @@
-# Da decidere
+# Da fare
 
-Domande aperte e decisioni rimandate, con i dati che servono per prenderle. Quando una
-decisione è presa si toglie da qui e va nel `CHANGELOG.md`, con il perché.
+Idee, problemi aperti e decisioni rimandate, con i dati che servono per prenderli. Quando
+una cosa è fatta o una decisione è presa si toglie da qui e va nel `CHANGELOG.md`, con il
+perché: lì si leggono i progressi, qui solo ciò che manca.
 
 ---
 

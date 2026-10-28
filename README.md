@@ -2,7 +2,7 @@
 
 Spot esplora da solo un'area rettangolare divisa in celle: entra in una cella dopo l'altra, costruisce mentre cammina una mappa degli ostacoli e del terreno, sceglie i percorsi su un grafo di nodi e li percorre solo fin dove la scansione dal vivo conferma che sono liberi. A fine missione torna al punto di partenza con GraphNav e salva tutto ciò che serve per capire, dopo, cosa ha fatto e perché.
 
-La storia delle modifiche, con le misure delle missioni che le hanno motivate, sta in [`CHANGELOG.md`](CHANGELOG.md). Cosa controllare nella prossima prova sul campo sta in [`PROVA_CAMPO.md`](PROVA_CAMPO.md); le decisioni rimandate, con i dati che servono per prenderle, in [`DA_DECIDERE.md`](DA_DECIDERE.md).
+La storia delle modifiche, con le misure delle missioni che le hanno motivate, sta in [`CHANGELOG.md`](CHANGELOG.md). Cosa controllare nella prossima prova sul campo sta in [`PROVA_CAMPO.md`](PROVA_CAMPO.md); idee, decisioni rimandate e lavori da fare, con i dati che servono per deciderli, in [`TODO.md`](TODO.md).
 
 ---
 
