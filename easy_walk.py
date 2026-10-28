@@ -1744,8 +1744,15 @@ class TentativoCella:
                       f"(obstacle_distance li' {od_arrival:.2f} m) mi porterebbe dove non ci sono "
                       f"uscite: {n_us_a}/{len(fan_arr)} direzioni utilizzabili ({fan_txt_a}). "
                       f"Non ci vado ({self.arrival_refusals}/{P.MAX_ARRIVAL_REFUSALS}), scarto il tratto "
-                      f"{self.robot_node_id}->{self.next_node_id} e ripianifico.")
+                      f"{self.robot_node_id}->{self.next_node_id} per il resto del tentativo e ripianifico.")
+                # Fuori dal piano per il RESTO DEL TENTATIVO (penalita' del tentativo, come i
+                # ritorni: vedi _trap_backtrack), non solo per ora: il tratto in se' e' libero,
+                # e' il punto d'arrivo a non avere uscite, quindi il refresh lo rimetterebbe
+                # nel grafo al giro dopo e si rifarebbe lo stesso piano. Il 28-10 12:16 lo
+                # stesso passo e' stato rifiutato tre volte di fila, e alla terza eseguito.
                 prm_graph_module.mark_edge_blocked_soft(self.prm_graph, self.robot_node_id, self.next_node_id)
+                key_a = (min(self.robot_node_id, self.next_node_id), max(self.robot_node_id, self.next_node_id))
+                self.prm_graph.edge_penalty_persistent[key_a] = self.prm_graph._ATTEMPT_MARK
                 new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
                 if new_ids is not None and len(new_ids) > 1:
                     self.path_waypoints = self._waypoints_from_ids(new_ids)

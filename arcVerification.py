@@ -944,7 +944,12 @@ def arrival_has_exit(snap, arrival_xy, heading, min_advance_m=P.ESCAPE_FAN_MIN_A
         snap.origin_x, snap.origin_y, snap.cell_size, ax, ay,
         timestamp=snap.time, valid=snap.valid, blocked_latch=snap.blocked_latch)
     dirs = scan_escape_directions((ax, ay), float(heading), probe, min_advance_m=min_advance_m)
-    return any(d['usable'] for d in dirs), dirs
+    # Una direzione girabile che si ferma perche' FINISCONO I DATI conta come uscita: dal
+    # punto d'arrivo il robot vedra' di piu', e "non visto" non vuol dire "chiuso". Senza,
+    # in un corridoio la direzione avanti finiva sul bordo della scansione (0.09 m) e il
+    # passo veniva rifiutato; al terzo rifiuto si andava lo stesso, ed era il passo giusto
+    # (28-10 12:16, e lo scenario S16 di test_e2e_loop.py).
+    return any(d['usable'] or (d['rotatable'] and d['reason'] == 'fine_dati') for d in dirs), dirs
 
 
 def plan_cone_move(robot_xy, robot_yaw, snap, goal_xy, max_dyaw_deg=P.CONE_SWEEP_MAX_DEG,
