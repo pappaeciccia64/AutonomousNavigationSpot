@@ -193,6 +193,9 @@ class FakeTracker:
 
 DYNAMIC_TRIGGER = {'armed': False, 'rect': None}
 FALL = {'armed': False, 'fallen': False, 'recoverable': True, 'where': None}
+# Comando che non si conclude (tempo scaduto): i prossimi 'n' tratti piu' lunghi di 0.3 m si
+# fermano 'short_m' prima del punto e restituiscono fallimento (scenario S17).
+STALL = {'n': 0, 'short_m': 0.0}
 
 
 def fake_check_fall(rsc):
@@ -241,6 +244,11 @@ def fake_navigate_to(tx, ty, rx, ry, rsc, cc, vtb, should_abort=None, keep_headi
         ROBOT.yaw = float(np.arctan2(np.sin(ROBOT.yaw + dyaw), np.cos(ROBOT.yaw + dyaw)))
         sx, sy = ROBOT.x, ROBOT.y
         ex, ey = sx + dist * np.cos(ROBOT.yaw), sy + dist * np.sin(ROBOT.yaw)
+    stalled = STALL['n'] > 0 and dist > 0.3
+    if stalled:
+        STALL['n'] -= 1
+        f = (dist - STALL['short_m']) / dist
+        ex, ey = sx + f * (ex - sx), sy + f * (ey - sy)
     # Quanto il punto d'arrivo vero si discosta da quello comandato: e' il sintomo.
     ROBOT.max_endpoint_error = max(ROBOT.max_endpoint_error, float(np.hypot(ex - tx, ey - ty)))
     steps = max(2, int(dist / 0.05))
@@ -264,6 +272,9 @@ def fake_navigate_to(tx, ty, rx, ry, rsc, cc, vtb, should_abort=None, keep_headi
         if should_abort is not None and k % 2 == 0 and should_abort():
             d = float(np.hypot(ROBOT.x - sx, ROBOT.y - sy)); ROBOT.walked += d
             return False, d, dist
+    if stalled:
+        d = float(np.hypot(ROBOT.x - sx, ROBOT.y - sy)); ROBOT.walked += d
+        return False, d, dist
     ROBOT.walked += dist
     return True, dist, dist
 
@@ -693,6 +704,20 @@ if __name__ == '__main__':
     check(r['tags']['[ARRIVO]'] == 0, f"nessun rifiuto [ARRIVO] ({r['tags']['[ARRIVO]']}; "
                                       f"prima della correzione 3, l'ultimo poi eseguito lo stesso)")
     check(r['scans'] <= 8, f"{r['scans']} scansioni (prima 10)")
+
+    # S17: comando che scade a pochi cm dal punto (28-10 13:50, cella (3,2): 0.42 m su 0.44
+    # in salita). Entro MOVE_NEAR_GOAL_M vale come arrivato; piu' lontano e' un fallimento fisico.
+    STALL.update(n=1, short_m=0.03)
+    r = run("S17. tempo scaduto a 3 cm dal punto: vale come arrivato", [], (2.0, 2.0, 0.785), (0, 1))
+    check(r['err'] is None and r['ok'] is True, "cella raggiunta")
+    check("[QUASI]" in r['log'] and "fallito meccanicamente" not in r['log'],
+          "il tratto vale come riuscito, nessun arco scartato per fallimento fisico")
+    STALL.update(n=1, short_m=0.30)
+    r = run("S17. tempo scaduto a 30 cm dal punto: fallimento fisico come prima", [], (2.0, 2.0, 0.785), (0, 1))
+    STALL.update(n=0)
+    check(r['err'] is None, "nessuna eccezione")
+    check("[QUASI]" not in r['log'] and "fallito meccanicamente" in r['log'],
+          "oltre la soglia resta un fallimento fisico")
 
     for d in [x for x in os.listdir(tempfile.gettempdir()) if x.startswith("missione_e2e_")]:
         shutil.rmtree(os.path.join(tempfile.gettempdir(), d), ignore_errors=True)

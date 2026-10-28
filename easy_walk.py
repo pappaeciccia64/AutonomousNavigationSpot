@@ -85,6 +85,7 @@ def mission_switches():
         'parametri.GRAPHNAV_SHORTCUTS': P.GRAPHNAV_SHORTCUTS,
         'parametri.GRAPHNAV_PRECHECK': P.GRAPHNAV_PRECHECK,
         'parametri.GRAPHNAV_ARRIVAL_HEADING': P.GRAPHNAV_ARRIVAL_HEADING,
+        'parametri.MOVE_NEAR_GOAL_M': P.MOVE_NEAR_GOAL_M,
         'parametri.GRAPHNAV_SDK_LOOP_CLOSURE': P.GRAPHNAV_SDK_LOOP_CLOSURE,
         'parametri.GRAPHNAV_SDK_LOOP_BUDGET_S': P.GRAPHNAV_SDK_LOOP_BUDGET_S,
         'parametri.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S': P.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S,
@@ -162,6 +163,8 @@ def _emit_mission_summary_once():
               + (f" ({100.0 * MISSION_STATS['prm_refresh_skipped'] / tot_r:.0f}% di giri risparmiati)"
                  if tot_r else ""))
         print(f"Cadute: {MISSION_STATS['falls']}, rialzate da solo: {MISSION_STATS['self_rights']}")
+        print(f"Tratti non conclusi ma arrivati entro {P.MOVE_NEAR_GOAL_M:.2f} m dal punto (validi): "
+              f"{MISSION_STATS.get('moves_near_goal', 0)}")
         print(f"Spostamenti GraphNav riusciti: {MISSION_STATS['graphnav_ok']}, falliti: {MISSION_STATS['graphnav_fail']}")
         print(f"Deriva dell'odometria: {MISSION_STATS['drift_samples']} misure agli arrivi GraphNav, "
               f"massima {MISSION_STATS['drift_max_m']:.2f} m, ultima {MISSION_STATS['drift_last_m']:.2f} m "
@@ -2051,6 +2054,24 @@ class TentativoCella:
             except Exception as e:
                 print(f"[LOG] Impossibile registrare il segmento: {e}")
 
+            # Comando finito male (tempo scaduto, Spot non assestato...) senza un arresto chiesto
+            # dal fronte, ma con il robot ARRIVATO a pochi cm dal punto: il tratto vale come
+            # riuscito invece che come fallimento fisico (arco scartato per sempre e ritorno).
+            # 28-10 13:50, cella (3,2): salita a 20 gradi in HARD, 0.42 m su 0.44 oltre i 15 s.
+            # In segments.csv resta l'esito vero del comando.
+            if not success_move and abort_state['reason'] is None:
+                try:
+                    ax, ay, _, _ = spotUtils.getPosition(self.robot_state_client)
+                    d_left = float(np.hypot(move_x - ax, move_y - ay))
+                except Exception:
+                    d_left = float('inf')
+                if d_left <= P.MOVE_NEAR_GOAL_M and distance_traveled >= 0.5 * distance_commanded:
+                    MISSION_STATS['moves_near_goal'] = MISSION_STATS.get('moves_near_goal', 0) + 1
+                    print(f"[QUASI] Comando verso ({move_x:.2f}, {move_y:.2f}) non concluso, ma il robot "
+                          f"e' a {d_left:.2f} m dal punto (percorsi {distance_traveled:.2f} m su "
+                          f"{distance_commanded:.2f}): vale come arrivato, l'arco resta valido.")
+                    success_move = True
+
             if success_move:
                 print(f"[INFO] Spostamento completato con successo su ({move_x:.2f}, {move_y:.2f})")
 
@@ -3026,9 +3047,11 @@ def _chiudi_missione(robot, robot_state_client, command_client, recordingInterfa
     if monitor is not None:
         monitor.controlla("inizio del ritorno a wp_0")
     _pct0 = MISSION_STATS.get('battery_last_pct')
-    if navGraphUtils.graphnav_return_to_start(recordingInterface, robot_state_client, command_client):
+    esito_wp0 = navGraphUtils.graphnav_return_to_start(recordingInterface, robot_state_client, command_client)
+    if esito_wp0 in ('arrivato', 'vicino'):
+        # Anche fermo vicino a wp_0 il tag si cerca: e' la misura della deriva di tutta la missione.
         navGraphUtils.graphnav_check_start_fiducial(robot, robot_state_client)
-    else:
+    if esito_wp0 != 'arrivato':
         print("[GRAPHNAV] Ritorno a wp_0 non riuscito: il robot si siede dove si trova.")
     _t_close['ritorno a wp_0'] = time.perf_counter() - _t
     if monitor is not None:

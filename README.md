@@ -118,6 +118,8 @@ Ognuno permette un confronto acceso/spento sul campo; il log li riporta nella ri
 | `spotGrid.CLEARANCE_MAP_DECIDES` | `False` | La mappa dello spazio libero decide la percorribilità al posto della mappa binaria |
 | `parametri.PLAN_ONLY_EXPLORED_CELLS` | `True` | I percorsi passano solo dalle celle già visitate |
 | `parametri.GRAPHNAV_ARRIVAL_HEADING` | `verso_obiettivo` | Orientamento all'arrivo dei viaggi GraphNav fra celle e dei ritorni: girato verso la cella da tentare (o l'obiettivo del tentativo); `waypoint` = quello del waypoint, `libero` = nessuna rotazione finale. Il ritorno a wp_0 tiene sempre quello di partenza |
+| `parametri.GRAPHNAV_RETURN_NEAR_M` | `1.0` | Ritorno a wp_0 fermo entro questa distanza: resta non riuscito, ma fiducial e deriva si misurano lo stesso |
+| `parametri.MOVE_NEAR_GOAL_M` | `0.10` | Tratto il cui comando non si conclude (tempo scaduto) con il robot entro questa distanza dal punto: vale come riuscito invece che come fallimento fisico (0 = spento) |
 | `parametri.GRAPHNAV_PRECHECK` | `True` | Prima di andare col GraphNav al waypoint da cui tentare una cella, controlla sul grafo che da lì si arrivi alla cella; se no, segna il lato come provato senza muoversi |
 | `parametri.GRAPHNAV_SHORTCUTS` | `True` | Scorciatoie nel grafo GraphNav prima di ogni spostamento |
 

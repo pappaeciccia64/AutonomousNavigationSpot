@@ -14,9 +14,9 @@ la sua prova senza robot, prima di portare il branch su `main`.
 **Codice**
 
 1. **`[SUBITO]` ripetuti sullo stesso tratto.** 14:23: 14 `[SUBITO]`, di cui 8 sullo stesso tratto del precedente (197->569 quattro volte di fila). Lo scarto "per ora" (`mark_edge_blocked_soft`) lo annulla il refresh al giro dopo: il tratto in sé passa lo scarto preliminare (una scansione, 0.25 m), il fronte no (mediana di 3 scansioni + isteresi fino a 0.29 m). Stesso meccanismo già corretto per `[ARRIVO]`: alla seconda volta sullo stesso tratto, penalità del tentativo; oppure allineare lo scarto preliminare all'isteresi del fronte.
-2. **Ritorno a wp_0 quasi arrivato.** 13:50: GraphNav fermo (`STUCK`, per l'erba alta attorno alla partenza) a 0.63 m da wp_0; contato come ritorno fallito, niente controllo del fiducial né misura della deriva, rapporto "NON arrivato". Se il robot è entro ~1 m da wp_0, vale come arrivato e il tag si controlla comunque.
-3. **Tempo scaduto a pochi centimetri dall'arrivo non è un fallimento fisico.** 13:50, cella (3,2): salita a 20° in HARD, percorsi 0.42 m su 0.44 in più dei 15 s concessi, arco scartato per sempre come "fallimento meccanico". Se il robot è arrivato entro pochi cm (o al 90% del tratto), il tratto vale come riuscito.
-4. **Accensione: `KeepaliveMotorsOffError`.** 14:16: Spot rifiuta di accendere i motori finché il servizio Keepalive chiede motori spenti (lasciato da un altro client che aveva appena spento il robot); 40 s dopo è partito. Attendere qualche secondo e riprovare, con un messaggio chiaro, invece del traceback.
+2. ~~**Ritorno a wp_0 quasi arrivato.**~~ Fatta il 28-10 sera (vedi CHANGELOG): tre esiti, `arrivato` / `vicino` (entro 1 m: ritorno NON riuscito, ma fiducial e deriva misurati) / `non arrivato`.
+3. ~~**Tempo scaduto a pochi centimetri dall'arrivo non è un fallimento fisico.**~~ Fatta il 28-10 sera (vedi CHANGELOG): entro `MOVE_NEAR_GOAL_M = 0.10` m dal punto il tratto vale come riuscito (`[QUASI]`). Da verificare sul campo se 10 cm sono troppi.
+4. ~~**Accensione: `KeepaliveMotorsOffError`.**~~ Non si fa (28-10 sera): il traceback va bene, si riavvia a mano.
 5. **Codice superfluo** (inventario del 27-10): `RETREAT_AFTER_ABORT_M`, i due `load_map`, `NOTE_2026-10-08_grafo_multinodo.md`, diagnostica della pendenza interpolata e della copertura (CSV dei segmenti), `[FOOTPRINT-DIAG]`, `env.waypoints`; gli strumenti da riga di comando di `mission_graph.py` in `prova_grafo.py`.
 
 **Sul campo** (finché l'erba non è sistemata)

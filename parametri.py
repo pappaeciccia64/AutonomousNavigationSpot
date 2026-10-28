@@ -366,6 +366,14 @@ BATTERY_RETURN_PCT = 30.0
 BATTERY_RETURN_CONFIRM = 2     # letture di fila sotto soglia (contro un valore isolato)
 BATTERY_SAMPLE_S = 5.0         # al massimo una lettura ogni tanti secondi nel ciclo
 GRAPHNAV_TIMEOUT_S = 240.0
+# Ritorno a wp_0 fermo entro questa distanza (STUCK, tempo scaduto): resta un ritorno NON
+# riuscito, ma fiducial e deriva si misurano lo stesso (vedi graphnav_return_to_start).
+GRAPHNAV_RETURN_NEAR_M = 1.0
+
+# Un tratto del ciclo il cui comando finisce male (tempo scaduto, Spot che non si assesta)
+# senza un arresto del fronte, con il robot entro questa distanza dal punto d'arrivo, vale
+# come riuscito invece che come fallimento fisico (arco scartato per sempre). 0 = spento.
+MOVE_NEAR_GOAL_M = 0.10
 GRAPHNAV_MAX_LINEAR_VEL_MPS = 0.5
 GRAPHNAV_MAX_ANGULAR_VEL_RPS = 0.6
 
