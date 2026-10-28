@@ -528,6 +528,15 @@ if __name__ == '__main__':
     _controlli_fallimenti(r)
     shutil.rmtree(r['root'], ignore_errors=True)
     _controlli_scelta_celle()
+    print("\nMissione intera nel mondo E: partenza chiusa tutto intorno (28-10 14:17, erba alta).")
+    chiuso = [(0.4, 2.6, 0.4, 0.6), (0.4, 2.6, 2.4, 2.6), (0.4, 0.6, 0.4, 2.6), (2.4, 2.6, 0.4, 2.6)]
+    r = run(chiuso, "MISSIONE_E")
+    log = r['log']
+    check(r['ok'] is True and 'Traceback' not in log, "main() arriva in fondo senza eccezioni")
+    check("[FINE] Nessuna cella raggiungibile dalla partenza" in log,
+          "la riga [FINE] dice che dalla partenza non si raggiunge nessuna cella")
+    check("ritorno a wp_0" in log, "chiusura normale della missione")
+    shutil.rmtree(r['root'], ignore_errors=True)
     print("\nMissione intera nel mondo D: il mondo A con la batteria che si scarica.")
     with _con_batteria():
         r = run(WORLDS['A'], "MISSIONE_D")

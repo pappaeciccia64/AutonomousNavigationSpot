@@ -2382,6 +2382,8 @@ class Missione:
         self._t0 = None
         self._closed_at_start = 0
         self._ultima_visitata = None      # vedi _cella_del_robot
+        self._tentativi = 0               # tentativi di entrare in una cella (vedi _fine_esplorazione)
+        self._celle_perse = []            # tolte dalla frontiera senza lati ancora provabili
         self._closed_logged = None
         self._area_points = None
 
@@ -2395,6 +2397,7 @@ class Missione:
             self.visualization_counter, self.recordingInterface, self.verification_tracker,
             mobility_kwargs=self.mobility_kwargs)
         self.visualization_counter += 1
+        self._tentativi += 1
         return check
 
     def _visitata(self, row, col, x, y):
@@ -2508,11 +2511,34 @@ class Missione:
                         continue
                 else:
                     if len(self.frontier) > 0:
-                        self.frontier.remove(self.frontier[0])
+                        tolta = self.frontier[0]
+                        self.frontier.remove(tolta)
+                        self._celle_perse.append((int(tolta[0]), int(tolta[1])))
+                        print(f"[FRONTIERA] Cella ({tolta[0]},{tolta[1]}) tolta dalla frontiera: in "
+                              f"questo giro nessuna candidata ha un lato ancora da provare.")
 
             if len(self.frontier) == 0:
                 break
+        self._fine_esplorazione()
         self._progresso(finale=True)
+
+    def _fine_esplorazione(self):
+        """Se l'esplorazione finisce con celle non chiuse, una riga [FINE] che dice perche'
+        (28-10 14:17: partenza in mezzo all'erba alta, nessuna cella raggiungibile, e nel log
+        solo "Frontiera vuota")."""
+        closed, visited, blocked, total = self._celle()
+        if closed >= total or _batteria_scarica():
+            return
+        if visited <= 1:
+            print(f"[FINE] Nessuna cella raggiungibile dalla partenza: {self._tentativi} tentativi "
+                  f"sulle celle confinanti, tutti falliti senza una strada nel grafo o con il passo "
+                  f"rifiutato (ostacoli tutto intorno: vedi GRAFO DISCONNESSO e [ARRIVO] sopra). "
+                  f"Spostare il robot su terreno libero e riprovare.")
+            return
+        print(f"[FINE] Esplorazione finita con {total - closed} celle non chiuse"
+              + (f"; tolte dalla frontiera senza lati ancora da provare: "
+                 f"{', '.join(f'({r},{c})' for r, c in self._celle_perse)}" if self._celle_perse else "")
+              + ". Le altre non sono mai state raggiungibili da una cella visitata.")
 
     # --- Avanzamento ---------------------------------------------------------------------
 
