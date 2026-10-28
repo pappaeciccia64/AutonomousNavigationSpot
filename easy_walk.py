@@ -84,6 +84,7 @@ def mission_switches():
         'parametri.PLAN_ONLY_EXPLORED_CELLS': P.PLAN_ONLY_EXPLORED_CELLS,
         'parametri.GRAPHNAV_SHORTCUTS': P.GRAPHNAV_SHORTCUTS,
         'parametri.GRAPHNAV_PRECHECK': P.GRAPHNAV_PRECHECK,
+        'parametri.GRAPHNAV_ARRIVAL_HEADING': P.GRAPHNAV_ARRIVAL_HEADING,
         'parametri.GRAPHNAV_SDK_LOOP_CLOSURE': P.GRAPHNAV_SDK_LOOP_CLOSURE,
         'parametri.GRAPHNAV_SDK_LOOP_BUDGET_S': P.GRAPHNAV_SDK_LOOP_BUDGET_S,
         'parametri.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S': P.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S,
@@ -527,7 +528,9 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
         return {'ok': False, 'ids': None, 'robot_node': None, 'how': 'cella rimandata'}
 
     for hop in range(1, int(max_hops) + 1):
-        ok, crumb = navGraphUtils.graphnav_step_back(env, recordingInterface, robot_state_client, command_client)
+        # Si arriva girati verso l'obiettivo del tentativo: da li' si ripianifica verso di lui.
+        ok, crumb = navGraphUtils.graphnav_step_back(env, recordingInterface, robot_state_client, command_client,
+                                                     face_xy=prm_graph.get_node_position(goal_id))
         if not ok:
             if crumb is None:
                 print(f"[RITORNO] {label}: nessuna briciola GraphNav disponibile.")
@@ -2804,7 +2807,8 @@ class Missione:
         recordingInterface.stop_recording()
         navigation_success = navGraphUtils.graphnav_navigate_to(
             recordingInterface, nearest_wp['id'], self.robot_state_client, self.command_client,
-            f"verso il waypoint della cella {nearest_cell} per la cella ({target_row},{target_col})")
+            f"verso il waypoint della cella {nearest_cell} per la cella ({target_row},{target_col})",
+            face_xy=self.env.get_world_position_from_cell(target_row, target_col))
 
         # GraphNav non registra i tratti percorsi: quelli vecchi non descrivono piu' la strada
         # da cui il robot e' arrivato, la ritirata non deve usarli.

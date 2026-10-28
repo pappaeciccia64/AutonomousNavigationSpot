@@ -381,6 +381,19 @@ GRAPHNAV_MAX_ANGULAR_VEL_RPS = 0.6
 #      NON si dichiara "arrivato": si riprova a navigare.
 #   3. rilevatore di perdita PERMISSIVO negli spostamenti GraphNav.
 GRAPHNAV_LOST_DETECTOR_STRICTNESS = 'LOST_DETECTOR_STRICTNESS_PERMISSIVE'   # None = quella di Spot
+
+# ORIENTAMENTO ALL'ARRIVO dei viaggi GraphNav fra celle e dei ritorni sulle briciole (il
+# ritorno finale a wp_0 tiene sempre l'orientamento di partenza):
+#   'verso_obiettivo'  arriva girato verso il centro della cella da tentare (viaggi fra celle)
+#                      o verso l'obiettivo del tentativo (ritorni): la prima mossa dopo
+#                      l'arrivo parte quasi dritta;
+#   'waypoint'         l'orientamento che il robot aveva quando ha creato il waypoint (come
+#                      fino al 28-10);
+#   'libero'           GraphNav non si gira alla fine (ignore_final_yaw).
+# Il 26-10 15:11 (8 arrivi): dopo l'arrivo il robot ruotava sul posto in media di 79 gradi
+# (38 s in tutto); lasciandolo libero sarebbero stati 82, girato verso l'obiettivo 22.
+GRAPHNAV_ARRIVAL_HEADING = 'verso_obiettivo'
+GRAPHNAV_ARRIVAL_HEADING_MIN_M = 0.5   # obiettivo piu' vicino di cosi' al waypoint: direzione non affidabile, si usa quella del waypoint
 GRAPHNAV_MAX_RELOCALIZATIONS = 3       # riagganci per singolo spostamento GraphNav
 GRAPHNAV_RELOC_MAX_DIST_M = 0.5        # raggio di ricerca dell'ICP attorno alla stima
 GRAPHNAV_RELOC_MAX_YAW_RAD = float(np.radians(20.0))

@@ -31,6 +31,7 @@ from bosdyn.client.recording import GraphNavRecordingServiceClient
 from bosdyn.client.math_helpers import Quat, SE3Pose
 from google.protobuf import wrappers_pb2 as wrappers
 from bosdyn.api.graph_nav import graph_nav_pb2 as _graph_nav_pb2
+from bosdyn.api import geometry_pb2
 
 import movements
 import parametri as P
@@ -1092,9 +1093,42 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, sdk=Tru
     return added + n_sdk
 
 
+def graphnav_arrival_heading(recordingInterface, waypoint_id, face_xy, label):
+    """
+    ORIENTAMENTO ALL'ARRIVO (vedi P.GRAPHNAV_ARRIVAL_HEADING): la posa del corpo rispetto al
+    waypoint da chiedere a GraphNav (destination_waypoint_tform_body_goal), per arrivare
+    girati verso face_xy (punto VISION). Il frame del waypoint ha l'imbardata che il corpo
+    aveva quando l'abbiamo creato (waypoint_poses), quindi l'angolo e' la differenza fra la
+    direzione voluta e quella. None = orientamento del waypoint, come senza: waypoint non
+    creato da noi, face_xy mancante o troppo vicino. Mai eccezioni.
+    """
+    if face_xy is None or P.GRAPHNAV_ARRIVAL_HEADING != 'verso_obiettivo':
+        return None
+    try:
+        poses = getattr(recordingInterface, 'waypoint_poses', None) or {}
+        wp = next((p for p in poses.values() if p.get('waypoint_id') == waypoint_id), None)
+        if wp is None:
+            return None
+        dx, dy = face_xy[0] - wp['x'], face_xy[1] - wp['y']
+        if float(np.hypot(dx, dy)) < P.GRAPHNAV_ARRIVAL_HEADING_MIN_M:
+            return None
+        want = float(np.arctan2(dy, dx))
+        rel = float((want - wp['yaw'] + np.pi) % (2.0 * np.pi) - np.pi)
+        print(f"[GRAPHNAV] {label}: arrivo girato verso ({face_xy[0]:.2f}, {face_xy[1]:.2f}), "
+              f"imbardata {np.degrees(want):.0f} gradi ({np.degrees(rel):+.0f} rispetto al waypoint).")
+        return geometry_pb2.SE2Pose(position=geometry_pb2.Vec2(x=0.0, y=0.0), angle=rel)
+    except Exception as e:
+        print(f"[GRAPHNAV] {label}: orientamento d'arrivo non calcolato ({e}): uso quello del waypoint.")
+        return None
+
+
 def graphnav_navigate_to(recordingInterface, waypoint_id, robot_state_client, command_client, label,
-                          timeout_s=P.GRAPHNAV_TIMEOUT_S):
-    """Porta il robot a un waypoint con GraphNav. True solo se ci arriva davvero."""
+                          timeout_s=P.GRAPHNAV_TIMEOUT_S, face_xy=None):
+    """Porta il robot a un waypoint con GraphNav. True solo se ci arriva davvero.
+
+    face_xy: punto VISION verso cui arrivare girati (vedi graphnav_arrival_heading); None =
+    orientamento del waypoint. Con GRAPHNAV_ARRIVAL_HEADING = 'libero', se face_xy c'e' il
+    robot arriva senza girarsi."""
     # Prima di muoversi: chiusure d'anello di Spot (a registrazione ferma). Le scorciatoie
     # dalla mappa le aggiunge chi chiama, PRIMA di fermare la registrazione.
     # Tutto cio' che sta qui dentro finisce nella voce 'GraphNav' di [TEMPO]: e' una delle
@@ -1104,13 +1138,13 @@ def graphnav_navigate_to(recordingInterface, waypoint_id, robot_state_client, co
         # 2026-10-26: anche i tratti GraphNav finiscono in trajectory.csv (vedi _TRAJECTORY_COLUMNS).
         with TrajectoryLog(robot_state_client, 'graphnav'):
             return _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_client,
-                                               command_client, label, timeout_s)
+                                               command_client, label, timeout_s, face_xy)
     finally:
         timing_add('GraphNav', time.perf_counter() - _t_gn)
 
 
 def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_client, command_client,
-                                label, timeout_s):
+                                label, timeout_s, face_xy=None):
     graphnav_add_shortcuts(recordingInterface, label, map_edges=False, sdk=True)
     client = recordingInterface._graph_nav_client
     tp = _graph_nav_pb2.TravelParams()
@@ -1124,6 +1158,9 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
             tp.lost_detector_strictness = enum.values_by_name[P.GRAPHNAV_LOST_DETECTOR_STRICTNESS].number
         except Exception:
             pass
+    goal_pose = graphnav_arrival_heading(recordingInterface, waypoint_id, face_xy, label)
+    if face_xy is not None and P.GRAPHNAV_ARRIVAL_HEADING == 'libero' and hasattr(tp, 'ignore_final_yaw'):
+        tp.ignore_final_yaw = True
     print(f"[GRAPHNAV] {label}: avvio (massimo {timeout_s:.0f} s, {P.GRAPHNAV_MAX_LINEAR_VEL_MPS:.1f} m/s).")
     # Prima di partire si guarda lo stato del localizzatore; se e' perso si riaggancia
     # subito, invece di farsi rifiutare il comando.
@@ -1136,7 +1173,8 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
     t0, cmd_id, fb_errors, nav_errors = time.time(), None, 0, 0
     while time.time() - t0 < timeout_s:
         try:
-            cmd_id = client.navigate_to(waypoint_id, 1.0, command_id=cmd_id, travel_params=tp)
+            cmd_id = client.navigate_to(waypoint_id, 1.0, command_id=cmd_id, travel_params=tp,
+                                        destination_waypoint_tform_body_goal=goal_pose)
             nav_errors = 0
         except Exception as e:
             if 'RobotLost' in type(e).__name__ and relocs < P.GRAPHNAV_MAX_RELOCALIZATIONS:
@@ -1360,7 +1398,7 @@ def graphnav_drop_breadcrumb(env, recordingInterface, robot_state_client, prm_no
 
 
 def graphnav_step_back(env, recordingInterface, robot_state_client, command_client,
-                       min_dist_m=0.40):
+                       min_dist_m=0.40, face_xy=None):
     """
     Torna al waypoint piu' recente che sia almeno min_dist_m DIETRO, con GraphNav.
 
@@ -1410,7 +1448,8 @@ def graphnav_step_back(env, recordingInterface, robot_state_client, command_clie
         print(f"[RITORNO] Non ho potuto fermare la registrazione ({e}): provo comunque.")
     ok = graphnav_navigate_to(
         recordingInterface, crumb['wp_id'], robot_state_client, command_client,
-        f"ritorno al waypoint {crumb['wp_name']} in ({crumb['x']:.2f}, {crumb['y']:.2f})")
+        f"ritorno al waypoint {crumb['wp_name']} in ({crumb['x']:.2f}, {crumb['y']:.2f})",
+        face_xy=face_xy)
     if recording_stopped:
         try:
             recordingInterface.start_recording()

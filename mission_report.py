@@ -241,6 +241,47 @@ def section_battery(stats, log):
     return line
 
 
+def section_arrival_rotation(trajectory):
+    """Dopo ogni arrivo GraphNav, quanto deve girarsi il robot per la prima mossa: angolo fra
+    l'imbardata d'arrivo e la direzione del primo punto da raggiungere, e secondi di rotazione
+    sul posto (posizione entro 0.12 m). Serve a giudicare GRAPHNAV_ARRIVAL_HEADING (28-10).
+    Lista di (gradi, secondi); vuota se trajectory.csv non ha viaggi GraphNav (prima del 26-10)."""
+    rows = []
+    for r in trajectory:
+        try:
+            rows.append((float(r['time']), float(r['x']), float(r['y']), float(r['yaw_deg']),
+                         float(r['target_x']), float(r['target_y']), r['move'].strip()))
+        except (KeyError, ValueError):
+            continue
+    rows.sort()
+    out, k = [], 0
+    while k < len(rows):
+        if rows[k][6] != 'graphnav':
+            k += 1
+            continue
+        while k + 1 < len(rows) and rows[k + 1][6] == 'graphnav' and rows[k + 1][0] - rows[k][0] <= 2.0:
+            k += 1
+        end = rows[k]
+        nxt = k + 1
+        while nxt < len(rows) and rows[nxt][6] == 'graphnav':
+            nxt += 1
+        k = nxt
+        if nxt >= len(rows):
+            break
+        first = rows[nxt]
+        # La prima mossa deve partire da dove GraphNav ha lasciato il robot, con un punto da raggiungere.
+        if math.isnan(first[4]) or math.hypot(first[1] - end[1], first[2] - end[2]) > 0.30:
+            continue
+        want = math.degrees(math.atan2(first[5] - first[2], first[4] - first[1]))
+        turn = abs((want - first[3] + 180.0) % 360.0 - 180.0)
+        j = nxt
+        while (j + 1 < len(rows) and rows[j + 1][6] == first[6] and rows[j + 1][0] - rows[j][0] <= 2.0
+               and math.hypot(rows[j + 1][1] - first[1], rows[j + 1][2] - first[2]) < 0.12):
+            j += 1
+        out.append((turn, rows[j][0] - first[0]))
+    return out
+
+
 def section_return(log, graph_dirs):
     out = {}
     m = re.search(r'ritorno a wp_0: arrivato in (\d+) s', log)
@@ -618,6 +659,13 @@ def report(name):
         if r.get('grafo'):
             line += f" | nel grafo scaricato da {r['grafo']['da']}: {r['grafo']['metri']} m"
         print(line)
+
+    ar = section_arrival_rotation(read_csv(f['trajectory']))
+    if ar:
+        m = re.search(r"GRAPHNAV_ARRIVAL_HEADING=(\S+)", log)
+        print(f"Rotazione dopo gli arrivi GraphNav ({m.group(1) if m else 'waypoint'}): {len(ar)} arrivi, "
+              f"media {np.mean([a for a, _ in ar]):.0f} gradi, {sum(s for _, s in ar):.0f} s sul posto in tutto "
+              f"(26-10 15:11, orientamento del waypoint: 79 gradi, 38 s su 8 arrivi)")
 
     print("\nControlli della prova (novita' mai provate sul robot, vedi PROVA_CAMPO.md):")
     for nome, esito, det in section_checks(log, read_csv(f['segments'])):

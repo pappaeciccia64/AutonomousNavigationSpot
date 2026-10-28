@@ -98,6 +98,7 @@ class FakeGraphNav:
         self.last_wp = None
         self.n = 0
         self.trips = []                # (da, a) degli spostamenti
+        self.headings = []             # angoli d'arrivo chiesti (rispetto al waypoint)
 
     # --- registrazione -------------------------------------------------------------
     def _new_waypoint(self, name):
@@ -180,8 +181,12 @@ class FakeGraphNav:
             return graph_nav_pb2.SetLocalizationResponse(status=graph_nav_pb2.SetLocalizationResponse.STATUS_OK)
         raise RuntimeError("STATUS_NO_MATCHING_FIDUCIAL (finto: nessun fiducial nel mondo)")
 
-    def navigate_to(self, waypoint_id, cmd_duration, command_id=None, travel_params=None, **kw):
+    def navigate_to(self, waypoint_id, cmd_duration, command_id=None, travel_params=None,
+                    destination_waypoint_tform_body_goal=None, **kw):
         x, y, yaw = self.pos[waypoint_id]
+        if destination_waypoint_tform_body_goal is not None:     # arrivo girato (solo l'angolo)
+            yaw += destination_waypoint_tform_body_goal.angle
+            self.headings.append(destination_waypoint_tform_body_goal.angle)
         self.trips.append((self._nearest(), waypoint_id))
         T.ROBOT.x, T.ROBOT.y, T.ROBOT.yaw = x, y, yaw
         T.ROBOT.track.append((x, y))
@@ -431,6 +436,10 @@ def _controlli_mondo(name, r):
     check(chiuse == sorted(set(chiuse)), f"una riga [PROGRESSO] per ogni cella chiusa in piu': {chiuse}")
     check("[BATTERIA] Carica non disponibile" in log and "RIENTRO" not in log,
           "senza la carica nello stato del robot la missione va avanti senza rientro")
+    check("arrivo girato verso" in log and len(r['gn'].headings) > 0,
+          f"viaggi GraphNav con l'arrivo girato verso la cella ({len(r['gn'].headings)})")
+    check(len(r['gn'].headings) < len(r['gn'].trips),
+          "il ritorno a wp_0 tiene l'orientamento del waypoint")
     if name == 'A':
         check("[PRECHECK]" in log, "il controllo prima dello spostamento GraphNav scatta")
         check("[FIDUCIAL] Fiducial di partenza: tag 7 a 1.00 m, dietro" in log,
