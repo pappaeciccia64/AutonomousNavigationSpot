@@ -101,6 +101,7 @@ Si arriva qui quando la frontiera è vuota, oppure prima se la batteria scende s
 | `visualizzatore_live.py` | Una figura che si aggiorna da sola durante la missione, in un terminale a parte (senza SDK) |
 | `test_e2e_loop.py`, `test_missione.py`, `test_replay.py`, `test_obiettivi.py`, `preflight.py`, `confronta_log.py` | Prove senza robot (vedi sotto) |
 | `prova_grafo.py`, `prova_anelli.py` | Prove dei grafi e della chiusura d'anello di Spot, al banco |
+| `prova_fiducial.py` | Quali fiducial vede Spot adesso e quale sceglierebbe la missione (sola lettura, robot fermo) |
 
 ---
 

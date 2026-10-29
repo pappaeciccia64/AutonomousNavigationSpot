@@ -75,6 +75,7 @@ import re
 import sys
 import time
 from multiprocessing import Pool
+from zoneinfo import ZoneInfo
 
 import numpy as np
 
@@ -94,6 +95,7 @@ GLOBAL_LIVE_MIN_MATCH = 0.995      # invariante 2
 HARD_PITCH_DEG = 18.0              # invariante 3
 ARCS_PER_SCAN = 60                 # archi a caso per scansione, invariante 2
 FAST_FULL_CHECKS = 3               # --veloce: confronti con la costruzione completa
+MISSION_TZ = ZoneInfo('Europe/Rome')   # ora dei timestamp di segments.csv (quella del portatile in missione)
 
 
 def _quiet():
@@ -380,7 +382,7 @@ def gait_check(m):
     for x in csv.DictReader(open(m['segments'])):
         if x['slope_source'] != 'live':
             continue
-        t0 = datetime.datetime.strptime(x['timestamp'], '%Y-%m-%d %H:%M:%S').timestamp() - float(x['duration_s'])
+        t0 = datetime.datetime.strptime(x['timestamp'], '%Y-%m-%d %H:%M:%S').replace(tzinfo=MISSION_TZ).timestamp() - float(x['duration_s'])
         prev = [f for t, f in times if t <= t0 + 1.0]
         if not prev:
             continue
