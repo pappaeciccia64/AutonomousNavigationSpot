@@ -594,6 +594,28 @@ class TentativoCella:
     mobility_kwargs: dict facoltativo che impone l'andatura (locomotion_hint, ground_mu_hint,
         swing_height) per tutti i tratti, passato fino a movements.relative_move attraverso
         navigate_to. Vuoto = andatura scelta tratto per tratto (select_mobility_params).
+
+    COME E' FATTO. _prepara una volta (_prima_scansione, _dati_locali_nel_grafo,
+    _obiettivo_e_percorso, _azzera_contatori), poi _giro finche' una fase decide l'esito:
+
+      _guardie              troppi giri, batteria bassa, caduta, robot fermo da troppo
+      _scansione_e_grafo    _scansione_fresca, _aggiorna_grafo, _ripianifica
+      _fronte_e_decisione   scorciatoia, fronte sicuro, arcVerification.decide_next_move:
+                            move / reached_node / arrived / wait / blocked
+      _rotazione            (move) non posso girarmi: _avanza_nel_cono, _arretra_per_ruotare,
+                            trappola, tratto scartato
+      _nodo_o_arrivo        (reached_node, arrived)
+      _attesa               (wait) _cambia_obiettivo_irraggiungibile, _ripianifica_subito,
+                            altrimenti riguardo da fermo
+      _blocco               (blocked) obiettivo da cambiare, trappola, tratto fuori per la
+                            missione, nuova strada o ritorno con GraphNav
+      _esegui_tratti        (move) _controlla_posa_d_arrivo, poi per ogni gamba
+                            _prepara_gamba e _cammina_tratto (_terreno_del_tratto,
+                            _muovi_e_registra, esito)
+
+    Azioni comuni alle fasi: _usa_percorso, _scarta_tratto (per ora / per il tentativo / per
+    la missione), _strada_fatta e _sosta, _ventaglio ed _esci_dalla_trappola,
+    _riscegli_obiettivo, _ritorno (GraphNav all'indietro, vedi _trap_backtrack).
     """
 
     def __init__(self, local_grid, global_grid, robot_state_client, command_client,
@@ -645,6 +667,18 @@ class TentativoCella:
 
         print(f"\n[ATTEMPT] Provo a entrare nella cella ({self.target_row},{self.target_col}) dalla posizione attuale...")
 
+        scan = self._prima_scansione()
+        if scan is None:
+            return FALLITO
+        self._dati_locali_nel_grafo(scan)
+        esito = self._obiettivo_e_percorso(scan)
+        if esito is not None:
+            return esito
+        self._azzera_contatori()
+
+    def _prima_scansione(self):
+        """Rialzo se caduto, prima scansione del tentativo, posa del robot, mappe globali
+        aggiornate e salvate. La scansione elaborata, o None se non arriva."""
         # Il robot arriva qui da un altro movimento (navigazione fra celle, ritirata): se e'
         # caduto nel frattempo si rialza prima di tutto. Solleva RobotFallenError se non puo'.
         # Poi esce dal disco pericoloso ripercorrendo i propri passi: rialzato, e' ancora DENTRO
@@ -654,16 +688,13 @@ class TentativoCella:
             retreat_along_traveled_path(self.env, self.robot_state_client, self.command_client,
                                         mobility_kwargs=self.mobility_kwargs)
 
-        local_grid_client = self.local_grid.local_grid_client
-
         # 1. La scansione: i layer in una richiesta, poi (sotto) la loro elaborazione
         scan = self.local_grid.fetch_scan(self.robot_state_client)
         if scan is None:
             print("[ERROR] Rilevamento griglie locali fallito.")
-            return FALLITO
-        grids_data, main_proto = scan.grids_data, scan.proto
+            return None
+        main_proto = scan.proto
         pts, cells_obstacle_dist = scan.pts, scan.od
-        terrain_values, valid_values = scan.terrain_raw, scan.valid
         num_x, num_y, cell_size = scan.num_x, scan.num_y, scan.cell_size
 
         # =========================================================================
@@ -694,9 +725,7 @@ class TentativoCella:
         self.local_grid.process_scan(scan, self.robot_x, self.robot_y, self.robot_yaw,
                                 ground_label="scan-iniziale")
         self.footprint_mask_2d, terrain_real, is_valid = scan.footprint_mask, scan.terrain, scan.is_valid
-        grad_values, rough_values, obstacle_mask = scan.grad, scan.rough, scan.obstacle_mask
-        grad_for_prm = grad_values.copy()
-        rough_for_prm = rough_values.copy()
+        obstacle_mask = scan.obstacle_mask
 
         # Aggiorna le mappe globali (occupazione e terreno) con i dati appena processati
         spotGrid.fold_scan_into_global_maps(self.global_map, self.global_terrain_map, pts, terrain_real, obstacle_mask,
@@ -713,9 +742,18 @@ class TentativoCella:
             pkl_terrain_path = os.path.join(self.mission_folder, "global_terrain_map.pkl")
             self.global_terrain_map.mission_z0 = MISSION_CTX.get('mission_z0')
             self.global_terrain_map.save_map(pkl_terrain_path)
+        return scan
 
-        save_path = os.path.join(self.mission_folder,
-                                 f"iteration_{self.iteration}_cell_{self.target_row}_{self.target_col}.png") if self.mission_folder else None
+    def _dati_locali_nel_grafo(self, scan):
+        """Terreno, pendenza e ostacoli della scansione nel PRM, poi aggiornamento degli archi."""
+        pts, cells_obstacle_dist, valid_values = scan.pts, scan.od, scan.valid
+        num_x, num_y, cell_size = scan.num_x, scan.num_y, scan.cell_size
+        terrain_real, is_valid = scan.terrain, scan.is_valid
+        grad_values, rough_values = scan.grad, scan.rough
+        grad_for_prm = grad_values.copy()
+        rough_for_prm = rough_values.copy()
+        main_proto = scan.proto
+        transforms_snapshot = main_proto.local_grid.transforms_snapshot
 
         # ================================================================== #
         # DATI LOCALI NEL PRM: terreno, pendenza e rugosita' della scansione
@@ -797,7 +835,15 @@ class TentativoCella:
         # sopravvivono alle ricostruzioni DENTRO il tentativo.
         self.prm_graph.clear_penalties_for_attempt()
 
-        # ================================================================== #
+    def _obiettivo_e_percorso(self, scan):
+        """Nodo del robot, punto obiettivo nella cella, briciola di partenza e primo percorso.
+        FALLITO se nella cella non c'e' nessun punto obiettivo valido."""
+        pts, cells_obstacle_dist, valid_values = scan.pts, scan.od, scan.valid
+        num_x, num_y, cell_size = scan.num_x, scan.num_y, scan.cell_size
+        terrain_real, obstacle_mask = scan.terrain, scan.obstacle_mask
+        grad_values, rough_values = scan.grad, scan.rough
+        save_path = os.path.join(self.mission_folder,
+                                 f"iteration_{self.iteration}_cell_{self.target_row}_{self.target_col}.png") if self.mission_folder else None
 
         # Solo celle visitate + cella del robot + cella obiettivo (vedi PLAN_ONLY_EXPLORED_CELLS).
         mission_graph.restrict_planning_to_explored_cells(self.prm_graph, self.env, self.target_row, self.target_col,
@@ -875,7 +921,10 @@ class TentativoCella:
             cells_obstacle_dist=cells_obstacle_dist, valid_values=valid_values,
             grad_values=grad_values, rough_values=rough_values
         )
+        return None
 
+    def _azzera_contatori(self):
+        """Contatori e memorie del tentativo, prima del primo giro."""
         # ===================================================================================
         # CICLO DI NAVIGAZIONE CON IL FRONTE SICURO
         #
@@ -1119,6 +1168,18 @@ class TentativoCella:
     def _scansione_e_grafo(self):
         """Scansione fresca, mappe globali, dati locali nel PRM ed eventuale
         ripianificazione (REFRESH A EVENTI); si esce dal ciclo se non c'e' piu' percorso."""
+        esito = self._scansione_fresca()
+        if esito is not None:
+            return esito
+        touched_nodes = self._aggiorna_grafo()
+        if touched_nodes:
+            self._ripianifica(touched_nodes)
+        if not self.path_waypoints:
+            return INTERROMPI
+
+    def _scansione_fresca(self):
+        """Scansione, elaborazione, mappe globali, dati locali nel PRM, fotografia per il
+        fronte e mappa dello spazio libero. FALLITO se la scansione non arriva."""
         # 1. SCANSIONE FRESCA, prima di tutto il resto
         scan = self.local_grid.fetch_scan(self.robot_state_client)
         if scan is None:
@@ -1181,6 +1242,9 @@ class TentativoCella:
         spotGrid.update_clearance_map(self.global_map, self.pts_up, self.snap, self.is_valid_up, self.unwritten_up,
                               _gm_core_up, (self.robot_x, self.robot_y))
 
+    def _aggiorna_grafo(self):
+        """Archi rivalutati sui dati nuovi (solo dopo un movimento o un evento), nodi negli
+        ostacoli fuori, rifiuti di rotazione ancora validi. I nodi toccati dal refresh."""
         # Lo scarto preliminare degli archi legge la obstacle_distance FILTRATA
         # (mediana su 3 scansioni + isteresi), la stessa del fronte.
         self.prm_graph.set_live_obstacles(self.snap.obstacle_dist, self.snap.seen, self.snap.origin_x, self.snap.origin_y,
@@ -1241,57 +1305,58 @@ class TentativoCella:
             if (from_id == self.robot_node_id and n_fails > 0
                     and float(np.hypot(self.robot_x - fx, self.robot_y - fy)) <= prm_graph_module.ANCHOR_ON_NODE_M):
                 prm_graph_module.mark_edge_blocked_soft(self.prm_graph, from_id, to_id)
+        return touched_nodes
 
-        if touched_nodes:
-            current_plan_ids = [self.robot_node_id] + [w[0] for w in self.path_waypoints]
-            chosen_path_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id,
-                                                           current_path_ids=current_plan_ids, margin=0.10)
+    def _ripianifica(self, touched_nodes):
+        """Dijkstra dal nodo del robot all'obiettivo sul grafo aggiornato; il percorso cambia
+        solo se il nuovo costa almeno il 10% in meno. Senza percorso, nuovo obiettivo se e'
+        isolato l'obiettivo (REPICK_ON_REPLAN_FAIL)."""
+        current_plan_ids = [self.robot_node_id] + [w[0] for w in self.path_waypoints]
+        chosen_path_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id,
+                                                       current_path_ids=current_plan_ids, margin=0.10)
 
-            if chosen_path_ids is None:
-                n_free = self.prm_graph.reachable_count(self.robot_node_id, P.REPLAN_FAIL_ROBOT_FREE_NODES)
-                if (P.REPICK_ON_REPLAN_FAIL and self.goal_repicks < P.MAX_BLOCK_REPLANS
-                        and n_free >= P.REPLAN_FAIL_ROBOT_FREE_NODES):
-                    # Dal robot il grafo va ancora da qualche parte: e' l'obiettivo a essere
-                    # rimasto isolato. Se ne cerca subito un altro con un percorso; se non
-                    # c'e', resta il piano di prima come sotto.
-                    MISSION_STATS['replan_fail_repicks'] = MISSION_STATS.get('replan_fail_repicks', 0) + 1
-                    self._riscegli_obiettivo(
-                        f"Ripianificazione fallita: nessun percorso da {self.robot_node_id} all'obiettivo "
-                        f"({self.target_x:.2f}, {self.target_y:.2f}) nel grafo aggiornato, mentre "
-                        f"dal robot il grafo prosegue: e' isolato l'obiettivo.",
-                        "nessun percorso nel grafo aggiornato")
-                else:
-                    print(f"[REPLAN FALLITO] Nessun percorso esistente da {self.robot_node_id} a "
-                          f"{self.goal_id} nel grafo aggiornato. Mantengo il percorso precedente: il "
-                          f"fronte sicuro decide comunque fin dove si puo' avanzare.")
-            elif chosen_path_ids != current_plan_ids:
-                self._usa_percorso(chosen_path_ids)
-                print(f"[REPLAN] Percorso aggiornato ({len(touched_nodes)} nodi locali rivalutati): "
-                      f"{len(self.path_waypoints)} waypoint rimanenti.")
-
-                self.replan_counter += 1
-                MISSION_STATS['replan_count'] += 1
-                replan_save_path = os.path.join(
-                    self.mission_folder, f"iteration_{self.iteration}_cell_{self.target_row}_{self.target_col}_replan_{self.replan_counter}.png"
-                ) if self.mission_folder else None
-
-                visualize_grid_with_candidates(
-                    pts=self.pts_up, terrain_real=self.terrain_real_up, obstacle_mask=self.obstacle_mask_updated,
-                    robot_x=self.robot_x, robot_y=self.robot_y,
-                    candidates={'rejected': [], 'valid': []},
-                    chosen_point=(self.target_x, self.target_y), iteration=self.iteration, env=self.env,
-                    save_path=replan_save_path, prm_graph=self.prm_graph, chosen_path=self.full_path_coords,
-                    cells_obstacle_dist=self.cells_obs_up, valid_values=self.valid_up,
-                    grad_values=self.grad_up, rough_values=self.rough_up,
-                    include_diagnostics=False  # leggero: vista principale e mappa globale
-                )
+        if chosen_path_ids is None:
+            n_free = self.prm_graph.reachable_count(self.robot_node_id, P.REPLAN_FAIL_ROBOT_FREE_NODES)
+            if (P.REPICK_ON_REPLAN_FAIL and self.goal_repicks < P.MAX_BLOCK_REPLANS
+                    and n_free >= P.REPLAN_FAIL_ROBOT_FREE_NODES):
+                # Dal robot il grafo va ancora da qualche parte: e' l'obiettivo a essere
+                # rimasto isolato. Se ne cerca subito un altro con un percorso; se non
+                # c'e', resta il piano di prima come sotto.
+                MISSION_STATS['replan_fail_repicks'] = MISSION_STATS.get('replan_fail_repicks', 0) + 1
+                self._riscegli_obiettivo(
+                    f"Ripianificazione fallita: nessun percorso da {self.robot_node_id} all'obiettivo "
+                    f"({self.target_x:.2f}, {self.target_y:.2f}) nel grafo aggiornato, mentre "
+                    f"dal robot il grafo prosegue: e' isolato l'obiettivo.",
+                    "nessun percorso nel grafo aggiornato")
             else:
-                print(f"[REPLAN STABILE] Percorso invariato da {self.robot_node_id} a {self.goal_id} "
-                      f"({len(touched_nodes)} nodi locali rivalutati): l'alternativa non "
-                      f"supera la soglia di stabilita'. Proseguo sul piano corrente.")
+                print(f"[REPLAN FALLITO] Nessun percorso esistente da {self.robot_node_id} a "
+                      f"{self.goal_id} nel grafo aggiornato. Mantengo il percorso precedente: il "
+                      f"fronte sicuro decide comunque fin dove si puo' avanzare.")
+        elif chosen_path_ids != current_plan_ids:
+            self._usa_percorso(chosen_path_ids)
+            print(f"[REPLAN] Percorso aggiornato ({len(touched_nodes)} nodi locali rivalutati): "
+                  f"{len(self.path_waypoints)} waypoint rimanenti.")
 
-        if not self.path_waypoints:
-            return INTERROMPI
+            self.replan_counter += 1
+            MISSION_STATS['replan_count'] += 1
+            replan_save_path = os.path.join(
+                self.mission_folder, f"iteration_{self.iteration}_cell_{self.target_row}_{self.target_col}_replan_{self.replan_counter}.png"
+            ) if self.mission_folder else None
+
+            visualize_grid_with_candidates(
+                pts=self.pts_up, terrain_real=self.terrain_real_up, obstacle_mask=self.obstacle_mask_updated,
+                robot_x=self.robot_x, robot_y=self.robot_y,
+                candidates={'rejected': [], 'valid': []},
+                chosen_point=(self.target_x, self.target_y), iteration=self.iteration, env=self.env,
+                save_path=replan_save_path, prm_graph=self.prm_graph, chosen_path=self.full_path_coords,
+                cells_obstacle_dist=self.cells_obs_up, valid_values=self.valid_up,
+                grad_values=self.grad_up, rough_values=self.rough_up,
+                include_diagnostics=False  # leggero: vista principale e mappa globale
+            )
+        else:
+            print(f"[REPLAN STABILE] Percorso invariato da {self.robot_node_id} a {self.goal_id} "
+                  f"({len(touched_nodes)} nodi locali rivalutati): l'alternativa non "
+                  f"supera la soglia di stabilita'. Proseguo sul piano corrente.")
 
     def _fronte_e_decisione(self):
         """Scorciatoia, fronte sicuro sul percorso e decisione (arcVerification.decide_next_move):
