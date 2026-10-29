@@ -6,6 +6,10 @@ Le missioni sono indicate come `giorno-mese ora` (per esempio `13-10 12:40`); i 
 
 ---
 
+## 2026-10-29
+
+- **Visualizzatore dal vivo** (`visualizzatore_live.py`, nuovo). Durante la missione non c'era modo di vedere cosa stesse pensando il robot se non leggendo il log. Ora, in un secondo terminale, una figura che si aggiorna da sola quando arriva una scansione o una riga di log nuova: mappa vista finora, ultima scansione, celle, grafo PRM, strada fatta, percorso pianificato, obiettivo, fronte sicuro, robot, e a destra lo stato e le ultime righe utili del log. Legge soltanto i file che la missione scrive già (`scans/*.npz`, `iteration_*_vis.npz`, `mission_log.txt`, `trajectory.csv`): il codice della missione non cambia. Ridisegna solo quando c'è qualcosa di nuovo (~0.4 s di CPU a disegno). Con `--rigioca` rigioca una missione finita, con `--png` salva una figura (anche a un'ora data, `--fino-a`). Provato sulla missione del 28-10 14:23.
+
 ## 2026-10-28 sera (dopo le prove all'aperto)
 
 Verso la versione su `main`: le correzioni piccole emerse dalle prove all'aperto, ognuna con la sua prova senza robot.

@@ -53,6 +53,7 @@ Tutti gli interruttori e i numeri della missione si cambiano in **`parametri.py`
 
 ## Durante la prova
 
+- Per seguire la missione: in un secondo terminale `python3 visualizzatore_live.py` (l'ultima missione, si aggiorna da sola; `f` segue il robot o mostra tutto). Avviarlo dopo che la missione è partita. Se si chiude o si blocca, la missione non ne risente.
 - Annotare l'**ora** di ogni cosa strana (il log ha l'ora a ogni riga): si ritrova subito nel log e nelle scansioni.
 - **Erba**: quando il robot si ferma o gira attorno a qualcosa che sembra erba, annotare l'ora e fare una foto di cosa c'è davanti. Serve come verità per confrontare le scansioni (con i layer `intensity` e `no_step`).
 - I messaggi di log sono in italiano dal 21-10; le etichette fra parentesi quadre (`[ATTEMPT]`, `[BLOCKED]`, …) sono rimaste le stesse.

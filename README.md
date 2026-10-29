@@ -98,6 +98,7 @@ Si arriva qui quando la frontiera è vuota, oppure prima se la batteria scende s
 | `batteria.py` | Carica e consumo della batteria (`battery.csv`), decisione di rientro a batteria bassa |
 | `spotLogInUtils.py`, `spotUtils.py` | Collegamento al robot, E-Stop, posizione |
 | `mission_report.py`, `mission_viewer.py` | Rapporto e figure, dopo la missione (senza SDK) |
+| `visualizzatore_live.py` | Una figura che si aggiorna da sola durante la missione, in un terminale a parte (senza SDK) |
 | `test_e2e_loop.py`, `test_missione.py`, `test_replay.py`, `test_obiettivi.py`, `preflight.py`, `confronta_log.py` | Prove senza robot (vedi sotto) |
 | `prova_grafo.py`, `prova_anelli.py` | Prove dei grafi e della chiusura d'anello di Spot, al banco |
 
@@ -139,6 +140,15 @@ Ogni missione ha un nome `Mission_<giorno-mese-anno>_<ora>` e tre cartelle:
 | `graph/<missione>/` | grafo GraphNav scaricato, con le istantanee dei waypoint | 150 MB |
 
 ---
+
+## Durante la missione
+
+```bash
+python3 visualizzatore_live.py                   # in un secondo terminale: l'ultima missione, dal vivo
+python3 visualizzatore_live.py 28-10-2026_14-23-50 --rigioca --velocita 20   # una missione finita, rigiocata
+```
+
+Una sola figura con tutto sopra: mappa vista finora (rosso ostacolo, verde libero), ultima scansione nel riquadro azzurro, celle (verde visitata, rossa bloccata, bordo blu = obiettivo), grafo PRM, strada fatta (blu, tratteggio = GraphNav), percorso pianificato (arancione), obiettivo (stella), punto dove si ferma il fronte (X) e avanzamento consentito (verde spesso), robot (freccia). A destra cella, decisione, fronte, avanzamento, batteria e le ultime righe utili del log. Legge solo i file che la missione scrive già: non la rallenta e non la può fermare. Tasti: `f` segui il robot / tutta la missione, spazio pausa, `q` esci.
 
 ## Dopo la missione
 
