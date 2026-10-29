@@ -24,7 +24,7 @@ import bosdyn.client.lease
 import bosdyn.client.util
 import bosdyn.geometry
 from bosdyn.api.graph_nav import graph_nav_pb2, recording_pb2, nav_pb2, map_processing_pb2
-from bosdyn.client.frame_helpers import VISION_FRAME_NAME, get_a_tform_b, get_odom_tform_body
+from bosdyn.client.frame_helpers import VISION_FRAME_NAME, BODY_FRAME_NAME, get_a_tform_b, get_odom_tform_body
 from bosdyn.client.graph_nav import GraphNavClient, map_pb2
 from bosdyn.client.map_processing import MapProcessingServiceClient
 from bosdyn.client.recording import GraphNavRecordingServiceClient
@@ -1096,12 +1096,12 @@ def graphnav_arrival_heading(recordingInterface, waypoint_id, face_xy, label):
 
 
 def graphnav_navigate_to(recordingInterface, waypoint_id, robot_state_client, command_client, label,
-                          timeout_s=P.GRAPHNAV_TIMEOUT_S, face_xy=None):
+                          timeout_s=P.GRAPHNAV_TIMEOUT_S, face_xy=None, move='graphnav'):
     """Porta il robot a un waypoint con GraphNav. True solo se ci arriva davvero.
 
     face_xy: punto VISION verso cui arrivare girati (vedi graphnav_arrival_heading); None =
     orientamento del waypoint. Con GRAPHNAV_ARRIVAL_HEADING = 'libero', se face_xy c'e' il
-    robot arriva senza girarsi."""
+    robot arriva senza girarsi. move: etichetta del movimento in trajectory.csv."""
     # Prima di muoversi: chiusure d'anello di Spot (a registrazione ferma). Le scorciatoie
     # dalla mappa le aggiunge chi chiama, PRIMA di fermare la registrazione.
     # Tutto cio' che sta qui dentro finisce nella voce 'GraphNav' di [TEMPO]: e' una delle
@@ -1109,7 +1109,7 @@ def graphnav_navigate_to(recordingInterface, waypoint_id, robot_state_client, co
     _t_gn = time.perf_counter()
     try:
         # 2026-10-26: anche i tratti GraphNav finiscono in trajectory.csv (vedi _TRAJECTORY_COLUMNS).
-        with TrajectoryLog(robot_state_client, 'graphnav'):
+        with TrajectoryLog(robot_state_client, move):
             return _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_client,
                                                command_client, label, timeout_s, face_xy)
     finally:
@@ -1258,6 +1258,8 @@ def find_fiducials(robot, robot_state_client, wait_s=0.0, fiducial_id=None):
                     continue
                 dx, dy = pose.x - rx, pose.y - ry
                 found.append({'id': int(tag.tag_id), 'xy': (float(pose.x), float(pose.y)),
+                              'robot_nel_tag': _robot_in_tag_frame(o.transforms_snapshot, frame, pose,
+                                                                    robot_state_client),
                               'dist': float(np.hypot(dx, dy)),
                               'avanti': float(dx * np.cos(yaw) + dy * np.sin(yaw)),
                               'sinistra': float(-dx * np.sin(yaw) + dy * np.cos(yaw)),
@@ -1268,6 +1270,31 @@ def find_fiducials(robot, robot_state_client, wait_s=0.0, fiducial_id=None):
         if found or time.time() >= t_end:
             return sorted(found, key=lambda f: f['dist'])
         time.sleep(0.3)
+
+
+def _robot_in_tag_frame(snapshot, frame, vision_tform_tag, robot_state_client):
+    """Posizione del corpo nel frame del tag (x, y, z), o None. Il tag e' fermo, quindi questa
+    posizione non risente della deriva dell'odometria: confrontata con quella della partenza
+    dice di quanto il robot e' davvero lontano dal punto di partenza."""
+    try:
+        tag_tform_body = get_a_tform_b(snapshot, frame, BODY_FRAME_NAME)
+        if tag_tform_body is None:
+            x, y, z, q = spotUtils.getPosition(robot_state_client)
+            vision_tform_body = SE3Pose(x, y, z, Quat(w=q.w, x=q.x, y=q.y, z=q.z))
+            tag_tform_body = vision_tform_tag.inverse() * vision_tform_body
+        return (float(tag_tform_body.x), float(tag_tform_body.y), float(tag_tform_body.z))
+    except Exception:
+        return None
+
+
+def _scarto_dalla_partenza(start, now):
+    """Distanza (m) fra la posizione del robot alla partenza e adesso, nel frame del tag di
+    partenza. Senza la posa del tag (None), dalle posizioni VISION del tag rispetto al robot,
+    che risentono della rotazione dell'odometria."""
+    a, b = start.get('robot_nel_tag'), now.get('robot_nel_tag')
+    if a is not None and b is not None:
+        return float(np.linalg.norm(np.subtract(a, b)))
+    return None
 
 
 def describe_fiducial(f):
@@ -1298,7 +1325,66 @@ def graphnav_check_start_fiducial(robot, robot_state_client):
     print(f"[FIDUCIAL] Al ritorno su wp_0 rivedo il {describe_fiducial(now[0])}. Nel frame "
           f"VISION si e' spostato di {drift:.2f} m (dx {dx:+.2f}, dy {dy:+.2f}) da quando "
           f"l'ho visto alla partenza: e' la deriva dell'odometria di tutta la missione.")
-    return drift
+    offset = _scarto_dalla_partenza(start, now[0])
+    if offset is not None:
+        print(f"[WP0] Secondo il tag il robot e' a {offset:.2f} m dal punto di partenza.")
+    return {'drift': drift, 'offset': offset}
+
+
+def graphnav_correct_wp0_with_fiducial(robot, recordingInterface, robot_state_client, command_client,
+                                       offset):
+    """
+    CORREZIONE DEL RITORNO A wp_0 (vedi WP0_FIDUCIAL_CORRECTION). GraphNav dice "arrivato",
+    ma il tag di partenza dice che il robot e' a `offset` m dalla partenza: GraphNav si e'
+    localizzato male (29-10 10:57: 1.2 m in un prato con una sola siepe come riferimento).
+    Si rilocalizza GraphNav sul tag (come all'avvio) e si torna di nuovo a wp_0, fino a
+    WP0_FIDUCIAL_MAX_CORRECTIONS volte, finche' lo scarto non scende sotto
+    WP0_FIDUCIAL_TOLERANCE_M. Se il tag non si vede o la rilocalizzazione non riesce, ci si
+    ferma dove si e'. Lo scarto finale, o quello di partenza se non si e' corretto niente.
+    Mai eccezioni.
+    """
+    start = MISSION_CTX.get('start_fiducial')
+    MISSION_STATS['wp0_offset_m'] = round(offset, 2)
+    MISSION_STATS['wp0_corrections'] = 0
+    if not P.WP0_FIDUCIAL_CORRECTION or not start or offset <= P.WP0_FIDUCIAL_TOLERANCE_M:
+        MISSION_STATS['wp0_offset_final_m'] = round(offset, 2)
+        return offset
+    try:
+        wp0 = next(w for w in recordingInterface._get_graph(force_refresh=True).waypoints
+                   if w.annotations.name == "wp_0")
+    except Exception as e:
+        print(f"[WP0] Correzione non possibile: wp_0 non trovato ({e}).")
+        MISSION_STATS['wp0_offset_final_m'] = round(offset, 2)
+        return offset
+    for k in range(1, P.WP0_FIDUCIAL_MAX_CORRECTIONS + 1):
+        print(f"[WP0] CORREZIONE {k}/{P.WP0_FIDUCIAL_MAX_CORRECTIONS}: GraphNav dice arrivato, ma "
+              f"secondo il tag {start['id']} il robot e' a {offset:.2f} m dalla partenza (oltre "
+              f"{P.WP0_FIDUCIAL_TOLERANCE_M:.2f} m). Rilocalizzo GraphNav sul tag e torno a wp_0.")
+        try:
+            ok = recordingInterface.initialize_with_fiducial(robot_state_client, fiducial_id=start['id'])
+        except Exception as e:
+            print(f"[WP0] Rilocalizzazione sul tag non riuscita ({e}).")
+            ok = False
+        if not ok:
+            print("[WP0] Senza rilocalizzazione sul tag non correggo: resto dove sono.")
+            break
+        arrived = graphnav_navigate_to(recordingInterface, wp0.id, robot_state_client, command_client,
+                                       f"correzione {k} del ritorno a wp_0", move='graphnav_correzione')
+        MISSION_STATS['wp0_corrections'] = k
+        now = find_fiducials(robot, robot_state_client, wait_s=P.START_FIDUCIAL_WAIT_S, fiducial_id=start['id'])
+        new = _scarto_dalla_partenza(start, now[0]) if now else None
+        if new is None:
+            print(f"[WP0] Dopo la correzione {k} il tag non si vede piu' (GraphNav: "
+                  f"{'arrivato' if arrived else 'non arrivato'}): non so di quanto sono lontano.")
+            offset = float('nan')
+            break
+        print(f"[WP0] Dopo la correzione {k}: a {new:.2f} m dalla partenza (prima {offset:.2f} m), "
+              f"GraphNav {'arrivato' if arrived else 'NON arrivato'}.")
+        offset = new
+        if offset <= P.WP0_FIDUCIAL_TOLERANCE_M:
+            break
+    MISSION_STATS['wp0_offset_final_m'] = None if not np.isfinite(offset) else round(offset, 2)
+    return offset
 
 
 def graphnav_return_to_start(recordingInterface, robot_state_client, command_client):

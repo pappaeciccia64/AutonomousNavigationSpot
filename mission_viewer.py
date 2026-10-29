@@ -752,10 +752,11 @@ class MissionContext:
                 try:
                     with open(cand, newline='', encoding='utf-8') as f:
                         rows = list(csv.DictReader(f))
-                    # quarta colonna: 1 se il campione viene da uno spostamento GraphNav
-                    # (colonna 'move', dal 2026-10-26), altrimenti 0
+                    # quarta colonna: 1 spostamento GraphNav (colonna 'move', dal 2026-10-26),
+                    # 2 correzione del ritorno a wp_0 con il fiducial (dal 29-10), 0 il resto
+                    kind = {'graphnav': 1.0, 'graphnav_correzione': 2.0}
                     return np.array([(float(r['time']), float(r['x']), float(r['y']),
-                                      float(r.get('move') == 'graphnav')) for r in rows]).reshape(-1, 4)
+                                      kind.get(r.get('move'), 0.0)) for r in rows]).reshape(-1, 4)
                 except Exception as e:
                     print(f"[viewer] trajectory.csv non leggibile: {e}")
         return None
@@ -1244,15 +1245,16 @@ def _prebuild_global_images(ctx):
 
 def _traj_runs(tr):
     """
-    Spezza la traiettoria (t, x, y, graphnav) dove fra due campioni consecutivi c'e' un salto
-    oltre TRAJ_GAP_M, e dove cambia il tipo di movimento. Restituisce
-    (tratti registrati come (punti, graphnav), salti come coppie di punti).
+    Spezza la traiettoria (t, x, y, tipo) dove fra due campioni consecutivi c'e' un salto
+    oltre TRAJ_GAP_M, e dove cambia il tipo di movimento (0 a zampe, 1 GraphNav, 2 correzione
+    del ritorno a wp_0). Restituisce (tratti registrati come (punti, tipo), salti come coppie
+    di punti).
     """
     if len(tr) == 0:
         return [], []
-    gn = tr[:, 3] > 0.5 if tr.shape[1] > 3 else np.zeros(len(tr), bool)
+    kind = np.rint(tr[:, 3]).astype(int) if tr.shape[1] > 3 else np.zeros(len(tr), int)
     jump = np.hypot(np.diff(tr[:, 1]), np.diff(tr[:, 2])) > TRAJ_GAP_M
-    cuts = np.flatnonzero(jump | (gn[1:] != gn[:-1])) + 1
+    cuts = np.flatnonzero(jump | (kind[1:] != kind[:-1])) + 1
     runs = []
     for idx in np.split(np.arange(len(tr)), cuts):
         if len(idx):
@@ -1260,10 +1262,9 @@ def _traj_runs(tr):
             k = idx[0]
             if k > 0 and not jump[k - 1]:
                 idx = np.concatenate(([k - 1], idx))
-            runs.append((tr[idx, 1:3], bool(gn[idx[-1]])))
+            runs.append((tr[idx, 1:3], int(kind[idx[-1]])))
     gaps = [(tr[k - 1, 1:3], tr[k, 1:3]) for k in np.flatnonzero(jump) + 1]
     return runs, gaps
-
 
 def _hillshade(h, res):
     """Ombreggiatura del rilievo (luce da nord-ovest, 45 gradi): 1 = piano. NaN -> 1."""
@@ -1491,10 +1492,12 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=Fals
         runs, gaps = _traj_runs(tr)
         halo = [pe.Stroke(linewidth=3.2, foreground='white', alpha=0.8), pe.Normal()]
         labelled = set()
-        for r, is_gn in runs:
-            lab = 'percorso reale (GraphNav)' if is_gn else 'percorso reale'
-            ax.plot(r[:, 0], r[:, 1], '-', color='darkorange' if is_gn else 'tab:blue', lw=1.5,
-                    zorder=5, path_effects=halo, label=None if lab in labelled else lab)
+        for r, kind in runs:
+            lab, col = {1: ('percorso reale (GraphNav)', 'darkorange'),
+                        2: ('correzione del ritorno a wp_0 (fiducial)', 'crimson')}.get(
+                kind, ('percorso reale', 'tab:blue'))
+            ax.plot(r[:, 0], r[:, 1], '-', color=col, lw=2.5 if kind == 2 else 1.5,
+                    zorder=6 if kind == 2 else 5, path_effects=halo, label=None if lab in labelled else lab)
             labelled.add(lab)
         for k, (a, b) in enumerate(gaps):
             # senza bordo bianco: sotto un tratteggio il bordo continuo lo fa sembrare una linea piena

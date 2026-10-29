@@ -34,7 +34,7 @@ MISSION_GRAPH_SAMPLING = 'casuale'
 MISSION_RANDOM_DISTRIBUTION = 'poisson'
 # Nodi per m2: con 4 il numero di nodi e' quello del reticolo a passo 0.5 m; 5 un po' di
 # piu', per i passaggi stretti.
-MISSION_RANDOM_DENSITY = 4.0
+MISSION_RANDOM_DENSITY = 9.0
 MISSION_RANDOM_SEED = None              # None = estratto a caso, e scritto nel log
 MISSION_POISSON_MIN_DIST_M = None       # None = 0.75 / sqrt(densita')
 
@@ -402,5 +402,15 @@ GRAPHNAV_PRECHECK = True
 #   START_FIDUCIAL_WAIT_S -- quanto aspettare che Spot lo veda (appena in piedi ci mette un po').
 START_FIDUCIAL_ID = None
 START_FIDUCIAL_WAIT_S = 3.0
+# CORREZIONE DEL RITORNO A wp_0 con il fiducial di partenza (graphnav_correct_wp0_with_fiducial).
+# GraphNav puo' dire "arrivato" essendo lontano dalla partenza: si localizza confrontando le
+# scansioni con quelle del waypoint, e in un posto povero di riferimenti sbaglia (29-10 10:57:
+# 1.2 m, prato con una sola siepe; la deriva dell'odometria era 2.8 m). Il tag di partenza e'
+# fermo: la posizione del robot nel suo frame dice lo scarto vero. Oltre
+# WP0_FIDUCIAL_TOLERANCE_M ci si rilocalizza sul tag e si torna a wp_0, al massimo
+# WP0_FIDUCIAL_MAX_CORRECTIONS volte. False = solo la misura, come prima.
+WP0_FIDUCIAL_CORRECTION = True
+WP0_FIDUCIAL_TOLERANCE_M = 0.30
+WP0_FIDUCIAL_MAX_CORRECTIONS = 2
 
 SHORTCUT_MAX_DIST_M = 2.5          # oltre, il tratto non sta comunque nella finestra

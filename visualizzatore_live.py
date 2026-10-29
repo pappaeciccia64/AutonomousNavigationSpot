@@ -51,7 +51,7 @@ REFRESH_S = 1.0             # ogni quanto si rilegge, dal vivo
 LOG_TAGS = ('[PROGRESSO]', '[TARGET]', '[ATTEMPT]', '[VISITED]', '[BLOCKED]', '[BLOCCO]',
             '[SUBITO]', '[REPLAN]', '[REPLAN FALLITO]', '[ARRIVO]', '[OBIETTIVO]', '[STOP]',
             '[GRAPHNAV]', '[BATTERIA]', '[FINE]', '[FRONTIERA]', '[STALLO]', '[EMERGENZA]',
-            '[QUASI]', '[PASSO FINALE]', '[RITORNO]', '[MULTINODO]', '[DEFER]', '[PRECHECK]')
+            '[QUASI]', '[PASSO FINALE]', '[RITORNO]', '[MULTINODO]', '[DEFER]', '[PRECHECK]', '[WP0]')
 N_LOG_LINES = 12
 REASON_COLORS = {'ostacolo': 'red', 'rugosita': 'darkorange', 'pendenza': 'darkorange',
                  'fine_dati': 'purple', 'fine_percorso': 'green'}
@@ -207,12 +207,38 @@ class Stato:
                 s['batteria'] = m.group(1) + '%'
         elif testo.startswith('[GRAPHNAV]'):
             s['graphnav'] = f"{ora} {testo[len('[GRAPHNAV] '):]}"
+        # Fase della missione, dall'ultima riga che la dice.
+        if testo.startswith('[ATTEMPT]'):
+            m = re.search(r'cella \((\d+),(\d+)\)', testo)
+            s['fase'] = f"esplorazione, tentativo sulla cella ({m.group(1)},{m.group(2)})" if m else "esplorazione"
+        elif testo.startswith('[GRAPHNAV]') and ': avvio' in testo:
+            s['fase'] = "viaggio con GraphNav: " + testo[len('[GRAPHNAV] '):].split(':')[0]
+        elif testo.startswith('[GRAPHNAV] prima del ritorno a wp_0'):
+            s['fase'] = "fine esplorazione: chiusura della mappa e ritorno a wp_0"
+        elif testo.startswith('[WP0] CORREZIONE'):
+            s['fase'] = "CORREZIONE del ritorno a wp_0 con il fiducial"
+        elif testo.startswith('[EMERGENZA]'):
+            s['fase'] = "EMERGENZA: " + testo[len('[EMERGENZA] '):]
+        elif testo.startswith('[TEMPO] Chiusura della missione'):
+            s['fase'] = "missione finita"
+        # Ritorno a wp_0: arrivo, scarto dal tag, correzioni.
+        if 'ritorno a wp_0: arrivato' in testo:
+            s['wp0'] = "arrivato secondo GraphNav"
+        elif 'Ritorno a wp_0 NON riuscito' in testo:
+            s['wp0'] = testo.split('] ', 1)[-1][:80]
+        m = re.search(r"\[WP0\] Secondo il tag il robot e' a ([\d.]+) m", testo)
+        if m:
+            s['wp0'] = f"{s.get('wp0', 'arrivato')}; secondo il tag a {m.group(1)} m dalla partenza"
+        m = re.search(r"\[WP0\] Dopo la correzione (\d+): a ([\d.]+) m dalla partenza \(prima ([\d.]+) m\)", testo)
+        if m:
+            s['wp0'] = f"CORRETTO con il fiducial ({m.group(1)}): da {m.group(3)} a {m.group(2)} m dalla partenza"
         if testo.startswith(LOG_TAGS):
             self.log_righe.append(f"{ora} {testo}")
             del self.log_righe[:-N_LOG_LINES]
 
     def traiettoria(self, fino_a=None):
-        """Array (t, x, y, graphnav) dalla traiettoria registrata."""
+        """Array (t, x, y, tipo) dalla traiettoria registrata: tipo 0 a zampe, 1 GraphNav,
+        2 correzione del ritorno a wp_0."""
         path = os.path.join(self.ml, "trajectory.csv")
         if not os.path.exists(path):
             return np.zeros((0, 4))
@@ -224,7 +250,8 @@ class Stato:
                         t = float(r['time'])
                         if fino_a is not None and t > fino_a:
                             break
-                        rows.append((t, float(r['x']), float(r['y']), 1.0 if r.get('move') == 'graphnav' else 0.0))
+                        tipo = {'graphnav': 1.0, 'graphnav_correzione': 2.0}.get(r.get('move'), 0.0)
+                        rows.append((t, float(r['x']), float(r['y']), tipo))
                     except (TypeError, ValueError, KeyError):
                         continue
         except OSError:
@@ -307,14 +334,18 @@ def disegna(fig, ax_map, ax_txt, st, segui, fino_a=None):
 
     tr = st.traiettoria(fino_a)
     if len(tr):
-        gn = tr[:, 3] > 0.5
+        tipo = np.rint(tr[:, 3]).astype(int)
         salto = np.r_[False, np.hypot(np.diff(tr[:, 1]), np.diff(tr[:, 2])) > 1.5]
-        for sel, ls in ((~gn, '-'), (gn, '--')):
+        for k, ls, col, lw in ((0, '-', 'royalblue', 1.4), (1, '--', 'royalblue', 1.4), (2, '-', 'crimson', 2.6)):
             xy = tr[:, 1:3].copy()
-            xy[~sel | salto] = np.nan
-            ax_map.plot(xy[:, 0], xy[:, 1], ls, color='royalblue', lw=1.4, zorder=5)
+            xy[(tipo != k) | salto] = np.nan
+            ax_map.plot(xy[:, 0], xy[:, 1], ls, color=col, lw=lw, zorder=5 if k < 2 else 8)
+        # Partenza: il primo punto registrato (nel frame VISION, quindi con la deriva dentro).
+        ax_map.plot(tr[0, 1], tr[0, 2], '^', color='black', mfc='white', ms=10, mew=1.5, zorder=9)
 
     righe = []
+    if 'fase' in st.stato_log:
+        righe.append(f"FASE             {st.stato_log['fase']}")
     if d is not None:
         rx, ry, _ = (float(v) for v in d['robot_xyz'])
         yaw = float(d['robot_yaw'])
@@ -363,6 +394,8 @@ def disegna(fig, ax_map, ax_txt, st, segui, fino_a=None):
         righe.append(f"Batteria         {s['batteria']}")
     if 'graphnav' in s:
         righe.append(f"Ultimo GraphNav  {s['graphnav'][:90]}")
+    if 'wp0' in s:
+        righe.append(f"Ritorno a wp_0   {s['wp0']}")
     righe = [w for r in righe for w in (textwrap.wrap(r, 66, subsequent_indent=' ' * 17) or [''])]
     ax_txt.text(0.0, 1.0, "\n".join(righe), va='top', ha='left', family='monospace', fontsize=9,
                 transform=ax_txt.transAxes)
@@ -372,6 +405,16 @@ def disegna(fig, ax_map, ax_txt, st, segui, fino_a=None):
     ax_map.set_aspect('equal')
     if not segui and st.mosaico:
         ax_map.autoscale()
+    from matplotlib.lines import Line2D
+    leg = [Line2D([], [], color='royalblue', lw=1.4, label='strada fatta'),
+           Line2D([], [], color='royalblue', lw=1.4, ls='--', label='GraphNav'),
+           Line2D([], [], color='crimson', lw=2.6, label='correzione wp_0'),
+           Line2D([], [], color='darkorange', lw=2, marker='o', ms=3, label='percorso pianificato'),
+           Line2D([], [], color='gold', marker='*', mec='k', ms=11, ls='', label='obiettivo'),
+           Line2D([], [], color='k', marker='x', ms=8, mew=2, ls='', label='fine del fronte'),
+           Line2D([], [], color='black', marker='^', mfc='white', ms=8, ls='', label='partenza')]
+    ax_map.legend(handles=leg, loc='upper center', bbox_to_anchor=(0.5, -0.035), ncol=4, fontsize=7.5,
+                  frameon=False)
     nome = os.path.basename(st.mm).replace('Mission_', '')
     quando = time.strftime('%H:%M:%S', time.localtime(fino_a if fino_a is not None else time.time()))
     ax_map.set_title(f"Missione {nome} -- {quando}" + ("   (segue il robot: f)" if segui else "   (tutta: f)"),
@@ -398,7 +441,7 @@ def main():
         sys.exit(f"Cartella non trovata: {mm}")
     st = Stato(mm, ml)
     fig = plt.figure(figsize=(15, 8.5))
-    ax_map = fig.add_axes([0.04, 0.05, 0.55, 0.9])
+    ax_map = fig.add_axes([0.04, 0.11, 0.55, 0.85])
     ax_txt = fig.add_axes([0.61, 0.03, 0.38, 0.94])
     stato = {'segui': not args.tutta, 'pausa': False, 'esci': False, 'ridisegna': True}
 

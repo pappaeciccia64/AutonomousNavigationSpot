@@ -294,6 +294,15 @@ def section_return(log, graph_dirs):
     m = re.search(r'strada verso wp_0 ([\d.]+) m -> ([\d.]+) m con (\d+) scorciatoie', log)
     if m:
         out['strada_m'] = (float(m.group(1)), float(m.group(2)), int(m.group(3)))
+    # Dal 29-10: scarto vero dalla partenza secondo il tag, e correzioni (WP0_FIDUCIAL_CORRECTION).
+    m = re.search(r"\[WP0\] Secondo il tag il robot e' a ([\d.]+) m dal punto di partenza", log)
+    if m:
+        out['scarto_m'] = float(m.group(1))
+    dopo = re.findall(r"\[WP0\] Dopo la correzione (\d+): a ([\d.]+) m dalla partenza", log)
+    if dopo:
+        out['correzioni'] = (int(dopo[-1][0]), float(dopo[-1][1]))
+    elif "[WP0] CORREZIONE" in log:
+        out['correzioni'] = (len(re.findall(r"\[WP0\] CORREZIONE", log)), None)
     start = re.findall(r"prima di 'ritorno a wp_0': localizzato su (\S+)", log)
     if graph_dirs and start:
         out['grafo'] = _graph_route(graph_dirs[-1], start[-1])
@@ -653,7 +662,7 @@ def report(name):
         print("\n" + b)
 
     r = section_return(log, f['graph'])
-    if r.get('tempo_s') is not None or r.get('grafo') or r.get('fallito'):
+    if r.get('tempo_s') is not None or r.get('grafo') or r.get('fallito') or r.get('scarto_m') is not None:
         line = f"\nRitorno a wp_0: {r['tempo_s']} s" if r.get('tempo_s') is not None else "\nRitorno a wp_0:"
         if r.get('fallito'):
             fl = r['fallito']
@@ -665,6 +674,14 @@ def report(name):
             line += f", strada {a:.1f} m -> {b:.1f} m con {n} scorciatoie"
         if r.get('grafo'):
             line += f" | nel grafo scaricato da {r['grafo']['da']}: {r['grafo']['metri']} m"
+        if r.get('scarto_m') is not None:
+            line += f"\n  secondo il tag di partenza: arrivato a {r['scarto_m']:.2f} m dalla partenza"
+            if r.get('correzioni'):
+                n, fin = r['correzioni']
+                line += (f", CORRETTO con il fiducial ({n} " + ("correzione" if n == 1 else "correzioni")
+                         + (f"), alla fine a {fin:.2f} m" if fin is not None else "), scarto finale non misurato"))
+            else:
+                line += ", nessuna correzione necessaria"
         print(line)
 
     ar = section_arrival_rotation(read_csv(f['trajectory']))

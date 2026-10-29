@@ -84,6 +84,7 @@ def mission_switches():
         'parametri.GRAPHNAV_PRECHECK': P.GRAPHNAV_PRECHECK,
         'parametri.REPICK_ON_REPLAN_FAIL': P.REPICK_ON_REPLAN_FAIL,
         'parametri.GRAPHNAV_ARRIVAL_HEADING': P.GRAPHNAV_ARRIVAL_HEADING,
+        'parametri.WP0_FIDUCIAL_CORRECTION': P.WP0_FIDUCIAL_CORRECTION,
         'parametri.MOVE_NEAR_GOAL_M': P.MOVE_NEAR_GOAL_M,
         'parametri.GRAPHNAV_SDK_LOOP_CLOSURE': P.GRAPHNAV_SDK_LOOP_CLOSURE,
         'parametri.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S': P.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S,
@@ -3197,7 +3198,12 @@ def _chiudi_missione(robot, robot_state_client, command_client, recordingInterfa
     esito_wp0 = navGraphUtils.graphnav_return_to_start(recordingInterface, robot_state_client, command_client)
     if esito_wp0 in ('arrivato', 'vicino'):
         # Anche fermo vicino a wp_0 il tag si cerca: e' la misura della deriva di tutta la missione.
-        navGraphUtils.graphnav_check_start_fiducial(robot, robot_state_client)
+        misura = navGraphUtils.graphnav_check_start_fiducial(robot, robot_state_client)
+        # Arrivato secondo GraphNav ma lontano secondo il tag: correzione (vedi
+        # WP0_FIDUCIAL_CORRECTION). Fermo vicino (STUCK) no: la strada e' bloccata.
+        if esito_wp0 == 'arrivato' and misura and misura.get('offset') is not None:
+            navGraphUtils.graphnav_correct_wp0_with_fiducial(robot, recordingInterface, robot_state_client,
+                                                             command_client, misura['offset'])
     if esito_wp0 != 'arrivato':
         print("[GRAPHNAV] Ritorno a wp_0 non riuscito: il robot si siede dove si trova.")
     _t_close['ritorno a wp_0'] = time.perf_counter() - _t

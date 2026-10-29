@@ -102,6 +102,9 @@ class FakeGraphNav:
         self.trips = []                # (da, a) degli spostamenti
         self.headings = []             # angoli d'arrivo chiesti (rispetto al waypoint)
         self.stuck_wp0_m = None        # ritorno a wp_0 fermo (STUCK) a questa distanza
+        self.wp0_offset_m = None       # ritorno a wp_0 "arrivato" ma spostato di tanto (vedi run)
+        self.wp0_returns = 0           # ritorni a wp_0 fatti
+        self.relocated = False         # rilocalizzato sul tag DOPO un ritorno a wp_0
         self.status = graph_nav_pb2.NavigationFeedbackResponse.STATUS_REACHED_GOAL
 
     # --- registrazione -------------------------------------------------------------
@@ -182,6 +185,8 @@ class FakeGraphNav:
     def set_localization(self, **kw):
         if (FIDUCIAL_TAG is not None and kw.get('use_fiducial_id') == FIDUCIAL_TAG[0]
                 and kw.get('fiducial_init') == graph_nav_pb2.SetLocalizationRequest.FIDUCIAL_INIT_SPECIFIC):
+            if self.wp0_returns > 0:
+                self.relocated = True             # da qui GraphNav sa davvero dov'e' wp_0
             return graph_nav_pb2.SetLocalizationResponse(status=graph_nav_pb2.SetLocalizationResponse.STATUS_OK)
         raise RuntimeError("STATUS_NO_MATCHING_FIDUCIAL (finto: nessun fiducial nel mondo)")
 
@@ -197,6 +202,10 @@ class FakeGraphNav:
         if name == 'wp_0' and self.stuck_wp0_m is not None:
             x += self.stuck_wp0_m                 # fermo prima, sulla strada da +x
             self.status = graph_nav_pb2.NavigationFeedbackResponse.STATUS_STUCK
+        if name == 'wp_0':
+            self.wp0_returns += 1
+            if self.wp0_offset_m is not None and not self.relocated:
+                y += self.wp0_offset_m            # localizzazione sbagliata: "arrivato" di lato
         T.ROBOT.x, T.ROBOT.y, T.ROBOT.yaw = x, y, yaw
         T.ROBOT.track.append((x, y))
         return 1
@@ -205,9 +214,9 @@ class FakeGraphNav:
         return NS(status=self.status)
 
     def clear_graph(self, **kw):
-        stuck = self.stuck_wp0_m
+        stuck, offset = self.stuck_wp0_m, self.wp0_offset_m
         self.__init__()
-        self.stuck_wp0_m = stuck
+        self.stuck_wp0_m, self.wp0_offset_m = stuck, offset
 
     def upload_graph(self, graph=None, **kw):
         for e in graph.edges:
@@ -382,13 +391,14 @@ def _con_batteria(da_pct=36.0, punti_a_lettura=1.0):
         parametri.BATTERY_SAMPLE_S = real_s
 
 
-def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0_m=None):
+def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0_m=None, wp0_offset_m=None):
     global FIDUCIAL_TAG
     FIDUCIAL_TAG = fiducial
     T.WORLD, T.ROBOT = T.World(WALLS if walls is None else walls, ghosts=True), T.Robot(*START)
     arcVerification.OBSTACLE_HISTORY.reset()
     gn = FakeGraphNav()
     gn.stuck_wp0_m = stuck_wp0_m
+    gn.wp0_offset_m = wp0_offset_m
     robot = FakeRobot(gn)
     spotLogInUtils.setLogInfo = lambda o: (robot, NS(), robot.state, None)
     spotLogInUtils.SimpleEstop = lambda r, n: NS(stop=lambda: None, allow=lambda: None)
@@ -459,6 +469,8 @@ def _controlli_mondo(name, r):
               "fiducial di partenza visto dietro il robot, qualunque ID")
         check("[FIDUCIAL INIT] Fiducial cercato: ID 7" in log and "[FIDUCIAL INIT] ✓" in log,
               "localizzazione sul fiducial trovato, dopo wp_0")
+        check("[WP0] Secondo il tag il robot e' a 0.00 m dal punto di partenza" in log
+              and "[WP0] CORREZIONE" not in log, "ritorno a wp_0 giusto: nessuna correzione")
         check("rivedo il tag 7" in log and "si e' spostato di 0.00 m" in log,
               "al ritorno su wp_0 il tag si rivede e la deriva si misura")
     else:
@@ -589,6 +601,18 @@ if __name__ == '__main__':
     shutil.rmtree(r['root'], ignore_errors=True)
     _controlli_scelta_celle()
     _controlli_emergenza()
+    print("\nMissione intera nel mondo G: il mondo A con il ritorno a wp_0 'arrivato' ma 0.8 m di lato "
+          "(29-10 10:57: 1.2 m).")
+    r = run(WORLDS['A'], "MISSIONE_G", fiducial=(7, START[0] - 1.0, START[1]), wp0_offset_m=0.8)
+    _controlli_comuni(r)
+    log = r['log']
+    check("[WP0] Secondo il tag il robot e' a 0.80 m dal punto di partenza" in log,
+          "il tag misura lo scarto vero dalla partenza (0.80 m)")
+    check("[WP0] CORREZIONE 1/2" in log and "correzione 1 del ritorno a wp_0: arrivato" in log,
+          "rilocalizzazione sul tag e nuovo ritorno a wp_0")
+    check("[WP0] Dopo la correzione 1: a 0.00 m dalla partenza (prima 0.80 m)" in log
+          and "CORREZIONE 2/2" not in log, "una correzione basta: 0.00 m dalla partenza")
+    shutil.rmtree(r['root'], ignore_errors=True)
     print("\nMissione intera nel mondo E: partenza chiusa tutto intorno (28-10 14:17, erba alta).")
     chiuso = [(0.4, 2.6, 0.4, 0.6), (0.4, 2.6, 2.4, 2.6), (0.4, 0.6, 0.4, 2.6), (2.4, 2.6, 0.4, 2.6)]
     r = run(chiuso, "MISSIONE_E")
