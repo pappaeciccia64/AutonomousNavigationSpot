@@ -75,7 +75,10 @@ import re
 import sys
 import time
 from multiprocessing import Pool
-from zoneinfo import ZoneInfo
+try:
+    from zoneinfo import ZoneInfo          # Python 3.9+
+except ImportError:                        # Python 3.8 (il portatile delle missioni)
+    ZoneInfo = None
 
 import numpy as np
 
@@ -95,7 +98,9 @@ GLOBAL_LIVE_MIN_MATCH = 0.995      # invariante 2
 HARD_PITCH_DEG = 18.0              # invariante 3
 ARCS_PER_SCAN = 60                 # archi a caso per scansione, invariante 2
 FAST_FULL_CHECKS = 3               # --veloce: confronti con la costruzione completa
-MISSION_TZ = ZoneInfo('Europe/Rome')   # ora dei timestamp di segments.csv (quella del portatile in missione)
+# Ora dei timestamp di segments.csv (quella del portatile in missione). Senza zoneinfo
+# (Python 3.8) si usa l'ora locale della macchina, giusta sul portatile delle missioni.
+MISSION_TZ = ZoneInfo('Europe/Rome') if ZoneInfo is not None else None
 
 
 def _quiet():
