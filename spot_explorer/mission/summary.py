@@ -3,7 +3,9 @@ import os
 import json
 
 from spot_explorer.robot import motion as movements
-from spot_explorer.perception import grids as spotGrid
+from spot_explorer.perception import geometry
+from spot_explorer.perception import slopes
+from spot_explorer.perception import spot_grid
 
 from spot_explorer.planning import roadmap as prm_graph_module   # dentro le funzioni `prm_graph` e' spesso il parametro (istanza)
 from spot_explorer.planning import mission_graph                   # reticolo dei nodi della missione
@@ -42,9 +44,9 @@ def mission_switches():
         'parametri.SAVE_SCAN_BUNDLES': P.SAVE_SCAN_BUNDLES,
         'parametri.SAVE_EXTRA_LAYERS': list(P.SAVE_EXTRA_LAYERS),
         'movements.DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT': movements.DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT,
-        'spotGrid.ARC_BODY_EXTENSION_M': spotGrid.ARC_BODY_EXTENSION_M,
-        'spotGrid.ROBOT_CLEARANCE_AIR_M': spotGrid.ROBOT_CLEARANCE_AIR_M,
-        'spotGrid.PLAN_CLEARANCE_EXTRA_M': spotGrid.PLAN_CLEARANCE_EXTRA_M,
+        'slopes.ARC_BODY_EXTENSION_M': slopes.ARC_BODY_EXTENSION_M,
+        'geometry.ROBOT_CLEARANCE_AIR_M': geometry.ROBOT_CLEARANCE_AIR_M,
+        'geometry.PLAN_CLEARANCE_EXTRA_M': geometry.PLAN_CLEARANCE_EXTRA_M,
         'parametri.BATTERY_RETURN_PCT': P.BATTERY_RETURN_PCT,
     }
 
@@ -131,13 +133,13 @@ def _emit_mission_summary_once():
             summary = {
                 'prm': prm.get_mission_summary_dict(),
                 'mission_stats': {k: v for k, v in MISSION_STATS.items()},
-                'lateral_slope_cost_multiplier': spotGrid.LATERAL_SLOPE_COST_MULTIPLIER,
-                'slope_threshold': spotGrid.SLOPE_THRESHOLD,
-                'near_threshold_margin_fraction': spotGrid.NEAR_THRESHOLD_MARGIN_FRACTION,
-                'slope_baseline_m': spotGrid.SLOPE_BASELINE_M,
-                'lateral_slice_half_width_m': spotGrid.LATERAL_SLICE_HALF_WIDTH_M,
-                'min_arc_sample_fraction': spotGrid.MIN_ARC_SAMPLE_FRACTION,
-                'terrain_valid_min': spotGrid.TERRAIN_VALID_MIN,
+                'lateral_slope_cost_multiplier': slopes.LATERAL_SLOPE_COST_MULTIPLIER,
+                'slope_threshold': slopes.SLOPE_THRESHOLD,
+                'near_threshold_margin_fraction': slopes.NEAR_THRESHOLD_MARGIN_FRACTION,
+                'slope_baseline_m': slopes.SLOPE_BASELINE_M,
+                'lateral_slice_half_width_m': slopes.LATERAL_SLICE_HALF_WIDTH_M,
+                'min_arc_sample_fraction': slopes.MIN_ARC_SAMPLE_FRACTION,
+                'terrain_valid_min': spot_grid.TERRAIN_VALID_MIN,
                 'goal_reached_tolerance_m': P.GOAL_REACHED_TOLERANCE_M,
                 'interruttori': mission_switches(),
                 'fiducial_partenza': MISSION_CTX.get('start_fiducial'),

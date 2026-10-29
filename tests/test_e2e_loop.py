@@ -33,7 +33,9 @@ matplotlib.use("Agg")
 from spot_explorer.mission import cell_attempt     # noqa: E402
 from spot_explorer import config as parametri     # noqa: E402
 from spot_explorer import records as registro      # noqa: E402
-from spot_explorer.perception import grids as spotGrid      # noqa: E402
+from spot_explorer.perception import geometry
+from spot_explorer.perception import global_maps
+from spot_explorer.perception import spot_grid
 from spot_explorer.planning import safe_frontier as av   # noqa: E402
 from spot_explorer.planning import roadmap as prm_graph     # noqa: E402
 from spot_explorer.robot import motion as movements     # noqa: E402
@@ -132,7 +134,7 @@ def fake_get_a_tform_b(snapshot, a, b):
     return NS(position=NS(x=ox, y=oy, z=0.0), rotation=quat(0.0))
 
 
-class FakeLocalGrid(spotGrid.LocalGrid):
+class FakeLocalGrid(spot_grid.LocalGrid):
     def __init__(self):
         self.footprint_correction_pending = True
         self.last_ground_filter = {'ground_z': None, 'n_above': 0, 'max_above': 0.0,
@@ -150,7 +152,7 @@ class FakeLocalGrid(spotGrid.LocalGrid):
         return data, proto, None
 
     def extra_layers(self, names):
-        # Come spotGrid.LocalGrid.extra_layers: un layer finto per controllare il salvataggio;
+        # Come spot_grid.LocalGrid.extra_layers: un layer finto per controllare il salvataggio;
         # 'no_step' manca apposta (un layer assente non deve fermare niente).
         if 'intensity' not in names:
             return {}
@@ -236,7 +238,7 @@ def fake_navigate_to(tx, ty, rx, ry, rsc, cc, vtb, should_abort=None, keep_headi
         dyaw = float(np.arctan2(np.sin(target_yaw - _yaw_of(vtb.rotation)),
                                 np.cos(target_yaw - _yaw_of(vtb.rotation))))
         ROBOT.turn_deg += abs(np.degrees(dyaw))
-        if abs(np.degrees(dyaw)) >= spotGrid.ROTATION_CHECK_MIN_DYAW_DEG:
+        if abs(np.degrees(dyaw)) >= geometry.ROTATION_CHECK_MIN_DYAW_DEG:
             ROBOT.turns += 1
         ROBOT.yaw = float(np.arctan2(np.sin(ROBOT.yaw + dyaw), np.cos(ROBOT.yaw + dyaw)))
         sx, sy = ROBOT.x, ROBOT.y
@@ -322,7 +324,7 @@ class FakeSampler:
 
 
 # ---- patch: solo i confini col robot ------------------------------------------------------
-cell_attempt.get_a_tform_b = spotGrid.get_a_tform_b = fake_get_a_tform_b
+cell_attempt.get_a_tform_b = spot_grid.get_a_tform_b = fake_get_a_tform_b
 spotUtils.getPosition = lambda rsc: (ROBOT.x, ROBOT.y, -2.7, quat(ROBOT.yaw))
 movements.navigate_to = fake_navigate_to
 movements.move_to_world_point_without_turning = fake_move_no_turn
@@ -381,12 +383,12 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
         # Ostacoli gia' nella mappa globale da osservazioni precedenti (in missione: le celle
         # gia' visitate). Occupate le celle con obstacle_distance <= OBSTACLE_THRESHOLD, come
         # le scrive fold_scan_into_global_maps.
-        gm0 = spotGrid.GlobalGrid(resolution=CS)
-        t = spotGrid.OBSTACLE_THRESHOLD
+        gm0 = global_maps.GlobalGrid(resolution=CS)
+        t = geometry.OBSTACLE_THRESHOLD
         for x0, x1, y0, y1 in memory:
             for gx in range(int(np.floor((x0 - t) / CS)), int(np.ceil((x1 + t) / CS))):
                 for gy in range(int(np.floor((y0 - t) / CS)), int(np.ceil((y1 + t) / CS))):
-                    gm0.obs_count[(gx, gy)] = spotGrid.GLOBAL_OCC_MAX_COUNT
+                    gm0.obs_count[(gx, gy)] = global_maps.GLOBAL_OCC_MAX_COUNT
                     gm0._set_state((gx, gy), -1.0)
         gg.global_occupancy_map = gm0
     out = io.StringIO()
@@ -472,7 +474,7 @@ if __name__ == '__main__':
             [(5.0, 5.2, 0.0, 5.0), (5.0, 5.2, 6.2, 12.0)], (2.0, 2.0, 0.785), (0, 1))
     check(r['err'] is None, "nessuna eccezione")
     check(r['ok'] is True, f"entrato nella cella passando dal varco ({r['final'][0]:.2f}, {r['final'][1]:.2f})")
-    check(r['min_clear'] >= spotGrid.FRONTIER_CLEARANCE_M - 0.05,
+    check(r['min_clear'] >= geometry.FRONTIER_CLEARANCE_M - 0.05,
           f"distanza minima del centro dagli ostacoli lungo tutto il tragitto: {r['min_clear']:.2f} m")
 
     r = run("S3. una persona si mette davanti al robot mentre cammina",
@@ -481,9 +483,9 @@ if __name__ == '__main__':
     check(r['min_clear'] > 0.0,
           f"non tocca mai l'ostacolo apparso durante il movimento "
           f"(distanza minima del centro {r['min_clear']:.2f} m)")
-    check(r['min_clear'] >= spotGrid.FRONTIER_CLEARANCE_M - 0.10,
+    check(r['min_clear'] >= geometry.FRONTIER_CLEARANCE_M - 0.10,
           f"e resta oltre la distanza minima richiesta dal fronte "
-          f"({spotGrid.FRONTIER_CLEARANCE_M:.2f} m): misurata {r['min_clear']:.2f} m")
+          f"({geometry.FRONTIER_CLEARANCE_M:.2f} m): misurata {r['min_clear']:.2f} m")
     print(f"       [STOP] x{r['tags']['[STOP]']}, [MULTINODO] x{r['tags']['[MULTINODO]']}")
 
     r = run("S4. cella obiettivo chiusa da muri su tutti i lati",
@@ -529,7 +531,7 @@ if __name__ == '__main__':
     r = run("S10. reticolo VERO + muro con varco: il percorso CURVA (qui serve il multinodo)",
             [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)], (3.5, 3.5, 0.0), (0, 1))
     check(r['err'] is None, "nessuna eccezione")
-    check(r['min_clear'] >= spotGrid.FRONTIER_CLEARANCE_M - 0.10,
+    check(r['min_clear'] >= geometry.FRONTIER_CLEARANCE_M - 0.10,
           f"non sfiora il muro passando dal varco (distanza minima {r['min_clear']:.2f} m)")
     print(f"       [MULTINODO] x{r['tags']['[MULTINODO]']}, [SCORCIATOIA] x{r['tags']['[SCORCIATOIA]']}, "
           f"nodi attraversati dai movimenti multinodo: {r['stats'].get('multinode_nodes', 0)}")
@@ -566,7 +568,7 @@ if __name__ == '__main__':
           f"{r['stats'].get('multinode_nodes', 0)} nodi)")
     check(r['endpoint_error'] < 0.02,
           f"ogni gamba arriva dove e' stata comandata: scarto massimo {r['endpoint_error']:.3f} m")
-    check(r['min_clear'] >= spotGrid.FRONTIER_CLEARANCE_M - 0.10,
+    check(r['min_clear'] >= geometry.FRONTIER_CLEARANCE_M - 0.10,
           f"non sfiora il muro (distanza minima {r['min_clear']:.2f} m)")
 
     # S14: della cella obiettivo e' libera solo una striscia lungo il bordo vicino al robot; il
@@ -615,7 +617,7 @@ if __name__ == '__main__':
         r = run(f"S13. {etichetta}", [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)],
                 (3.5, 3.5, 0.0), (0, 1))
         check(r['err'] is None and r['ok'], f"{etichetta}: arrivato nella cella senza eccezioni")
-        check(r['min_clear'] >= spotGrid.FRONTIER_CLEARANCE_M - 0.10,
+        check(r['min_clear'] >= geometry.FRONTIER_CLEARANCE_M - 0.10,
               f"{etichetta}: non sfiora il muro (distanza minima {r['min_clear']:.2f} m)")
         print(f"       {r['commands']} comandi, {r['walked']:.1f} m, rotazioni oltre 10 gradi "
               f"{r['turns']} ({r['turn_deg']:.0f} gradi), {r['scans']} scansioni")

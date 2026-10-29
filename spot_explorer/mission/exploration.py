@@ -5,7 +5,9 @@ import numpy as np
 
 from spot_explorer.graphnav import graphnav as navGraphUtils
 from spot_explorer.robot import motion as movements
-from spot_explorer.perception import grids as spotGrid
+from spot_explorer.perception import geometry
+from spot_explorer.perception import global_maps
+from spot_explorer.perception import spot_grid
 from spot_explorer.mission import cells as environmentMap
 from spot_explorer.robot import connection as spotUtils
 
@@ -338,7 +340,7 @@ class Missione:
                 grad_values_2d=scan.grad.reshape((num_y, num_x)),
                 rough_values_2d=scan.rough.reshape((num_y, num_x)),
                 terrain_values_2d=scan.terrain.reshape((num_y, num_x)),
-                valid_2d=spotGrid.slope_usable_mask(scan.is_valid, scan.od, (num_y, num_x)),
+                valid_2d=spot_grid.slope_usable_mask(scan.is_valid, scan.od, (num_y, num_x)),
                 grid_origin_x=grid_origin_x,
                 grid_origin_y=grid_origin_y,
                 cell_size=scan.cell_size
@@ -364,10 +366,10 @@ class Missione:
         mission_graph.restrict_planning_to_explored_cells(prm, self.env, row, col, (x_curr, y_curr))
         start_id = prm.add_stop_node(
             x_curr, y_curr, global_map,
-            spotGrid.PRM_EDGE_SAFETY_MARGIN_M, label="verifica recupero (robot)")
+            geometry.PRM_EDGE_SAFETY_MARGIN_M, label="verifica recupero (robot)")
         goal_id = prm.add_stop_node(
             target_x, target_y, global_map,
-            spotGrid.PRM_EDGE_SAFETY_MARGIN_M, label="verifica recupero (obiettivo)",
+            geometry.PRM_EDGE_SAFETY_MARGIN_M, label="verifica recupero (obiettivo)",
             is_robot=False)
         prm.set_robot_node(start_id)
 
@@ -528,7 +530,7 @@ class Missione:
             return
         self.local_grid.process_scan(scan, x_final, y_final, final_yaw, ground_label="scan-finale")
         # Anche l'ultima scansione entra nelle mappe globali, come tutte le altre
-        spotGrid.fold_scan_into_global_maps(
+        global_maps.fold_scan_into_global_maps(
             self.global_grid.global_occupancy_map, self.global_grid.global_terrain_map, scan.pts,
             scan.terrain, scan.obstacle_mask, scan.is_valid, scan.od,
             (scan.num_y, scan.num_x), (x_final, y_final, final_yaw))

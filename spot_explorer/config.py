@@ -12,7 +12,8 @@ dell'uso, quindi anche le prove (test_replay.py, test_e2e_loop.py) li possono ca
 """
 import numpy as np
 
-from spot_explorer.perception import grids as spotGrid
+from spot_explorer.perception import geometry
+from spot_explorer.perception import spot_grid
 
 # =========================================================================================
 # LA MISSIONE: dimensione, grafo dei nodi, archi
@@ -106,7 +107,7 @@ FRONTIER_ABORT_TOLERANCE_M = 0.05
 # libero. Una tolleranza piu' piccola lascerebbe una banda morta in cui il robot non puo' ne'
 # avanzare ne' dichiarare di essere arrivato, e finirebbe per dichiarare un blocco. Le due
 # costanti devono essere la stessa cosa.
-GOAL_REACHED_TOLERANCE_M = spotGrid.FRONTIER_BODY_HALF_LENGTH_M + spotGrid.FRONTIER_MARGIN_M
+GOAL_REACHED_TOLERANCE_M = geometry.FRONTIER_BODY_HALF_LENGTH_M + geometry.FRONTIER_MARGIN_M
 MAX_LOOP_ITERATIONS = 150
 
 # --- GUARDIE ANTI-STALLO ------------------------------------------------------------
@@ -225,7 +226,7 @@ GRAPHNAV_SHORTCUT_MARGIN_M = 0.30
 # Lunghezza massima degli archi che crea la chiusura d'anello di Spot.
 GRAPHNAV_SDK_LOOP_MAX_M = 2.0
 # Un nodo PRM con meno di questo spazio libero non e' raggiungibile dal fronte: si scarta.
-PRM_NODE_MIN_CLEARANCE_M = spotGrid.FRONTIER_CLEARANCE_M   # 0.30
+PRM_NODE_MIN_CLEARANCE_M = geometry.FRONTIER_CLEARANCE_M   # 0.30
 # Ripianificazioni "precoci" (alla prima cella bloccante, senza aspettare la conferma da
 # ferma) ammesse per tentativo di cella. Vedi il ramo 'wait'.
 MAX_EARLY_REPLANS = 4
@@ -292,7 +293,7 @@ REPLAN_FAIL_ROBOT_FREE_NODES = 6
 # ==================================================================
 SAVE_SCAN_BUNDLES = True
 # Layer di Spot salvati in piu' nei pacchetti, con una richiesta a parte che non tocca la
-# navigazione (spotGrid.LocalGrid.extra_layers): per capire l'erba alta (22-10 16:04), cioe'
+# navigazione (spot_grid.LocalGrid.extra_layers): per capire l'erba alta (22-10 16:04), cioe'
 # se intensita' e no_step distinguono la vegetazione da un ostacolo solido. Ogni layer ha
 # accanto <nome>_origin e <nome>_cell, perche' la sua griglia puo' non coincidere con le
 # altre. () = spento.

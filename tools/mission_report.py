@@ -34,13 +34,13 @@ MAPS = os.path.join(HERE, 'MissionMap')
 GRAPHS = os.path.join(HERE, 'graph')
 
 # Come in spotGrid / easy_walk: copiate qui perche' il rapporto non importa il codice di missione.
-INTRUSION_M = 0.25                 # mezza larghezza del corpo (spotGrid.ROBOT_HALF_WIDTH_M)
+INTRUSION_M = 0.25                 # mezza larghezza del corpo (geometry.ROBOT_HALF_WIDTH_M)
 
 
 def mission_thresholds(summary, log):
     """
     (fronte, scarto dal vivo): le distanze dagli ostacoli con cui ha lavorato QUESTA missione,
-    dagli interruttori registrati (dal 21-10). Fronte = 0.25 + spotGrid.ROBOT_CLEARANCE_AIR_M;
+    dagli interruttori registrati (dal 21-10). Fronte = 0.25 + geometry.ROBOT_CLEARANCE_AIR_M;
     scarto dal vivo degli archi = fronte dal 22-10 (quando c'e' PLAN_CLEARANCE_EXTRA_M).
     Senza interruttori registrati: 0.30 e 0.20, i valori delle missioni di prima.
     """
@@ -60,7 +60,7 @@ def mission_thresholds(summary, log):
     frontier = INTRUSION_M + (0.05 if air is None else air)
     live = 0.20 if extra is None else frontier
     return frontier, live
-TERRAIN_VALID_MIN = 0.5            # spotGrid.TERRAIN_VALID_MIN
+TERRAIN_VALID_MIN = 0.5            # spot_grid.TERRAIN_VALID_MIN
 PITCH_LIMITS_DEG = (14.0, 18.0)    # tratti "ripidi" per il controllo delle andature
 
 

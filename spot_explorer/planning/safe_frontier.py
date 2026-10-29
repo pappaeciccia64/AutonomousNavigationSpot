@@ -33,7 +33,9 @@ from bosdyn.client.frame_helpers import get_a_tform_b, VISION_FRAME_NAME, BODY_F
 from spot_explorer import config as P
 from spot_explorer.planning import roadmap as prm_graph
 from spot_explorer.robot import connection as spotUtils
-from spot_explorer.perception import grids as spotGrid
+from spot_explorer.perception import geometry
+from spot_explorer.perception import slopes
+from spot_explorer.perception import spot_grid
 
 
 LOGGER = logging.getLogger(__name__)
@@ -143,7 +145,7 @@ class _ObstacleHistory:
             else:
                 med = od.copy()
 
-            thr = spotGrid.FRONTIER_CLEARANCE_M
+            thr = geometry.FRONTIER_CLEARANCE_M
             latch = med < thr
             if self._latch is not None and self._latch_ij is not None:
                 sh = shift_from(self._latch_ij[0], self._latch_ij[1])
@@ -167,7 +169,7 @@ class GridSnapshot:
     """
     Una scansione pronta per il fronte. Tutti gli array sono 2D (num_y, num_x), con lo
     stesso ordinamento usato ovunque nel progetto: riga = y, colonna = x, origine nel
-    vertice in basso a sinistra (vedi spotGrid._gather_heights).
+    vertice in basso a sinistra (vedi slopes._gather_heights).
 
     blocked_latch: maschera dell'isteresi (vedi _ObstacleHistory); None = nessun filtro.
     """
@@ -201,7 +203,7 @@ def make_grid_snapshot(cells_obstacle_dist, rough_values, is_valid, terrain_vali
 
     - rough_veto: stesso criterio di fuse_obstacle_mask (rugosita' > soglia, su cella valida).
     - seen: il sensore ha dato una quota per quella cella (terrain_valid grezzo, confrontato
-      con spotGrid.TERRAIN_VALID_MIN e non con 0: dopo scala e offset lo 0 diventa +/-5e-17).
+      con spot_grid.TERRAIN_VALID_MIN e non con 0: dopo scala e offset lo 0 diventa +/-5e-17).
       Non e' is_valid: is_valid esclude anche le celle scartate dal filtro sull'altezza del
       suolo (muri), che invece sono state viste; l'ostacolo lo segnala obstacle_distance.
     - unwritten: celle mai scritte dai sensori (correct_terrain con return_unwritten=True):
@@ -211,7 +213,7 @@ def make_grid_snapshot(cells_obstacle_dist, rough_values, is_valid, terrain_vali
     rough = np.asarray(rough_values, dtype=np.float64).reshape(shape)
     valid = np.asarray(is_valid, dtype=bool).reshape(shape)
     if terrain_valid_raw is not None and np.size(terrain_valid_raw) == num_x * num_y:
-        seen = np.asarray(terrain_valid_raw).reshape(shape) >= spotGrid.TERRAIN_VALID_MIN
+        seen = np.asarray(terrain_valid_raw).reshape(shape) >= spot_grid.TERRAIN_VALID_MIN
     else:
         seen = np.ones(shape, dtype=bool)
     if unwritten is not None and np.size(unwritten) == num_x * num_y:
@@ -223,7 +225,7 @@ def make_grid_snapshot(cells_obstacle_dist, rough_values, is_valid, terrain_vali
 
     return GridSnapshot(
         obstacle_dist=od_filtered,
-        rough_veto=(rough > spotGrid.ROUGH_THRESHOLD) & valid,
+        rough_veto=(rough > spot_grid.ROUGH_THRESHOLD) & valid,
         seen=seen,
         terrain=np.asarray(terrain_corrected, dtype=np.float64).reshape(shape),
         origin_x=origin_x, origin_y=origin_y, cell_size=cell_size,
@@ -238,17 +240,17 @@ def _under_body(snap, xs, ys):
     larghezza), che sta sotto il corpo in qualunque orientamento.
 
     Li' c'e' il robot, quindi non c'e' un ostacolo in cui entrare: quei punti non fermano
-    mai il fronte (stesso principio di spotGrid.rotation_is_clear).
+    mai il fronte (stesso principio di geometry.rotation_is_clear).
     """
     dx = np.asarray(xs, dtype=np.float64) - snap.robot_x
     dy = np.asarray(ys, dtype=np.float64) - snap.robot_y
     yaw = getattr(snap, 'robot_yaw', None)
     if yaw is None:
-        return np.hypot(dx, dy) <= spotGrid.ROBOT_HALF_WIDTH_M
+        return np.hypot(dx, dy) <= geometry.ROBOT_HALF_WIDTH_M
     c, s = np.cos(yaw), np.sin(yaw)
     along = c * dx + s * dy
     across = -s * dx + c * dy
-    return (np.abs(along) <= spotGrid.ROBOT_HALF_LENGTH_M) & (np.abs(across) <= spotGrid.ROBOT_HALF_WIDTH_M)
+    return (np.abs(along) <= geometry.ROBOT_HALF_LENGTH_M) & (np.abs(across) <= geometry.ROBOT_HALF_WIDTH_M)
 
 
 def _cells(snap, xs, ys):
@@ -296,10 +298,10 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
             FRONTIER_BODY_HALF_LENGTH_M.
         check_slope: controlla anche la pendenza dei tratti liberi.
         body: (meta' ingombro lungo la marcia, meta' ingombro di traverso), vedi
-            spotGrid.body_extents. Default: robot che guarda dove va (0.55, 0.25).
+            geometry.body_extents. Default: robot che guarda dove va (0.55, 0.25).
         air_m: aria fra fianco e ostacolo. None = ROBOT_CLEARANCE_AIR_M (0.05), cioe' la
             distanza minima 0.30 con cui si DECIDE di partire. Il thread di arresto passa
-            spotGrid.FRONTIER_ABORT_AIR_M (0.0): a movimento in corso ci si ferma solo per
+            geometry.FRONTIER_ABORT_AIR_M (0.0): a movimento in corso ci si ferma solo per
             un'intrusione vera, a meno di mezza larghezza (0.25). I 5 cm fra le due soglie
             evitano di fermarsi su un tratto appena dichiarato libero. Con un'aria diversa
             dalla nominale l'isteresi non si applica (e' tarata sulla soglia 0.30).
@@ -316,10 +318,10 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
         clearance   distanza minima applicata nel primo tratto
         robot_xy, time
     """
-    half_along, half_across = body if body is not None else (spotGrid.FRONTIER_BODY_HALF_LENGTH_M,
-                                                             spotGrid.ROBOT_HALF_WIDTH_M)
+    half_along, half_across = body if body is not None else (geometry.FRONTIER_BODY_HALF_LENGTH_M,
+                                                             geometry.ROBOT_HALF_WIDTH_M)
     use_latch = air_m is None
-    clearance_nominal = half_across + (spotGrid.ROBOT_CLEARANCE_AIR_M if air_m is None else float(air_m))
+    clearance_nominal = half_across + (geometry.ROBOT_CLEARANCE_AIR_M if air_m is None else float(air_m))
     if extend_end_m is None:
         extend_end_m = half_along
     pl = [(float(x), float(y)) for x, y in polyline]
@@ -333,18 +335,18 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
         if L > 1e-6:
             pl.append((xb + extend_end_m * (xb - xa) / L, yb + extend_end_m * (yb - ya) / L))
 
-    xs, ys, ss, seg, _ = _polyline_samples(pl, spotGrid.FRONTIER_SAMPLE_STEP_M)
+    xs, ys, ss, seg, _ = _polyline_samples(pl, geometry.FRONTIER_SAMPLE_STEP_M)
     rows, cols, inside = _cells(snap, xs, ys)
 
     # obstacle_distance sotto il robot: decide se siamo gia' in uno spazio stretto
     r0, c0, in0 = _cells(snap, np.array([snap.robot_x]), np.array([snap.robot_y]))
     od_robot = float(snap.obstacle_dist[r0[0], c0[0]]) if in0[0] else np.inf
-    clearance_escape = max(spotGrid.FRONTIER_MIN_CLEARANCE_M,
+    clearance_escape = max(geometry.FRONTIER_MIN_CLEARANCE_M,
                            min(clearance_nominal, od_robot - 0.02))
-    thr = np.where(ss < spotGrid.FRONTIER_ESCAPE_DIST_M, clearance_escape, clearance_nominal)
+    thr = np.where(ss < geometry.FRONTIER_ESCAPE_DIST_M, clearance_escape, clearance_nominal)
 
     od = snap.obstacle_dist[rows, cols]
-    near_robot = np.hypot(xs - snap.robot_x, ys - snap.robot_y) <= spotGrid.FRONTIER_ROBOT_RADIUS_M
+    near_robot = np.hypot(xs - snap.robot_x, ys - snap.robot_y) <= geometry.FRONTIER_ROBOT_RADIUS_M
     under_body = _under_body(snap, xs, ys)
 
     no_data = ~inside | (~snap.seen[rows, cols] & ~near_robot)
@@ -367,7 +369,7 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
         # la pancia (che alzerebbero "il meglio raggiunto" senza motivo).
         od_capped = np.where(under_body, min(od_robot, clearance_nominal), od_capped)
         best_so_far = np.maximum.accumulate(od_capped)
-        in_escape = inside & (ss < spotGrid.FRONTIER_ESCAPE_DIST_M) & (od < clearance_nominal) & ~under_body
+        in_escape = inside & (ss < geometry.FRONTIER_ESCAPE_DIST_M) & (od < clearance_nominal) & ~under_body
         # Tolleranza: almeno 1.5 celle. obstacle_distance va a gradini di una cella (3 cm), e
         # lungo un muro quasi parallelo al percorso un gradino non deve contare come
         # riavvicinamento.
@@ -403,7 +405,7 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
     # troppo ripido il fronte arretra al suo inizio. Stessa funzione e stessa soglia del PRM
     # sull'arco fra i nodi (il PRM usa in piu' il valore col corpo, quindi e' piu' severo:
     # il fronte non puo' rifiutare per pendenza un arco che il PRM ha ammesso).
-    if check_slope and spotGrid.FRONTIER_SLOPE_MIN_LENGTH_M > 0:
+    if check_slope and slopes.FRONTIER_SLOPE_MIN_LENGTH_M > 0:
         s_start = 0.0
         for k in range(len(pl) - 1):
             (x1, y1), (x2, y2) = pl[k], pl[k + 1]
@@ -411,12 +413,12 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
             if s_start >= dist:
                 break
             free_len = min(L, dist - s_start)
-            if free_len >= spotGrid.FRONTIER_SLOPE_MIN_LENGTH_M:
+            if free_len >= slopes.FRONTIER_SLOPE_MIN_LENGTH_M:
                 f = free_len / L
-                long_s, lat_s, has = spotGrid.compute_arc_slope_profile(
+                long_s, lat_s, has = slopes.compute_arc_slope_profile(
                     snap.terrain, snap.origin_x, snap.origin_y, snap.cell_size,
                     x1, y1, x1 + f * (x2 - x1), y1 + f * (y2 - y1), valid_2d=snap.valid)
-                if has and max(long_s, lat_s) > spotGrid.SLOPE_THRESHOLD:
+                if has and max(long_s, lat_s) > slopes.SLOPE_THRESHOLD:
                     reason, value = 'pendenza', float(max(long_s, lat_s))
                     dist, stop_xy = s_start, (x1, y1)
                     break
@@ -437,8 +439,8 @@ def allowed_advance(frontier):
     """
     if frontier['reason'] == 'fine_percorso':
         return frontier['path_len']
-    half_along = frontier.get('half_along', spotGrid.FRONTIER_BODY_HALF_LENGTH_M)
-    return max(0.0, frontier['dist'] - half_along - spotGrid.FRONTIER_MARGIN_M)
+    half_along = frontier.get('half_along', geometry.FRONTIER_BODY_HALF_LENGTH_M)
+    return max(0.0, frontier['dist'] - half_along - geometry.FRONTIER_MARGIN_M)
 
 
 def point_along(polyline, s):
@@ -467,7 +469,7 @@ def describe_frontier(frontier):
         return f"[FRONTE] {base} -- si ferma sul bordo dei dati in ({sx:.2f}, {sy:.2f}): avanzo e riguardo"
     if r == 'ostacolo':
         thr = frontier.get('stop_threshold', frontier.get('clearance_nominal',
-                                                          spotGrid.FRONTIER_CLEARANCE_M))
+                                                          geometry.FRONTIER_CLEARANCE_M))
         if frontier.get('stop_by_latch'):
             why = (f"(minimo {thr:.2f} m; qui decide l'isteresi, che tiene bloccante la cella "
                    f"fino a {thr + OBSTACLE_HYSTERESIS_M:.2f} m)")
@@ -478,7 +480,7 @@ def describe_frontier(frontier):
     if r == 'rugosita':
         return f"[FRONTE] {base} -- terreno troppo irregolare in ({sx:.2f}, {sy:.2f})"
     return (f"[FRONTE] {base} -- tratto troppo ripido da ({sx:.2f}, {sy:.2f}) "
-            f"(pendenza {frontier['value']:.3f} > {spotGrid.SLOPE_THRESHOLD:.3f})")
+            f"(pendenza {frontier['value']:.3f} > {slopes.SLOPE_THRESHOLD:.3f})")
 
 
 # =============================================================================
@@ -500,7 +502,7 @@ class ArcVerificationTracker:
     def __init__(self, robot):
         self.robot = robot
         self._robot_state_client = self.robot.ensure_client(RobotStateClient.default_service_name)
-        self._local_grid = spotGrid.LocalGrid(self.robot)
+        self._local_grid = spot_grid.LocalGrid(self.robot)
         self._lock = threading.Lock()
         self._waypoints = []          # [(x, y), ...] SENZA la posizione del robot
         self._extend_end_m = None
@@ -562,10 +564,10 @@ class ArcVerificationTracker:
                     time.sleep(0.2)
                     continue
                 # Questo fronte serve SOLO all'arresto a meta' movimento: soglia d'intrusione
-                # (mezza larghezza, senza aria), vedi spotGrid.FRONTIER_ABORT_AIR_M.
+                # (mezza larghezza, senza aria), vedi geometry.FRONTIER_ABORT_AIR_M.
                 frontier = compute_safe_frontier([(snap.robot_x, snap.robot_y)] + waypoints, snap,
                                                  extend_end_m=extend, body=body,
-                                                 air_m=spotGrid.FRONTIER_ABORT_AIR_M)
+                                                 air_m=geometry.FRONTIER_ABORT_AIR_M)
                 frontier['path_version'] = version
                 with self._lock:
                     if version == self._path_version:   # nel frattempo non e' cambiato il percorso
@@ -661,7 +663,7 @@ def goal_still_reachable(snap, goal_x, goal_y):
     rows, cols, inside = _cells(snap, np.array([float(goal_x)]), np.array([float(goal_y)]))
     if not bool(inside[0]):
         return True
-    return float(snap.obstacle_dist[rows[0], cols[0]]) >= spotGrid.FRONTIER_CLEARANCE_M
+    return float(snap.obstacle_dist[rows[0], cols[0]]) >= geometry.FRONTIER_CLEARANCE_M
 
 
 def decide_next_move(robot_xy, path_waypoints, frontier, no_progress_count, in_target_cell=True):
@@ -763,7 +765,7 @@ def rotation_plan(robot_yaw, robot_xy, target_xy, od_robot, snap=None):
       1. rotazione sotto ROTATION_CHECK_MIN_DYAW_DEG -- trascurabile, si ruota
       2. obstacle_distance sotto il robot >= ROTATION_CLEARANCE_M -- cerchio circoscritto
          libero, si ruota senza altri calcoli (prefiltro)
-      3. spotGrid.rotation_is_clear() sulle celle davvero spazzate (0.26 ms)
+      3. geometry.rotation_is_clear() sulle celle davvero spazzate (0.26 ms)
 
     Senza `snap` (nessuna fotografia della griglia) si ricade sul solo confronto scalare.
 
@@ -776,14 +778,14 @@ def rotation_plan(robot_yaw, robot_xy, target_xy, od_robot, snap=None):
     motion_dir = float(np.arctan2(ty - ry, tx - rx))
     dyaw = float(np.degrees(np.arctan2(np.sin(motion_dir - robot_yaw), np.cos(motion_dir - robot_yaw))))
 
-    if abs(dyaw) < spotGrid.ROTATION_CHECK_MIN_DYAW_DEG:
+    if abs(dyaw) < geometry.ROTATION_CHECK_MIN_DYAW_DEG:
         return {'turn': True, 'dyaw_deg': dyaw, 'motion_dir': motion_dir, 'margin': None,
                 'why': 'rotazione trascurabile'}
-    if od_robot >= spotGrid.ROTATION_CLEARANCE_M:
+    if od_robot >= geometry.ROTATION_CLEARANCE_M:
         return {'turn': True, 'dyaw_deg': dyaw, 'motion_dir': motion_dir, 'margin': None,
                 'why': 'cerchio circoscritto libero'}
     if snap is not None:
-        ok, margin = spotGrid.rotation_is_clear(
+        ok, margin = geometry.rotation_is_clear(
             snap.obstacle_dist, snap.origin_x, snap.origin_y, snap.cell_size,
             rx, ry, robot_yaw, float(np.radians(dyaw)))
         return {'turn': bool(ok), 'dyaw_deg': dyaw, 'motion_dir': motion_dir,
@@ -828,7 +830,7 @@ def shortcut_index(robot_xy, path_waypoints, snap, global_map=None, prm=None, ro
         if global_map is not None:
             n = max(prm_graph.OCCUPANCY_SAMPLES_MIN, int(np.ceil(d * prm_graph.OCCUPANCY_SAMPLES_PER_M)) + 1)
             if any(global_map.is_occupied(rx + t * (wx - rx), ry + t * (wy - ry),
-                                          safety_margin=spotGrid.PRM_EDGE_SAFETY_MARGIN_M)
+                                          safety_margin=geometry.PRM_EDGE_SAFETY_MARGIN_M)
                    for t in np.linspace(0.0, 1.0, n)[1:]):
                 continue
         f = compute_safe_frontier([(rx, ry), (wx, wy)], snap)
@@ -853,7 +855,7 @@ def plan_straight_retreat(robot_xy, robot_yaw, snap, max_dist=P.ROTATION_RETREAT
     rx, ry = robot_xy
     back_x = rx - max_dist * np.cos(robot_yaw)
     back_y = ry - max_dist * np.sin(robot_yaw)
-    body = spotGrid.body_extents(robot_yaw, robot_yaw + np.pi)   # all'indietro: (0.55, 0.25)
+    body = geometry.body_extents(robot_yaw, robot_yaw + np.pi)   # all'indietro: (0.55, 0.25)
     f = compute_safe_frontier([(rx, ry), (back_x, back_y)], snap, body=body)
     adv = allowed_advance(f)
     if adv < P.ROTATION_RETREAT_MIN_M:
@@ -869,7 +871,7 @@ def scan_escape_directions(robot_xy, robot_yaw, snap, step_deg=P.ESCAPE_FAN_STEP
 
     Per ciascuna direzione del giro (passo step_deg) misura due cose indipendenti:
       - quanto spazio concede il fronte sicuro andando in linea retta in quella direzione;
-      - se il robot puo' girarsi tanto da puntarci il muso (spotGrid.rotation_is_clear).
+      - se il robot puo' girarsi tanto da puntarci il muso (geometry.rotation_is_clear).
     Una direzione e' UTILIZZABILE solo se entrambe rispondono si'. Il robot non cammina di
     traverso (vedi ROTAZIONE E ARRETRAMENTO in parametri.py), quindi una corsia larga che richiede una
     rotazione impossibile NON e' una via d'uscita, per quanto larga sia.
@@ -889,10 +891,10 @@ def scan_escape_directions(robot_xy, robot_yaw, snap, step_deg=P.ESCAPE_FAN_STEP
             [(rx, ry), (rx + probe_m * np.cos(a), ry + probe_m * np.sin(a))], snap)
         adv = allowed_advance(f)
         rel = float(np.degrees(np.arctan2(np.sin(a - robot_yaw), np.cos(a - robot_yaw))))
-        if abs(rel) < spotGrid.ROTATION_CHECK_MIN_DYAW_DEG:
+        if abs(rel) < geometry.ROTATION_CHECK_MIN_DYAW_DEG:
             rotatable = True
         else:
-            rotatable = bool(spotGrid.rotation_is_clear(
+            rotatable = bool(geometry.rotation_is_clear(
                 snap.obstacle_dist, snap.origin_x, snap.origin_y, snap.cell_size,
                 rx, ry, float(robot_yaw), float(np.radians(rel)))[0])
         out.append({'dir_deg': float(deg), 'rel_deg': rel, 'advance': float(adv),
@@ -980,8 +982,8 @@ def plan_cone_move(robot_xy, robot_yaw, snap, goal_xy, max_dyaw_deg=P.CONE_SWEEP
     for rel in rels:
         # La rotazione deve essere possibile: sotto la soglia di trascurabilita' non si
         # controlla nulla (e' quello che fa anche rotation_plan), sopra si misura il settore.
-        if abs(rel) >= spotGrid.ROTATION_CHECK_MIN_DYAW_DEG:
-            ok, _ = spotGrid.rotation_is_clear(
+        if abs(rel) >= geometry.ROTATION_CHECK_MIN_DYAW_DEG:
+            ok, _ = geometry.rotation_is_clear(
                 snap.obstacle_dist, snap.origin_x, snap.origin_y, snap.cell_size,
                 rx, ry, robot_yaw, float(np.radians(rel)))
             if not ok:
@@ -1017,9 +1019,9 @@ def retreat_would_help(snap, back_xy, robot_yaw, dyaw_deg):
     perche' da li' il robot vedra' qualcosa di piu', ma e' la stessa informazione su cui si
     e' deciso di arretrare, quindi almeno la decisione e' coerente con se stessa.
     """
-    if abs(dyaw_deg) < spotGrid.ROTATION_CHECK_MIN_DYAW_DEG:
+    if abs(dyaw_deg) < geometry.ROTATION_CHECK_MIN_DYAW_DEG:
         return True, None
-    ok, margin = spotGrid.rotation_is_clear(
+    ok, margin = geometry.rotation_is_clear(
         snap.obstacle_dist, snap.origin_x, snap.origin_y, snap.cell_size,
         float(back_xy[0]), float(back_xy[1]), float(robot_yaw), float(np.radians(dyaw_deg)))
     return bool(ok), margin

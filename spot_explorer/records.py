@@ -102,7 +102,7 @@ MISSION_CTX = {
     # sono gia' riferiti all'avvio missione (env.set_origin con la posa di partenza); per la
     # quota si salva questo valore in tutti i dati e nelle mappe, e il viewer mostra le quote
     # rispetto ad esso. I CALCOLI non ne dipendono: usano solo differenze di quota e il
-    # suolo stimato sotto il robot a ogni scansione (vedi spotGrid.GROUND_HEIGHT_TOLERANCE_M).
+    # suolo stimato sotto il robot a ogni scansione (vedi spot_grid.GROUND_HEIGHT_TOLERANCE_M).
     'mission_z0': None,
     # Fiducial visto alla partenza (navGraphUtils.find_fiducials): ID e posizione VISION, per
     # rivederlo al ritorno su wp_0 (graphnav_check_start_fiducial). None = nessuno.

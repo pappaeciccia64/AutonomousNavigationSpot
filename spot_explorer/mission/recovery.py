@@ -3,7 +3,7 @@ import numpy as np
 
 from spot_explorer.graphnav import graphnav as navGraphUtils
 from spot_explorer.robot import motion as movements
-from spot_explorer.perception import grids as spotGrid
+from spot_explorer.perception import geometry
 from spot_explorer.robot import connection as spotUtils
 from spot_explorer.planning import safe_frontier as arcVerification
 
@@ -148,7 +148,7 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
         except Exception:
             ax, ay = crumb['x'], crumb['y']
         new_node = prm_graph.add_stop_node(
-            ax, ay, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
+            ax, ay, global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M,
             label=f"sosta (ritorno GraphNav a {crumb['wp_name']})")
         # Niente deroga alla mappa globale attorno a questo nodo: vedi il commento al
         # chiamante di set_robot_node nel ciclo principale.
@@ -289,7 +289,7 @@ def cell_has_reachable_target(env, sampler, global_map, row, col, safety_margin=
     if global_map is None:
         return True, 0, 0, 0
     if safety_margin is None:
-        safety_margin = spotGrid.PRM_EDGE_SAFETY_MARGIN_M
+        safety_margin = geometry.PRM_EDGE_SAFETY_MARGIN_M
     centro = env.get_world_position_from_cell(row, col)
     if centro is None:
         return False, 0, 0, 0

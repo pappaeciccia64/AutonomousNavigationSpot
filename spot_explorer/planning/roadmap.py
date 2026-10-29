@@ -12,7 +12,9 @@ import numpy as np
 from typing import List, Tuple, Optional
 import heapq
 import threading
-from spot_explorer.perception import grids as spotGrid
+from spot_explorer.perception import geometry
+from spot_explorer.perception import global_maps
+from spot_explorer.perception import slopes
 try:
     from scipy.spatial import cKDTree
 except Exception:          # scipy c'e' gia' (spotGrid usa scipy.ndimage); ripiego per sicurezza
@@ -20,9 +22,9 @@ except Exception:          # scipy c'e' gia' (spotGrid usa scipy.ndimage); ripie
 
 
 # Campioni per metro con cui si controlla l'occupazione lungo un arco (minimo 5), uguali
-# ovunque. Ogni campione controlla un disco di raggio spotGrid.PRM_EDGE_SAFETY_MARGIN_M
+# ovunque. Ogni campione controlla un disco di raggio geometry.PRM_EDGE_SAFETY_MARGIN_M
 # (0.13): con un campione ogni 10 cm, a meta' fra due campioni il disco copre ancora 0.12 m,
-# cioe' la linea dell'arco resta a ~0.27 m dagli ostacoli (spotGrid.PLAN_CLEARANCE_M = 0.28;
+# cioe' la linea dell'arco resta a ~0.27 m dagli ostacoli (geometry.PLAN_CLEARANCE_M = 0.28;
 # il fronte ne pretende 0.25).
 OCCUPANCY_SAMPLES_PER_M = 10
 OCCUPANCY_SAMPLES_MIN = 5
@@ -32,7 +34,7 @@ OCCUPANCY_SAMPLES_MIN = 5
 # scansione di un posto non sa ancora niente. Prima di tutto il resto, un arco si scarta se
 # un suo campione (ogni 10 cm) cade su una cella VISTA nella scansione attuale con
 # obstacle_distance sotto LIVE_PREFILTER_OD_M e non sotto il corpo del robot.
-#   - La soglia e' la distanza del fronte (spotGrid.FRONTIER_CLEARANCE_M, 0.25 m): toglie
+#   - La soglia e' la distanza del fronte (geometry.FRONTIER_CLEARANCE_M, 0.25 m): toglie
 #     gli archi che il fronte rifiuterebbe. Con una soglia sotto il fronte (0.20 m) il
 #     pianificatore sceglieva archi a 0.20-0.25 m che il fronte poi rifiutava.
 #   - NON la distanza di pianificazione (0.28, quella della mappa globale): da un punto
@@ -42,7 +44,7 @@ OCCUPANCY_SAMPLES_MIN = 5
 #   - E' una lettura vettoriale, costa pochissimo, e viene prima della pendenza.
 #   - Non e' permanente: si rifa' a ogni refresh con la scansione nuova.
 # None = disattivato.
-LIVE_PREFILTER_OD_M = spotGrid.FRONTIER_CLEARANCE_M     # = 0.25
+LIVE_PREFILTER_OD_M = geometry.FRONTIER_CLEARANCE_M     # = 0.25
 
 # --- Aggancio della posizione del robot al grafo -------------------------------------------
 # Il grafo non cresce durante la missione: add_stop_node aggancia la posizione al nodo
@@ -81,7 +83,7 @@ def body_slope(prof):
     """
     (long, lat, has) da usare per veto, costo e andatura, dato il risultato di
     compute_arc_slope_profile: con 6 valori (body=True) quelli col corpo (il peggiore fra arco
-    e arco allungato di mezzo corpo, vedi spotGrid._body_slope); con 3 valori quelli
+    e arco allungato di mezzo corpo, vedi slopes._body_slope); con 3 valori quelli
     dell'arco. Se l'arco non ha dati suoi restano quelli dell'arco: l'allungamento non
     trasforma un arco mai visto in uno misurato.
     """
@@ -97,8 +99,8 @@ def body_slope(prof):
 # mezzo corpo oltre gli estremi, fetta laterale della pendenza, margine d'occupazione, piu'
 # un decimetro di sicurezza. Ridurlo rompe l'uguaglianza con la costruzione completa
 # (test_replay.py lo controlla).
-DIRTY_MARGIN_M = (spotGrid.ARC_BODY_EXTENSION_M + spotGrid.LATERAL_SLICE_HALF_WIDTH_M
-                  + spotGrid.PRM_EDGE_SAFETY_MARGIN_M + 0.10)
+DIRTY_MARGIN_M = (slopes.ARC_BODY_EXTENSION_M + slopes.LATERAL_SLICE_HALF_WIDTH_M
+                  + geometry.PRM_EDGE_SAFETY_MARGIN_M + 0.10)
 
 
 class PRM:
@@ -117,7 +119,7 @@ class PRM:
             beta: peso della pendenza LONGITUDINALE (beccheggio)
             gamma: peso della rugosita' (0: oggi la rugosita' non entra nel costo)
             beta_lateral: peso della pendenza LATERALE (rollio); None = beta *
-                spotGrid.LATERAL_SLOPE_COST_MULTIPLIER
+                slopes.LATERAL_SLOPE_COST_MULTIPLIER
         """
         self.max_edge_length = max_edge_length
         self.connection_radius = connection_radius
@@ -128,7 +130,7 @@ class PRM:
         self.beta = beta  # Peso pendenza longitudinale (beccheggio)
         self.gamma = gamma  # Peso rugosità (roughness)
         self.beta_lateral = (beta_lateral if beta_lateral is not None
-                             else beta * spotGrid.LATERAL_SLOPE_COST_MULTIPLIER)  # Peso pendenza laterale (rollio)
+                             else beta * slopes.LATERAL_SLOPE_COST_MULTIPLIER)  # Peso pendenza laterale (rollio)
 
         self.nodes = {}  # {point_idx: (x, y)}
         self.node_gradients = {}  # {point_idx: slope_value} <-- Memorizza la pendenza del nodo
@@ -144,7 +146,7 @@ class PRM:
         self.grid_origin_y = None
         self.cell_size = None
 
-        # Mappa globale delle quote (spotGrid.GlobalTerrainGrid): pendenza degli archi fuori
+        # Mappa globale delle quote (global_maps.GlobalTerrainGrid): pendenza degli archi fuori
         # dalla finestra di adesso ma gia' visti prima (vedi set_global_terrain_map).
         self.global_terrain_map = None
         # Cache della pendenza dalla mappa globale, per arco: una voce resta valida finche' la
@@ -247,7 +249,7 @@ class PRM:
 
     def set_global_terrain_map(self, global_terrain_map):
         """
-        Inietta la mappa globale persistente delle altezze (spotGrid.GlobalTerrainGrid).
+        Inietta la mappa globale persistente delle altezze (global_maps.GlobalTerrainGrid).
         Va richiamata una volta che l'oggetto esiste (tipicamente subito dopo averlo
         creato/recuperato in easy_walk.py) -- puo' essere richiamata piu' volte, e'
         idempotente, serve solo ad aggiornare il riferimento.
@@ -266,7 +268,7 @@ class PRM:
         self.current_rough_2d = rough_values_2d
         self.current_terrain_2d = terrain_values_2d
         # celle attendibili (is_valid di correct_terrain): le quote riempite non entrano
-        # nel profilo di pendenza -- vedi spotGrid.compute_arc_slope_profile
+        # nel profilo di pendenza -- vedi slopes.compute_arc_slope_profile
         self.current_valid_2d = valid_2d
         self.grid_origin_x = grid_origin_x
         self.grid_origin_y = grid_origin_y
@@ -328,11 +330,11 @@ class PRM:
         hit = inside & lo['seen'][rows, cols] & np.isfinite(v) & (v < LIVE_PREFILTER_OD_M)
         dx, dy = sx - lo['rx'], sy - lo['ry']
         if lo['yaw'] is None:
-            body = np.hypot(dx, dy) <= spotGrid.ROBOT_HALF_WIDTH_M
+            body = np.hypot(dx, dy) <= geometry.ROBOT_HALF_WIDTH_M
         else:
             c, s = np.cos(lo['yaw']), np.sin(lo['yaw'])
-            body = ((np.abs(c * dx + s * dy) <= spotGrid.ROBOT_HALF_LENGTH_M)
-                    & (np.abs(-s * dx + c * dy) <= spotGrid.ROBOT_HALF_WIDTH_M))
+            body = ((np.abs(c * dx + s * dy) <= geometry.ROBOT_HALF_LENGTH_M)
+                    & (np.abs(-s * dx + c * dy) <= geometry.ROBOT_HALF_WIDTH_M))
         return hit & ~body
 
     def _live_blocked_many(self, pairs):
@@ -488,7 +490,7 @@ class PRM:
 
             if not blocked:
                 # Una sola lettura del terreno; veto e costo usano lo stesso valore, quello
-                # col corpo (vedi body_slope e spotGrid.ARC_BODY_EXTENSION_M).
+                # col corpo (vedi body_slope e slopes.ARC_BODY_EXTENSION_M).
                 prof = (live_prof if live_prof is not None
                         else self.compute_arc_slope_profile(x1, y1, x2, y2, body=True))
                 long_slope, lat_slope, has_slope_data = body_slope(prof)
@@ -501,7 +503,7 @@ class PRM:
                     # refresh consecutivi puo' indicare oscillazione dovuta a rumore del
                     # sensore piu' che a un cambiamento reale del terreno -- non influisce
                     # su nessuna decisione, serve solo a farlo emergere nei log.
-                    near_thresh = spotGrid.SLOPE_THRESHOLD * (1.0 - spotGrid.NEAR_THRESHOLD_MARGIN_FRACTION)
+                    near_thresh = slopes.SLOPE_THRESHOLD * (1.0 - slopes.NEAR_THRESHOLD_MARGIN_FRACTION)
                     is_near_threshold = (long_slope >= near_thresh) or (lat_slope >= near_thresh)
                     new_valid = not blocked
                     if is_near_threshold and old_valid is not None and old_valid != new_valid:
@@ -533,15 +535,15 @@ class PRM:
     def compute_arc_slope_profile(self, x1: float, y1: float, x2: float, y2: float,
                                    perp_sample_spacing_m: float = 0.10, body: bool = False):
         """
-        spotGrid.compute_arc_slope_profile sulla griglia dal vivo di questo ciclo (vedi
+        slopes.compute_arc_slope_profile sulla griglia dal vivo di questo ciclo (vedi
         update_local_grid_data). Restituisce (pendenza longitudinale, laterale, has_data);
         con body=True l'arco e' allungato di mezzo corpo per parte.
         """
-        return spotGrid.compute_arc_slope_profile(
+        return slopes.compute_arc_slope_profile(
             self.current_terrain_2d, self.grid_origin_x, self.grid_origin_y, self.cell_size,
             x1, y1, x2, y2, perp_sample_spacing_m=perp_sample_spacing_m,
             valid_2d=getattr(self, 'current_valid_2d', None),
-            body_ext_m=(spotGrid.ARC_BODY_EXTENSION_M if body else 0.0)
+            body_ext_m=(slopes.ARC_BODY_EXTENSION_M if body else 0.0)
         )
 
     def sample_terrain_between_points(self, x1: float, y1: float, x2: float, y2: float,
@@ -588,7 +590,7 @@ class PRM:
                     sampled_roughness.append(self.current_rough_2d[row_idx, col_idx])
 
         if sampled_roughness:
-            actual_roughness = spotGrid.p90(sampled_roughness)
+            actual_roughness = slopes.p90(sampled_roughness)
         else:
             r1 = self.node_roughness.get(node_idx1, 0.0)
             r2 = self.node_roughness.get(node_idx2, 0.0)
@@ -623,7 +625,7 @@ class PRM:
 
     def _record_slope_veto(self, key, long_slope: float, lat_slope: float) -> bool:
         """
-        Veto di pendenza (spotGrid.SLOPE_THRESHOLD, in entrambe le direzioni) con le statistiche.
+        Veto di pendenza (slopes.SLOPE_THRESHOLD, in entrambe le direzioni) con le statistiche.
         Restituisce True se l'arco va scartato. I veti si riassumono in una riga [PENDENZE] per
         costruzione o refresh (flush_slope_log); i valori arco per arco restano nei _vis.npz.
         """
@@ -632,7 +634,7 @@ class PRM:
 
         vetoed = False
         pend = self._slope_pending()
-        if long_slope > spotGrid.SLOPE_THRESHOLD:
+        if long_slope > slopes.SLOPE_THRESHOLD:
             vetoed = True
             self.veto_count_longitudinal += 1
             pend['long'] += 1
@@ -640,7 +642,7 @@ class PRM:
             if key not in self.vetoed_arcs_longitudinal:
                 self.vetoed_arcs_longitudinal.add(key)
                 pend['new'] += 1
-        if lat_slope > spotGrid.SLOPE_THRESHOLD:
+        if lat_slope > slopes.SLOPE_THRESHOLD:
             vetoed = True
             self.veto_count_lateral += 1
             pend['lat'] += 1
@@ -667,7 +669,7 @@ class PRM:
             print(f"[PENDENZE] {where}: archi vetati per pendenza -- longitudinale {p['long']} "
                   f"(max {p['max_long']:.2f}), laterale {p['lat']} (max {p['max_lat']:.2f}), "
                   f"{p['new']} mai vetati prima; {p['flip']} cambi di verdetto vicino soglia "
-                  f"(soglia {spotGrid.SLOPE_THRESHOLD:.2f}).")
+                  f"(soglia {slopes.SLOPE_THRESHOLD:.2f}).")
         self._slope_log_pending = None
 
     def _record_occupancy_veto(self, key):
@@ -691,9 +693,9 @@ class PRM:
             },
             'max_slope_seen': dict(self.max_slope_seen),
             'slope_flip_count': self.slope_flip_count,
-            'slope_threshold': spotGrid.SLOPE_THRESHOLD,
-            'slope_baseline_m': spotGrid.SLOPE_BASELINE_M,
-            'lateral_slice_half_width_m': spotGrid.LATERAL_SLICE_HALF_WIDTH_M,
+            'slope_threshold': slopes.SLOPE_THRESHOLD,
+            'slope_baseline_m': slopes.SLOPE_BASELINE_M,
+            'lateral_slice_half_width_m': slopes.LATERAL_SLICE_HALF_WIDTH_M,
             'beta': self.beta,
             'beta_lateral': self.beta_lateral,
             'gamma': self.gamma,
@@ -719,9 +721,9 @@ class PRM:
               f"laterale: {len(self.vetoed_arcs_lateral)} ({self.veto_count_lateral})  "
               f"occupazione: {len(self.vetoed_arcs_occupancy)} ({self.veto_count_occupancy})")
         print(f"Pendenza massima misurata su un arco -- longitudinale: {self.max_slope_seen['long']:.3f}, "
-              f"laterale: {self.max_slope_seen['lat']:.3f} (soglia veto {spotGrid.SLOPE_THRESHOLD:.3f})")
-        print(f"Geometria del profilo d'arco -- base {spotGrid.SLOPE_BASELINE_M:.2f} m, "
-              f"fetta laterale +/-{spotGrid.LATERAL_SLICE_HALF_WIDTH_M:.2f} m")
+              f"laterale: {self.max_slope_seen['lat']:.3f} (soglia veto {slopes.SLOPE_THRESHOLD:.3f})")
+        print(f"Geometria del profilo d'arco -- base {slopes.SLOPE_BASELINE_M:.2f} m, "
+              f"fetta laterale +/-{slopes.LATERAL_SLICE_HALF_WIDTH_M:.2f} m")
         print(f"Pesi del costo -- alpha={self.alpha}, beta(long)={self.beta}, "
               f"beta_lateral={self.beta_lateral}, gamma={self.gamma}")
         print(f"Flip del veto pendenza vicino soglia (possibile oscillazione): {self.slope_flip_count}")
@@ -760,7 +762,7 @@ class PRM:
         def _with_body(x1, y1, x2, y2):
             # Come per il dal vivo (sample_terrain_between_points): il peggiore fra arco e
             # arco allungato di mezzo corpo, solo se l'arco ha dati suoi.
-            ext = spotGrid.ARC_BODY_EXTENSION_M
+            ext = slopes.ARC_BODY_EXTENSION_M
             if ext <= 0:
                 return tm.compute_arc_slope_profile(x1, y1, x2, y2)
             r = tm.compute_arc_slope_profile(x1, y1, x2, y2, body_ext_m=ext)
@@ -807,7 +809,7 @@ class PRM:
             return
         a = np.array([self.nodes[k[0]] for k in keys]); b = np.array([self.nodes[k[1]] for k in keys])
         # + ARC_BODY_EXTENSION_M: il valore in cache guarda anche oltre gli estremi.
-        m = spotGrid.LATERAL_SLICE_HALF_WIDTH_M + 2 * tm.resolution + spotGrid.ARC_BODY_EXTENSION_M
+        m = slopes.LATERAL_SLICE_HALF_WIDTH_M + 2 * tm.resolution + slopes.ARC_BODY_EXTENSION_M
         exmin, exmax = np.minimum(a[:, 0], b[:, 0]) - m, np.maximum(a[:, 0], b[:, 0]) + m
         eymin, eymax = np.minimum(a[:, 1], b[:, 1]) - m, np.maximum(a[:, 1], b[:, 1]) + m
         stale = np.zeros(len(keys), dtype=bool)
@@ -828,7 +830,7 @@ class PRM:
             return False
         if global_map is not None and hasattr(global_map, 'segment_hits_hazard'):
             (xa, ya), (xb, yb) = self.nodes[a], self.nodes[b]
-            if global_map.segment_hits_hazard(xa, ya, xb, yb, spotGrid.PRM_EDGE_SAFETY_MARGIN_M):
+            if global_map.segment_hits_hazard(xa, ya, xb, yb, geometry.PRM_EDGE_SAFETY_MARGIN_M):
                 return False
         return True
 
@@ -942,7 +944,7 @@ class PRM:
     def precompute_arc_slopes(self, pairs, skip=None):
         """
         Pendenza di molte coppie in un colpo solo, con le matrici di
-        spotGrid.arc_slope_profiles_batch: numeri IDENTICI al calcolo arco per arco.
+        slopes.arc_slope_profiles_batch: numeri IDENTICI al calcolo arco per arco.
 
         pairs: [(idx1, idx2, dist)], nel verso in cui verranno valutate; skip: maschera delle
         coppie da non calcolare (es. gia' scartate per occupazione).
@@ -961,8 +963,8 @@ class PRM:
             return out
         xy1 = np.array([self.nodes[pairs[i][0]] for i in idx], dtype=np.float64)
         xy2 = np.array([self.nodes[pairs[i][1]] for i in idx], dtype=np.float64)
-        ext = spotGrid.ARC_BODY_EXTENSION_M
-        live = spotGrid.compute_arc_slope_profiles_batch(
+        ext = slopes.ARC_BODY_EXTENSION_M
+        live = slopes.compute_arc_slope_profiles_batch(
             self.current_terrain_2d, self.grid_origin_x, self.grid_origin_y, self.cell_size,
             xy1[:, 0], xy1[:, 1], xy2[:, 0], xy2[:, 1],
             valid_2d=getattr(self, 'current_valid_2d', None), body_ext_m=ext)
@@ -997,7 +999,7 @@ class PRM:
         xy1 = np.array([self.nodes[a] for a, _, _ in pairs], dtype=np.float64)
         xy2 = np.array([self.nodes[b] for _, b, _ in pairs], dtype=np.float64)
         num_rows, num_cols = self.current_terrain_2d.shape
-        pad = spotGrid.LATERAL_SLICE_HALF_WIDTH_M + self.cell_size
+        pad = slopes.LATERAL_SLICE_HALF_WIDTH_M + self.cell_size
         x_hi = self.grid_origin_x + num_cols * self.cell_size
         y_hi = self.grid_origin_y + num_rows * self.cell_size
         out = ((np.maximum(xy1[:, 0], xy2[:, 0]) + pad < self.grid_origin_x)

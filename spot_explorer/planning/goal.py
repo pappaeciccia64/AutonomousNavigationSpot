@@ -1,7 +1,8 @@
 """Scelta del punto obiettivo in una cella (find_best_point_in_cell) e obiettivi esclusi."""
 import numpy as np
 
-from spot_explorer.perception import grids as spotGrid
+from spot_explorer.perception import geometry
+from spot_explorer.perception import global_maps
 from spot_explorer.mission import cells as environmentMap
 
 
@@ -47,7 +48,7 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
 
     Scartati sempre (mai scelti): i punti in `exclude` (gia' provati in questo tentativo),
     quelli occupati nella mappa globale (con safety_margin) e quelli a meno di
-    spotGrid.PLAN_CLEARANCE_M (0.28) da un ostacolo nella scansione dal vivo o nello spazio
+    geometry.PLAN_CLEARANCE_M (0.28) da un ostacolo nella scansione dal vivo o nello spazio
     libero imparato. Fra i rimasti, nell'ordine:
       1. non rifiutati dal fronte in questa missione (_refuse_goal); i rifiutati tornano
          solo se non c'e' altro;
@@ -70,7 +71,7 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
     restituisce (None, None, ...): il chiamante lo tratta gia' come fallimento di
     ingresso e passa alla logica dei lati non ancora provati.
 
-    global_map: spotGrid.GlobalGrid accumulata, aggiornata con la scansione corrente appena
+    global_map: global_maps.GlobalGrid accumulata, aggiornata con la scansione corrente appena
     prima di questa chiamata. Se None si usa il centro senza controlli.
 
     Returns:
@@ -78,7 +79,7 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
         Le due liste alimentano la visualizzazione (gialli = ammessi, rossi = scartati).
     """
     if safety_margin is None:
-        safety_margin = spotGrid.PRM_EDGE_SAFETY_MARGIN_M
+        safety_margin = geometry.PRM_EDGE_SAFETY_MARGIN_M
     cell_center = env.get_world_position_from_cell(cell_row, cell_col)
     if cell_center is None:
         return None, None, [], []
@@ -90,12 +91,12 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
         # Nessuna informazione di occupazione: il centro della cella.
         return cell_center_x, cell_center_y, sampled, []
 
-    # min_clear e' la distanza con cui si pianificano gli archi (spotGrid.PLAN_CLEARANCE_M):
+    # min_clear e' la distanza con cui si pianificano gli archi (geometry.PLAN_CLEARANCE_M):
     # un obiettivo piu' vicino agli ostacoli non avrebbe archi. La mappa globale dichiara
     # occupata una cella solo dopo due osservazioni, quindi un ostacolo appena visto c'e'
     # solo nella scansione dal vivo (22-10 15:50, cella (0,2)).
-    min_clear = spotGrid.PLAN_CLEARANCE_M
-    pref_margin = max(safety_margin, P.TARGET_CLEARANCE_M - spotGrid.OBSTACLE_THRESHOLD)
+    min_clear = geometry.PLAN_CLEARANCE_M
+    pref_margin = max(safety_margin, P.TARGET_CLEARANCE_M - geometry.OBSTACLE_THRESHOLD)
     refused = _refused_goals(env, cell_row, cell_col)
     live_od = None
     if pts is not None and cells_obstacle_dist is not None:

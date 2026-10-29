@@ -26,7 +26,7 @@ from bosdyn.api import geometry_pb2
 from google.protobuf import wrappers_pb2
 
 from spot_explorer import config as P
-from spot_explorer.perception import grids as spotGrid
+from spot_explorer.perception import gait
 from spot_explorer.records import MISSION_STATS
 
 
@@ -35,7 +35,7 @@ from spot_explorer.records import MISSION_STATS
 #
 # Ogni comando di movimento imposta un limite: senza, Spot cammina fino al proprio massimo
 # (~1.6 m/s), troppo per un terreno esterno anche se in piano. I limiti per livello di
-# terreno stanno in spotGrid.GAIT_VEL_* e arrivano tramite select_mobility_params()
+# terreno stanno in gait.GAIT_VEL_* e arrivano tramite select_mobility_params()
 # (qui sotto). Questi sono i valori usati quando il chiamante non ne passa (comandi
 # isolati, ritirata).
 #
@@ -78,7 +78,7 @@ MOVE_MAX_RPC_ERRORS = 3
 # PERCHE' RESTA DISATTIVATA (True): la classificazione `no_step` di Spot considera
 # l'ERBA un ostacolo -- lo stesso identico motivo per cui questo progetto usa
 # `obstacle_distance` invece di `no_step` (vedi il commento in
-# spotGrid.create_vtk_obstacle_grid). Con la protezione attiva, su prato Spot
+# spot_grid.LocalGrid). Con la protezione attiva, su prato Spot
 # rifiuta di appoggiare le zampe e la missione si ferma. Il campo d'uso previsto
 # di questo sistema e' l'esplorazione in ESTERNO: le prove al chiuso sono una
 # contingenza, non il caso d'uso, quindi il default segue l'esterno.
@@ -481,7 +481,7 @@ def select_mobility_params(gradient, roughness):
 
     Decide la peggiore fra pendenza e rugosita' (basta superare la soglia su UNA delle due
     per passare al livello piu' duro) -- la stessa logica OR del veto d'ostacolo in
-    spotGrid.fuse_obstacle_mask. Soglie, attriti e velocita' stanno in spotGrid.GAIT_*.
+    spot_grid.LocalGrid.fuse_obstacle_mask. Soglie, attriti e velocita' stanno in gait.GAIT_*.
 
     Livelli:
       PLAIN    -- terreno piano e regolare: andatura normale (HINT_AUTO), passo medio,
@@ -493,30 +493,30 @@ def select_mobility_params(gradient, roughness):
     """
     # Tarato per l'ESTERNO: anche un prato in piano non e' un pavimento, quindi passo
     # almeno medio per tutti i livelli, e velocita' limitate a ogni livello.
-    if gradient < spotGrid.GAIT_PLAIN_SLOPE_MAX and roughness < spotGrid.GAIT_PLAIN_ROUGH_MAX:
+    if gradient < gait.GAIT_PLAIN_SLOPE_MAX and roughness < gait.GAIT_PLAIN_ROUGH_MAX:
         tier = "PLAIN"
         params = dict(locomotion_hint=spot_command_pb2.HINT_AUTO,
                       swing_height=spot_command_pb2.SWING_HEIGHT_MEDIUM,
-                      ground_mu_hint=spotGrid.GAIT_MU_PLAIN,
-                      max_linear_vel=spotGrid.GAIT_VEL_PLAIN,
-                      max_angular_vel=spotGrid.GAIT_ANG_PLAIN)
-    elif gradient < spotGrid.GAIT_MODERATE_SLOPE_MAX and roughness < spotGrid.GAIT_MODERATE_ROUGH_MAX:
+                      ground_mu_hint=gait.GAIT_MU_PLAIN,
+                      max_linear_vel=gait.GAIT_VEL_PLAIN,
+                      max_angular_vel=gait.GAIT_ANG_PLAIN)
+    elif gradient < gait.GAIT_MODERATE_SLOPE_MAX and roughness < gait.GAIT_MODERATE_ROUGH_MAX:
         tier = "MODERATE"
         # CRAWL anche qui, su richiesta dell'utente. Sul prato MODERATE prende ~60% dei
         # passi, quindi il crawl e' l'andatura prevalente e la missione e' piu' lenta;
         # con HINT_AUTO qui MODERATE torna all'andatura normale.
         params = dict(locomotion_hint=spot_command_pb2.HINT_CRAWL,
                       swing_height=spot_command_pb2.SWING_HEIGHT_HIGH,
-                      ground_mu_hint=spotGrid.GAIT_MU_MODERATE,
-                      max_linear_vel=spotGrid.GAIT_VEL_MODERATE,
-                      max_angular_vel=spotGrid.GAIT_ANG_MODERATE)
+                      ground_mu_hint=gait.GAIT_MU_MODERATE,
+                      max_linear_vel=gait.GAIT_VEL_MODERATE,
+                      max_angular_vel=gait.GAIT_ANG_MODERATE)
     else:
         tier = "HARD"
         params = dict(locomotion_hint=spot_command_pb2.HINT_CRAWL,
                       swing_height=spot_command_pb2.SWING_HEIGHT_HIGH,
-                      ground_mu_hint=spotGrid.GAIT_MU_HARD,
-                      max_linear_vel=spotGrid.GAIT_VEL_HARD,
-                      max_angular_vel=spotGrid.GAIT_ANG_HARD)
+                      ground_mu_hint=gait.GAIT_MU_HARD,
+                      max_linear_vel=gait.GAIT_VEL_HARD,
+                      max_angular_vel=gait.GAIT_ANG_HARD)
 
     print(f"[GAIT] Livello del terreno: {tier} (pendenza={gradient:.3f}, rugosita'={roughness:.3f}) -> "
           f"locomotion_hint={params['locomotion_hint']}, swing_height={params['swing_height']}, "

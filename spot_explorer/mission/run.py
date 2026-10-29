@@ -14,7 +14,11 @@ from bosdyn.client.robot_command import (RobotCommandBuilder, RobotCommandClient
 from types import SimpleNamespace
 from spot_explorer.graphnav import graphnav as navGraphUtils
 from spot_explorer.robot import motion as movements
-from spot_explorer.perception import grids as spotGrid
+from spot_explorer.perception import gait
+from spot_explorer.perception import geometry
+from spot_explorer.perception import global_maps
+from spot_explorer.perception import slopes
+from spot_explorer.perception import spot_grid
 from spot_explorer.robot import connection as spotLogInUtils
 from spot_explorer.mission import cells as environmentMap
 from spot_explorer.robot import connection as spotUtils
@@ -94,25 +98,25 @@ def _stampa_configurazione():
     stato prodotto."""
     print("[CONFIG] INTERRUTTORI: " + "  ".join(
         f"{k.split('.')[-1]}={v}" for k, v in summary.mission_switches().items()))
-    print(f"[CONFIG] SLOPE_THRESHOLD={spotGrid.SLOPE_THRESHOLD}  "
-          f"LATERAL_SLOPE_COST_MULTIPLIER={spotGrid.LATERAL_SLOPE_COST_MULTIPLIER}  "
-          f"OBSTACLE_THRESHOLD={spotGrid.OBSTACLE_THRESHOLD}  ROUGH_THRESHOLD={spotGrid.ROUGH_THRESHOLD}  "
-          f"NEAR_THRESHOLD_MARGIN_FRACTION={spotGrid.NEAR_THRESHOLD_MARGIN_FRACTION}")
-    print(f"[CONFIG] PROFILO ARCO: base={spotGrid.SLOPE_BASELINE_M}m  "
-          f"fetta_laterale=+/-{spotGrid.LATERAL_SLICE_HALF_WIDTH_M}m  "
-          f"copertura_minima={spotGrid.MIN_ARC_SAMPLE_FRACTION:.0%}")
-    print(f"[CONFIG] GAIT: plain<{spotGrid.GAIT_PLAIN_SLOPE_MAX}/{spotGrid.GAIT_PLAIN_ROUGH_MAX}  "
-          f"moderate<{spotGrid.GAIT_MODERATE_SLOPE_MAX}/{spotGrid.GAIT_MODERATE_ROUGH_MAX}  "
-          f"mu={spotGrid.GAIT_MU_PLAIN}/{spotGrid.GAIT_MU_MODERATE}/{spotGrid.GAIT_MU_HARD}")
-    print(f"[CONFIG] TERRENO: terrain_valid >= {spotGrid.TERRAIN_VALID_MIN} "
+    print(f"[CONFIG] SLOPE_THRESHOLD={slopes.SLOPE_THRESHOLD}  "
+          f"LATERAL_SLOPE_COST_MULTIPLIER={slopes.LATERAL_SLOPE_COST_MULTIPLIER}  "
+          f"OBSTACLE_THRESHOLD={geometry.OBSTACLE_THRESHOLD}  ROUGH_THRESHOLD={spot_grid.ROUGH_THRESHOLD}  "
+          f"NEAR_THRESHOLD_MARGIN_FRACTION={slopes.NEAR_THRESHOLD_MARGIN_FRACTION}")
+    print(f"[CONFIG] PROFILO ARCO: base={slopes.SLOPE_BASELINE_M}m  "
+          f"fetta_laterale=+/-{slopes.LATERAL_SLICE_HALF_WIDTH_M}m  "
+          f"copertura_minima={slopes.MIN_ARC_SAMPLE_FRACTION:.0%}")
+    print(f"[CONFIG] GAIT: plain<{gait.GAIT_PLAIN_SLOPE_MAX}/{gait.GAIT_PLAIN_ROUGH_MAX}  "
+          f"moderate<{gait.GAIT_MODERATE_SLOPE_MAX}/{gait.GAIT_MODERATE_ROUGH_MAX}  "
+          f"mu={gait.GAIT_MU_PLAIN}/{gait.GAIT_MU_MODERATE}/{gait.GAIT_MU_HARD}")
+    print(f"[CONFIG] TERRENO: terrain_valid >= {spot_grid.TERRAIN_VALID_MIN} "
           f"(era > 0.0, dipendeva dal segno di un residuo numerico)  "
-          f"celle mai scritte: plateau >= {spotGrid.UNWRITTEN_MIN_CELLS} celle, "
-          f"almeno {spotGrid.UNWRITTEN_MIN_SPOT_INVALID:.0%} marcate non valide da Spot")
-    print(f"[CONFIG] ROTAZIONE: prefiltro {spotGrid.ROTATION_CLEARANCE_M:.3f} m "
-          f"(aria {spotGrid.ROTATION_CLEARANCE_AIR_M:.2f} m, separata dai "
-          f"{spotGrid.ROBOT_CLEARANCE_AIR_M:.2f} m dell'avanzamento), poi controllo sul "
-          f"settore spazzato a passi di {spotGrid.ROTATION_SWEEP_STEP_DEG:.0f} gradi "
-          f"(tolleranza {spotGrid.ROTATION_NOISE_TOLERANCE_M:.2f} m sul rumore); "
+          f"celle mai scritte: plateau >= {spot_grid.UNWRITTEN_MIN_CELLS} celle, "
+          f"almeno {spot_grid.UNWRITTEN_MIN_SPOT_INVALID:.0%} marcate non valide da Spot")
+    print(f"[CONFIG] ROTAZIONE: prefiltro {geometry.ROTATION_CLEARANCE_M:.3f} m "
+          f"(aria {geometry.ROTATION_CLEARANCE_AIR_M:.2f} m, separata dai "
+          f"{geometry.ROBOT_CLEARANCE_AIR_M:.2f} m dell'avanzamento), poi controllo sul "
+          f"settore spazzato a passi di {geometry.ROTATION_SWEEP_STEP_DEG:.0f} gradi "
+          f"(tolleranza {geometry.ROTATION_NOISE_TOLERANCE_M:.2f} m sul rumore); "
           f"MARCIA DI TRAVERSO DISATTIVATA")
     print(f"[CONFIG] SE NON PUO' RUOTARE: 1) ventaglio nel cono +/-{P.CONE_SWEEP_MAX_DEG:.0f} gradi "
           f"a passi di {P.CONE_SWEEP_STEP_DEG:.0f}, si va nella direzione piu' libera fra quelle "
@@ -137,7 +141,7 @@ def _stampa_configurazione():
           f"attorno al robot: ora solo dopo una caduta")
     print(f"[CONFIG] OSTACOLI: mediana su {arcVerification.OBSTACLE_MEDIAN_FRAMES} scansioni "
           f"+ isteresi {arcVerification.OBSTACLE_HYSTERESIS_M:.2f} m attorno a "
-          f"{spotGrid.FRONTIER_CLEARANCE_M:.2f} m (rumore misurato 1.5 cm tipici, 7.3 di punta); "
+          f"{geometry.FRONTIER_CLEARANCE_M:.2f} m (rumore misurato 1.5 cm tipici, 7.3 di punta); "
           f"celle-ostacolo escluse dal campionamento della pendenza d'arco")
     print(f"[CONFIG] BATTERIA: rientro a wp_0 sotto {P.BATTERY_RETURN_PCT:.0f}% "
           f"({P.BATTERY_RETURN_CONFIRM} letture di fila; 0 = spento), lettura al massimo ogni "
@@ -148,7 +152,7 @@ def _stampa_configurazione():
           f"PRIMA cella bloccante, fino a {P.MAX_EARLY_REPLANS} volte per tentativo")
     print(f"[CONFIG] SCELTA OBIETTIVO: solo punti raggiungibili dal robot nel grafo (se ce "
           f"ne sono), spazio libero preferito {P.TARGET_CLEARANCE_M:.2f} m (minimo "
-          f"{spotGrid.PLAN_CLEARANCE_M:.2f}), almeno {P.TARGET_CELL_BORDER_M:.2f} m dal bordo "
+          f"{geometry.PLAN_CLEARANCE_M:.2f}), almeno {P.TARGET_CELL_BORDER_M:.2f} m dal bordo "
           f"della cella, obiettivi rifiutati dal fronte esclusi per la missione; arrivo "
           f"valido anche col robot fuori dalla cella fino a {P.ARRIVAL_OUTSIDE_CELL_M:.2f} m")
 
@@ -266,9 +270,9 @@ def easy_walk(options):
     robot, lease_client, robot_state_client, client_metadata = spotLogInUtils.setLogInfo(options)
     estop = spotLogInUtils.SimpleEstop(robot, options.name + "_estop")
 
-    local_grid = spotGrid.LocalGrid(robot)
+    local_grid = spot_grid.LocalGrid(robot)
     MISSION_CTX['local_grid'] = local_grid
-    global_grid = spotGrid.GlobalGrid()
+    global_grid = global_maps.GlobalGrid()
     MISSION_CTX['global_grid'] = global_grid   # per graphnav_add_shortcuts
 
     recordingInterface = navGraphUtils.RecordingInterface(robot, options.download_filepath, client_metadata)

@@ -111,7 +111,10 @@ def _quiet():
 with _quiet():
     import matplotlib
     matplotlib.use('Agg')
-    from spot_explorer.perception import grids as sg
+    from spot_explorer.perception import geometry
+    from spot_explorer.perception import global_maps
+    from spot_explorer.perception import slopes
+    from spot_explorer.perception import spot_grid
     from spot_explorer.planning import roadmap as prm_graph
     from spot_explorer.mission import cells as environmentMap
     from spot_explorer.planning import mission_graph
@@ -165,7 +168,7 @@ def scan_arrays(d):
     cs = float(d['cell_size'])
     r, c = np.mgrid[0:ny, 0:nx]
     pts = np.stack([ox + (c + .5) * cs, oy + (r + .5) * cs, z], -1).reshape(-1, 3)
-    seen = np.asarray(d['terrain_valid_raw']).reshape(z.shape) >= sg.TERRAIN_VALID_MIN
+    seen = np.asarray(d['terrain_valid_raw']).reshape(z.shape) >= spot_grid.TERRAIN_VALID_MIN
     if 'unwritten' in d.files and np.size(d['unwritten']) == z.size:
         seen &= ~np.asarray(d['unwritten'], dtype=bool).reshape(z.shape)
     return dict(z=z, nx=nx, ny=ny, ox=ox, oy=oy, cs=cs, pts=pts,
@@ -181,9 +184,9 @@ def scan_arrays(d):
 def feed_scan(a, prm, gm, tm):
     """Una scansione nelle mappe globali (con la funzione stessa della missione) e nel PRM."""
     rx, ry, ryaw = a['robot']
-    sg.fold_scan_into_global_maps(gm, tm, a['pts'], a['z'].ravel(), a['obstacle_mask'], a['valid'].ravel(),
+    global_maps.fold_scan_into_global_maps(gm, tm, a['pts'], a['z'].ravel(), a['obstacle_mask'], a['valid'].ravel(),
                                   a['od_raw'].ravel(), (a['ny'], a['nx']), (rx, ry, ryaw))
-    usable = sg.slope_usable_mask(a['valid'].ravel(), a['od_raw'].ravel(), (a['ny'], a['nx']))
+    usable = spot_grid.slope_usable_mask(a['valid'].ravel(), a['od_raw'].ravel(), (a['ny'], a['nx']))
     prm.update_local_grid_data(grad_values_2d=a['grad'], rough_values_2d=a['rough'],
                                terrain_values_2d=a['z'], valid_2d=usable,
                                grid_origin_x=a['ox'], grid_origin_y=a['oy'], cell_size=a['cs'])
@@ -223,8 +226,8 @@ def replay_mission(job):
             setattr(P, k, v)
         prm, _sampler, mg = mission_graph.build_mission_prm(env, verbose=False)
         out['grafo'] = mg.describe()
-        gm = sg.GlobalGrid()
-        tm = sg.GlobalTerrainGrid()
+        gm = global_maps.GlobalGrid()
+        tm = global_maps.GlobalTerrainGrid()
         tm.update_rects = []
         prm.set_global_terrain_map(tm)
     # --veloce: il confronto col grafo completo si fa su FAST_FULL_CHECKS inizi di cella
@@ -305,14 +308,14 @@ def replay_mission(job):
                 done_cells.append((tr, tc))
             else:
                 t_g = time.perf_counter()
-                prm.refresh_local_edge_weights(global_map=gm, edge_safety_margin=sg.PRM_EDGE_SAFETY_MARGIN_M)
+                prm.refresh_local_edge_weights(global_map=gm, edge_safety_margin=geometry.PRM_EDGE_SAFETY_MARGIN_M)
                 out['tempo_grafo_s'] += time.perf_counter() - t_g
         # --- invariante 2: mappa globale contro dal vivo, su archi a caso nella finestra --
         span = a['nx'] * a['cs']
-        usable = sg.slope_usable_mask(a['valid'].ravel(), a['od_raw'].ravel(), (a['ny'], a['nx']))
-        single = sg.GlobalTerrainGrid()          # mappa globale fatta di questa sola scansione,
-        sg.fold_scan_into_global_maps(           # con la funzione della missione
-            sg.GlobalGrid(), single, a['pts'], a['z'].ravel(), a['obstacle_mask'], a['valid'].ravel(),
+        usable = spot_grid.slope_usable_mask(a['valid'].ravel(), a['od_raw'].ravel(), (a['ny'], a['nx']))
+        single = global_maps.GlobalTerrainGrid()          # mappa globale fatta di questa sola scansione,
+        global_maps.fold_scan_into_global_maps(           # con la funzione della missione
+            global_maps.GlobalGrid(), single, a['pts'], a['z'].ravel(), a['obstacle_mask'], a['valid'].ravel(),
             a['od_raw'].ravel(), (a['ny'], a['nx']), a['robot'])
         for _ in range(ARCS_PER_SCAN):
             p = np.array([a['ox'], a['oy']]) + rng.uniform(0.3, span - 0.3, 2)
@@ -320,7 +323,7 @@ def replay_mission(job):
             q = p + rng.uniform(0.5, 1.25) * np.array([math.cos(ang), math.sin(ang)])
             if not (a['ox'] + 0.3 < q[0] < a['ox'] + span - 0.3 and a['oy'] + 0.3 < q[1] < a['oy'] + span - 0.3):
                 continue
-            live = sg.compute_arc_slope_profile(a['z'], a['ox'], a['oy'], a['cs'], *p, *q, valid_2d=usable)
+            live = slopes.compute_arc_slope_profile(a['z'], a['ox'], a['oy'], a['cs'], *p, *q, valid_2d=usable)
             if not live[2]:
                 continue
             glob_ = single.compute_arc_slope_profile(*p, *q)
@@ -394,10 +397,10 @@ def gait_check(m):
         if not prev:
             continue
         a = scan_arrays(np.load(prev[-1]))
-        usable = sg.slope_usable_mask(a['valid'].ravel(), a['od_raw'].ravel(), (a['ny'], a['nx']))
+        usable = spot_grid.slope_usable_mask(a['valid'].ravel(), a['od_raw'].ravel(), (a['ny'], a['nx']))
         seg = [float(x[k]) for k in ('x_from', 'y_from', 'x_to', 'y_to')]
-        prof = sg.compute_arc_slope_profile(a['z'], a['ox'], a['oy'], a['cs'], *seg, valid_2d=usable,
-                                            body_ext_m=sg.ARC_BODY_EXTENSION_M)
+        prof = slopes.compute_arc_slope_profile(a['z'], a['ox'], a['oy'], a['cs'], *seg, valid_2d=usable,
+                                            body_ext_m=slopes.ARC_BODY_EXTENSION_M)
         lo, la, has = prm_graph.body_slope(prof)
         if not has:
             continue

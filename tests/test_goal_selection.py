@@ -47,7 +47,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import test_replay as tr          # noqa: E402  (importa anche easy_walk in silenzio)
-from test_replay import goal, sg, P    # noqa: E402
+from test_replay import goal, P    # noqa: E402
+from spot_explorer.perception import geometry, global_maps   # noqa: E402
 
 DEFAULT = ['22-10-2026_16-04-22']
 
@@ -64,7 +65,7 @@ def _od_at(a, x, y):
 def _bad(g_):
     """Il fronte rifiuterebbe l'obiettivo: spazio libero dal vivo sotto soglia, o blocco a ridosso."""
     return g_['xy'] is not None and (
-        g_.get('blocked', False) or (bool(g_['od']) and min(g_['od']) < sg.FRONTIER_CLEARANCE_M))
+        g_.get('blocked', False) or (bool(g_['od']) and min(g_['od']) < geometry.FRONTIER_CLEARANCE_M))
 
 
 def replay_goals(name):
@@ -83,8 +84,8 @@ def replay_goals(name):
             P.MISSION_RANDOM_DENSITY = g['density']
             P.MISSION_RANDOM_SEED = g['seed']
         prm, sampler, mg = tr.mission_graph.build_mission_prm(env, verbose=False)
-        gm = sg.GlobalGrid()
-        tm = sg.GlobalTerrainGrid()
+        gm = global_maps.GlobalGrid()
+        tm = global_maps.GlobalTerrainGrid()
         tm.update_rects = []
         prm.set_global_terrain_map(tm)
     node_cells = None
@@ -105,12 +106,12 @@ def replay_goals(name):
                     node_cells = tr.mission_graph.node_cells(prm, env)
                 cells = set(done_cells) | {(rr, cc)} | {tuple(int(v) for v in env.get_cell_from_world(rx, ry))}
                 prm.set_allowed_nodes([n for n, c in node_cells.items() if c in cells])
-                robot_node = prm.anchor_node(rx, ry, gm, sg.PRM_EDGE_SAFETY_MARGIN_M,
+                robot_node = prm.anchor_node(rx, ry, gm, geometry.PRM_EDGE_SAFETY_MARGIN_M,
                                              ignore_near_m=prm_graph_ignore())
                 prm.set_robot_node(robot_node, 0.0)
 
                 def reach(px, py, _rn=robot_node):
-                    nid = prm.anchor_node(px, py, gm, sg.PRM_EDGE_SAFETY_MARGIN_M)
+                    nid = prm.anchor_node(px, py, gm, geometry.PRM_EDGE_SAFETY_MARGIN_M)
                     return nid is not None and prm.find_path_dijkstra(_rn, nid) is not None
 
                 nx_, ny_ = goal.find_best_point_in_cell(
@@ -178,7 +179,7 @@ class _Map:
         return min((math.dist((x, y), o) for o in self.obs), default=99.0)
 
     def is_occupied(self, x, y, safety_margin=0.0):
-        return self._d(x, y) <= sg.OBSTACLE_THRESHOLD + safety_margin
+        return self._d(x, y) <= geometry.OBSTACLE_THRESHOLD + safety_margin
 
     def is_known(self, x, y):
         return True

@@ -77,24 +77,27 @@ from matplotlib.transforms import Affine2D            # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # il pacchetto spot_explorer
 
-from spot_explorer.perception import grids as spotGrid                                       # noqa: E402  costanti di mappe e soglie
+from spot_explorer.perception import geometry
+from spot_explorer.perception import global_maps
+from spot_explorer.perception import slopes
+from spot_explorer.perception import spot_grid
 
-SLOPE_THRESHOLD = spotGrid.SLOPE_THRESHOLD    # serve solo a colorare gli archi
+SLOPE_THRESHOLD = slopes.SLOPE_THRESHOLD    # serve solo a colorare gli archi
 
-# MAPPA GLOBALE COME LA COSTRUIVA IL ROBOT. Le regole di spotGrid.mask_for_global_map e
-# spotGrid.GlobalGrid.update rifatte sui dati salvati (le scansioni di scans/), con le stesse
+# MAPPA GLOBALE COME LA COSTRUIVA IL ROBOT. Le regole di global_maps.mask_for_global_map e
+# global_maps.GlobalGrid.update rifatte sui dati salvati (le scansioni di scans/), con le stesse
 # costanti, lette da spotGrid (che si importa anche senza l'SDK di Spot).
 # Prima il pannello di destra mostrava il mosaico "l'ultima scansione vince": un ostacolo
 # letto UNA volta, anche accanto alle zampe, ricopriva le celle su cui il robot era appena
 # passato, e il percorso reale sembrava attraversare gli ostacoli, soprattutto alla fine
 # (missione del 22-10, 16:00 circa). Il robot quelle letture le scartava o le pretendeva
 # confermate. Il tasto 'm' torna al mosaico grezzo.
-SELF_BODY_LENGTH_M = spotGrid.GLOBAL_MAP_SELF_BODY_LENGTH_M
-SELF_BODY_WIDTH_M = spotGrid.GLOBAL_MAP_SELF_BODY_WIDTH_M
-SELF_RING_M = spotGrid.GLOBAL_MAP_SELF_RING_M
-OCC_CONFIRM_OBS = spotGrid.GLOBAL_OCC_CONFIRM_OBS
-OCC_CONFIRM_WALKED = spotGrid.GLOBAL_OCC_CONFIRM_WALKED
-OCC_MAX_COUNT = spotGrid.GLOBAL_OCC_MAX_COUNT
+SELF_BODY_LENGTH_M = global_maps.GLOBAL_MAP_SELF_BODY_LENGTH_M
+SELF_BODY_WIDTH_M = global_maps.GLOBAL_MAP_SELF_BODY_WIDTH_M
+SELF_RING_M = global_maps.GLOBAL_MAP_SELF_RING_M
+OCC_CONFIRM_OBS = global_maps.GLOBAL_OCC_CONFIRM_OBS
+OCC_CONFIRM_WALKED = global_maps.GLOBAL_OCC_CONFIRM_WALKED
+OCC_MAX_COUNT = global_maps.GLOBAL_OCC_MAX_COUNT
 
 # Due campioni consecutivi di trajectory.csv piu' lontani di cosi': in mezzo c'e' un
 # movimento non registrato (fino al 2026-10-26 GraphNav, cono e arretramenti non scrivevano
@@ -104,7 +107,7 @@ TRAJ_GAP_M = 0.5
 # SFONDO DEL PANNELLO GLOBALE (2026-10-26), tasto 't'.
 #   ostacoli -- la mappa di occupazione (rosso ostacolo, verde chiaro libero, bianco mai visto)
 #   terreno  -- la mappa globale della QUOTA, come la teneva il robot (media delle quote
-#               corrette, solo celle attendibili e non ostacolo: vedi spotGrid.slope_usable_mask),
+#               corrette, solo celle attendibili e non ostacolo: vedi spot_grid.slope_usable_mask),
 #               rispetto al suolo all'avvio della missione, con ombreggiatura del rilievo
 #   fusione  -- il terreno, e sopra in rosso gli ostacoli della mappa di occupazione
 # La scala dei colori della quota e' fissa per tutta la missione, cosi' scorrendo le
@@ -113,7 +116,7 @@ BACKGROUNDS = ('ostacoli', 'terreno', 'fusione')
 TERRAIN_CMAP = 'viridis'                # niente rossi: nella fusione il rosso e' solo degli ostacoli
 OBSTACLE_RGB = (0.84, 0.15, 0.16)       # come MOSAIC_CMAP
 NO_TERRAIN_RGB = (0.80, 0.80, 0.80)     # fusione: cella vista libera ma senza quota attendibile
-OBSTACLE_THRESHOLD = spotGrid.OBSTACLE_THRESHOLD       # maschera del terreno
+OBSTACLE_THRESHOLD = geometry.OBSTACLE_THRESHOLD       # maschera del terreno
 TERRAIN_PERCENTILES = (2, 98)           # estremi della scala dei colori della quota (con lo 0 sempre dentro)
 ZERO_LEVEL_COLOR = 'white'              # linea di livello e riga sulla barra a quota 0 (partenza)
 ZERO_LEVEL_SMOOTH_CELLS = 5             # media su 5 celle (15 cm) solo per tracciare quella linea
@@ -560,7 +563,7 @@ def _vis_times(vis, scans):
 # (iteration_I_cell_R_C_vis.npz) e in quella finale (iteration_I_FINAL_SCAN_vis.npz): si
 # ricostruiscono da li' e si inseriscono fra le altre, in ordine di tempo, sia nello sfoglio
 # sia nelle mappe. Approssimazioni: la vista non ha le celle "mai scritte", quindi una cella
-# vale come vista se terrain_valid >= spotGrid.TERRAIN_VALID_MIN (sul 28-10 uguale a quella
+# vale come vista se terrain_valid >= spot_grid.TERRAIN_VALID_MIN (sul 28-10 uguale a quella
 # del robot nel 98.8% delle celle); la quota grezza e' quella corretta; l'orientamento viene
 # da trajectory.csv (ultimo campione prima, nello stesso punto) e senza quello manca la zona
 # sotto il corpo. Fronte e decisione non esistono: campi vuoti, e il campo 'extra_kind'.
@@ -587,7 +590,7 @@ def _scan_from_vis(t, name, v, yaw_at=None):
             'terrain_raw': terrain.astype(np.float32),
             'terrain_corrected': terrain,
             'terrain_valid_raw': np.asarray(v['terrain_valid'], float).reshape(shape),
-            'is_valid': np.asarray(v['terrain_valid'], float).reshape(shape) >= spotGrid.TERRAIN_VALID_MIN,
+            'is_valid': np.asarray(v['terrain_valid'], float).reshape(shape) >= spot_grid.TERRAIN_VALID_MIN,
             'unwritten': np.zeros(shape, bool),
             'obstacle_mask': np.sign(np.asarray(v['obstacle_mask'], float)).reshape(shape).astype(np.int8),
             'obstacle_distance': np.asarray(v['obstacle_distance'], float).reshape(shape),
@@ -775,7 +778,7 @@ class MissionContext:
     @staticmethod
     def _robot_mask(d):
         """
-        Come spotGrid.mask_for_global_map: -1 ostacolo, +1 libero, 0 nessuna informazione;
+        Come global_maps.mask_for_global_map: -1 ostacolo, +1 libero, 0 nessuna informazione;
         sotto il corpo libero, nell'anello attorno nessun ostacolo. Anche la maschera del corpo.
         """
         om = np.asarray(d['obstacle_mask']).reshape(d['terrain_raw'].shape)
@@ -854,8 +857,8 @@ class MissionContext:
     def terrain(self, upto):
         """
         Quota media (m, rispetto al suolo all'avvio missione) delle scansioni 0..upto, come
-        spotGrid.GlobalTerrainGrid: quote corrette, solo celle attendibili e non ostacolo
-        (spotGrid.slope_usable_mask). NaN dove non c'e' quota.
+        global_maps.GlobalTerrainGrid: quote corrette, solo celle attendibili e non ostacolo
+        (spot_grid.slope_usable_mask). NaN dove non c'e' quota.
         """
         def step(st_all, d):
             hsum, hn = st_all

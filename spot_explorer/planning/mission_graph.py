@@ -63,7 +63,7 @@ ANCORAGGIO
 
 ALIASING -- il limite da conoscere
   Se un corridoio cade fra due file di nodi, nel grafo non esiste. Il fronte sicuro
-  pretende spotGrid.FRONTIER_CLEARANCE_M = c dalla linea centrale (0.25 m senza aria, 0.30
+  pretende geometry.FRONTIER_CLEARANCE_M = c dalla linea centrale (0.25 m senza aria, 0.30
   con 5 cm), quindi un corridoio utile e' largo almeno 2c e le linee centrali ammesse sono
   una striscia larga (larghezza - 2c): perche' ci cada sempre una fila di nodi il passo deve
   essere piu' corto della striscia. Per i nodi casuali basta copertura <= striscia / 2.
@@ -100,7 +100,7 @@ COME SI USA
       mg.into_prm(prm)                                  # i nodi, id 0..N-1
       gb_sampler = mg.as_sampler()                      # punti del reticolo per cella
       ...
-      mg.add_edges_to_prm(prm, global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M)
+      mg.add_edges_to_prm(prm, global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M)
   add_edges_to_prm valuta ogni coppia con PRM._evaluate_and_add_edge, la stessa funzione
   usata per tutti gli archi: veti e pesi vengono da li'. Sul robot si calcolano solo i veti
   e i pesi, che per costruzione non sono precalcolabili: l'occupazione viene dalla mappa
@@ -131,7 +131,7 @@ import numpy as np
 
 from spot_explorer import config as P          # dimensione della missione, metodo dei nodi, archi
 from spot_explorer.planning import roadmap as prm_graph
-from spot_explorer.perception import grids as spotGrid
+from spot_explorer.perception import geometry
 
 
 # La missione (righe, colonne, lato, passo, metodo dei nodi, archi) si sceglie in
@@ -458,10 +458,10 @@ def _prm_dirty_margin():
 
 
 def _frontier_clearance():
-    """spotGrid.FRONTIER_CLEARANCE_M, importato solo quando serve (questo modulo gira anche senza SDK)."""
+    """geometry.FRONTIER_CLEARANCE_M, importato solo quando serve (questo modulo gira anche senza SDK)."""
     try:
-        from spot_explorer.perception import grids as spotGrid
-        return spotGrid.FRONTIER_CLEARANCE_M
+        from spot_explorer.perception import geometry
+        return geometry.FRONTIER_CLEARANCE_M
     except Exception:
         return 0.25
 
@@ -1494,7 +1494,7 @@ def graph_reaches_cell(prm, env, from_xy, row, col, global_map=None):
     Ricerca in ampiezza, nessun effetto sul grafo. None se il grafo non ha nodi.
     """
     start = prm.anchor_node(float(from_xy[0]), float(from_xy[1]), global_map,
-                            spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
+                            geometry.PRM_EDGE_SAFETY_MARGIN_M,
                             ignore_near_m=prm_graph.ANCHOR_IGNORE_NEAR_M)
     if start is None:
         return None
@@ -1556,7 +1556,7 @@ def rebuild_prm_edges(prm, global_map, incremental=True):
     """
     return prm.mission_graph.add_edges_to_prm(
         prm, global_map=global_map,
-        edge_safety_margin=spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
+        edge_safety_margin=geometry.PRM_EDGE_SAFETY_MARGIN_M,
         incremental=incremental)
 
 

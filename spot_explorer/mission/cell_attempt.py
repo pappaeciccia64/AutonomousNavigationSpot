@@ -8,7 +8,10 @@ from bosdyn.client.frame_helpers import BODY_FRAME_NAME, VISION_FRAME_NAME, get_
 from types import SimpleNamespace
 from spot_explorer.graphnav import graphnav as navGraphUtils
 from spot_explorer.robot import motion as movements
-from spot_explorer.perception import grids as spotGrid
+from spot_explorer.perception import geometry
+from spot_explorer.perception import global_maps
+from spot_explorer.perception import slopes
+from spot_explorer.perception import spot_grid
 from spot_explorer.mission import cells as environmentMap
 from spot_explorer.robot import connection as spotUtils
 from spot_explorer.planning import safe_frontier as arcVerification
@@ -164,13 +167,13 @@ class TentativoCella:
         # MAPPE GLOBALI: create alla prima scansione, poi accumulate per tutta la missione
         # =========================================================================
         if self.global_grid.global_occupancy_map is None:
-            self.global_grid.global_occupancy_map = spotGrid.GlobalGrid(resolution=cell_size)
+            self.global_grid.global_occupancy_map = global_maps.GlobalGrid(resolution=cell_size)
             print("[MAP] Inizializzata nuova mappa di occupazione globale persistente.")
 
         # Mappa globale delle altezze: stessa risoluzione nativa della griglia locale (nessuna
         # riduzione), creata come quella di occupazione.
         if self.global_grid.global_terrain_map is None:
-            self.global_grid.global_terrain_map = spotGrid.GlobalTerrainGrid(resolution=cell_size)
+            self.global_grid.global_terrain_map = global_maps.GlobalTerrainGrid(resolution=cell_size)
             print("[MAP] Inizializzata nuova mappa globale persistente del terreno (altezza).")
 
         self.global_map = self.global_grid.global_occupancy_map
@@ -191,7 +194,7 @@ class TentativoCella:
         obstacle_mask = scan.obstacle_mask
 
         # Aggiorna le mappe globali (occupazione e terreno) con i dati appena processati
-        spotGrid.fold_scan_into_global_maps(self.global_map, self.global_terrain_map, pts, terrain_real, obstacle_mask,
+        global_maps.fold_scan_into_global_maps(self.global_map, self.global_terrain_map, pts, terrain_real, obstacle_mask,
                                    is_valid, cells_obstacle_dist, (num_y, num_x),
                                    (self.robot_x, self.robot_y, self.robot_yaw))
 
@@ -237,7 +240,7 @@ class TentativoCella:
             grad_values_2d=grad_values_2d,
             rough_values_2d=rough_values_2d,
             terrain_values_2d=terrain_values_2d,
-            valid_2d=spotGrid.slope_usable_mask(is_valid, cells_obstacle_dist, (num_y, num_x)),
+            valid_2d=spot_grid.slope_usable_mask(is_valid, cells_obstacle_dist, (num_y, num_x)),
             grid_origin_x=grid_origin_x,
             grid_origin_y=grid_origin_y,
             cell_size=cell_size
@@ -273,7 +276,7 @@ class TentativoCella:
         try:
             self.prm_graph.set_live_obstacles(
                 np.asarray(cells_obstacle_dist, dtype=np.float64).reshape((num_y, num_x)),
-                np.asarray(valid_values, dtype=np.float64).reshape((num_y, num_x)) >= spotGrid.TERRAIN_VALID_MIN,
+                np.asarray(valid_values, dtype=np.float64).reshape((num_y, num_x)) >= spot_grid.TERRAIN_VALID_MIN,
                 grid_origin_x, grid_origin_y, cell_size, self.robot_x, self.robot_y, self.robot_yaw)
         except Exception as e:
             self.prm_graph.set_live_obstacles(None, None, 0, 0, 1, 0, 0)
@@ -317,7 +320,7 @@ class TentativoCella:
         # robot serve PRIMA della scelta dell'obiettivo: si sceglie fra i punti che il grafo
         # collega al robot (vedi find_best_point_in_cell, criterio 2).
         self.robot_node_id = self.prm_graph.add_stop_node(
-            self.robot_x, self.robot_y, self.global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
+            self.robot_x, self.robot_y, self.global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M,
             label="partenza tentativo")
         self.prm_graph.set_robot_node(self.robot_node_id, 0.0)
 
@@ -351,7 +354,7 @@ class TentativoCella:
         # L'obiettivo e' il centro o un nodo del reticolo (lo sceglie find_best_point_in_cell fra
         # i punti del campionatore).
         self.goal_id = self.prm_graph.add_stop_node(
-            self.target_x, self.target_y, self.global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
+            self.target_x, self.target_y, self.global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M,
             label=f"obiettivo cella ({self.target_row},{self.target_col})", is_robot=False)
         self.prm_graph.set_robot_node(self.robot_node_id, 0.0)
         path_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
@@ -397,7 +400,7 @@ class TentativoCella:
         #   - il muso punta SEMPRE il prossimo punto: niente marcia di traverso; se la
         #     rotazione non e' possibile si prova il cono, poi l'arretramento dritto (vedi
         #     plan_cone_move e plan_straight_retreat);
-        #   - la rotazione si giudica sulle celle davvero spazzate (spotGrid.rotation_is_clear),
+        #   - la rotazione si giudica sulle celle davvero spazzate (geometry.rotation_is_clear),
         #     non sul cerchio circoscritto;
         #   - se l'obiettivo risulta irraggiungibile sui dati freschi se ne sceglie un altro
         #     nella cella, invece di aspettare e dichiarare un blocco (goal_still_reachable).
@@ -423,7 +426,7 @@ class TentativoCella:
         self.trap_state = {'n': 0}   # ritorni indietro in QUESTO tentativo, mai azzerato (vedi _trap_backtrack)
 
     def _reachable_from_robot(self, px, py):
-        nid = self.prm_graph.anchor_node(px, py, self.global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M)
+        nid = self.prm_graph.anchor_node(px, py, self.global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M)
         return nid is not None and self.prm_graph.find_path_dijkstra(self.robot_node_id, nid) is not None
 
     def _waypoints_from_ids(self, ids):
@@ -467,7 +470,7 @@ class TentativoCella:
     def _sosta(self, x, y, label):
         """La posizione (x, y) diventa il nodo del robot (vedi add_stop_node)."""
         self.robot_node_id = self.prm_graph.add_stop_node(
-            x, y, self.global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M, label=label)
+            x, y, self.global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M, label=label)
         self.prm_graph.set_robot_node(self.robot_node_id, 0.0)
 
     def _ventaglio(self):
@@ -549,7 +552,7 @@ class TentativoCella:
                 print("[TARGET] Nessun altro punto valido in questa cella.")
                 break
             goal_id = self.prm_graph.add_stop_node(
-                new_tx, new_ty, self.global_map, spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
+                new_tx, new_ty, self.global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M,
                 label=f"obiettivo riscelto cella ({self.target_row},{self.target_col})",
                 is_robot=False)
             new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, goal_id)
@@ -666,7 +669,7 @@ class TentativoCella:
         self.grad_up, self.rough_up, self.obstacle_mask_updated = scan.grad, scan.rough, scan.obstacle_mask
 
         self.t_proc = time.perf_counter()
-        _gm_core_up = spotGrid.fold_scan_into_global_maps(
+        _gm_core_up = global_maps.fold_scan_into_global_maps(
             self.global_map, self.global_terrain_map, self.pts_up, self.terrain_real_up, self.obstacle_mask_updated,
             self.is_valid_up, self.cells_obs_up, (self.num_y_up, self.num_x_up), (self.robot_x, self.robot_y, self.robot_yaw))
         self.t_maps = time.perf_counter()
@@ -683,7 +686,7 @@ class TentativoCella:
             grad_values_2d=grad_up_2d,
             rough_values_2d=self.rough_up_2d,
             terrain_values_2d=self.terrain_up_2d,
-            valid_2d=spotGrid.slope_usable_mask(self.is_valid_up, self.cells_obs_up, (self.num_y_up, self.num_x_up)),
+            valid_2d=spot_grid.slope_usable_mask(self.is_valid_up, self.cells_obs_up, (self.num_y_up, self.num_x_up)),
             grid_origin_x=self.grid_origin_x_up,
             grid_origin_y=self.grid_origin_y_up,
             cell_size=self.cell_size_up
@@ -699,10 +702,10 @@ class TentativoCella:
             self.robot_x, self.robot_y, unwritten=self.unwritten_up, robot_yaw=self.robot_yaw)
 
         # Mappa dello spazio libero: QUI, non insieme a global_map.update, perche' serve la
-        # obstacle_distance filtrata che vive nella fotografia (vedi spotGrid.update_clearance_map).
+        # obstacle_distance filtrata che vive nella fotografia (vedi global_maps.update_clearance_map).
         # Si alimenta solo dal ciclo di navigazione, cosi' tutte le osservazioni passano per
         # lo stesso filtro.
-        spotGrid.update_clearance_map(self.global_map, self.pts_up, self.snap, self.is_valid_up, self.unwritten_up,
+        global_maps.update_clearance_map(self.global_map, self.pts_up, self.snap, self.is_valid_up, self.unwritten_up,
                               _gm_core_up, (self.robot_x, self.robot_y))
 
     def _aggiorna_grafo(self):
@@ -732,7 +735,7 @@ class TentativoCella:
         if self.need_refresh or getattr(self.prm_graph, 'needs_refresh', False):
             self.prm_graph.needs_refresh = False
             touched_nodes = self.prm_graph.refresh_local_edge_weights(
-                global_map=self.global_map, edge_safety_margin=spotGrid.PRM_EDGE_SAFETY_MARGIN_M)
+                global_map=self.global_map, edge_safety_margin=geometry.PRM_EDGE_SAFETY_MARGIN_M)
             self.need_refresh = False
             MISSION_STATS['prm_refresh'] += 1
             n_live = (getattr(self.prm_graph, 'live_veto_last', 0)
@@ -923,8 +926,8 @@ class TentativoCella:
                 ground_z=np.nan if gf.get('ground_z') is None else gf['ground_z'],
                 ground_n_above=gf.get('n_above', 0),
                 mission_z0=mission_z0(),
-                terrain_raw_zero=np.nan if spotGrid.raw_zero(self.grids_data_up) is None else spotGrid.raw_zero(self.grids_data_up),
-                terrain_scale=np.nan if not spotGrid.raw_scale(self.grids_data_up) else spotGrid.raw_scale(self.grids_data_up),
+                terrain_raw_zero=np.nan if spot_grid.raw_zero(self.grids_data_up) is None else spot_grid.raw_zero(self.grids_data_up),
+                terrain_scale=np.nan if not spot_grid.raw_scale(self.grids_data_up) else spot_grid.raw_scale(self.grids_data_up),
                 unwritten=np.asarray(self.unwritten_up, dtype=bool).reshape(shape_up),
                 polyline=np.array(self.polyline), path_node_ids=np.array([w[0] for w in self.path_waypoints]),
                 robot_node_id=self.robot_node_id, goal_xy=np.array([self.target_x, self.target_y]),
@@ -1025,7 +1028,7 @@ class TentativoCella:
                 od_goal = float(self.snap.obstacle_dist[r_g[0], c_g[0]]) if in_g[0] else float('nan')
                 esito = self._riscegli_obiettivo(
                     f"L'obiettivo ({self.target_x:.2f}, {self.target_y:.2f}) ha obstacle_distance "
-                    f"{od_goal:.2f} m, sotto i {spotGrid.FRONTIER_CLEARANCE_M:.2f} m che il fronte "
+                    f"{od_goal:.2f} m, sotto i {geometry.FRONTIER_CLEARANCE_M:.2f} m che il fronte "
                     f"pretende: non e' raggiungibile da nessuna direzione.",
                     f"spazio libero dal vivo {od_goal:.2f} m")
                 if esito is not None:
@@ -1463,7 +1466,7 @@ class TentativoCella:
         od_here = float(self.snap.obstacle_dist[r_h[0], c_h[0]]) if in_h[0] else 0.0
         rot_leg = arcVerification.rotation_plan(self.robot_yaw, (self.robot_x, self.robot_y), (move_x, move_y),
                                 od_here, snap=self.snap)
-        reach_rot = float(spotGrid.ROTATION_CLEARANCE_M)
+        reach_rot = float(geometry.ROTATION_CLEARANCE_M)
         ny_s, nx_s = self.snap.obstacle_dist.shape
         inside_rot = (self.snap.origin_x <= self.robot_x - reach_rot and
                       self.robot_x + reach_rot <= self.snap.origin_x + nx_s * self.snap.cell_size and
@@ -1507,7 +1510,7 @@ class TentativoCella:
         )
         slope_source = self.prm_graph.last_slope_source
 
-        near_thresh = spotGrid.SLOPE_THRESHOLD * (1.0 - spotGrid.NEAR_THRESHOLD_MARGIN_FRACTION)
+        near_thresh = slopes.SLOPE_THRESHOLD * (1.0 - slopes.NEAR_THRESHOLD_MARGIN_FRACTION)
         if (segment_long_slope >= near_thresh or segment_lat_slope >= near_thresh) and self.mission_folder is not None:
             try:
                 npz_near = os.path.join(
@@ -1521,12 +1524,12 @@ class TentativoCella:
                     grid_origin_x=self.grid_origin_x_up, grid_origin_y=self.grid_origin_y_up, cell_size=self.cell_size_up,
                     arc_xy=np.array([self.robot_x, self.robot_y, move_x, move_y]),
                     long_slope=segment_long_slope, lat_slope=segment_lat_slope,
-                    slope_threshold=spotGrid.SLOPE_THRESHOLD)
+                    slope_threshold=slopes.SLOPE_THRESHOLD)
                 MISSION_STATS['near_threshold_saves'] += 1
-                margine = spotGrid.SLOPE_THRESHOLD - max(segment_long_slope, segment_lat_slope)
+                margine = slopes.SLOPE_THRESHOLD - max(segment_long_slope, segment_lat_slope)
                 print(f"[NEAR-LIMIT] Arco {self.robot_node_id}->{self.next_node_id} vicino soglia "
                       f"(long={segment_long_slope:.3f}, lat={segment_lat_slope:.3f}, "
-                      f"soglia={spotGrid.SLOPE_THRESHOLD:.3f}, margine residuo={margine:+.3f}) "
+                      f"soglia={slopes.SLOPE_THRESHOLD:.3f}, margine residuo={margine:+.3f}) "
                       f"-- dati salvati in {os.path.basename(npz_near)}")
             except Exception as e:
                 print(f"[DATA SAVE] Impossibile salvare il file vicino soglia: {e}")

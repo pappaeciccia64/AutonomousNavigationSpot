@@ -65,7 +65,7 @@ from spot_explorer.robot import motion as movements
 from spot_explorer.graphnav import graphnav as navGraphUtils
 from spot_explorer import config as parametri
 from spot_explorer import records as registro
-from spot_explorer.perception import grids as spotGrid
+from spot_explorer.perception import spot_grid
 from spot_explorer.robot import connection as spotLogInUtils
 
 CELL = 3.0
@@ -406,7 +406,7 @@ def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0_m=None, wp0_offset
     spotLogInUtils.SimpleEstop = lambda r, n: NS(stop=lambda: None, allow=lambda: None)
     bosdyn.client.lease.LeaseKeepAlive = lambda *a, **k: contextlib.nullcontext()
     mission_run.blocking_stand = lambda *a, **k: None
-    spotGrid.LocalGrid = lambda r: T.FakeLocalGrid()
+    spot_grid.LocalGrid = lambda r: T.FakeLocalGrid()
     arcVerification.ArcVerificationTracker = lambda r: _Tracker()
     cell_attempt.BodyTiltRecorder = registro.BodyTiltRecorder = _NoTilt
     parametri.MISSION_GRAPH_SAMPLING = 'reticolo'
