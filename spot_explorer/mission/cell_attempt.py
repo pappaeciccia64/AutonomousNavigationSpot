@@ -14,7 +14,8 @@ from spot_explorer.perception import slopes
 from spot_explorer.perception import spot_grid
 from spot_explorer.mission import cells as environmentMap
 from spot_explorer.robot import connection as spotUtils
-from spot_explorer.planning import safe_frontier as arcVerification
+from spot_explorer.planning import decisions
+from spot_explorer.planning import safe_frontier
 
 from spot_explorer.planning import roadmap as prm_graph
 from spot_explorer.planning import roadmap as prm_graph_module   # dentro le funzioni `prm_graph` e' spesso il parametro (istanza)
@@ -66,7 +67,7 @@ class TentativoCella:
 
       _guardie              troppi giri, batteria bassa, caduta, robot fermo da troppo
       _scansione_e_grafo    _scansione_fresca, _aggiorna_grafo, _ripianifica
-      _fronte_e_decisione   scorciatoia, fronte sicuro, arcVerification.decide_next_move:
+      _fronte_e_decisione   scorciatoia, fronte sicuro, decisions.decide_next_move:
                             move / reached_node / arrived / wait / blocked
       _rotazione            (move) non posso girarmi: _avanza_nel_cono, _arretra_per_ruotare,
                             trappola, tratto scartato
@@ -474,10 +475,10 @@ class TentativoCella:
         self.prm_graph.set_robot_node(self.robot_node_id, 0.0)
 
     def _ventaglio(self):
-        """Le 24 direzioni d'uscita da qui (vedi arcVerification.is_trapped): (trappola?,
+        """Le 24 direzioni d'uscita da qui (vedi decisions.is_trapped): (trappola?,
         direzioni utilizzabili, totale, testo per il log)."""
-        trapped, fan = arcVerification.is_trapped((self.robot_x, self.robot_y), self.robot_yaw, self.snap)
-        n_us, fan_txt = arcVerification.describe_escape_fan(fan)
+        trapped, fan = decisions.is_trapped((self.robot_x, self.robot_y), self.robot_yaw, self.snap)
+        n_us, fan_txt = decisions.describe_escape_fan(fan)
         return trapped, n_us, len(fan), fan_txt
 
     def _esci_dalla_trappola(self, tratto, messaggio):
@@ -696,7 +697,7 @@ class TentativoCella:
         # degli archi nel refresh (vedi prm_graph.LIVE_PREFILTER_OD_M), a quello dei nodi
         # negli ostacoli -- e poi al fronte sicuro. Va creata UNA volta sola per scansione:
         # make_grid_snapshot aggiorna anche il filtro temporale degli ostacoli.
-        self.snap = arcVerification.make_grid_snapshot(
+        self.snap = safe_frontier.make_grid_snapshot(
             self.cells_obs_up, self.rough_up, self.is_valid_up, self.valid_up, self.terrain_real_up,
             self.num_x_up, self.num_y_up, self.grid_origin_x_up, self.grid_origin_y_up, self.cell_size_up,
             self.robot_x, self.robot_y, unwritten=self.unwritten_up, robot_yaw=self.robot_yaw)
@@ -753,7 +754,7 @@ class TentativoCella:
 
 
         # Nodi DENTRO gli ostacoli: fuori dal grafo (vedi prune_prm_nodes_in_obstacles).
-        pruned_nodes = arcVerification.prune_prm_nodes_in_obstacles(self.prm_graph, self.snap)
+        pruned_nodes = safe_frontier.prune_prm_nodes_in_obstacles(self.prm_graph, self.snap)
         if pruned_nodes:
             MISSION_STATS['nodes_pruned'] += len(pruned_nodes)
             print(f"[NODI] {len(pruned_nodes)} nodi scartati: meno di "
@@ -825,13 +826,13 @@ class TentativoCella:
                   f"supera la soglia di stabilita'. Proseguo sul piano corrente.")
 
     def _fronte_e_decisione(self):
-        """Scorciatoia, fronte sicuro sul percorso e decisione (arcVerification.decide_next_move):
+        """Scorciatoia, fronte sicuro sul percorso e decisione (decisions.decide_next_move):
         muoversi, nodo raggiunto, arrivati, aspettare o blocco confermato."""
         self.t_prm = time.perf_counter()
 
         # 3. FRONTE SICURO sulla scansione appena fatta ---------------------------------
         # La scorciatoia rispetta gli archi gia' scartati: vedi shortcut_index.
-        k_short = arcVerification.shortcut_index((self.robot_x, self.robot_y), self.path_waypoints, self.snap, self.global_map,
+        k_short = decisions.shortcut_index((self.robot_x, self.robot_y), self.path_waypoints, self.snap, self.global_map,
                                  prm=self.prm_graph, robot_node_id=self.robot_node_id)
         if k_short > 0:
             skipped = [w[0] for w in self.path_waypoints[:k_short]]
@@ -840,8 +841,8 @@ class TentativoCella:
                   f"salto {len(skipped)} nodi intermedi {skipped}.")
             MISSION_STATS['shortcuts'] += 1
         self.polyline = [(self.robot_x, self.robot_y)] + [(x, y) for _, x, y in self.path_waypoints]
-        self.frontier = arcVerification.compute_safe_frontier(self.polyline, self.snap)
-        print(arcVerification.describe_frontier(self.frontier))
+        self.frontier = safe_frontier.compute_safe_frontier(self.polyline, self.snap)
+        print(safe_frontier.describe_frontier(self.frontier))
 
         self.path_version = None
         if self.verification_tracker is not None:
@@ -855,7 +856,7 @@ class TentativoCella:
         robot_border = environmentMap.cell_border_distance(self.env, self.target_row, self.target_col, self.robot_x, self.robot_y)
         near_goal = (not in_target_cell and robot_border is not None
                      and -robot_border <= P.ARRIVAL_OUTSIDE_CELL_M)
-        self.decision = arcVerification.decide_next_move((self.robot_x, self.robot_y), self.path_waypoints, self.frontier, self.no_progress,
+        self.decision = decisions.decide_next_move((self.robot_x, self.robot_y), self.path_waypoints, self.frontier, self.no_progress,
                                     in_target_cell=in_target_cell or near_goal)
         if self.decision.get('final'):
             MISSION_STATS['final_steps'] = MISSION_STATS.get('final_steps', 0) + 1
@@ -907,7 +908,7 @@ class TentativoCella:
                 terrain_valid_raw=np.asarray(self.valid_up, dtype=np.float32).reshape(shape_up),
                 obstacle_distance=np.asarray(self.cells_obs_up, dtype=np.float32).reshape(shape_up),
                 # Il layer su cui il fronte DECIDE (mediana sulle ultime letture + isteresi,
-                # vedi arcVerification._ObstacleHistory) e la maschera del latch. Senza questi
+                # vedi safe_frontier._ObstacleHistory) e la maschera del latch. Senza questi
                 # due un rigioco offline non puo' riprodurre i blocchi che nascono dalle
                 # letture del thread durante il movimento. Stesso orientamento degli altri:
                 # (num_y, num_x), riga = y.
@@ -936,7 +937,7 @@ class TentativoCella:
                 frontier_value=np.nan if self.frontier['value'] is None else self.frontier['value'],
                 frontier_od_robot=self.frontier['od_robot'], frontier_half_along=self.frontier['half_along'],
                 frontier_clearance=self.frontier['clearance_nominal'], frontier_path_len=self.frontier['path_len'],
-                allowed_advance=arcVerification.allowed_advance(self.frontier),
+                allowed_advance=safe_frontier.allowed_advance(self.frontier),
                 keep_heading=self.keep_heading, no_progress=self.no_progress,
                 **extra,
                 decision_kind=self.decision['kind'],
@@ -952,7 +953,7 @@ class TentativoCella:
         # avanzare dentro il cono di rotazione possibile, arretrare dritti se da li' la
         # rotazione diventa possibile, riconoscere una trappola, scartare il tratto.
         if self.decision['kind'] == 'move':
-            rot = arcVerification.rotation_plan(self.robot_yaw, (self.robot_x, self.robot_y), self.decision['target'],
+            rot = decisions.rotation_plan(self.robot_yaw, (self.robot_x, self.robot_y), self.decision['target'],
                                 self.frontier['od_robot'], snap=self.snap)
             if not rot['turn']:
                 MISSION_STATS['rotation_refusals'] += 1
@@ -1022,8 +1023,8 @@ class TentativoCella:
         # cella e' ancora tutta ignota; arrivandoci puo' risultare a ridosso di un muro,
         # e allora nessun numero di scansioni lo rendera' raggiungibile.
         if self.goal_repicks < P.MAX_BLOCK_REPLANS:
-            if not arcVerification.goal_still_reachable(self.snap, self.target_x, self.target_y):
-                r_g, c_g, in_g = arcVerification._cells(
+            if not safe_frontier.goal_still_reachable(self.snap, self.target_x, self.target_y):
+                r_g, c_g, in_g = safe_frontier._cells(
                     self.snap, np.array([float(self.target_x)]), np.array([float(self.target_y)]))
                 od_goal = float(self.snap.obstacle_dist[r_g[0], c_g[0]]) if in_g[0] else float('nan')
                 esito = self._riscegli_obiettivo(
@@ -1060,7 +1061,7 @@ class TentativoCella:
                 and self.frontier['reason'] in ('ostacolo', 'rugosita', 'pendenza')
                 and self.path_waypoints):
             poly_now = [(self.robot_x, self.robot_y)] + [(x, y) for _, x, y in self.path_waypoints]
-            _, seg_blk = arcVerification.point_along(poly_now, self.frontier['dist'])
+            _, seg_blk = safe_frontier.point_along(poly_now, self.frontier['dist'])
             seg_blk = int(seg_blk)
             ea = self.robot_node_id if seg_blk == 0 else self.path_waypoints[seg_blk - 1][0]
             eb = self.path_waypoints[min(seg_blk, len(self.path_waypoints) - 1)][0]
@@ -1116,8 +1117,8 @@ class TentativoCella:
         # --- 4a. PRIMA DI TUTTO: posso ANDARE AVANTI dentro il cono di rotazione che
         # mi e' concesso? Spesso andare dritti, o quasi, avvicina all'obiettivo piu'
         # di qualunque arretramento (vedi plan_cone_move).
-        cone_goal, _ = arcVerification.point_along(self.polyline, P.CONE_PATH_LOOKAHEAD_M)
-        cone = arcVerification.plan_cone_move((self.robot_x, self.robot_y), self.robot_yaw, self.snap, cone_goal)
+        cone_goal, _ = safe_frontier.point_along(self.polyline, P.CONE_PATH_LOOKAHEAD_M)
+        cone = decisions.plan_cone_move((self.robot_x, self.robot_y), self.robot_yaw, self.snap, cone_goal)
         if cone is not None:
             print(f"[CONO] Non posso girarmi di {rot['dyaw_deg']:+.0f} gradi, ma ruotando di "
                   f"{cone['dyaw_deg']:+.0f} posso avanzare {cone['dist']:.2f} m "
@@ -1148,10 +1149,10 @@ class TentativoCella:
         """Rotazione impossibile: si arretra dritti, se da li' la rotazione diventa possibile
         (CONTINUA), altrimenti None."""
         # --- 4b. Arretrare, ma SOLO se serve a qualcosa (vedi retreat_would_help).
-        back = arcVerification.plan_straight_retreat((self.robot_x, self.robot_y), self.robot_yaw, self.snap)
+        back = decisions.plan_straight_retreat((self.robot_x, self.robot_y), self.robot_yaw, self.snap)
         helps, margin_back = (False, None)
         if back is not None:
-            helps, margin_back = arcVerification.retreat_would_help(
+            helps, margin_back = decisions.retreat_would_help(
                 self.snap, (back[0], back[1]), self.robot_yaw, rot['dyaw_deg'])
             if not helps:
                 MISSION_STATS['retreats_suppressed'] += 1
@@ -1353,7 +1354,7 @@ class TentativoCella:
             MISSION_STATS['multinode_moves'] += 1
             MISSION_STATS['multinode_nodes'] += n_legs
             print(f"[MULTINODO] Il fronte conferma "
-                  f"{arcVerification.allowed_advance(self.frontier):.2f} m: percorro {n_legs} "
+                  f"{safe_frontier.allowed_advance(self.frontier):.2f} m: percorro {n_legs} "
                   f"tratti di fila {[w[0] for w in self.path_waypoints[:n_legs]]} senza fermarmi "
                   f"a riscansionare.")
         for leg_i in range(max(1, n_legs)):
@@ -1400,16 +1401,16 @@ class TentativoCella:
         # Solo per i passi corti o verso spazi stretti: sono quelli con cui si entra negli
         # angoli senza uscita. Vedi arrival_has_exit.
         step_len = float(np.hypot(move_x - self.robot_x, move_y - self.robot_y))
-        r_a, c_a, in_a = arcVerification._cells(self.snap, np.array([move_x]), np.array([move_y]))
+        r_a, c_a, in_a = safe_frontier._cells(self.snap, np.array([move_x]), np.array([move_y]))
         od_arrival = float(self.snap.obstacle_dist[r_a[0], c_a[0]]) if in_a[0] else float('inf')
         if (self.arrival_refusals < P.MAX_ARRIVAL_REFUSALS
                 and (step_len <= P.ARRIVAL_EXIT_CHECK_MAX_STEP_M or od_arrival <= P.ARRIVAL_EXIT_CHECK_OD_M)):
             heading_arr = float(np.arctan2(move_y - self.robot_y, move_x - self.robot_x))
-            has_exit, fan_arr = arcVerification.arrival_has_exit(self.snap, (move_x, move_y), heading_arr)
+            has_exit, fan_arr = decisions.arrival_has_exit(self.snap, (move_x, move_y), heading_arr)
             if not has_exit:
                 self.arrival_refusals += 1
                 MISSION_STATS['arrival_refusals'] += 1
-                n_us_a, fan_txt_a = arcVerification.describe_escape_fan(fan_arr)
+                n_us_a, fan_txt_a = decisions.describe_escape_fan(fan_arr)
                 print(f"[ARRIVO] Il passo di {step_len:.2f} m verso ({move_x:.2f}, {move_y:.2f}) "
                       f"(obstacle_distance li' {od_arrival:.2f} m) mi porterebbe dove non ci sono "
                       f"uscite: {n_us_a}/{len(fan_arr)} direzioni utilizzabili ({fan_txt_a}). "
@@ -1462,9 +1463,9 @@ class TentativoCella:
         # puo' stare vicino al bordo. Se non si puo' ruotare, o non si puo' dire,
         # ci si ferma e si riguarda: la rotazione la gestisce il ciclo, con cono,
         # arretramento e ventaglio, sui dati freschi.
-        r_h, c_h, in_h = arcVerification._cells(self.snap, np.array([self.robot_x]), np.array([self.robot_y]))
+        r_h, c_h, in_h = safe_frontier._cells(self.snap, np.array([self.robot_x]), np.array([self.robot_y]))
         od_here = float(self.snap.obstacle_dist[r_h[0], c_h[0]]) if in_h[0] else 0.0
-        rot_leg = arcVerification.rotation_plan(self.robot_yaw, (self.robot_x, self.robot_y), (move_x, move_y),
+        rot_leg = decisions.rotation_plan(self.robot_yaw, (self.robot_x, self.robot_y), (move_x, move_y),
                                 od_here, snap=self.snap)
         reach_rot = float(geometry.ROTATION_CLEARANCE_M)
         ny_s, nx_s = self.snap.obstacle_dist.shape
@@ -1484,10 +1485,10 @@ class TentativoCella:
         # Stessa prudenza della prima gamba sulla posa d'arrivo (arrival_has_exit):
         # non fermarsi in un punto senza uscite.
         step_leg = float(np.hypot(move_x - self.robot_x, move_y - self.robot_y))
-        r_l, c_l, in_l = arcVerification._cells(self.snap, np.array([move_x]), np.array([move_y]))
+        r_l, c_l, in_l = safe_frontier._cells(self.snap, np.array([move_x]), np.array([move_y]))
         od_leg = float(self.snap.obstacle_dist[r_l[0], c_l[0]]) if in_l[0] else float('inf')
         if step_leg <= P.ARRIVAL_EXIT_CHECK_MAX_STEP_M or od_leg <= P.ARRIVAL_EXIT_CHECK_OD_M:
-            has_exit_leg, _fan_leg = arcVerification.arrival_has_exit(
+            has_exit_leg, _fan_leg = decisions.arrival_has_exit(
                 self.snap, (move_x, move_y), float(np.arctan2(move_y - self.robot_y, move_x - self.robot_x)))
             if not has_exit_leg:
                 print(f"[MULTINODO] Gamba {leg_i + 1}/{n_legs}: il nodo {self.next_node_id} "
@@ -1563,7 +1564,7 @@ class TentativoCella:
                 return False
             frx, fry = f['robot_xy']
             remaining = float(np.hypot(move_x - frx, move_y - fry))
-            reach = arcVerification.allowed_advance(f)
+            reach = safe_frontier.allowed_advance(f)
             if not live_frontiers or live_frontiers[-1][0] != f['time']:
                 live_frontiers.append((f['time'], frx, fry, f['reason'], float(f['dist']), reach, remaining,
                                        abort_state['bad']))

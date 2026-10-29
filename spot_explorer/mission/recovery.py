@@ -5,7 +5,7 @@ from spot_explorer.graphnav import navigation
 from spot_explorer.robot import motion as movements
 from spot_explorer.perception import geometry
 from spot_explorer.robot import connection as spotUtils
-from spot_explorer.planning import safe_frontier as arcVerification
+from spot_explorer.planning import safe_frontier
 
 from spot_explorer.planning import roadmap as prm_graph
 
@@ -235,8 +235,8 @@ def retreat_along_traveled_path(env, robot_state_client, command_client,
 
         if pts is not None and obstacle_mask is not None:
             try:
-                if arcVerification.is_arc_in_fov(robot_x, robot_y, from_x, from_y, pts):
-                    status = arcVerification.verify_arc_safety(robot_x, robot_y, from_x, from_y,
+                if safe_frontier.is_arc_in_fov(robot_x, robot_y, from_x, from_y, pts):
+                    status = safe_frontier.verify_arc_safety(robot_x, robot_y, from_x, from_y,
                                                                pts, obstacle_mask)
                     if status == 'blocked':
                         print(f"[RITIRATA] Il tratto di rientro verso ({from_x:.2f}, {from_y:.2f}) "

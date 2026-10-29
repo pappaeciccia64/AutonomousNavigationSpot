@@ -56,7 +56,7 @@ from bosdyn.api import world_object_pb2
 from bosdyn.api.graph_nav import graph_nav_pb2, map_pb2, map_processing_pb2, recording_pb2
 from bosdyn.client.math_helpers import Quat, SE3Pose
 
-from spot_explorer.planning import safe_frontier as arcVerification
+from spot_explorer.planning import safe_frontier
 from spot_explorer.robot import battery as batteria
 from spot_explorer.mission import cell_attempt, exploration
 from spot_explorer.mission import run as mission_run
@@ -397,7 +397,7 @@ def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0_m=None, wp0_offset
     global FIDUCIAL_TAG
     FIDUCIAL_TAG = fiducial
     T.WORLD, T.ROBOT = T.World(WALLS if walls is None else walls, ghosts=True), T.Robot(*START)
-    arcVerification.OBSTACLE_HISTORY.reset()
+    safe_frontier.OBSTACLE_HISTORY.reset()
     gn = FakeGraphNav()
     gn.stuck_wp0_m = stuck_wp0_m
     gn.wp0_offset_m = wp0_offset_m
@@ -407,7 +407,7 @@ def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0_m=None, wp0_offset
     bosdyn.client.lease.LeaseKeepAlive = lambda *a, **k: contextlib.nullcontext()
     mission_run.blocking_stand = lambda *a, **k: None
     spot_grid.LocalGrid = lambda r: T.FakeLocalGrid()
-    arcVerification.ArcVerificationTracker = lambda r: _Tracker()
+    safe_frontier.ArcVerificationTracker = lambda r: _Tracker()
     cell_attempt.BodyTiltRecorder = registro.BodyTiltRecorder = _NoTilt
     parametri.MISSION_GRAPH_SAMPLING = 'reticolo'
 

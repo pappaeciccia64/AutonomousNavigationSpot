@@ -36,7 +36,8 @@ from spot_explorer import records as registro      # noqa: E402
 from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
 from spot_explorer.perception import spot_grid
-from spot_explorer.planning import safe_frontier as av   # noqa: E402
+from spot_explorer.planning import decisions
+from spot_explorer.planning import safe_frontier
 from spot_explorer.planning import roadmap as prm_graph     # noqa: E402
 from spot_explorer.robot import motion as movements     # noqa: E402
 from spot_explorer.robot import connection as spotUtils     # noqa: E402
@@ -183,8 +184,8 @@ class FakeTracker:
         _, rough = self.lg.compute_gradient_and_roughness(tc, valid, N, N, CS, is_valid=iv)
         c0 = int(np.floor(ROBOT.x / CS)) - N // 2
         r0 = int(np.floor(ROBOT.y / CS)) - N // 2
-        snap = av.make_grid_snapshot(od, rough, iv, valid, tc, N, N, c0 * CS, r0 * CS, CS, ROBOT.x, ROBOT.y)
-        f = av.compute_safe_frontier([(ROBOT.x, ROBOT.y)] + self.waypoints, snap, body=self.body)
+        snap = safe_frontier.make_grid_snapshot(od, rough, iv, valid, tc, N, N, c0 * CS, r0 * CS, CS, ROBOT.x, ROBOT.y)
+        f = safe_frontier.compute_safe_frontier([(ROBOT.x, ROBOT.y)] + self.waypoints, snap, body=self.body)
         f['path_version'] = self.version
         f['time'] = time.time()
         return f
@@ -353,7 +354,7 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
     # sempre quello. Qui ogni scenario e' un mondo diverso con le stesse coordinate, e
     # senza azzerarlo la mediana mescolava le scansioni dello scenario precedente con
     # quelle nuove: S11 passava o falliva a seconda di cosa girava prima.
-    av.OBSTACLE_HISTORY.reset()
+    safe_frontier.OBSTACLE_HISTORY.reset()
     DYNAMIC_TRIGGER.update(armed=dynamic is not None, rect=dynamic)
     FALL.update(armed=fall is not None, fallen=False, recoverable=(fall == 'recuperabile'), where=None)
     registro.MISSION_STATS['falls'] = registro.MISSION_STATS['self_rights'] = 0
@@ -683,19 +684,19 @@ if __name__ == '__main__':
         occ_d = distance_transform_edt(occupied) * cs
         od = np.where(occupied, -occ_d, free_d)
         z = np.zeros((n, n))
-        return av.GridSnapshot(od, np.zeros((n, n), bool), seen, z, ox, oy, cs, ax, ay)
+        return safe_frontier.GridSnapshot(od, np.zeros((n, n), bool), seen, z, ox, oy, cs, ax, ay)
     n, cs = 128, 0.03
     xs = (np.arange(n) + 0.5) * cs
     ys = -1.92 + (np.arange(n) + 0.5) * cs
     X, Y = np.meshgrid(xs, ys)
     walls = (np.abs(Y) >= 0.45)                         # corridoio largo 0.9 m lungo x
     seen_corr = X <= 2.2                                 # la scansione finisce a x = 2.2
-    ok_corr, fan_corr = av.arrival_has_exit(_snap(walls, seen_corr, 2.0, 0.0), (2.0, 0.0), 0.0)
+    ok_corr, fan_corr = decisions.arrival_has_exit(_snap(walls, seen_corr, 2.0, 0.0), (2.0, 0.0), 0.0)
     fwd = [d for d in fan_corr if abs(d['rel_deg']) < 1.0][0]
     check(ok_corr, f"corridoio che continua oltre i dati: un'uscita c'e' (avanti {fwd['advance']:.2f} m, "
                    f"{fwd['reason']}, girabile {fwd['rotatable']})")
     pocket = walls | (X >= 2.45)                         # stessa larghezza, chiuso davanti
-    ok_pocket, fan_pocket = av.arrival_has_exit(_snap(pocket, np.ones((n, n), bool), 2.0, 0.0),
+    ok_pocket, fan_pocket = decisions.arrival_has_exit(_snap(pocket, np.ones((n, n), bool), 2.0, 0.0),
                                                 (2.0, 0.0), 0.0)
     check(not ok_pocket, f"nicchia cieca tutta vista: nessuna uscita "
                          f"({sum(d['usable'] for d in fan_pocket)}/{len(fan_pocket)} direzioni)")

@@ -25,7 +25,7 @@ from spot_explorer.perception import spot_grid
 from spot_explorer.robot import connection as spotLogInUtils
 from spot_explorer.mission import cells as environmentMap
 from spot_explorer.robot import connection as spotUtils
-from spot_explorer.planning import safe_frontier as arcVerification
+from spot_explorer.planning import safe_frontier
 from spot_explorer.robot import battery as batteria
 
 from spot_explorer.planning import roadmap as prm_graph
@@ -142,8 +142,8 @@ def _stampa_configurazione():
           f"{P.PRM_NODE_MIN_CLEARANCE_M:.2f} m di spazio libero, solo dove visti. "
           f"Deroga di {prm_graph.STOP_NODE_MAP_IGNORE_M:.2f} m alla mappa globale "
           f"attorno al robot: ora solo dopo una caduta")
-    print(f"[CONFIG] OSTACOLI: mediana su {arcVerification.OBSTACLE_MEDIAN_FRAMES} scansioni "
-          f"+ isteresi {arcVerification.OBSTACLE_HYSTERESIS_M:.2f} m attorno a "
+    print(f"[CONFIG] OSTACOLI: mediana su {safe_frontier.OBSTACLE_MEDIAN_FRAMES} scansioni "
+          f"+ isteresi {safe_frontier.OBSTACLE_HYSTERESIS_M:.2f} m attorno a "
           f"{geometry.FRONTIER_CLEARANCE_M:.2f} m (rumore misurato 1.5 cm tipici, 7.3 di punta); "
           f"celle-ostacolo escluse dal campionamento della pendenza d'arco")
     print(f"[CONFIG] BATTERIA: rientro a wp_0 sotto {P.BATTERY_RETURN_PCT:.0f}% "
@@ -362,7 +362,7 @@ def easy_walk(options):
             prm, gb_sampler, mission_lattice = mission_graph.build_mission_prm(env)
             MISSION_CTX['prm'] = prm  # per il riepilogo di fine missione (anche se interrotta)
 
-            verification_tracker = arcVerification.ArcVerificationTracker(robot)
+            verification_tracker = safe_frontier.ArcVerificationTracker(robot)
             MISSION_CTX['tracker'] = verification_tracker
             verification_tracker.start()
 
