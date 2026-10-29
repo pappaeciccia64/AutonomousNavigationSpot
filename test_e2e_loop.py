@@ -654,7 +654,7 @@ if __name__ == '__main__':
     real_check = easy_walk.TentativoCella._fronte_fermo_sull_obiettivo
 
     def _solo_nel_blocco(self):
-        return sys._getframe(1).f_code.co_name != '_attesa' and real_check(self)
+        return sys._getframe(1).f_code.co_name != '_cambia_obiettivo_irraggiungibile' and real_check(self)
     easy_walk.TentativoCella._fronte_fermo_sull_obiettivo = _solo_nel_blocco
     parametri_early = parametri.MAX_EARLY_REPLANS
     parametri.MAX_EARLY_REPLANS = 0
