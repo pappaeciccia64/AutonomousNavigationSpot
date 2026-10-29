@@ -304,11 +304,19 @@ def draw_scan(ax, d, layer_idx, title_prefix="", ctx=None):
                                        SELF_BODY_LENGTH_M, SELF_BODY_WIDTH_M, angle=float(np.degrees(yaw)),
                                        rotation_point=(rx, ry), fill=False, edgecolor='blue', lw=1.2,
                                        ls='--', zorder=6))
+    # Il fronte controlla il percorso PROLUNGATO di mezzo corpo oltre l'obiettivo (il muso,
+    # vedi arcVerification.compute_safe_frontier): la X e' dove finisce il controllo, che con
+    # 'fine_percorso' sta mezzo corpo oltre il punto comandato. Il prolungamento e' tratteggiato.
     reason = str(d['frontier_reason'])
     sx, sy = d['frontier_stop_xy']
+    poly = np.asarray(d['polyline']) if 'polyline' in d else np.zeros((0, 2))
+    path_len = float(d['frontier_path_len']) if 'frontier_path_len' in d else np.nan
+    if np.isfinite(sx) and len(poly) >= 2 and float(d['frontier_dist']) > path_len + 1e-6:
+        ax.plot([poly[-1][0], sx], [poly[-1][1], sy], ':', color='magenta', lw=2,
+                label=f"prolungamento per il muso ({float(d['frontier_dist']) - path_len:.2f} m)")
     if np.isfinite(sx):
         ax.plot(sx, sy, 'X', color=REASON_COLORS.get(reason, 'k'), ms=13, mec='white',
-                label=f"fronte: {reason}")
+                label=f"fine del controllo del fronte: {reason}")
     tx, ty = d['decision_target']
     if np.isfinite(tx):
         ax.plot(tx, ty, '*', color='lime', ms=14, mec='k', label='punto comandato')
