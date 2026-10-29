@@ -275,7 +275,7 @@ def main():
     from bosdyn.api.graph_nav import map_pb2
     import bosdyn.client.lease
     from spot_explorer.robot import connection as spotLogInUtils
-    from spot_explorer.graphnav import graphnav as navGraphUtils
+    from spot_explorer.graphnav import map_recording
 
     gdir = args.grafo if os.path.isabs(args.grafo) else os.path.join(HERE, args.grafo)
     graph = map_pb2.Graph()
@@ -290,7 +290,7 @@ def main():
     options = SimpleNamespace(name="provaAnelli", hostname=args.hostname, verbose=False,
                               recording_user_name="", recording_session_name="")
     robot, lease_client, _rsc, client_metadata = spotLogInUtils.setLogInfo(options)
-    ri = navGraphUtils.RecordingInterface(robot, HERE, client_metadata)
+    ri = map_recording.RecordingInterface(robot, HERE, client_metadata)
     gn = ri._graph_nav_client
     results = dict(serie=args.serie, grafo=gdir, waypoint=len(graph.waypoints), archi=len(graph.edges))
 

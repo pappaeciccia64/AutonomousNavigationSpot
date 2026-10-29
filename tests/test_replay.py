@@ -118,7 +118,7 @@ with _quiet():
     from spot_explorer.planning import roadmap as prm_graph
     from spot_explorer.mission import cells as environmentMap
     from spot_explorer.planning import mission_graph
-    from spot_explorer.graphnav import graphnav as navGraphUtils
+    from spot_explorer.graphnav import map_shortcuts
     from spot_explorer.robot import motion as movements
     from spot_explorer.planning import goal
     from spot_explorer import records
@@ -374,7 +374,7 @@ def return_route_check(name, gm):
     if start is None or goal is None or goal not in xy and start not in xy:
         return None
     with _quiet():
-        used, before, after = navGraphUtils.plan_graphnav_shortcuts(xy, base, start, goal, gm)
+        used, before, after = map_shortcuts.plan_graphnav_shortcuts(xy, base, start, goal, gm)
     if before is None:
         return None
     sx = xy.get(start)

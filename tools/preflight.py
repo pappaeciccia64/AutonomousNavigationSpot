@@ -57,10 +57,10 @@ METHODS = [
     ("spot_explorer.planning.mission_graph", "MissionGraph", "report"),
     ("spot_explorer.planning.mission_graph", "MissionGraph", "describe"),
     ("spot_explorer.planning.mission_graph", "LatticeSampler", "get_point_in_cell"),
-    ("spot_explorer.graphnav.graphnav", "RecordingInterface", "close_loops_checked"),
-    ("spot_explorer.graphnav.graphnav", "RecordingInterface", "create_edge_between_waypoint_objs"),
-    ("spot_explorer.graphnav.graphnav", "RecordingInterface", "invalidate_graph_cache"),
-    ("spot_explorer.graphnav.graphnav", "RecordingInterface", "_get_graph"),
+    ("spot_explorer.graphnav.map_recording", "RecordingInterface", "close_loops_checked"),
+    ("spot_explorer.graphnav.map_recording", "RecordingInterface", "create_edge_between_waypoint_objs"),
+    ("spot_explorer.graphnav.map_recording", "RecordingInterface", "invalidate_graph_cache"),
+    ("spot_explorer.graphnav.map_recording", "RecordingInterface", "_get_graph"),
     ("spot_explorer.planning.roadmap", "PRM", "refresh_local_edge_weights"),
     ("spot_explorer.planning.roadmap", "PRM", "sample_terrain_between_points"),
     ("spot_explorer.planning.roadmap", "PRM", "_compute_edge_weight"),
@@ -93,9 +93,9 @@ METHOD_PARAMS = [
     ("spot_explorer.planning.roadmap", "PRM", "add_stop_node", "is_robot"),
     ("spot_explorer.planning.roadmap", "PRM", "update_local_grid_data", "valid_2d"),
     ("spot_explorer.planning.roadmap", "PRM", "compute_path_cost", "allow_direct_first_hop"),
-    ("spot_explorer.graphnav.graphnav", "RecordingInterface", "close_loops_checked", "upload_result"),
-    ("spot_explorer.graphnav.graphnav", "RecordingInterface", "close_loops_checked", "prune_edges"),
-    ("spot_explorer.graphnav.graphnav", "RecordingInterface", "close_loops_checked", "icp_iters"),
+    ("spot_explorer.graphnav.map_recording", "RecordingInterface", "close_loops_checked", "upload_result"),
+    ("spot_explorer.graphnav.map_recording", "RecordingInterface", "close_loops_checked", "prune_edges"),
+    ("spot_explorer.graphnav.map_recording", "RecordingInterface", "close_loops_checked", "icp_iters"),
 ]
 
 

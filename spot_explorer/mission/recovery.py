@@ -1,7 +1,7 @@
 """Uscire da un blocco: ritorno indietro con GraphNav, ritirata a zampe, celle bloccate o rimandate."""
 import numpy as np
 
-from spot_explorer.graphnav import graphnav as navGraphUtils
+from spot_explorer.graphnav import navigation
 from spot_explorer.robot import motion as movements
 from spot_explorer.perception import geometry
 from spot_explorer.robot import connection as spotUtils
@@ -122,7 +122,7 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
 
     for hop in range(1, int(max_hops) + 1):
         # Si arriva girati verso l'obiettivo del tentativo: da li' si ripianifica verso di lui.
-        ok, crumb = navGraphUtils.graphnav_step_back(env, recordingInterface, robot_state_client, command_client,
+        ok, crumb = navigation.graphnav_step_back(env, recordingInterface, robot_state_client, command_client,
                                                      face_xy=prm_graph.get_node_position(goal_id))
         if not ok:
             if crumb is None:

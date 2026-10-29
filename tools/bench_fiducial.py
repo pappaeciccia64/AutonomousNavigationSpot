@@ -6,7 +6,7 @@ prova_fiducial.py -- quali fiducial vede Spot adesso, e quale sceglierebbe la mi
 
 Solo lettura: niente lease, niente accensione dei motori, il robot non si muove. Va bene
 anche con il robot seduto (serve solo che sia acceso). Usa la stessa funzione della missione
-(navGraphUtils.find_fiducials) e lo stesso criterio di scelta (il piu' vicino, oppure
+(apriltags.find_fiducials) e lo stesso criterio di scelta (il piu' vicino, oppure
 parametri.START_FIDUCIAL_ID se e' un numero).
 
 Spot riconosce solo i fiducial AprilTag 36h11 (quelli di Boston Dynamics), non gli ArUco.
@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # il pacchetto spot_explorer
 
-from spot_explorer.graphnav import graphnav as navGraphUtils
+from spot_explorer.graphnav import apriltags
 from spot_explorer import config as P
 from spot_explorer.robot import connection as spotLogInUtils
 
@@ -33,15 +33,15 @@ def main():
     t_end = time.time() + durata
     visti = {}
     while time.time() < t_end:
-        found = navGraphUtils.find_fiducials(robot, robot_state_client,
+        found = apriltags.find_fiducials(robot, robot_state_client,
                                              fiducial_id=P.START_FIDUCIAL_ID)
         stamp = time.strftime('%H:%M:%S')
         if found:
             for f in found:
                 visti[f['id']] = visti.get(f['id'], 0) + 1
-            print(f"{stamp}  la missione sceglierebbe: {navGraphUtils.describe_fiducial(found[0])}")
+            print(f"{stamp}  la missione sceglierebbe: {apriltags.describe_fiducial(found[0])}")
             for f in found[1:]:
-                print(f"           visto anche: {navGraphUtils.describe_fiducial(f)}")
+                print(f"           visto anche: {apriltags.describe_fiducial(f)}")
         else:
             print(f"{stamp}  nessun fiducial visto")
         time.sleep(1.0)

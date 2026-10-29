@@ -13,7 +13,7 @@ movimento, fronte):
   - GraphNav: un grafo in memoria. I waypoint nascono dove sta il robot, gli archi della
     registrazione collegano ognuno al precedente, navigate_to porta il robot sul waypoint,
     la localizzazione e' il waypoint piu' vicino.
-Tutto il resto e' il codice vero, compreso RecordingInterface di navGraphUtils.py.
+Tutto il resto e' il codice vero, compreso RecordingInterface di spot_explorer.graphnav.map_recording.
 
     python3 test_missione.py
     E2E_LOG_DIR=/tmp/prima python3 test_missione.py    # salva il log della missione (vedi
@@ -62,7 +62,7 @@ from spot_explorer.mission import cell_attempt, exploration
 from spot_explorer.mission import run as mission_run
 from spot_explorer.planning import goal
 from spot_explorer.robot import motion as movements
-from spot_explorer.graphnav import graphnav as navGraphUtils
+from spot_explorer.graphnav import map_recording
 from spot_explorer import config as parametri
 from spot_explorer import records as registro
 from spot_explorer.perception import spot_grid
@@ -278,14 +278,14 @@ def _robot_state_with_odom():
     return st
 
 
-_real_initialize_with_fiducial = navGraphUtils.RecordingInterface.initialize_with_fiducial
+_real_initialize_with_fiducial = map_recording.RecordingInterface.initialize_with_fiducial
 
 
 def _initialize_with_fiducial(self, robot_state_client, fiducial_id=None):
     return _real_initialize_with_fiducial(self, NS(get_robot_state=_robot_state_with_odom), fiducial_id)
 
 
-navGraphUtils.RecordingInterface.initialize_with_fiducial = _initialize_with_fiducial
+map_recording.RecordingInterface.initialize_with_fiducial = _initialize_with_fiducial
 
 
 class FakeRobot:

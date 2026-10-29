@@ -3,7 +3,8 @@ import os
 import time
 import numpy as np
 
-from spot_explorer.graphnav import graphnav as navGraphUtils
+from spot_explorer.graphnav import map_shortcuts
+from spot_explorer.graphnav import navigation
 from spot_explorer.robot import motion as movements
 from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
@@ -477,11 +478,11 @@ class Missione:
         x_current, y_current, _, _ = spotUtils.getPosition(self.robot_state_client)
 
         nearest_wp = recordingInterface.get_manual_waypoint_by_cell(nearest_cell[0], nearest_cell[1])
-        navGraphUtils.graphnav_add_shortcuts(recordingInterface, "prima dello spostamento fra celle",
+        map_shortcuts.graphnav_add_shortcuts(recordingInterface, "prima dello spostamento fra celle",
                                              map_edges=True, target_wp_id=nearest_wp['id'],
                                              robot_xy=(x_current, y_current))
         recordingInterface.stop_recording()
-        navigation_success = navGraphUtils.graphnav_navigate_to(
+        navigation_success = navigation.graphnav_navigate_to(
             recordingInterface, nearest_wp['id'], self.robot_state_client, self.command_client,
             f"verso il waypoint della cella {nearest_cell} per la cella ({target_row},{target_col})",
             face_xy=self.env.get_world_position_from_cell(target_row, target_col))

@@ -6,7 +6,7 @@ import numpy as np
 
 from bosdyn.client.frame_helpers import BODY_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b
 from types import SimpleNamespace
-from spot_explorer.graphnav import graphnav as navGraphUtils
+from spot_explorer.graphnav import map_recording
 from spot_explorer.robot import motion as movements
 from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
@@ -349,7 +349,7 @@ class TentativoCella:
 
         # Briciola GraphNav del punto di partenza del tentativo: e' quello a cui serve poter
         # tornare se la cella si rivela un vicolo cieco.
-        navGraphUtils.graphnav_drop_breadcrumb(self.env, self.recordingInterface, self.robot_state_client, self.robot_node_id,
+        map_recording.graphnav_drop_breadcrumb(self.env, self.recordingInterface, self.robot_state_client, self.robot_node_id,
                                  self.target_row, self.target_col, force=True)
         # L'obiettivo e' il centro o un nodo del reticolo (lo sceglie find_best_point_in_cell fra
         # i punti del campionatore).
@@ -1685,7 +1685,7 @@ class TentativoCella:
 
             # Briciola per i ritorni: un waypoint GraphNav ogni
             # GRAPHNAV_WAYPOINT_MIN_SPACING_M di strada percorsa.
-            navGraphUtils.graphnav_drop_breadcrumb(self.env, self.recordingInterface, self.robot_state_client,
+            map_recording.graphnav_drop_breadcrumb(self.env, self.recordingInterface, self.robot_state_client,
                                      self.robot_node_id, self.target_row, self.target_col)
 
         elif abort_reason is not None:

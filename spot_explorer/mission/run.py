@@ -12,7 +12,10 @@ import bosdyn.client.util
 import bosdyn.geometry
 from bosdyn.client.robot_command import (RobotCommandBuilder, RobotCommandClient, blocking_stand)
 from types import SimpleNamespace
-from spot_explorer.graphnav import graphnav as navGraphUtils
+from spot_explorer.graphnav import apriltags
+from spot_explorer.graphnav import map_recording
+from spot_explorer.graphnav import map_shortcuts
+from spot_explorer.graphnav import navigation
 from spot_explorer.robot import motion as movements
 from spot_explorer.perception import gait
 from spot_explorer.perception import geometry
@@ -211,14 +214,14 @@ def _chiudi_missione(robot, robot_state_client, command_client, recordingInterfa
         _xy_end = spotUtils.getPosition(robot_state_client)[:2]
     except Exception:
         _wp0_id, _xy_end = None, None
-    navGraphUtils.graphnav_add_shortcuts(recordingInterface, "prima del ritorno a wp_0",
+    map_shortcuts.graphnav_add_shortcuts(recordingInterface, "prima del ritorno a wp_0",
                                          map_edges=True, target_wp_id=_wp0_id, robot_xy=_xy_end)
     recordingInterface.auto_close_loops(True, False)
     recordingInterface.stop_recording()
     # Chiusura d'anello di Spot una volta sola, PRIMA dell'ancoraggio: i suoi archi,
     # verificati sulle scansioni, correggono la deriva della mappa scaricata e accorciano il
     # ritorno (vedi GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S).
-    navGraphUtils.graphnav_add_shortcuts(recordingInterface, "chiusura della mappa", map_edges=False,
+    map_shortcuts.graphnav_add_shortcuts(recordingInterface, "chiusura della mappa", map_edges=False,
                                          loop_closure_s=P.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S)
     recordingInterface.optimize_anchoring()
     _t_close['chiusura mappa e ancoraggio'] = time.perf_counter() - _t
@@ -228,14 +231,14 @@ def _chiudi_missione(robot, robot_state_client, command_client, recordingInterfa
     if monitor is not None:
         monitor.controlla("inizio del ritorno a wp_0")
     _pct0 = MISSION_STATS.get('battery_last_pct')
-    esito_wp0 = navGraphUtils.graphnav_return_to_start(recordingInterface, robot_state_client, command_client)
+    esito_wp0 = navigation.graphnav_return_to_start(recordingInterface, robot_state_client, command_client)
     if esito_wp0 in ('arrivato', 'vicino'):
         # Anche fermo vicino a wp_0 il tag si cerca: e' la misura della deriva di tutta la missione.
-        misura = navGraphUtils.graphnav_check_start_fiducial(robot, robot_state_client)
+        misura = apriltags.graphnav_check_start_fiducial(robot, robot_state_client)
         # Arrivato secondo GraphNav ma lontano secondo il tag: correzione (vedi
         # WP0_FIDUCIAL_CORRECTION). Fermo vicino (STUCK) no: la strada e' bloccata.
         if esito_wp0 == 'arrivato' and misura and misura.get('offset') is not None:
-            navGraphUtils.graphnav_correct_wp0_with_fiducial(robot, recordingInterface, robot_state_client,
+            apriltags.graphnav_correct_wp0_with_fiducial(robot, recordingInterface, robot_state_client,
                                                              command_client, misura['offset'])
     if esito_wp0 != 'arrivato':
         print("[GRAPHNAV] Ritorno a wp_0 non riuscito: il robot si siede dove si trova.")
@@ -275,7 +278,7 @@ def easy_walk(options):
     global_grid = global_maps.GlobalGrid()
     MISSION_CTX['global_grid'] = global_grid   # per graphnav_add_shortcuts
 
-    recordingInterface = navGraphUtils.RecordingInterface(robot, options.download_filepath, client_metadata)
+    recordingInterface = map_recording.RecordingInterface(robot, options.download_filepath, client_metadata)
     recordingInterface.stop_recording()
     recordingInterface.clear_map()
 
@@ -312,12 +315,12 @@ def easy_walk(options):
 
             # Fiducial di partenza (vedi START_FIDUCIAL_ID): cercato PRIMA di creare wp_0, cosi'
             # entra nella sua istantanea e la localizzazione sul fiducial ha qualcosa da trovare.
-            fiducials = navGraphUtils.find_fiducials(robot, robot_state_client,
+            fiducials = apriltags.find_fiducials(robot, robot_state_client,
                                                      wait_s=P.START_FIDUCIAL_WAIT_S,
                                                      fiducial_id=P.START_FIDUCIAL_ID)
             MISSION_CTX['start_fiducial'] = fiducials[0] if fiducials else None
             if fiducials:
-                print(f"[FIDUCIAL] Fiducial di partenza: {navGraphUtils.describe_fiducial(fiducials[0])}"
+                print(f"[FIDUCIAL] Fiducial di partenza: {apriltags.describe_fiducial(fiducials[0])}"
                       + (f"; ne vedo altri {len(fiducials) - 1}: "
                          + ", ".join(str(f['id']) for f in fiducials[1:]) if len(fiducials) > 1 else ""))
             else:
