@@ -1412,10 +1412,15 @@ class TentativoCella:
         self.next_node_id, next_x, next_y = self.path_waypoints[0]
         self.keep_heading = False     # sempre False (niente traverso): resta nei dati salvati e in navigate_to
 
-        # Pacchetto della scansione salvato QUI, prima del blocco rotazione: i rami di
-        # rotazione rifiutata/cono/arretramento/trappola fanno `continue`, e salvando dopo
-        # quelle scansioni non finirebbero su disco. Il rifiuto si ricalcola offline da
-        # obstacle_distance, robot_xyz, robot_yaw e decision_target.
+        # Il pacchetto si salva qui, prima delle fasi che possono chiudere il giro (rotazione,
+        # attesa, blocco): altrimenti quelle scansioni non finirebbero su disco.
+        self._salva_pacchetto_scansione()
+
+    def _salva_pacchetto_scansione(self):
+        """Tutto quello che serve a rivedere questa scansione dopo (scans/*.npz): layer della
+        griglia, fotografia filtrata, percorso, fronte e decisione. Vedi SAVE_SCAN_BUNDLES."""
+        # Un rifiuto di rotazione si ricalcola offline da obstacle_distance, robot_xyz,
+        # robot_yaw e decision_target.
         if P.SAVE_SCAN_BUNDLES and self.mission_folder is not None:
             gf = self.local_grid.last_ground_filter
             shape_up = (self.num_y_up, self.num_x_up)

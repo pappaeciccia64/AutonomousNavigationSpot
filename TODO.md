@@ -42,6 +42,10 @@ la sua prova senza robot, prima di portare il branch su `main`.
 
 ---
 
+## Decisioni del ciclo: cosa scatta davvero (conteggio del 29-10)
+
+Sulle 15 missioni dal 22-10 (~420 tentativi): ritirata a zampe 0 volte dal 12-10 (resta come ultima rete e dopo le cadute); cadute e stallo 0; trappola 2; gamba multinodo interrotta 3; cono 8, arretramento dritto 18, tratto scartato per rotazione 19; `[SUBITO]` ~100, blocchi confermati 36, ritorni con GraphNav ~30; recupero di missione 10 (2 riusciti). Semplificazioni possibili che CAMBIANO il comportamento, da provare con il robot dopo `main`: cono, arretramento e trappola come un solo ventaglio di direzioni d'uscita (il cono sono le direzioni vicine a quella voluta, l'arretramento quella a 180 gradi); una sola scala di escalation con un contatore (scarta il tratto, riguarda da fermo, direzione d'uscita, ritorno con GraphNav, rinuncia al lato) al posto di una decina di contatori separati; un solo controllo "l'obiettivo va ancora bene?" a inizio giro.
+
 ## Lavori principali, dopo la versione su `main`
 
 1. **Erba e ostacoli che "si muovono"** di scansione in scansione. Il problema principale del 28-10: la vegetazione è vista come muro, nella nostra mappa e nell'evitamento ostacoli di GraphNav.
