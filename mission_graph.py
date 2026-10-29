@@ -1547,16 +1547,17 @@ def robot_on_node(prm, node_id, x, y):
     return pos is not None and float(np.hypot(pos[0] - x, pos[1] - y)) <= prm_graph.ANCHOR_ON_NODE_M
 
 
-def rebuild_prm_edges(prm, global_map):
+def rebuild_prm_edges(prm, global_map, incremental=True):
     """
     Rivaluta gli archi del PRM sui dati correnti, sulle coppie del reticolo gia' calcolate
     (vedi mission_graph.MissionGraph.add_edges_to_prm). Veti e pesi li calcola
-    PRM._evaluate_and_add_edge.
+    PRM._evaluate_and_add_edge. incremental=False forza la costruzione completa (stesso
+    risultato: test_replay.py lo verifica).
     """
     return prm.mission_graph.add_edges_to_prm(
         prm, global_map=global_map,
         edge_safety_margin=spotGrid.PRM_EDGE_SAFETY_MARGIN_M,
-        incremental=P.INCREMENTAL_GRAPH_UPDATE)
+        incremental=incremental)
 
 
 if __name__ == '__main__':

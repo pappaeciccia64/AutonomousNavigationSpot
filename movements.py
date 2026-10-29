@@ -566,14 +566,12 @@ def navigate_to(target_x, target_y, robot_x, robot_y, robot_state_client, comman
             target_x, target_y, "vision", command_client, robot_state_client,
             should_abort=should_abort, **mobility_kwargs)
     else:
-        print("[INFO] Passo 1: rotazione verso il punto...")
         rotate_success, _ = relative_move(0, 0, dyaw, "vision", command_client, robot_state_client,
                                                     should_abort=should_abort, **mobility_kwargs)
         if not rotate_success:
             print(f"[FAIL] Rotazione non riuscita: il movimento in avanti non parte.")
             return False, 0.0, distance
 
-        print(f"[INFO] Passo 2: avanti di {distance:.2f} m...")
         move_success, distance_traveled = relative_move(distance, 0, 0, "vision", command_client,
                                                                    robot_state_client,
                                                                    should_abort=should_abort, **mobility_kwargs)

@@ -44,11 +44,6 @@ OCCUPANCY_SAMPLES_MIN = 5
 # None = disattivato.
 LIVE_PREFILTER_OD_M = spotGrid.FRONTIER_CLEARANCE_M     # = 0.25
 
-# False: per i veti di pendenza si stampa UNA riga riassuntiva [PENDENZE] per ogni
-# costruzione o refresh (vedi flush_slope_log) invece di una per arco; i valori arco per arco
-# restano nei pacchetti _vis.npz. True: anche le righe [SLOPE-VETO] e [SLOPE-FLIP].
-VERBOSE_SLOPE_LOG = False
-
 # --- Aggancio della posizione del robot al grafo -------------------------------------------
 # Il grafo non cresce durante la missione: add_stop_node aggancia la posizione al nodo
 # ESISTENTE adatto (vedi anchor_node).
@@ -200,10 +195,6 @@ class PRM:
         self.slope_flip_count = 0         # volte in cui un arco vicino soglia ha cambiato stato tra due refresh
         self.edge_slope_info = {}         # {(idx1,idx2): (long_slope, lat_slope)} -- per visualizzazione, niente ricalcolo
 
-        # Disaccordo fra mappa binaria e mappa dello spazio libero sull'ultimo lotto di archi
-        # valutati: (solo la binaria blocca, solo lo spazio libero blocca, archi valutati).
-        # Solo diagnostica, vedi spotGrid.CLEARANCE_MAP_DECIDES.
-        self.clearance_disagreement = None
         # Scansione dal vivo per lo scarto preliminare (vedi LIVE_PREFILTER_OD_M e
         # set_live_obstacles). None = nessuna scansione: nessuno scarto.
         self.live_obstacles = None
@@ -516,12 +507,6 @@ class PRM:
                     if is_near_threshold and old_valid is not None and old_valid != new_valid:
                         self.slope_flip_count += 1
                         self._slope_pending()['flip'] += 1
-                    if (VERBOSE_SLOPE_LOG and is_near_threshold and old_valid is not None
-                            and old_valid != new_valid):
-                        print(f"[SLOPE-FLIP] Arco {idx1}-{idx2}: stato cambiato "
-                              f"{old_valid}->{new_valid} vicino soglia "
-                              f"(long={long_slope:.3f}, lat={lat_slope:.3f}, "
-                              f"soglia={spotGrid.SLOPE_THRESHOLD:.3f})")
 
             self.edges[idx1] = [(n, w) for n, w in self.edges.get(idx1, []) if n != idx2]
             self.edges[idx2] = [(n, w) for n, w in self.edges.get(idx2, []) if n != idx1]
@@ -639,8 +624,8 @@ class PRM:
     def _record_slope_veto(self, key, long_slope: float, lat_slope: float) -> bool:
         """
         Veto di pendenza (spotGrid.SLOPE_THRESHOLD, in entrambe le direzioni) con le statistiche.
-        Restituisce True se l'arco va scartato. Con VERBOSE_SLOPE_LOG stampa una riga la prima
-        volta che un arco DISTINTO viene vetato.
+        Restituisce True se l'arco va scartato. I veti si riassumono in una riga [PENDENZE] per
+        costruzione o refresh (flush_slope_log); i valori arco per arco restano nei _vis.npz.
         """
         self.max_slope_seen['long'] = max(self.max_slope_seen['long'], long_slope)
         self.max_slope_seen['lat'] = max(self.max_slope_seen['lat'], lat_slope)
@@ -655,9 +640,6 @@ class PRM:
             if key not in self.vetoed_arcs_longitudinal:
                 self.vetoed_arcs_longitudinal.add(key)
                 pend['new'] += 1
-                if VERBOSE_SLOPE_LOG:
-                    print(f"[SLOPE-VETO] Arco {key[0]}-{key[1]}: LONGITUDINALE {long_slope:.3f} > "
-                          f"soglia {spotGrid.SLOPE_THRESHOLD:.3f} (lat={lat_slope:.3f})")
         if lat_slope > spotGrid.SLOPE_THRESHOLD:
             vetoed = True
             self.veto_count_lateral += 1
@@ -666,9 +648,6 @@ class PRM:
             if key not in self.vetoed_arcs_lateral:
                 self.vetoed_arcs_lateral.add(key)
                 pend['new'] += 1
-                if VERBOSE_SLOPE_LOG:
-                    print(f"[SLOPE-VETO] Arco {key[0]}-{key[1]}: LATERALE {lat_slope:.3f} > "
-                          f"soglia {spotGrid.SLOPE_THRESHOLD:.3f} (long={long_slope:.3f})")
         return vetoed
 
     def _slope_pending(self):
@@ -680,7 +659,7 @@ class PRM:
 
     def flush_slope_log(self, where=""):
         """
-        Una riga [PENDENZE] con i veti dall'ultima chiamata (vedi VERBOSE_SLOPE_LOG), poi azzera.
+        Una riga [PENDENZE] con i veti dall'ultima chiamata, poi azzera.
         Non stampa niente se non ci sono stati veti.
         """
         p = self._slope_pending()
@@ -875,20 +854,13 @@ class PRM:
             ignore_xy = self.nodes[self.robot_node]
         # ceil + 1: passo fra campioni <= 1/OCCUPANCY_SAMPLES_PER_M.
         num_samples = max(OCCUPANCY_SAMPLES_MIN, int(np.ceil(dist * OCCUPANCY_SAMPLES_PER_M)) + 1)
-        # Con spotGrid.CLEARANCE_MAP_DECIDES il test e' quello del fronte ("qui ci sono almeno
-        # FRONTIER_CLEARANCE_M?") sulla mappa dello spazio libero; altrimenti la mappa binaria.
-        use_clear = (spotGrid.CLEARANCE_MAP_DECIDES
-                     and hasattr(global_map, 'clearance_blocked'))
         for k in range(num_samples):
             t = k / (num_samples - 1)
             sx = x1 + t * (x2 - x1)
             sy = y1 + t * (y2 - y1)
             if ignore_xy is not None and np.hypot(sx - ignore_xy[0], sy - ignore_xy[1]) <= self.robot_node_ignore_m:
                 continue
-            if use_clear:
-                if global_map.clearance_blocked(sx, sy, spotGrid.FRONTIER_CLEARANCE_M):
-                    return True
-            elif global_map.is_occupied(sx, sy, safety_margin=edge_safety_margin):
+            if global_map.is_occupied(sx, sy, safety_margin=edge_safety_margin):
                 return True
         return False
 
@@ -929,10 +901,6 @@ class PRM:
             ignore_xy = self.nodes[self.robot_node]
             touches = np.array([(a == self.robot_node) or (b == self.robot_node)
                                 for a, b in zip(a_ids, b_ids)], dtype=bool)
-        # Si calcolano ENTRAMBI i criteri, mappa binaria e mappa dello spazio libero: decide
-        # quello scelto da spotGrid.CLEARANCE_MAP_DECIDES, l'altro serve alla riga [SPAZIO].
-        has_clear = hasattr(global_map, 'clearance_many')
-        out_clear = np.zeros(n_pairs, dtype=bool) if has_clear else None
         for m in np.unique(ns):
             sel = np.nonzero(ns == m)[0]
             t = np.arange(int(m)) / (int(m) - 1)
@@ -946,17 +914,6 @@ class PRM:
             if keep is not None:
                 occ &= keep
             out[sel] = occ.any(axis=1)
-            if has_clear:
-                cl = global_map.clearance_many(sx, sy)
-                blocked = np.isfinite(cl) & (cl < spotGrid.FRONTIER_CLEARANCE_M)
-                if keep is not None:
-                    blocked &= keep
-                out_clear[sel] = blocked.any(axis=1)
-        if has_clear:
-            self.clearance_disagreement = (
-                int((out & ~out_clear).sum()), int((~out & out_clear).sum()), n_pairs)
-            if spotGrid.CLEARANCE_MAP_DECIDES:
-                return out_clear
         return out
 
     def _prefill_global_slope_nodata(self, pairs):

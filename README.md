@@ -111,12 +111,10 @@ Ognuno permette un confronto acceso/spento sul campo; il log li riporta nella ri
 | Interruttore | Default | Cosa fa |
 |---|---|---|
 | `parametri.MISSION_GRAPH_SAMPLING` | `casuale` | Come si generano i nodi: `reticolo` o `casuale` (vedi *Grafo della missione*) |
-| `parametri.INCREMENTAL_GRAPH_UPDATE` | `True` | A inizio cella rivaluta solo gli archi vicini ai dati nuovi (stesso risultato della ricostruzione completa) |
 | `mission_graph.BATCH_SLOPES` | `True` | Pendenze a inizio cella calcolate in blocco (stesso risultato, più veloce) |
 | `prm_graph.REFRESH_BATCH_SLOPES` | `True` | Pendenze del refresh calcolate in blocco (stesso risultato, più veloce) |
 | `spotGrid.ROBOT_CLEARANCE_AIR_M` | `0.0` | Aria fra corpo e ostacoli: la linea del percorso sta a 0.25 m + questo valore dagli ostacoli (fronte e veto degli archi). 0.05 = con margine |
 | `spotGrid.PLAN_CLEARANCE_EXTRA_M` | `0.03` | Sulla mappa globale e nella scelta dell'obiettivo, il pianificatore tiene gli archi a (distanza del fronte + questo valore) dagli ostacoli, così il rumore della scansione non fa rifiutare dal fronte i tratti appena scelti. 0 = stessa distanza del fronte |
-| `spotGrid.CLEARANCE_MAP_DECIDES` | `False` | La mappa dello spazio libero decide la percorribilità al posto della mappa binaria |
 | `parametri.PLAN_ONLY_EXPLORED_CELLS` | `True` | I percorsi passano solo dalle celle già visitate |
 | `parametri.GRAPHNAV_ARRIVAL_HEADING` | `verso_obiettivo` | Orientamento all'arrivo dei viaggi GraphNav fra celle e dei ritorni: girato verso la cella da tentare (o l'obiettivo del tentativo); `waypoint` = quello del waypoint, `libero` = nessuna rotazione finale. Il ritorno a wp_0 tiene sempre quello di partenza |
 | `parametri.GRAPHNAV_RETURN_NEAR_M` | `1.0` | Ritorno a wp_0 fermo entro questa distanza: resta non riuscito, ma fiducial e deriva si misurano lo stesso |
@@ -124,7 +122,6 @@ Ognuno permette un confronto acceso/spento sul campo; il log li riporta nella ri
 | `parametri.GRAPHNAV_PRECHECK` | `True` | Prima di andare col GraphNav al waypoint da cui tentare una cella, controlla sul grafo che da lì si arrivi alla cella; se no, segna il lato come provato senza muoversi |
 | `parametri.GRAPHNAV_SHORTCUTS` | `True` | Scorciatoie nel grafo GraphNav prima di ogni spostamento |
 
-| `parametri.GRAPHNAV_SDK_LOOP_BUDGET_S` | `0.0` | Chiusura d'anello veloce di Spot prima di ogni spostamento GraphNav (0 = spenta) |
 | `parametri.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S` | `45.0` | Chiusura d'anello completa a fine missione, prima dell'ancoraggio (0 = spenta) |
 | `parametri.BATTERY_RETURN_PCT` | `30.0` | Sotto questa carica (2 letture di fila) la missione chiude e torna a `wp_0` (0 = rientro spento, la carica si misura comunque) |
 ---

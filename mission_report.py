@@ -432,41 +432,35 @@ def section_checks(log, segments):
                     f"archi esclusi per il tentativo {excl}, celle rimandate dopo 2 ritorni {giveup}, "
                     f"recuperi rimandati perche' stesso obiettivo {same}; guardare che non ci siano giri ripetuti"))
 
-    # 7. Mappa dello spazio libero: dato per decidere CLEARANCE_MAP_DECIDES.
-    gap = [(int(a), int(b), int(c), int(d)) for a, b, c, d in re.findall(
-        r'\[SPAZIO\] Archi su cui i due criteri non concordano: (\d+) su (\d+) .*? -- (\d+) bloccati '
-        r'solo dalla mappa binaria, (\d+) solo dallo spazio', log)]
-    if not gap:
-        out.append(("Spazio libero (CLEARANCE_MAP_DECIDES)", 'NON SCATTATO', "nessuna riga [SPAZIO]"))
-    else:
-        pct = [100.0 * a / b for a, b, _, _ in gap if b]
-        out.append(("Spazio libero (CLEARANCE_MAP_DECIDES)", 'DECISIONE',
-                    f"{len(gap)} giri con disaccordo, mediana {np.median(pct):.1f}% degli archi "
-                    f"(massimo {max(pct):.1f}%); in tutto {sum(c for *_, c, _ in gap)} archi bloccati "
-                    f"solo dalla binaria, {sum(d for *_, d in gap)} solo dallo spazio libero"))
-
     # 8. Attesa prima degli spostamenti GraphNav: dalla preparazione (scorciatoie, chiusura
     #    d'anello di Spot) alla partenza. Il 22-10 16:04 la chiusura d'anello e' andata in
     #    timeout 20 volte, 30 s l'una: 603 s di attesa contro 257 s di viaggio.
-    waits, trips, prep = [], [], None
+    #    La chiusura d'anello finale (prima del ritorno a wp_0) ha il suo limite e non conta
+    #    come attesa: si toglie dall'attesa di quel viaggio.
+    final_closure = [float(t) for t in re.findall(
+        r"Chiusura d'anello di Spot \(completa\): \d+ archi in ([\d.]+) s", log)]
+    waits, trips, prep, to_wp0 = [], [], None, False
     for line in log.splitlines():
         t = log_time(line)
         if t is None:
             continue
         if re.search(r'\[GRAPHNAV\] prima (?:dello|del) ', line):
-            prep = t
+            prep, to_wp0 = t, 'wp_0' in line
         elif re.search(r'\[GRAPHNAV\] .*: avvio \(massimo', line) and prep is not None:
-            waits.append(t - prep)
+            w = t - prep
+            if to_wp0 and final_closure:
+                w = max(0.0, w - final_closure[-1])
+            waits.append(w)
             prep = None
         m = re.search(r'\[GRAPHNAV\] .*: arrivato in (\d+) s', line)
         if m:
             trips.append(int(m.group(1)))
-    #    Dal 26-10 la chiusura d'anello ha un limite lato Spot (GRAPHNAV_SDK_LOOP_BUDGET_S, 20 s
-    #    prima del ritorno a wp_0): un'attesa fino al limite e' normale, oltre no.
+    #    Fra il 26 e il 28-10 c'era anche una chiusura d'anello veloce prima di ogni viaggio,
+    #    con il suo limite lato Spot: un'attesa fino al limite e' normale, oltre no.
     timeouts = len(re.findall(r"Chiusura d'anello di Spot non riuscita \(TimedOut", log))
     loop_fail = len(re.findall(r"Chiusura d'anello di Spot \([^)]*\): tentativo \d+ non riuscito", log))
-    #    Dal 26-10 pomeriggio: prima degli spostamenti in modalita' veloce (senza ICP, limite
-    #    3 s), a fine missione completa (limite 45 s), vedi GRAPHNAV_SDK_LOOP_BUDGET_S.
+    #    Veloce (senza ICP) solo nelle missioni del 26-10; completa a fine missione (limite
+    #    GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S).
     loops = [(int(n), float(t), float(b), 'SCADUTO' in rest, mode) for mode, n, t, b, rest in re.findall(
         r"Chiusura d'anello di Spot(?: \(([^)]*)\))?: (\d+) archi in ([\d.]+) s \(limite (\d+) s, ([^)]*)\)", log)]
     fast = [l for l in loops if 'veloce' in l[4]]

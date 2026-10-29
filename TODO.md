@@ -32,10 +32,10 @@ la sua prova senza robot, prima di portare il branch su `main`.
 | Questione | Dati del 28-10 | Decisione |
 |---|---|---|
 | **Chiusura d'anello finale** (solo completa a fine missione, limite 45 s) | 16 archi in 55.5 s (13:50), 20 in 65.6 s (14:23); caricati con `upload_graph` senza errori né secondo tentativo | Resta così. Spot sfora il limite di 10–20 s, crescendo con il grafo: da tenere d'occhio, eventualmente limite più basso. |
-| **Rientri senza chiusura veloce** | Tutti i viaggi GraphNav riusciti (3 e 8), scorciatoie 116 -> 27 m e 132 -> 70 m | Resta spenta (`GRAPHNAV_SDK_LOOP_BUDGET_S = 0`). |
+| **Rientri senza chiusura veloce** | Tutti i viaggi GraphNav riusciti (3 e 8), scorciatoie 116 -> 27 m e 132 -> 70 m | Tolta dal codice il 29-10. |
 | **Deriva dell'odometria** | 14:23: **1.09 m in 26 min sul tag**, 0.92 m su GraphNav; 13:50: 0.19 m dopo 4 min | Supera di molto la soglia di 0.3 m: la correzione delle mappe globali va fatta (lavori principali, punto 3). |
 | **Soglia di rientro a batteria bassa** (30%) | 1.15–1.19 %/min, 0.18–0.19 %/m; ritorno a wp_0 di 14–21 m costato 1 punto | Il ritorno costa poco: 30% ha margine ampio, si potrebbe scendere a 20–25%. Da decidere con missioni più grandi. |
-| **`CLEARANCE_MAP_DECIDES`** (oggi `False`) | Disaccordo mediano 7–9% degli archi; nessun varco riproposto più volte | Resta spento. |
+| **`CLEARANCE_MAP_DECIDES`** | Disaccordo mediano 7–9% degli archi; nessun varco riproposto più volte | Tolto dal codice il 29-10: decide la mappa binaria; la mappa dello spazio libero resta per la scelta dell'obiettivo. |
 | **Andature** | HARD su tratti tranquilli (sotto 8°): 6 (13:50), 9 (14:23) | Poco tempo perso; da rivedere insieme al movimento fluido. |
 | **Briciole GraphNav ogni 0.75 m** | Scaricamento della mappa 76–94 s a fine missione | Da provare 1.0–1.5 m quando si lavora sul movimento. |
 | **Missione nelle validazioni** | 14:23: 56/56 celle, ritorno e fiducial riusciti | Da aggiungere alle missioni di validazione su GitHub. |

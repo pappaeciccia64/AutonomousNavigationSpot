@@ -77,10 +77,8 @@ def mission_switches():
     """
     return {
         'parametri.MISSION_GRAPH_SAMPLING': P.MISSION_GRAPH_SAMPLING,
-        'parametri.INCREMENTAL_GRAPH_UPDATE': P.INCREMENTAL_GRAPH_UPDATE,
         'mission_graph.BATCH_SLOPES': mission_graph.BATCH_SLOPES,
         'prm_graph.REFRESH_BATCH_SLOPES': prm_graph_module.REFRESH_BATCH_SLOPES,
-        'spotGrid.CLEARANCE_MAP_DECIDES': spotGrid.CLEARANCE_MAP_DECIDES,
         'parametri.PLAN_ONLY_EXPLORED_CELLS': P.PLAN_ONLY_EXPLORED_CELLS,
         'parametri.GRAPHNAV_SHORTCUTS': P.GRAPHNAV_SHORTCUTS,
         'parametri.GRAPHNAV_PRECHECK': P.GRAPHNAV_PRECHECK,
@@ -88,11 +86,7 @@ def mission_switches():
         'parametri.GRAPHNAV_ARRIVAL_HEADING': P.GRAPHNAV_ARRIVAL_HEADING,
         'parametri.MOVE_NEAR_GOAL_M': P.MOVE_NEAR_GOAL_M,
         'parametri.GRAPHNAV_SDK_LOOP_CLOSURE': P.GRAPHNAV_SDK_LOOP_CLOSURE,
-        'parametri.GRAPHNAV_SDK_LOOP_BUDGET_S': P.GRAPHNAV_SDK_LOOP_BUDGET_S,
         'parametri.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S': P.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S,
-        'parametri.GRAPHNAV_SDK_LOOP_FAST': P.GRAPHNAV_SDK_LOOP_FAST,
-        'parametri.GRAPHNAV_SDK_LOOP_FINAL_PRUNE': P.GRAPHNAV_SDK_LOOP_FINAL_PRUNE,
-        'parametri.GRAPHNAV_SDK_LOOP_MAX_PATH_M': P.GRAPHNAV_SDK_LOOP_MAX_PATH_M,
         'parametri.SAVE_SCAN_BUNDLES': P.SAVE_SCAN_BUNDLES,
         'parametri.SAVE_EXTRA_LAYERS': list(P.SAVE_EXTRA_LAYERS),
         'movements.DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT': movements.DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT,
@@ -344,8 +338,8 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
             center_reason = center_reason or ("occupato nella mappa" if is_center else None)
             continue
         c_live = _live_clearance(px, py)
-        # Per il centro conta la sola scansione dal vivo: lo spazio libero imparato e' ancora
-        # in prova (spotGrid.CLEARANCE_MAP_DECIDES) e cambierebbe il centro piu' del dovuto.
+        # Per il centro conta la sola scansione dal vivo: lo spazio libero imparato, che
+        # raccoglie anche letture da lontano, cambierebbe il centro piu' del dovuto.
         c_mem = None if is_center else (global_map.clearance(px, py)
                                         if hasattr(global_map, 'clearance') else None)
         known_c = [c for c in (c_live, c_mem) if c is not None]
@@ -720,35 +714,8 @@ class TentativoCella:
             self.global_terrain_map.mission_z0 = MISSION_CTX.get('mission_z0')
             self.global_terrain_map.save_map(pkl_terrain_path)
 
-            # Le mappe globali crescono per tutta la missione e non vengono mai potate: a
-            # risoluzione nativa (3 cm) un'area di 25x25 m sono ~0.7 milioni di celle per
-            # mappa, cioe' qualche centinaio di MB fra occupazione e terreno.
-            print(f"[MAP] Dimensione mappe globali -- occupazione: {len(self.global_map.grid)} celle, "
-                  f"terreno: {len(self.global_terrain_map.height_count)} celle")
-
         save_path = os.path.join(self.mission_folder,
                                  f"iteration_{self.iteration}_cell_{self.target_row}_{self.target_col}.png") if self.mission_folder else None
-
-        # =========================================================================
-        # SALVATAGGIO DEI VALORI NUMERICI IN FORMATO NumPy (.npy)
-        # =========================================================================
-        if self.mission_folder is not None:
-            try:
-                obstacle_grid_2d = obstacle_mask.reshape((num_y, num_x))
-                terrain_grid_2d = terrain_real.reshape((num_y, num_x))
-
-                npy_obstacle_path = os.path.join(self.mission_folder,
-                                                 f"iteration_{self.iteration}_cell_{self.target_row}_{self.target_col}_obstacles.npy")
-                npy_terrain_path = os.path.join(self.mission_folder,
-                                                f"iteration_{self.iteration}_cell_{self.target_row}_{self.target_col}_terrain.npy")
-
-                np.save(npy_obstacle_path, obstacle_grid_2d)
-                np.save(npy_terrain_path, terrain_grid_2d)
-
-                print(f"[DATA SAVE] Matrici .npy salvate per cella ({self.target_row},{self.target_col})")
-
-            except Exception as e:
-                print(f"[DATA SAVE] Impossibile salvare i file .npy: {e}")
 
         # ================================================================== #
         # DATI LOCALI NEL PRM: terreno, pendenza e rugosita' della scansione
@@ -1208,17 +1175,12 @@ class TentativoCella:
 
 
         # Nodi DENTRO gli ostacoli: fuori dal grafo (vedi prune_prm_nodes_in_obstacles).
-        pruned_nodes = arcVerification.prune_prm_nodes_in_obstacles(self.prm_graph, self.snap, global_map=self.global_map)
+        pruned_nodes = arcVerification.prune_prm_nodes_in_obstacles(self.prm_graph, self.snap)
         if pruned_nodes:
             MISSION_STATS['nodes_pruned'] += len(pruned_nodes)
             print(f"[NODI] {len(pruned_nodes)} nodi scartati: meno di "
                   f"{P.PRM_NODE_MIN_CLEARANCE_M:.2f} m di spazio libero dove li vediamo "
                   f"(primi: {pruned_nodes[:8]}).")
-
-        # Quanto la mappa dello spazio libero si discosta dal criterio in uso (vedi
-        # spotGrid.CLEARANCE_MAP_DECIDES). Finche' decide la mappa binaria questa riga e'
-        # solo una misura: dice quanti archi cambierebbero verdetto commutando.
-        spotGrid.log_clearance_gap(self.prm_graph, self.global_map)
 
         # Archi gia' rifiutati per rotazione DA QUESTO NODO: restano fuori finche' il robot
         # non si sposta. Lo scarto e' soft, quindi refresh_local_edge_weights li rimetterebbe
@@ -1948,9 +1910,6 @@ class TentativoCella:
                 node_idx1=self.robot_node_id, node_idx2=self.next_node_id
             )
             slope_source = self.prm_graph.last_slope_source
-            print(f"[SLOPE-SOURCE] Arco {self.robot_node_id}->{self.next_node_id}: "
-                  f"{str(slope_source).upper()} "
-                  f"(long={segment_long_slope:.3f}, lat={segment_lat_slope:.3f})")
 
             near_thresh = spotGrid.SLOPE_THRESHOLD * (1.0 - spotGrid.NEAR_THRESHOLD_MARGIN_FRACTION)
             if (segment_long_slope >= near_thresh or segment_lat_slope >= near_thresh) and self.mission_folder is not None:
@@ -2071,12 +2030,6 @@ class TentativoCella:
                     'roll_peak_abs_deg': tilt_stats['roll_peak_abs'], 'pitch_peak_abs_deg': tilt_stats['pitch_peak_abs'],
                     'tilt_samples': tilt_stats['samples'], 'tilt_errors': tilt_stats['errors'],
                 })
-                if tilt_stats['samples']:
-                    print(f"[TILT] Arco {self.robot_node_id}->{self.next_node_id}: picco roll={tilt_stats['roll_peak_abs']:.1f} deg, "
-                          f"pitch={tilt_stats['pitch_peak_abs']:.1f} deg ({tilt_stats['samples']} campioni) | "
-                          f"stimato long={segment_long_slope:.3f} (~{np.degrees(np.arctan(segment_long_slope)):.1f} deg), "
-                          f"lat={segment_lat_slope:.3f} (~{np.degrees(np.arctan(segment_lat_slope)):.1f} deg) | "
-                          f"tier={segment_tier}, {move_duration:.1f}s")
             except Exception as e:
                 print(f"[LOG] Impossibile registrare il segmento: {e}")
 
@@ -2099,8 +2052,6 @@ class TentativoCella:
                     success_move = True
 
             if success_move:
-                print(f"[INFO] Spostamento completato con successo su ({move_x:.2f}, {move_y:.2f})")
-
                 if not hasattr(self.env, '_traveled_arcs'):
                     self.env._traveled_arcs = []
                 self.env._traveled_arcs.append((self.robot_x, self.robot_y, move_x, move_y))
@@ -2541,7 +2492,6 @@ class Missione:
                 print(f"[BATTERIA] Fine dell'esplorazione per batteria bassa: restano "
                       f"{len(self.frontier)} celle in frontiera {[(f[0], f[1]) for f in self.frontier]}.")
                 break
-            print(self.frontier)
             robot_row, robot_col = self._cella_del_robot()
 
             borders = self.env.get_adjacent_frontier_cells(robot_row, robot_col, self.path)
@@ -2848,7 +2798,7 @@ class Missione:
 
         nearest_wp = recordingInterface.get_manual_waypoint_by_cell(nearest_cell[0], nearest_cell[1])
         navGraphUtils.graphnav_add_shortcuts(recordingInterface, "prima dello spostamento fra celle",
-                                             map_edges=True, sdk=False, target_wp_id=nearest_wp['id'],
+                                             map_edges=True, target_wp_id=nearest_wp['id'],
                                              robot_xy=(x_current, y_current))
         recordingInterface.stop_recording()
         navigation_success = navGraphUtils.graphnav_navigate_to(
@@ -3095,15 +3045,14 @@ def _chiudi_missione(robot, robot_state_client, command_client, recordingInterfa
     except Exception:
         _wp0_id, _xy_end = None, None
     navGraphUtils.graphnav_add_shortcuts(recordingInterface, "prima del ritorno a wp_0",
-                                         map_edges=True, sdk=False, target_wp_id=_wp0_id, robot_xy=_xy_end)
+                                         map_edges=True, target_wp_id=_wp0_id, robot_xy=_xy_end)
     recordingInterface.auto_close_loops(True, False)
     recordingInterface.stop_recording()
     # Chiusura d'anello di Spot una volta sola, PRIMA dell'ancoraggio: i suoi archi,
     # verificati sulle scansioni, correggono la deriva della mappa scaricata e accorciano il
     # ritorno (vedi GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S).
     navGraphUtils.graphnav_add_shortcuts(recordingInterface, "chiusura della mappa", map_edges=False,
-                                         sdk=True, sdk_budget_s=P.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S,
-                                         sdk_fast=False)
+                                         loop_closure_s=P.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S)
     recordingInterface.optimize_anchoring()
     _t_close['chiusura mappa e ancoraggio'] = time.perf_counter() - _t
 

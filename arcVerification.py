@@ -1025,8 +1025,7 @@ def retreat_would_help(snap, back_xy, robot_yaw, dyaw_deg):
     return bool(ok), margin
 
 
-def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=P.PRM_NODE_MIN_CLEARANCE_M,
-                                 global_map=None):
+def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=P.PRM_NODE_MIN_CLEARANCE_M):
     """
     Scarta dal grafo i nodi che cadono DENTRO un ostacolo.
 
@@ -1047,9 +1046,7 @@ def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=P.PRM_NODE_MIN_CLEAR
     lettura rumorosa torna in gioco quando i dati freschi lo smentiscono.
 
     La finestra della scansione contiene solo una piccola parte del grafo (~7%), e lo
-    scarto e' soft: al refresh successivo gli archi tornano. Con `global_map` (e
-    spotGrid.CLEARANCE_MAP_DECIDES) si guarda ANCHE la mappa dello spazio libero, che copre
-    tutto il grafo e ricorda, cosi' il giudizio su un nodo lontano non va perso a ogni giro.
+    scarto e' soft: al refresh successivo gli archi tornano.
     """
     ids = [nid for nid in prm.nodes if prm.edges.get(nid)]   # gia' isolati: niente da togliere
     if not ids:
@@ -1060,10 +1057,6 @@ def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=P.PRM_NODE_MIN_CLEAR
     if np.any(inside):
         r, c = rows[inside], cols[inside]
         bad[inside] = snap.seen[r, c] & (snap.obstacle_dist[r, c] < min_clearance_m)
-    if (spotGrid.CLEARANCE_MAP_DECIDES and global_map is not None
-            and hasattr(global_map, 'clearance_many')):
-        cl = global_map.clearance_many(xy[:, 0], xy[:, 1])
-        bad |= np.isfinite(cl) & (cl < min_clearance_m)
     pruned = []
     for k in np.nonzero(bad)[0]:
         nid = ids[int(k)]

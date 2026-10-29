@@ -64,14 +64,7 @@ class EnvironmentMap(object):
         local_x = delta_x * cos_yaw - delta_y * sin_yaw
         local_y = delta_x * sin_yaw + delta_y * cos_yaw
 
-        is_inside = (abs(local_x) <= half_size and abs(local_y) <= half_size)
-
-        if is_inside:
-            print(f"[CHECK] Il punto ({x:.2f},{y:.2f}) e' DENTRO la cella ({target_row},{target_col})")
-        else:
-            print(f"[CHECK] Il punto ({x:.2f},{y:.2f}) e' FUORI dalla cella ({target_row},{target_col}) di ({local_x:.2f},{local_y:.2f})")
-
-        return is_inside
+        return abs(local_x) <= half_size and abs(local_y) <= half_size
 
     def mark_cell_blocked(self, row, col):
         """Segna la cella come bloccata (-1): provata e non raggiungibile."""
@@ -157,19 +150,17 @@ class EnvironmentMap(object):
             print(f"[ERROR] get_adjacent_frontier_cells richiede il parametro path")
             return []
 
-        print(f"\n[ADJACENT] Cerco le celle confinanti non esplorate attorno a ({cell_row},{cell_col})")
-
         cell_to_rank = {cell: idx for idx, cell in enumerate(path)}
 
         unexplored_neighbors = []
         neighbors = [
-            (-1, 0, 'north'),
-            (1, 0, 'south'),
-            (0, 1, 'east'),
-            (0, -1, 'west')
+            (-1, 0),
+            (1, 0),
+            (0, 1),
+            (0, -1)
         ]
 
-        for dr, dc, direction in neighbors:
+        for dr, dc in neighbors:
             neighbor_row = cell_row + dr
             neighbor_col = cell_col + dc
 
@@ -182,23 +173,14 @@ class EnvironmentMap(object):
                 # stesso tentativo: tornera' in gioco da un altro lato.
                 side_bit = self.get_side_bit_facing_origin(cell_row, cell_col, neighbor_row, neighbor_col)
                 if self.get_cell_sides_status(neighbor_row, neighbor_col) & side_bit:
-                    print(f"  ✗ Vicina {direction}: ({neighbor_row},{neighbor_col}) gia' provata da "
-                          f"questo lato senza successo: per ora la salto")
                     continue
 
                 neighbor_cell = (neighbor_row, neighbor_col)
                 rank = cell_to_rank.get(neighbor_cell, float('inf'))
                 unexplored_neighbors.append((neighbor_row, neighbor_col, rank))
-                print(f"  ✓ Vicina {direction}: ({neighbor_row},{neighbor_col}) rango={rank}")
 
-        if unexplored_neighbors:
-            unexplored_neighbors.sort(key=lambda x: x[2])
-            print(f"[ADJACENT] ✓ {len(unexplored_neighbors)} celle confinanti non esplorate")
-            print(f"[ADJACENT] Quella di rango piu' basso: ({unexplored_neighbors[0][0]},{unexplored_neighbors[0][1]}) rango={unexplored_neighbors[0][2]}")
-            return unexplored_neighbors
-        else:
-            print(f"[ADJACENT] Nessuna cella confinante non esplorata")
-            return []
+        unexplored_neighbors.sort(key=lambda x: x[2])
+        return unexplored_neighbors
 
     def get_lowest_rank_from_frontier_list(self, frontier_list, path):
         """
@@ -304,7 +286,6 @@ class EnvironmentMap(object):
             if 0 <= row < self.rows and 0 <= col < self.cols:
                 if self.map[row][col] == 0:
                     self.map[row][col] = 1
-                    print(f"[MAP] Cella ({row}, {col}) segnata come visitata (centro del robot dentro)")
 
                 self.current_cell = (row, col)
                 return (row, col)

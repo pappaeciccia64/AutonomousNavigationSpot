@@ -248,16 +248,12 @@ GLOBAL_OCC_CONFIRM_WALKED = 4
 
 # =========================================================================
 # MAPPA DELLO SPAZIO LIBERO (vedi GlobalGrid.update_clearance)
-# Per ogni cella ricorda QUANTO spazio c'era (obstacle_distance), non solo "ostacolo si/no":
-# cosi' il pianificatore potrebbe applicare lo stesso test del fronte sulla stessa grandezza.
-# Statistica: media delle osservazioni prese entro CLEARANCE_NEAR_M dal robot; dove non ce ne
-# sono, media di tutte.
-# CLEARANCE_MAP_DECIDES = False: la mappa impara e la riga [SPAZIO] del log misura il
-# disaccordo, ma decide la mappa binaria (sulle missioni del 12-13/10 lo spazio libero non ha
-# dato vantaggi: vedi CHANGELOG 2026-10-14).
+# Per ogni cella ricorda QUANTO spazio c'era (obstacle_distance), non solo "ostacolo si/no".
+# La usa la scelta dell'obiettivo della cella (easy_walk.find_best_point_in_cell); archi e
+# nodi del grafo si giudicano sulla mappa binaria. Statistica: media delle osservazioni prese
+# entro CLEARANCE_NEAR_M dal robot; dove non ce ne sono, media di tutte.
 # =========================================================================
 CLEARANCE_NEAR_M = 1.0
-CLEARANCE_MAP_DECIDES = False
 
 # =========================================================================
 # SCELTA DELL'ANDATURA (vedi movements.select_mobility_params)
@@ -1561,15 +1557,6 @@ class GlobalGrid:
                     flat[i] = as_[k] / n
         return out
 
-    def clearance_blocked(self, x, y, min_clearance):
-        """
-        True se in quel punto lo spazio ricordato e' sotto min_clearance. Una cella mai
-        osservata non blocca: ignoto non e' occupato, stessa regola del fronte sicuro
-        ('fine_dati' non e' 'ostacolo').
-        """
-        c = self.clearance(x, y)
-        return c is not None and c < min_clearance
-
     def update_clearance(self, pts, obstacle_distance, usable, near=None):
         """
         Impara lo spazio libero per cella. Chiamata accanto a update().
@@ -1806,7 +1793,6 @@ class GlobalGrid:
                 'clear_all_sum': getattr(self, 'clear_all_sum', {}),
                 'clear_all_n': getattr(self, 'clear_all_n', {}),
             }, f)
-        print(f"[MAP] Mappa globale salvata correttamente in {file_path}")
 
 def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
                                 perp_sample_spacing_m=0.10,
@@ -2142,7 +2128,6 @@ class GlobalTerrainGrid:
                 # per averle rispetto al suolo all'avvio missione. None se non noto.
                 'mission_z0': getattr(self, 'mission_z0', None),
             }, f)
-        print(f"[MAP] Mappa globale del terreno salvata correttamente in {file_path}")
 
 # =========================================================================================
 # DALLA SCANSIONE ALLE MAPPE GLOBALI, e righe di log sullo stato di griglie e mappe
@@ -2314,24 +2299,3 @@ def log_ground_filter(local_grid, label):
         print(f"[GROUND-FILTER] {label}: {info['n_unwritten']} celle mai scritte dai sensori "
               f"({info.get('n_unwritten_below', 0)} sotto il suolo) -> trattate come non viste"
               + (f", quota {info['quota_unwritten']:+.4f} m" if info.get('quota_unwritten') is not None else ""))
-
-
-def log_clearance_gap(prm, global_map):
-    """
-    Una riga per giro sul divario fra i due criteri di percorribilita':
-    la mappa binaria (bit occupato + margine) e la mappa dello spazio libero (stessa soglia
-    del fronte). Tace quando sono d'accordo. Serve a decidere sul campo se commutare
-    spotGrid.CLEARANCE_MAP_DECIDES.
-    """
-    d = getattr(prm, 'clearance_disagreement', None)
-    if not d:
-        return
-    only_bin, only_clear, tot = d
-    if not (only_bin or only_clear) or not tot:
-        return
-    chi = "lo spazio libero" if CLEARANCE_MAP_DECIDES else "la mappa binaria"
-    n_cells = len(getattr(global_map, 'clear_all_n', ()) or ())
-    print(f"[SPAZIO] Archi su cui i due criteri non concordano: {only_bin + only_clear} su "
-          f"{tot} ({100.0 * (only_bin + only_clear) / tot:.1f}%) -- "
-          f"{only_bin} bloccati solo dalla mappa binaria, {only_clear} solo dallo spazio "
-          f"libero. Adesso decide {chi}. Celle con spazio libero noto: {n_cells}.")

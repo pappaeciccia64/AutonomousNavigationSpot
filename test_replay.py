@@ -265,11 +265,7 @@ def replay_mission(job):
                     local_expected += 1
                     local_used += bool(mg.last_update and mg.last_update[2])
                 if twin is not None:
-                    P.INCREMENTAL_GRAPH_UPDATE = False
-                    try:
-                        mission_graph.rebuild_prm_edges(twin[0], twin[1])
-                    finally:
-                        P.INCREMENTAL_GRAPH_UPDATE = True
+                    mission_graph.rebuild_prm_edges(twin[0], twin[1], incremental=False)
                     full_checks += 1
                     full_same += edges_of(prm) == edges_of(twin[0])
                 # --- percorso verso l'obiettivo, con le restrizioni della missione ------

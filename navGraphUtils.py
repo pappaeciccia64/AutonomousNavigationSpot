@@ -143,8 +143,8 @@ class RecordingInterface(object):
         modify_map_on_server, check_collision: False solo per le misure al banco
         (prova_anelli.py): la mappa resta com'era e si confrontano impostazioni diverse.
         icp_iters (0 = niente ICP) e feature_matching: senza, Spot finisce in pochi secondi ma
-        gli archi non sono corretti sulle scansioni (vedi parametri.GRAPHNAV_SDK_LOOP_FAST);
-        None = valori di Spot.
+        gli archi non sono corretti sulle scansioni; None = valori di Spot (con ICP). Solo per
+        le misure al banco, come max_path_m, min_path_m e prune_edges.
         upload_result: Spot calcola SENZA scrivere nella mappa e gli archi li carica questa
         funzione (upload_graph, che li aggiunge alla mappa in un colpo solo). Scrivendo da se',
         Spot puo' rispondere MapModifiedError ALLA FINE dell'elaborazione, se la mappa e'
@@ -197,12 +197,8 @@ class RecordingInterface(object):
     def _get_graph(self, force_refresh=False):
         """Il grafo di GraphNav, dalla copia locale se valida. force_refresh lo riscarica sempre."""
         if force_refresh or not self._graph_cache_valid or self._cached_graph is None:
-            print("[GRAPH_CACHE] Scarico il grafo aggiornato dal robot...")
             self._cached_graph = self._graph_nav_client.download_graph()
             self._graph_cache_valid = True
-        else:
-            print("[GRAPH_CACHE] Uso il grafo in memoria")
-
         return self._cached_graph
 
     def invalidate_graph_cache(self):
@@ -212,7 +208,6 @@ class RecordingInterface(object):
         """
         self._graph_cache_valid = False
         self._cached_graph = None
-        print("[GRAPH_CACHE] Grafo in memoria da riscaricare")
 
     def set_download_filepath(self, filepath):
         """Cartella della missione in cui salvare le mappe scaricate (una sottocartella per volta)."""
@@ -430,14 +425,6 @@ class RecordingInterface(object):
                 next_number = max_number + 1
 
         new_name = f'wp_{next_number}'
-        print(f"\n[WAYPOINT CREATION] Creo un nuovo waypoint MANUALE:")
-        print(f"  Nome: {new_name} (formato dei waypoint manuali)")
-        print(f"  Numero: {next_number}")
-        print(f"  Posizione: ({x:.3f}, {y:.3f}, {z:.3f})")
-        print(f"  Orientamento (imbardata): {np.degrees(yaw):.1f}°")
-        if cell_row is not None and cell_col is not None:
-            print(f"  Cella: ({cell_row}, {cell_col})")
-
         resp = self._recording_client.create_waypoint(waypoint_name=new_name)
 
         if resp.status == recording_pb2.CreateWaypointResponse.STATUS_OK:
@@ -454,13 +441,9 @@ class RecordingInterface(object):
                 'cell_col': cell_col
             }
 
-            print(f"[WAYPOINT CREATION] ✓ Waypoint creato:")
-            print(f"  Nome: {new_name}")
-            print(f"  ID: {created_waypoint_id}")
-            print(f"  Posa salvata per i riallineamenti")
-            if cell_row is not None and cell_col is not None:
-                print(f"  Cella salvata: ({cell_row}, {cell_col})")
-            print(f"  Stato: {resp.status}\n")
+            print(f"[WAYPOINT] {new_name} creato in ({x:.2f}, {y:.2f}), imbardata {np.degrees(yaw):.0f} gradi"
+                  + (f", cella ({cell_row},{cell_col})" if cell_row is not None and cell_col is not None else "")
+                  + ".")
 
             # Nome e id dell'ultimo waypoint, dalla risposta del robot: chi li vuole non deve
             # passare da get_localization_state, che riscaricherebbe il grafo appena
@@ -471,8 +454,7 @@ class RecordingInterface(object):
 
             return resp
         else:
-            print(f"[WAYPOINT CREATION] ✗ Waypoint {new_name} non creato")
-            print(f"  Stato: {resp.status}\n")
+            print(f"[WAYPOINT] {new_name} NON creato (stato {resp.status}).")
             return False
 
     def clear_map(self, *args):
@@ -564,9 +546,7 @@ class RecordingInterface(object):
                 waypoint_snapshot.SerializeToString(),
             )
             num_waypoint_snapshots_downloaded += 1
-            print(
-                f'[MAP DOWNLOAD] Istantanee dei waypoint: {num_waypoint_snapshots_downloaded} su {len(waypoints)}.'
-            )
+        print(f'[MAP DOWNLOAD] Istantanee dei waypoint: {num_waypoint_snapshots_downloaded} su {len(waypoints)}.')
 
     def _download_and_write_edge_snapshots(self, edges):
         num_edge_snapshots_downloaded = 0
@@ -586,9 +566,7 @@ class RecordingInterface(object):
                 edge_snapshot.SerializeToString(),
             )
             num_edge_snapshots_downloaded += 1
-            print(
-                f'[MAP DOWNLOAD] Istantanee degli archi: {num_edge_snapshots_downloaded} su {num_to_download}.'
-            )
+        print(f'[MAP DOWNLOAD] Istantanee degli archi: {num_edge_snapshots_downloaded} su {num_to_download}.')
 
     def _write_bytes(self, filepath, filename, data):
         os.makedirs(filepath, exist_ok=True)
@@ -974,8 +952,8 @@ def plan_graphnav_shortcuts(poses, base_edges, start_id, goal_id, global_map,
     return used, before, after
 
 
-def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, sdk=True,
-                           target_wp_id=None, robot_xy=None, sdk_budget_s=None, sdk_fast=None):
+def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, loop_closure_s=0.0,
+                           target_wp_id=None, robot_xy=None):
     """
     Aggiunge scorciatoie al grafo GraphNav prima di uno spostamento (vedi GRAPHNAV_SHORTCUTS).
     Non solleva mai: senza scorciatoie GraphNav funziona lo stesso, sulla catena.
@@ -989,11 +967,10 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, sdk=Tru
                    target_wp_id (la destinazione) e, se il localizzatore non dice dove si
                    trova il robot, robot_xy; si creano solo quelle sulla strada (vedi
                    plan_graphnav_shortcuts).
-      sdk       -- la chiusura d'anello di Spot: da chiamare DOPO stop_recording (si salta da
-                   sola se si sta registrando), con qualche tentativo su MapModifiedError.
-                   sdk_budget_s: limite lato Spot; None = GRAPHNAV_SDK_LOOP_BUDGET_S.
-                   sdk_fast: senza ICP ne' feature matching; None = GRAPHNAV_SDK_LOOP_FAST
-                   (vedi GRAPHNAV_SDK_LOOP_BUDGET_S).
+      loop_closure_s -- se > 0, la chiusura d'anello completa di Spot con questo limite lato
+                   Spot (s): da chiamare DOPO stop_recording (si salta da sola se si sta
+                   registrando), con un secondo tentativo su MapModifiedError. Si fa una volta
+                   sola, a fine missione (vedi GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S).
     """
     if not P.GRAPHNAV_SHORTCUTS or recordingInterface is None:
         return 0
@@ -1040,14 +1017,13 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, sdk=Tru
             if added:
                 recordingInterface.invalidate_graph_cache()
     n_sdk = 0
-    budget = P.GRAPHNAV_SDK_LOOP_BUDGET_S if sdk_budget_s is None else sdk_budget_s
-    fast = P.GRAPHNAV_SDK_LOOP_FAST if sdk_fast is None else sdk_fast
-    if sdk and P.GRAPHNAV_SDK_LOOP_CLOSURE and budget > 0 and recording is not True:
+    budget = loop_closure_s
+    if P.GRAPHNAV_SDK_LOOP_CLOSURE and budget > 0 and recording is not True:
         # Spot calcola senza scrivere e gli archi li carichiamo noi (upload_result): niente
         # MapModifiedError a fine elaborazione. Ogni tentativo fallito finisce nel log con la
         # sua durata, e il tempo riportato e' il TOTALE (il 26-10 15:36 i tentativi falliti non
         # comparivano e il tempo era solo quello dell'ultimo: 65 s dichiarati su 138).
-        what = 'veloce, senza ICP' if fast else 'completa'
+        what = 'completa'
         t_all = time.perf_counter()
         write_on_spot = False
         for attempt in range(1, 3):
@@ -1055,10 +1031,7 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, sdk=Tru
             try:
                 n_sdk, timed_out = recordingInterface.close_loops_checked(
                     max_edge_length_m=P.GRAPHNAV_SDK_LOOP_MAX_M, timeout_s=budget,
-                    max_path_m=P.GRAPHNAV_SDK_LOOP_MAX_PATH_M, min_path_m=P.GRAPHNAV_SDK_LOOP_MIN_PATH_M,
-                    icp_iters=0 if fast else None, feature_matching=False if fast else None,
-                    upload_result=not write_on_spot,
-                    prune_edges=None if fast else P.GRAPHNAV_SDK_LOOP_FINAL_PRUNE)
+                    upload_result=not write_on_spot)
             except Exception as e:
                 dt = time.perf_counter() - t0
                 MISSION_STATS['sdk_loop_failures'] += 1
@@ -1155,7 +1128,6 @@ def _stop_graphnav(command_client, reason):
 def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_client, command_client,
                                 label, timeout_s, face_xy=None):
     _LAST_GRAPHNAV_FAIL['reason'] = None
-    graphnav_add_shortcuts(recordingInterface, label, map_edges=False, sdk=True)
     client = recordingInterface._graph_nav_client
     tp = _graph_nav_pb2.TravelParams()
     tp.velocity_limit.CopyFrom(movements._velocity_limit(P.GRAPHNAV_MAX_LINEAR_VEL_MPS, P.GRAPHNAV_MAX_ANGULAR_VEL_RPS))
@@ -1507,7 +1479,7 @@ def graphnav_step_back(env, recordingInterface, robot_state_client, command_clie
         return True, dict(crumb, in_place=True)
     print(f"[RITORNO] Torno a {crumb['wp_name']}, a {d_crumb:.2f} m dal robot.")
     recording_stopped = False
-    graphnav_add_shortcuts(recordingInterface, "prima del ritorno", map_edges=True, sdk=False,
+    graphnav_add_shortcuts(recordingInterface, "prima del ritorno", map_edges=True,
                            target_wp_id=crumb['wp_id'], robot_xy=(rx, ry))
     try:
         recordingInterface.stop_recording()
