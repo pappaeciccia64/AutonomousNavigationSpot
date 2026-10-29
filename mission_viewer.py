@@ -265,6 +265,12 @@ def draw_scan(ax, d, layer_idx, title_prefix="", ctx=None):
         if hole is not None:
             mat = mat.copy()
             mat[hole] = q[hole] - QUOTA_LAYER_REF[name](d)
+    if name == "quota rispetto all'avvio missione" and ctx is not None:
+        # Stessa scala e stessi colori del pannello globale ('t'), fissi per la missione: una
+        # scala fissa da -2 a +2 m mandava fuori scala (bianco) le scansioni in cima a una
+        # salita (29-10 10:57: +2.1 m a fine missione).
+        norm = ctx.terrain_norm()
+        cmap, vmin, vmax = TERRAIN_CMAP, norm.vmin, norm.vmax
     im = ax.imshow(mat, origin='lower', extent=ext, cmap=cmap, vmin=vmin, vmax=vmax,
                    interpolation='nearest')
     _hover(ax, mat, ext)
