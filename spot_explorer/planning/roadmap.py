@@ -12,7 +12,7 @@ import numpy as np
 from typing import List, Tuple, Optional
 import heapq
 import threading
-import spotGrid
+from spot_explorer.perception import grids as spotGrid
 try:
     from scipy.spatial import cKDTree
 except Exception:          # scipy c'e' gia' (spotGrid usa scipy.ndimage); ripiego per sicurezza

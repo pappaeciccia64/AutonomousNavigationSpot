@@ -30,10 +30,10 @@ import numpy as np
 from bosdyn.client.robot_state import RobotStateClient
 from bosdyn.client.frame_helpers import get_a_tform_b, VISION_FRAME_NAME, BODY_FRAME_NAME
 
-import parametri as P
-import prm_graph
-import spotUtils
-import spotGrid
+from spot_explorer import config as P
+from spot_explorer.planning import roadmap as prm_graph
+from spot_explorer.robot import connection as spotUtils
+from spot_explorer.perception import grids as spotGrid
 
 
 LOGGER = logging.getLogger(__name__)

@@ -33,10 +33,10 @@ from google.protobuf import wrappers_pb2 as wrappers
 from bosdyn.api.graph_nav import graph_nav_pb2 as _graph_nav_pb2
 from bosdyn.api import geometry_pb2
 
-import movements
-import parametri as P
-import spotUtils
-from registro import MISSION_CTX, MISSION_STATS, TrajectoryLog, append_csv, timing_add
+from spot_explorer.robot import motion as movements
+from spot_explorer import config as P
+from spot_explorer.robot import connection as spotUtils
+from spot_explorer.records import MISSION_CTX, MISSION_STATS, TrajectoryLog, append_csv, timing_add
 
 class LoopClosureUploadError(Exception):
     """Spot ha calcolato gli archi della chiusura d'anello ma il loro caricamento e' fallito."""
@@ -382,12 +382,6 @@ class RecordingInterface(object):
         Crea un waypoint di GraphNav nella posizione attuale, con nome progressivo (wp_0,
         wp_1, ...), e ne salva la posa e, se data, la cella in waypoint_poses.
         """
-        import sys
-        import os
-        sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-        import spotUtils
-        import numpy as np
-
         robot_state_client = self.robot.ensure_client('robot-state')
         x, y, z, quat = spotUtils.getPosition(robot_state_client)
 

@@ -24,7 +24,7 @@ from datetime import datetime
 import numpy as np
 from bosdyn.client.frame_helpers import GROUND_PLANE_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b
 
-import spotUtils
+from spot_explorer.robot import connection as spotUtils
 
 # Un thread di appoggio per salvare i dati su disco senza fermare il ciclo di navigazione.
 VIS_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vis_worker")

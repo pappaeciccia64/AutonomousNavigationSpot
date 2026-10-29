@@ -48,7 +48,7 @@ import sys
 import time
 from types import SimpleNamespace
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # cartella del progetto
 sys.path.insert(0, HERE)
 
 DEFAULT_GRAPH = 'graph/Mission_22-10-2026_16-04-22/Grafo_22-10-2026_16-48-11'
@@ -274,8 +274,8 @@ def main():
 
     from bosdyn.api.graph_nav import map_pb2
     import bosdyn.client.lease
-    import spotLogInUtils
-    import navGraphUtils
+    from spot_explorer.robot import connection as spotLogInUtils
+    from spot_explorer.graphnav import graphnav as navGraphUtils
 
     gdir = args.grafo if os.path.isabs(args.grafo) else os.path.join(HERE, args.grafo)
     graph = map_pb2.Graph()

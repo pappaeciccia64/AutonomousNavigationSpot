@@ -56,15 +56,15 @@ from bosdyn.api import world_object_pb2
 from bosdyn.api.graph_nav import graph_nav_pb2, map_pb2, map_processing_pb2, recording_pb2
 from bosdyn.client.math_helpers import Quat, SE3Pose
 
-import arcVerification
-import batteria
-import easy_walk
-import movements
-import navGraphUtils
-import parametri
-import registro
-import spotGrid
-import spotLogInUtils
+from spot_explorer.planning import safe_frontier as arcVerification
+from spot_explorer.robot import battery as batteria
+from spot_explorer.mission import explorer as easy_walk
+from spot_explorer.robot import motion as movements
+from spot_explorer.graphnav import graphnav as navGraphUtils
+from spot_explorer import config as parametri
+from spot_explorer import records as registro
+from spot_explorer.perception import grids as spotGrid
+from spot_explorer.robot import connection as spotLogInUtils
 
 CELL = 3.0
 ROWS, COLS = 3, 3
@@ -410,7 +410,7 @@ def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0_m=None, wp0_offset
     parametri.MISSION_GRAPH_SAMPLING = 'reticolo'
 
     root = tempfile.mkdtemp(prefix="missione_finta_")
-    easy_walk.__file__ = os.path.join(root, "easy_walk.py")      # cartelle dei dati qui
+    easy_walk.DATA_ROOT = root                                    # cartelle dei dati qui
     argv = sys.argv
     sys.argv = ["easy_walk.py", "--rows", str(ROWS), "--cols", str(COLS), "--cell", str(CELL),
                 "--grafo", "reticolo", "--spacing", "0.5"]
@@ -536,7 +536,7 @@ def _controlli_scelta_celle():
     dalla (6,1) (prima: salto, poi la cella usciva dalla frontiera).
     """
     print("\nScelta delle celle: il caso delle 13:50 (celle (7,1) e (7,2))")
-    import environmentMap
+    from spot_explorer.mission import cells as environmentMap
     env = environmentMap.EnvironmentMap(rows=8, cols=7, cell_size=2.0)
     with contextlib.redirect_stdout(io.StringIO()):
         env.set_origin(0.0, 0.0, 0.0)

@@ -24,9 +24,9 @@ import time
 
 import numpy as np
 
-import parametri as P
-import spotUtils
-from registro import MISSION_STATS, append_csv
+from spot_explorer import config as P
+from spot_explorer.robot import connection as spotUtils
+from spot_explorer.records import MISSION_STATS, append_csv
 
 _BATTERY_COLUMNS = ['t_s', 'wall_time', 'charge_pct', 'spot_runtime_min', 'voltage_v',
                     'current_a', 'temp_max_c', 'dist_m', 'x', 'y', 'where', 'pct_per_min',

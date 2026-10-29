@@ -75,7 +75,9 @@ import csv                                            # noqa: E402
 import matplotlib.patheffects as pe                   # noqa: E402
 from matplotlib.transforms import Affine2D            # noqa: E402
 
-import spotGrid                                       # noqa: E402  costanti di mappe e soglie
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # il pacchetto spot_explorer
+
+from spot_explorer.perception import grids as spotGrid                                       # noqa: E402  costanti di mappe e soglie
 
 SLOPE_THRESHOLD = spotGrid.SLOPE_THRESHOLD    # serve solo a colorare gli archi
 
@@ -386,7 +388,7 @@ def _navgraph_folder(folder):
     """graph/<missione>/Grafo_* piu' recente, cercato accanto a MissionMap/ e a questo file."""
     name = os.path.basename(os.path.normpath(folder))
     bases = {os.path.dirname(os.path.dirname(os.path.abspath(folder))),
-             os.path.dirname(os.path.abspath(__file__))}
+             os.path.dirname(os.path.dirname(os.path.abspath(__file__)))}
     cands = []
     for b in bases:
         cands += [d for d in glob.glob(os.path.join(b, "graph", name, "Grafo_*")) if os.path.isdir(d)]
@@ -1578,7 +1580,7 @@ def _latest_mission_folder():
     Senza argomenti (es. tasto Run dell'editor): l'ultima missione in MissionMap/, cercata
     accanto a questo file e nella cartella corrente. Se non c'e', finestra per sceglierla.
     """
-    here = os.path.dirname(os.path.abspath(__file__))
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     cands = []
     for base in (here, os.getcwd(), os.path.dirname(here)):
         cands += [d for d in glob.glob(os.path.join(base, "MissionMap", "Mission_*")) if os.path.isdir(d)]
@@ -1607,7 +1609,7 @@ def main():
         args = [found]
     target = args[0]
     # Basta anche il nome della missione (es. 13-10-2026_12-40-38), come per mission_report.py.
-    by_name = os.path.join(os.path.dirname(os.path.abspath(__file__)), "MissionMap",
+    by_name = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "MissionMap",
                            "Mission_" + target.replace("Mission_", ""))
     if not os.path.exists(target) and os.path.isdir(by_name):
         target = by_name

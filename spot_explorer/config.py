@@ -12,7 +12,7 @@ dell'uso, quindi anche le prove (test_replay.py, test_e2e_loop.py) li possono ca
 """
 import numpy as np
 
-import spotGrid
+from spot_explorer.perception import grids as spotGrid
 
 # =========================================================================================
 # LA MISSIONE: dimensione, grafo dei nodi, archi

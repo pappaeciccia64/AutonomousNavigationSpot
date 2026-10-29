@@ -129,9 +129,9 @@ from collections import deque
 
 import numpy as np
 
-import parametri as P          # dimensione della missione, metodo dei nodi, archi
-import prm_graph
-import spotGrid
+from spot_explorer import config as P          # dimensione della missione, metodo dei nodi, archi
+from spot_explorer.planning import roadmap as prm_graph
+from spot_explorer.perception import grids as spotGrid
 
 
 # La missione (righe, colonne, lato, passo, metodo dei nodi, archi) si sceglie in
@@ -451,7 +451,7 @@ def _special_pairs(prm):
 def _prm_dirty_margin():
     """prm_graph.DIRTY_MARGIN_M, importato solo quando serve (questo modulo gira anche senza SDK)."""
     try:
-        import prm_graph
+        from spot_explorer.planning import roadmap as prm_graph
         return prm_graph.DIRTY_MARGIN_M
     except Exception:
         return 1.2
@@ -460,7 +460,7 @@ def _prm_dirty_margin():
 def _frontier_clearance():
     """spotGrid.FRONTIER_CLEARANCE_M, importato solo quando serve (questo modulo gira anche senza SDK)."""
     try:
-        import spotGrid
+        from spot_explorer.perception import grids as spotGrid
         return spotGrid.FRONTIER_CLEARANCE_M
     except Exception:
         return 0.25

@@ -28,7 +28,7 @@ from collections import Counter
 
 import numpy as np
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # cartella del progetto
 LOGS = os.path.join(HERE, 'MissionLogs')
 MAPS = os.path.join(HERE, 'MissionMap')
 GRAPHS = os.path.join(HERE, 'graph')

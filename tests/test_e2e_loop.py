@@ -26,22 +26,18 @@ import numpy as np
 from scipy.ndimage import distance_transform_edt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-STUBS = tempfile.mkdtemp(prefix="stub_moduli_")
-for name in ("navGraphUtils", "spotLogInUtils", "environmentMap"):
-    open(os.path.join(STUBS, name + ".py"), "w").write("# vuoto: usato solo a runtime sul robot\n")
-sys.path.insert(0, HERE)
-sys.path.insert(1, STUBS)
+sys.path.insert(0, os.path.dirname(HERE))   # il pacchetto spot_explorer
 
 import matplotlib  # noqa: E402
 matplotlib.use("Agg")
-import easy_walk     # noqa: E402
-import parametri     # noqa: E402
-import registro      # noqa: E402
-import spotGrid      # noqa: E402
-import arcVerification as av   # noqa: E402
-import prm_graph     # noqa: E402
-import movements     # noqa: E402
-import spotUtils     # noqa: E402
+from spot_explorer.mission import explorer as easy_walk     # noqa: E402
+from spot_explorer import config as parametri     # noqa: E402
+from spot_explorer import records as registro      # noqa: E402
+from spot_explorer.perception import grids as spotGrid      # noqa: E402
+from spot_explorer.planning import safe_frontier as av   # noqa: E402
+from spot_explorer.planning import roadmap as prm_graph     # noqa: E402
+from spot_explorer.robot import motion as movements     # noqa: E402
+from spot_explorer.robot import connection as spotUtils     # noqa: E402
 
 FAILS = []
 
@@ -361,7 +357,7 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
     easy_walk.MISSION_STATS['falls'] = easy_walk.MISSION_STATS['self_rights'] = 0
     # Il reticolo vero della missione: passo 0.25 m, archi 0.5-1.25 m, sulle 2 x 2 celle da
     # 5 m di FakeEnv, per tutti gli scenari. GRAPH_KW sceglie i nodi casuali (confronto in fondo).
-    import mission_graph
+    from spot_explorer.planning import mission_graph
     mg = mission_graph.build_mission_graph(
         rows=2, cols=2, cell_size_m=5.0, spacing_m=0.25, rings=None,
         origin_xy=(3.5, 3.5), origin_yaw=0.0, min_edge_length=parametri.PRM_MIN_EDGE_M,
@@ -728,7 +724,6 @@ if __name__ == '__main__':
 
     for d in [x for x in os.listdir(tempfile.gettempdir()) if x.startswith("missione_e2e_")]:
         shutil.rmtree(os.path.join(tempfile.gettempdir(), d), ignore_errors=True)
-    shutil.rmtree(STUBS, ignore_errors=True)
     print("\n" + "=" * 70)
     print("TUTTO OK" if not FAILS else f"{len(FAILS)} CONTROLLI FALLITI:\n  - " + "\n  - ".join(FAILS))
     sys.exit(1 if FAILS else 0)

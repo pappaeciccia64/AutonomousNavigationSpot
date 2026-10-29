@@ -25,9 +25,9 @@ from bosdyn.api.spot import robot_command_pb2 as spot_command_pb2
 from bosdyn.api import geometry_pb2
 from google.protobuf import wrappers_pb2
 
-import parametri as P
-import spotGrid
-from registro import MISSION_STATS
+from spot_explorer import config as P
+from spot_explorer.perception import grids as spotGrid
+from spot_explorer.records import MISSION_STATS
 
 
 # =========================================================================

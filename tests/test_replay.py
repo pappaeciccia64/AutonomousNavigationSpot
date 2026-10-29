@@ -26,7 +26,7 @@ Due tipi di controllo:
        quella di oggi, ed e' entro 1.5 volte la linea d'aria piu' 2 m.
 
   RIFERIMENTO -- i numeri del comportamento (archi validi e scartati, percorsi, andature)
-  confrontati con test_replay_riferimento.json. Una differenza NON e' per forza un errore:
+  confrontati con replay_reference.json. Una differenza NON e' per forza un errore:
   vuol dire che la modifica cambia cio' che il robot farebbe. La prova la elenca ed esce con
   codice 1; se il cambiamento e' voluto si accetta con --aggiorna-riferimento, e il file
   aggiornato va nel commit insieme alla modifica.
@@ -83,9 +83,10 @@ except ImportError:                        # Python 3.8 (il portatile delle miss
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
+ROOT = os.path.dirname(HERE)                 # cartella del progetto: dati delle missioni
+sys.path.insert(0, ROOT)                     # il pacchetto spot_explorer
 
-REFERENCE_FILE = os.path.join(HERE, 'test_replay_riferimento.json')
+REFERENCE_FILE = os.path.join(HERE, 'replay_reference.json')
 DEFAULT_MISSIONS = ['13-10-2026_12-14-30', '13-10-2026_12-40-38']
 # --tutte: tutte le missioni su questo PC con scansioni nel formato giusto (dal 12-10, quando
 # sono arrivati il reticolo e il fronte filtrato). Registrate con versioni vecchie del codice:
@@ -110,14 +111,14 @@ def _quiet():
 with _quiet():
     import matplotlib
     matplotlib.use('Agg')
-    import spotGrid as sg
-    import prm_graph
-    import environmentMap
-    import mission_graph
-    import navGraphUtils
-    import movements
-    import easy_walk as ew
-    import parametri as P
+    from spot_explorer.perception import grids as sg
+    from spot_explorer.planning import roadmap as prm_graph
+    from spot_explorer.mission import cells as environmentMap
+    from spot_explorer.planning import mission_graph
+    from spot_explorer.graphnav import graphnav as navGraphUtils
+    from spot_explorer.robot import motion as movements
+    from spot_explorer.mission import explorer as ew
+    from spot_explorer import config as P
 
 
 # --------------------------------------------------------------------------------------
@@ -126,8 +127,8 @@ with _quiet():
 def mission_setup(name):
     """Origine, orientamento, griglia e grafo (passo, oppure nodi casuali e seme) dal log;
     scansioni in ordine."""
-    log_path = os.path.join(HERE, 'MissionLogs', f'Mission_{name}', 'mission_log.txt')
-    scans = glob.glob(os.path.join(HERE, 'MissionMap', f'Mission_{name}', 'scans', '*.npz'))
+    log_path = os.path.join(ROOT, 'MissionLogs', f'Mission_{name}', 'mission_log.txt')
+    scans = glob.glob(os.path.join(ROOT, 'MissionMap', f'Mission_{name}', 'scans', '*.npz'))
     if not os.path.exists(log_path) or not scans:
         return None
     log = open(log_path, errors='replace').read()
@@ -149,7 +150,7 @@ def mission_setup(name):
                  density=float(rnd.group(2)) if rnd else None,
                  seed=int(rnd.group(3)) if rnd else None)
     scans.sort(key=lambda f: float(np.load(f)['time']))
-    seg_path = os.path.join(HERE, 'MissionLogs', f'Mission_{name}', 'segments.csv')
+    seg_path = os.path.join(ROOT, 'MissionLogs', f'Mission_{name}', 'segments.csv')
     return dict(origin=(ox, oy), yaw_deg=yaw, rows=rows, cols=cols, cell=cell, spacing=spacing,
                 graph=graph,
                 scans=scans, segments=seg_path if os.path.exists(seg_path) else None)
@@ -337,8 +338,8 @@ def replay_mission(job):
 
 def return_route_check(name, gm):
     """Strada di ritorno a wp_0 sul grafo GraphNav scaricato, oggi e con le scorciatoie."""
-    gdirs = glob.glob(os.path.join(HERE, 'graph', f'Mission_{name}', 'Grafo_*'))
-    log_path = os.path.join(HERE, 'MissionLogs', f'Mission_{name}', 'mission_log.txt')
+    gdirs = glob.glob(os.path.join(ROOT, 'graph', f'Mission_{name}', 'Grafo_*'))
+    log_path = os.path.join(ROOT, 'MissionLogs', f'Mission_{name}', 'mission_log.txt')
     if not gdirs:
         return None
     from bosdyn.api.graph_nav import map_pb2
@@ -528,7 +529,7 @@ def main():
                     help=f"confronto col grafo completo solo su {FAST_FULL_CHECKS} inizi di cella sparsi")
     ap.add_argument('--aggiorna-riferimento', action='store_true',
                     help="salva il comportamento di adesso come nuovo riferimento")
-    import mission_graph
+    from spot_explorer.planning import mission_graph
     ap.add_argument('--grafo', choices=mission_graph.GRAPH_SAMPLINGS,
                     help="rigioca con questo metodo dei nodi (vedi CONFRONTO FRA GRAFI)")
     ap.add_argument('--distribuzione', choices=mission_graph.RANDOM_DISTRIBUTIONS)

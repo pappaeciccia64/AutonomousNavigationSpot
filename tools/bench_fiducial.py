@@ -15,9 +15,12 @@ import sys
 import time
 from types import SimpleNamespace
 
-import navGraphUtils
-import parametri as P
-import spotLogInUtils
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # il pacchetto spot_explorer
+
+from spot_explorer.graphnav import graphnav as navGraphUtils
+from spot_explorer import config as P
+from spot_explorer.robot import connection as spotLogInUtils
 
 
 def main():

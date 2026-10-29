@@ -45,7 +45,7 @@ import numpy as np
 import matplotlib
 import matplotlib.patches as patches
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # cartella del progetto
 MOSAIC_RES = 0.10           # lato delle celle del mosaico, m
 REFRESH_S = 1.0             # ogni quanto si rilegge, dal vivo
 LOG_TAGS = ('[PROGRESSO]', '[TARGET]', '[ATTEMPT]', '[VISITED]', '[BLOCKED]', '[BLOCCO]',

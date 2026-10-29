@@ -41,25 +41,29 @@ import bosdyn.geometry
 from bosdyn.client.frame_helpers import BODY_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b
 from bosdyn.client.robot_command import (RobotCommandBuilder, RobotCommandClient, blocking_stand)
 from types import SimpleNamespace
-import navGraphUtils
-import movements
-import spotGrid
-import spotLogInUtils
-import environmentMap
-import spotUtils
-import arcVerification
-import batteria
+from spot_explorer.graphnav import graphnav as navGraphUtils
+from spot_explorer.robot import motion as movements
+from spot_explorer.perception import grids as spotGrid
+from spot_explorer.robot import connection as spotLogInUtils
+from spot_explorer.mission import cells as environmentMap
+from spot_explorer.robot import connection as spotUtils
+from spot_explorer.planning import safe_frontier as arcVerification
+from spot_explorer.robot import battery as batteria
 
-import prm_graph
-import prm_graph as prm_graph_module   # dentro le funzioni `prm_graph` e' spesso il parametro (istanza)
-import mission_graph                   # reticolo dei nodi della missione
+from spot_explorer.planning import roadmap as prm_graph
+from spot_explorer.planning import roadmap as prm_graph_module   # dentro le funzioni `prm_graph` e' spesso il parametro (istanza)
+from spot_explorer.planning import mission_graph                   # reticolo dei nodi della missione
 
-import parametri as P
-from registro import (MISSION_STATS, MISSION_CTX, BodyTiltRecorder, SegmentLog,
+from spot_explorer import config as P
+from spot_explorer import REPO_ROOT
+from spot_explorer.records import (MISSION_STATS, MISSION_CTX, BodyTiltRecorder, SegmentLog,
                       TrajectoryLog, append_csv, append_trajectory, install_stdout_tee,
                       log_segment, mission_z0, remove_stdout_tee, save_npz_async,
                       set_mission_z0, timing_add,
                       visualize_grid_with_candidates)
+
+# Dove nascono MissionMap/, MissionLogs/ e graph/ (i test la spostano in una cartella temporanea).
+DATA_ROOT = REPO_ROOT
 
 
 # =========================================================================
@@ -3050,7 +3054,7 @@ def _cartelle_di_missione():
     """Cartelle di missione (graph/, MissionMap/, MissionLogs/ con la data): (grafo, dati e
     immagini, log)."""
     mission_timestamp = datetime.now().strftime("Mission_%d-%m-%Y_%H-%M-%S")
-    base = os.path.dirname(os.path.abspath(__file__))
+    base = DATA_ROOT
     graph_folder = os.path.join(base, "graph", mission_timestamp)
     mission_map_folder = os.path.join(base, "MissionMap", mission_timestamp)
     mission_log_folder = os.path.join(base, "MissionLogs", mission_timestamp)

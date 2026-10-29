@@ -258,7 +258,7 @@ def synthetic_checks():
 
 
 def prm_graph_ignore():
-    import prm_graph
+    from spot_explorer.planning import roadmap as prm_graph
     return prm_graph.ANCHOR_IGNORE_NEAR_M
 
 

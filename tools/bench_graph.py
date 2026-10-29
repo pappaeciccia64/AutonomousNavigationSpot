@@ -18,8 +18,11 @@ lo stesso grafo, nella stessa posizione rispetto al punto di partenza.
 import os
 import subprocess
 
-import mission_graph
-import parametri as P
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # il pacchetto spot_explorer
+
+from spot_explorer.planning import mission_graph
+from spot_explorer import config as P
 
 # ======================================================================================
 # PROVA: None = come in parametri.py
