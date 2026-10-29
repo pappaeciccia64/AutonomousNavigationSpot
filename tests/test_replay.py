@@ -28,23 +28,23 @@ Due tipi di controllo:
   RIFERIMENTO -- i numeri del comportamento (archi validi e scartati, percorsi, andature)
   confrontati con replay_reference.json. Una differenza NON e' per forza un errore:
   vuol dire che la modifica cambia cio' che il robot farebbe. La prova la elenca ed esce con
-  codice 1; se il cambiamento e' voluto si accetta con --aggiorna-riferimento, e il file
+  codice 1; se il cambiamento e' voluto si accetta con --update-reference, e il file
   aggiornato va nel commit insieme alla modifica.
 
 Uso:
     python3 test_replay.py                       # 2 missioni di riferimento, controllo completo
-    python3 test_replay.py --tutte               # tutte le 10 missioni rigiocabili
-    python3 test_replay.py --veloce              # invariante 1 solo su 3 inizi di cella sparsi
-    python3 test_replay.py --missioni 13-10-2026_12-40-38
-    python3 test_replay.py --aggiorna-riferimento
-    python3 test_replay.py --tutte --grafo casuale --distribuzione poisson --seme 7
+    python3 test_replay.py --all               # tutte le 10 missioni rigiocabili
+    python3 test_replay.py --fast              # invariante 1 solo su 3 inizi di cella sparsi
+    python3 test_replay.py --missions 13-10-2026_12-40-38
+    python3 test_replay.py --update-reference
+    python3 test_replay.py --all --graph casuale --distribution poisson --seed 7
 
-CONFRONTO FRA GRAFI -- con --grafo, --passo (e --distribuzione, --densita, --seme,
+CONFRONTO FRA GRAFI -- con --graph, --spacing (e --distribution, --density, --seed,
   --min-edge, --max-edge) le missioni si rigiocano con un grafo diverso da quello che avevano in
   missione, sulle stesse scansioni. Il confronto col riferimento non ha senso e si salta;
   gli invarianti valgono ancora. In fondo una tabella per missione (percorsi trovati,
   lunghezza e numero di archi dei percorsi, tempo del grafo) da mettere accanto a quella
-  dello stesso comando senza --grafo. Il robot si aggancia al nodo piu' vicino, l'obiettivo
+  dello stesso comando senza --graph. Il robot si aggancia al nodo piu' vicino, l'obiettivo
   e' il nodo piu' vicino con almeno un arco valido, e i blocchi confermati in missione (dati
   come archi del reticolo) non si rigiocano.
 
@@ -88,7 +88,7 @@ sys.path.insert(0, ROOT)                     # il pacchetto spot_explorer
 
 REFERENCE_FILE = os.path.join(HERE, 'replay_reference.json')
 DEFAULT_MISSIONS = ['13-10-2026_12-14-30', '13-10-2026_12-40-38']
-# --tutte: tutte le missioni su questo PC con scansioni nel formato giusto (dal 12-10, quando
+# --all: tutte le missioni su questo PC con scansioni nel formato giusto (dal 12-10, quando
 # sono arrivati il reticolo e il fronte filtrato). Registrate con versioni vecchie del codice:
 # non importa, la prova rigioca le SCANSIONI attraverso il codice di oggi.
 ALL_MISSIONS = ['12-10-2026_14-10-32', '12-10-2026_14-23-28', '12-10-2026_14-47-06',
@@ -98,7 +98,7 @@ ALL_MISSIONS = ['12-10-2026_14-10-32', '12-10-2026_14-23-28', '12-10-2026_14-47-
 GLOBAL_LIVE_MIN_MATCH = 0.995      # invariante 2
 HARD_PITCH_DEG = 18.0              # invariante 3
 ARCS_PER_SCAN = 60                 # archi a caso per scansione, invariante 2
-FAST_FULL_CHECKS = 3               # --veloce: confronti con la costruzione completa
+FAST_FULL_CHECKS = 3               # --fast: confronti con la costruzione completa
 # Ora dei timestamp di segments.csv (quella del portatile in missione). Senza zoneinfo
 # (Python 3.8) si usa l'ora locale della macchina, giusta sul portatile delle missioni.
 MISSION_TZ = ZoneInfo('Europe/Rome') if ZoneInfo is not None else None
@@ -230,7 +230,7 @@ def replay_mission(job):
         tm = global_maps.GlobalTerrainGrid()
         tm.update_rects = []
         prm.set_global_terrain_map(tm)
-    # --veloce: il confronto col grafo completo si fa su FAST_FULL_CHECKS inizi di cella
+    # --fast: il confronto col grafo completo si fa su FAST_FULL_CHECKS inizi di cella
     # sparsi lungo la missione, ultimo compreso. I primi non bastano: hanno poca storia alle
     # spalle, e un margine troppo stretto li lascia ancora identici (provato: margine ridotto
     # a un quinto, primi 3 identici, 7 diversi su 10 nel resto della missione).
@@ -525,58 +525,58 @@ def graph_table(names, results):
 
 def main():
     ap = argparse.ArgumentParser(description="Rigioco delle missioni salvate (vedi docstring)")
-    ap.add_argument('--missioni', nargs='+', default=DEFAULT_MISSIONS,
+    ap.add_argument('--missions', nargs='+', default=DEFAULT_MISSIONS,
                     help="nomi come 13-10-2026_12-40-38 (default: le missioni di riferimento)")
-    ap.add_argument('--tutte', action='store_true',
+    ap.add_argument('--all', action='store_true',
                     help=f"tutte le {len(ALL_MISSIONS)} missioni rigiocabili (circa 5 minuti)")
-    ap.add_argument('--veloce', action='store_true',
+    ap.add_argument('--fast', action='store_true',
                     help=f"confronto col grafo completo solo su {FAST_FULL_CHECKS} inizi di cella sparsi")
-    ap.add_argument('--aggiorna-riferimento', action='store_true',
+    ap.add_argument('--update-reference', action='store_true',
                     help="salva il comportamento di adesso come nuovo riferimento")
     from spot_explorer.planning import mission_graph
-    ap.add_argument('--grafo', choices=mission_graph.GRAPH_SAMPLINGS,
+    ap.add_argument('--graph', choices=mission_graph.GRAPH_SAMPLINGS,
                     help="rigioca con questo metodo dei nodi (vedi CONFRONTO FRA GRAFI)")
-    ap.add_argument('--distribuzione', choices=mission_graph.RANDOM_DISTRIBUTIONS)
-    ap.add_argument('--densita', type=float, help="nodi casuali per m2")
-    ap.add_argument('--passo', type=float, help="passo del reticolo in m")
-    ap.add_argument('--seme', type=int, help="seme dei nodi casuali (default: estratto a caso)")
+    ap.add_argument('--distribution', choices=mission_graph.RANDOM_DISTRIBUTIONS)
+    ap.add_argument('--density', type=float, help="nodi casuali per m2")
+    ap.add_argument('--spacing', type=float, help="passo del reticolo in m")
+    ap.add_argument('--seed', type=int, help="seme dei nodi casuali (default: estratto a caso)")
     ap.add_argument('--min-edge', type=float, help="lunghezza minima degli archi in m")
     ap.add_argument('--max-edge', type=float, help="lunghezza massima degli archi in m")
     args = ap.parse_args()
 
     override = {}
-    if args.grafo is not None:
-        override['MISSION_GRAPH_SAMPLING'] = args.grafo
-    if args.distribuzione is not None:
-        override['MISSION_RANDOM_DISTRIBUTION'] = args.distribuzione
-    if args.densita is not None:
-        override['MISSION_RANDOM_DENSITY'] = args.densita
-    if args.passo is not None:
-        override['MISSION_LATTICE_SPACING_M'] = args.passo
+    if args.graph is not None:
+        override['MISSION_GRAPH_SAMPLING'] = args.graph
+    if args.distribution is not None:
+        override['MISSION_RANDOM_DISTRIBUTION'] = args.distribution
+    if args.density is not None:
+        override['MISSION_RANDOM_DENSITY'] = args.density
+    if args.spacing is not None:
+        override['MISSION_LATTICE_SPACING_M'] = args.spacing
     if args.min_edge is not None:
         override['PRM_MIN_EDGE_M'] = args.min_edge
     if args.max_edge is not None:
         override['PRM_MAX_EDGE_M'] = args.max_edge
     if override and override.get('MISSION_GRAPH_SAMPLING', P.MISSION_GRAPH_SAMPLING) == 'casuale':
         # Un solo seme per tutte le missioni, scritto qui sotto per poter ripetere il confronto.
-        override['MISSION_RANDOM_SEED'] = (args.seme if args.seme is not None
+        override['MISSION_RANDOM_SEED'] = (args.seed if args.seed is not None
                                            else mission_graph.draw_seed())
-    if override and args.aggiorna_riferimento:
-        ap.error("--aggiorna-riferimento non si usa con un grafo diverso da quello della missione")
+    if override and args.update_reference:
+        ap.error("--update-reference non si usa con un grafo diverso da quello della missione")
 
-    if args.tutte:
-        args.missioni = ALL_MISSIONS
+    if args.all:
+        args.missions = ALL_MISSIONS
     t0 = time.perf_counter()
-    print(f"Rigioco di {len(args.missioni)} missioni{' (veloce)' if args.veloce else ''}, in parallelo...")
+    print(f"Rigioco di {len(args.missions)} missioni{' (veloce)' if args.fast else ''}, in parallelo...")
     if override:
         print("Grafo diverso da quello delle missioni: " +
               ", ".join(f"{k}={v}" for k, v in override.items()))
-    with Pool(min(len(args.missioni), os.cpu_count() or 1)) as pool:
-        results = dict(pool.map(replay_mission, [(n, args.veloce, override) for n in args.missioni]))
+    with Pool(min(len(args.missions), os.cpu_count() or 1)) as pool:
+        results = dict(pool.map(replay_mission, [(n, args.fast, override) for n in args.missions]))
 
     ref_all = json.load(open(REFERENCE_FILE)) if os.path.exists(REFERENCE_FILE) else {}
     fails, diffs, new_ref = [], [], dict(ref_all)
-    for name in args.missioni:
+    for name in args.missions:
         out = results[name]
         print(f"\n== {name}")
         if out is None:
@@ -591,14 +591,14 @@ def main():
             diffs += [f"{name}: {x}" for x in compare_reference(name, now, ref_all.get(name))]
         new_ref[name] = now
 
-    graph_table(args.missioni, results)
+    graph_table(args.missions, results)
 
     print("\n" + "=" * 70)
-    if args.aggiorna_riferimento and not fails:
+    if args.update_reference and not fails:
         json.dump(new_ref, open(REFERENCE_FILE, 'w'), indent=1, ensure_ascii=False)
         print(f"Riferimento aggiornato: {os.path.basename(REFERENCE_FILE)} (va nel commit con la modifica).")
         diffs = []
-    elif args.aggiorna_riferimento:
+    elif args.update_reference:
         print("Riferimento NON aggiornato: prima vanno risolti gli invarianti falliti.")
     if fails:
         print(f"INVARIANTI FALLITI ({len(fails)}):")
@@ -606,7 +606,7 @@ def main():
             print(f"  - {x}")
     if diffs:
         print(f"COMPORTAMENTO CAMBIATO rispetto al riferimento ({len(diffs)} differenze). Se e' voluto: "
-              f"python3 test_replay.py --aggiorna-riferimento")
+              f"python3 test_replay.py --update-reference")
     if not fails and not diffs:
         print("TUTTO OK")
     print(f"({time.perf_counter() - t0:.0f} s)")

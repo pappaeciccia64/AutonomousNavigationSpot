@@ -42,7 +42,7 @@ from spot_explorer.mission import summary
 DATA_ROOT = REPO_ROOT
 
 
-def _chiusura_di_emergenza(robot, command_client, recordingInterface, exc):
+def _emergency_shutdown(robot, command_client, recordingInterface, exc):
     """
     Missione interrotta (eccezione o Ctrl+C) con il robot acceso e il lease ancora in mano:
     fermarlo, farlo sedere e spegnere i motori, poi scaricare la mappa GraphNav, che resta
@@ -51,9 +51,9 @@ def _chiusura_di_emergenza(robot, command_client, recordingInterface, exc):
     toglieva la potenza (~9 s), e mappa persa. Se il robot e' caduto non lo si fa sedere (e'
     gia' a terra). Ogni passo e' tentato a se': mai eccezioni da qui.
     """
-    caduto = isinstance(exc, movements.RobotFallenError)
+    fallen = isinstance(exc, movements.RobotFallenError)
     print(f"\n[EMERGENZA] Missione interrotta ({type(exc).__name__}): "
-          + ("il robot e' a terra, " if caduto else "fermo il robot, lo faccio sedere, ")
+          + ("il robot e' a terra, " if fallen else "fermo il robot, lo faccio sedere, ")
           + "salvo la mappa GraphNav.")
     tracker = MISSION_CTX.get('tracker')
     if tracker is not None:
@@ -61,7 +61,7 @@ def _chiusura_di_emergenza(robot, command_client, recordingInterface, exc):
             tracker.clear_path()
         except Exception:
             pass
-    if not caduto:
+    if not fallen:
         try:
             movements.stop_robot(command_client, reason="missione interrotta")
             command_client.robot_command(RobotCommandBuilder.synchro_sit_command(),
@@ -82,7 +82,7 @@ def _chiusura_di_emergenza(robot, command_client, recordingInterface, exc):
         print(f"[EMERGENZA] Mappa GraphNav non scaricata ({e!r}).")
 
 
-def _cartelle_di_missione():
+def _mission_folders():
     """Cartelle di missione (graph/, MissionMap/, MissionLogs/ con la data): (grafo, dati e
     immagini, log)."""
     mission_timestamp = datetime.now().strftime("Mission_%d-%m-%Y_%H-%M-%S")
@@ -96,7 +96,7 @@ def _cartelle_di_missione():
     return graph_folder, mission_map_folder, mission_log_folder
 
 
-def _stampa_configurazione():
+def _print_configuration():
     """Interruttori e soglie in testa al log, per poterlo leggere sapendo con quali valori e'
     stato prodotto."""
     print("[CONFIG] INTERRUTTORI: " + "  ".join(
@@ -160,7 +160,7 @@ def _stampa_configurazione():
           f"valido anche col robot fuori dalla cella fino a {P.ARRIVAL_OUTSIDE_CELL_M:.2f} m")
 
 
-def _griglia_di_missione(options):
+def _mission_grid(options):
     """La griglia di missione: EnvironmentMap con colonne davanti e righe a sinistra.
 
     Default P.MISSION_GRID_ROWS x P.MISSION_GRID_COLS celle da P.MISSION_CELL_SIZE_M. Si
@@ -202,7 +202,7 @@ def _griglia_di_missione(options):
     return environmentMap.EnvironmentMap(rows=grid_rows, cols=grid_cols, cell_size=grid_cell)
 
 
-def _chiudi_missione(robot, robot_state_client, command_client, recordingInterface):
+def _close_mission(robot, robot_state_client, command_client, recordingInterface):
     """Dopo il riepilogo: chiusura della mappa GraphNav, ritorno a wp_0, seduta, spegnimento,
     scaricamento della mappa. Non entra in nessuna voce di [TEMPO]: si misura a parte e si
     stampa in chiusura."""
@@ -229,22 +229,22 @@ def _chiudi_missione(robot, robot_state_client, command_client, recordingInterfa
     _t = time.perf_counter()
     monitor = MISSION_CTX.get('batteria')
     if monitor is not None:
-        monitor.controlla("inizio del ritorno a wp_0")
+        monitor.check("inizio del ritorno a wp_0")
     _pct0 = MISSION_STATS.get('battery_last_pct')
-    esito_wp0 = navigation.graphnav_return_to_start(recordingInterface, robot_state_client, command_client)
-    if esito_wp0 in ('arrivato', 'vicino'):
+    wp0_outcome = navigation.graphnav_return_to_start(recordingInterface, robot_state_client, command_client)
+    if wp0_outcome in ('arrivato', 'vicino'):
         # Anche fermo vicino a wp_0 il tag si cerca: e' la misura della deriva di tutta la missione.
-        misura = apriltags.graphnav_check_start_fiducial(robot, robot_state_client)
+        measure = apriltags.graphnav_check_start_fiducial(robot, robot_state_client)
         # Arrivato secondo GraphNav ma lontano secondo il tag: correzione (vedi
         # WP0_FIDUCIAL_CORRECTION). Fermo vicino (STUCK) no: la strada e' bloccata.
-        if esito_wp0 == 'arrivato' and misura and misura.get('offset') is not None:
+        if wp0_outcome == 'arrivato' and measure and measure.get('offset') is not None:
             apriltags.graphnav_correct_wp0_with_fiducial(robot, recordingInterface, robot_state_client,
-                                                             command_client, misura['offset'])
-    if esito_wp0 != 'arrivato':
+                                                             command_client, measure['offset'])
+    if wp0_outcome != 'arrivato':
         print("[GRAPHNAV] Ritorno a wp_0 non riuscito: il robot si siede dove si trova.")
     _t_close['ritorno a wp_0'] = time.perf_counter() - _t
     if monitor is not None:
-        monitor.controlla("fine del ritorno a wp_0")
+        monitor.check("fine del ritorno a wp_0")
         _pct1 = MISSION_STATS.get('battery_last_pct')
         if _pct0 is not None and _pct1 is not None:
             # Quanto costa il ritorno: serve a tarare BATTERY_RETURN_PCT.
@@ -285,14 +285,14 @@ def easy_walk(options):
     with bosdyn.client.lease.LeaseKeepAlive(lease_client, must_acquire=True, return_at_exit=True):
         # Cartelle e log creati subito, cosi' la copia dell'output su file (mission_log.txt)
         # cattura anche tutto l'avvio e la costruzione del grafo.
-        graph_folder, mission_folder, mission_log_folder = _cartelle_di_missione()
+        graph_folder, mission_folder, mission_log_folder = _mission_folders()
         install_stdout_tee(os.path.join(mission_log_folder, "mission_log.txt"))
         try:
             MISSION_CTX['log_folder'] = mission_log_folder
             MISSION_CTX['segment_log'] = SegmentLog(os.path.join(mission_log_folder, "segments.csv"))
             MISSION_CTX['summary_done'] = False
             print(f"[LOG] Cartella log: {mission_log_folder}  |  dati e immagini: {mission_folder}")
-            _stampa_configurazione()
+            _print_configuration()
         except Exception as e:
             print(f"[LOG] Impossibile inizializzare il CSV dei segmenti: {e}")
 
@@ -306,8 +306,8 @@ def easy_walk(options):
             blocking_stand(command_client)
 
             # Batteria: prima lettura, poi a ogni giro del ciclo (vedi batteria.py).
-            MISSION_CTX['batteria'] = batteria.MonitorBatteria(robot_state_client)
-            MISSION_CTX['batteria'].controlla("avvio")
+            MISSION_CTX['batteria'] = batteria.BatteryMonitor(robot_state_client)
+            MISSION_CTX['batteria'].check("avvio")
 
             # Griglie e mappe locali vengono tutte dalle telecamere di Spot (nessun Velodyne).
             recordingInterface.clear_map()
@@ -334,7 +334,7 @@ def easy_walk(options):
             if fiducials:
                 recordingInterface.initialize_with_fiducial(robot_state_client, fiducials[0]['id'])
 
-            env = _griglia_di_missione(options)
+            env = _mission_grid(options)
 
             # --- Andatura per tutta la missione ---
             # Vuoto: andatura, altezza del passo e ground_mu_hint si scelgono TRATTO PER TRATTO in
@@ -368,28 +368,28 @@ def easy_walk(options):
 
             recordingInterface.set_download_filepath(graph_folder)
 
-            missione = exploration.Missione(robot_state_client, command_client, recordingInterface, local_grid,
+            mission = exploration.Mission(robot_state_client, command_client, recordingInterface, local_grid,
                                 global_grid, env, prm, gb_sampler, verification_tracker,
                                 mission_folder, mobility_kwargs)
-            missione.esplora()
+            mission.explore()
 
             env.print_map()
-            if cell_attempt._batteria_scarica():
+            if cell_attempt._battery_low():
                 print("[BATTERIA] Missione chiusa prima di finire l'esplorazione: la chiusura e' "
                       "quella normale (scansione finale, riepilogo, ritorno a wp_0, mappa scaricata).")
             x_final, y_final, _, _ = spotUtils.getPosition(robot_state_client)
             final_row, final_col = env.get_cell_from_world(x_final, y_final)
             recordingInterface.create_default_waypoint(cell_row=final_row, cell_col=final_col)
 
-            missione.scansione_finale()
+            mission.final_scan()
 
             # RIEPILOGO DI MISSIONE -- solo diagnostica, va letto dopo il volo.
             summary._emit_mission_summary_once()
 
-            _chiudi_missione(robot, robot_state_client, command_client, recordingInterface)
+            _close_mission(robot, robot_state_client, command_client, recordingInterface)
             estop.stop()
         except BaseException as exc:
-            _chiusura_di_emergenza(robot, command_client, recordingInterface, exc)
+            _emergency_shutdown(robot, command_client, recordingInterface, exc)
             raise
 
 
@@ -418,13 +418,13 @@ def _parse_args(argv=None):
                         f"0 = suggerito)")
     p.add_argument('--rings', default=None,
                    help=f"anelli di vicini collegati, o 'tutti' (default {P.MISSION_LATTICE_RINGS})")
-    p.add_argument('--grafo', choices=mission_graph.GRAPH_SAMPLINGS, default=None,
+    p.add_argument('--graph', choices=mission_graph.GRAPH_SAMPLINGS, default=None,
                    help=f"come si generano i nodi (default {P.MISSION_GRAPH_SAMPLING})")
-    p.add_argument('--distribuzione', choices=mission_graph.RANDOM_DISTRIBUTIONS, default=None,
+    p.add_argument('--distribution', choices=mission_graph.RANDOM_DISTRIBUTIONS, default=None,
                    help=f"nodi casuali: distribuzione (default {P.MISSION_RANDOM_DISTRIBUTION})")
-    p.add_argument('--densita', type=float, default=None,
+    p.add_argument('--density', type=float, default=None,
                    help=f"nodi casuali: nodi per m2 (default {P.MISSION_RANDOM_DENSITY:g})")
-    p.add_argument('--seme', type=int, default=None,
+    p.add_argument('--seed', type=int, default=None,
                    help="nodi casuali: seme, per ripetere un grafo (default: estratto a caso, "
                         "scritto nel log)")
     p.add_argument('--min-edge', type=float, default=None,
@@ -436,8 +436,8 @@ def _parse_args(argv=None):
         p.error("--rows e --cols devono essere almeno 1")
     if a.cell is not None and a.cell <= 0:
         p.error("--cell deve essere positivo")
-    if a.densita is not None and a.densita <= 0:
-        p.error("--densita deve essere positiva")
+    if a.density is not None and a.density <= 0:
+        p.error("--density deve essere positiva")
     lo = P.PRM_MIN_EDGE_M if a.min_edge is None else a.min_edge
     hi = P.PRM_MAX_EDGE_M if a.max_edge is None else a.max_edge
     if lo <= 0 or hi < lo:
@@ -447,14 +447,14 @@ def _parse_args(argv=None):
 
 def main():
     args = _parse_args()
-    if args.grafo is not None:
-        P.MISSION_GRAPH_SAMPLING = args.grafo
-    if args.distribuzione is not None:
-        P.MISSION_RANDOM_DISTRIBUTION = args.distribuzione
-    if args.densita is not None:
-        P.MISSION_RANDOM_DENSITY = float(args.densita)
-    if args.seme is not None:
-        P.MISSION_RANDOM_SEED = int(args.seme)
+    if args.graph is not None:
+        P.MISSION_GRAPH_SAMPLING = args.graph
+    if args.distribution is not None:
+        P.MISSION_RANDOM_DISTRIBUTION = args.distribution
+    if args.density is not None:
+        P.MISSION_RANDOM_DENSITY = float(args.density)
+    if args.seed is not None:
+        P.MISSION_RANDOM_SEED = int(args.seed)
     if args.min_edge is not None:
         P.PRM_MIN_EDGE_M = float(args.min_edge)
     if args.max_edge is not None:

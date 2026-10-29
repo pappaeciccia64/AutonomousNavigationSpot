@@ -189,7 +189,7 @@ def _cross_module(fname, tree, info):
     return problems
 
 
-def _moduli(root):
+def _modules(root):
     """{nome del modulo con i punti: percorso del file} per tutto il pacchetto."""
     out = {}
     for dp, _, fs in os.walk(os.path.join(root, PACKAGE)):
@@ -205,7 +205,7 @@ def main():
     print(f"Controllo pre-volo su: {root}\n")
 
     problems, trees, info = [], {}, {}
-    files = _moduli(root)
+    files = _modules(root)
     if not files:
         problems.append(f"{PACKAGE}/: PACCHETTO MANCANTE")
     for mod, path in sorted(files.items()):

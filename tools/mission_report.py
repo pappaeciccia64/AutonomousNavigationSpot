@@ -9,7 +9,7 @@ numpy, NON l'SDK di Spot (che se c'e' viene usato per la strada di ritorno nel g
 
     python3 mission_report.py                         # l'ultima missione in MissionLogs/
     python3 mission_report.py 13-10-2026_12-40-38     # una missione per nome
-    python3 mission_report.py --tutte                 # una riga di sintesi per ogni missione
+    python3 mission_report.py --all                 # una riga di sintesi per ogni missione
 
 File letti (quelli che mancano vengono saltati: le missioni vecchie ne hanno meno):
     MissionLogs/Mission_<nome>/mission_log.txt, mission_summary.json, segments.csv, trajectory.csv,
@@ -298,9 +298,9 @@ def section_return(log, graph_dirs):
     m = re.search(r"\[WP0\] Secondo il tag il robot e' a ([\d.]+) m dal punto di partenza", log)
     if m:
         out['scarto_m'] = float(m.group(1))
-    dopo = re.findall(r"\[WP0\] Dopo la correzione (\d+): a ([\d.]+) m dalla partenza", log)
-    if dopo:
-        out['correzioni'] = (int(dopo[-1][0]), float(dopo[-1][1]))
+    after = re.findall(r"\[WP0\] Dopo la correzione (\d+): a ([\d.]+) m dalla partenza", log)
+    if after:
+        out['correzioni'] = (int(after[-1][0]), float(after[-1][1]))
     elif "[WP0] CORREZIONE" in log:
         out['correzioni'] = (len(re.findall(r"\[WP0\] CORREZIONE", log)), None)
     start = re.findall(r"prima di 'ritorno a wp_0': localizzato su (\S+)", log)
@@ -583,9 +583,9 @@ def report(name):
               + (f", batteria alla fine {pr['batteria']:.0f}%" if pr.get('batteria') is not None else "")
               + ("" if pr.get('finale') else "  [MISSIONE INTERROTTA: ultimo valore registrato]"))
     else:
-        righe = [l for l in log.splitlines() if '[PROGRESSO]' in l]
-        if righe:
-            print("Avanzamento (ultima riga del log): " + righe[-1].split('[PROGRESSO]', 1)[1].strip())
+        lines = [l for l in log.splitlines() if '[PROGRESSO]' in l]
+        if lines:
+            print("Avanzamento (ultima riga del log): " + lines[-1].split('[PROGRESSO]', 1)[1].strip())
     # Interruttori della missione (dal 21-10): dal riepilogo, o dalla riga [CONFIG] del log.
     sw = (summary or {}).get('interruttori')
     if sw:
@@ -692,8 +692,8 @@ def report(name):
               f"(26-10 15:11, orientamento del waypoint: 79 gradi, 38 s su 8 arrivi)")
 
     print("\nControlli della prova (novita' mai provate sul robot, vedi PROVA_CAMPO.md):")
-    for nome, esito, det in section_checks(log, read_csv(f['segments'])):
-        print(f"  [{esito:^12s}] {nome}: {det}")
+    for nome, outcome, det in section_checks(log, read_csv(f['segments'])):
+        print(f"  [{outcome:^12s}] {nome}: {det}")
 
 
 def one_line(name):
@@ -716,7 +716,7 @@ def main():
     args = sys.argv[1:]
     names = sorted((os.path.basename(p)[len('Mission_'):] for p in glob.glob(os.path.join(LOGS, 'Mission_*'))),
                    key=lambda n: (n[6:10], n[3:5], n[0:2], n[11:]))
-    if '--tutte' in args:
+    if '--all' in args:
         for n in names:
             line = one_line(n)
             if line:

@@ -28,62 +28,62 @@ from spot_explorer import config as P
 # PROVA: None = come in parametri.py
 # ======================================================================================
 # Area: righe (a sinistra del robot) x colonne (davanti) x lato della cella.
-RIGHE = None                 # parametri.MISSION_GRID_ROWS
-COLONNE = None               # parametri.MISSION_GRID_COLS
-LATO_CELLA_M = None          # parametri.MISSION_CELL_SIZE_M
+ROWS = None                 # parametri.MISSION_GRID_ROWS
+COLS = None               # parametri.MISSION_GRID_COLS
+CELL_SIZE_M = None          # parametri.MISSION_CELL_SIZE_M
 
 # Archi: tutte le coppie di nodi distanti fra ARCO_MIN_M e ARCO_MAX_M.
-ARCO_MIN_M = None            # parametri.PRM_MIN_EDGE_M
-ARCO_MAX_M = None            # parametri.PRM_MAX_EDGE_M
+EDGE_MIN_M = None            # parametri.PRM_MIN_EDGE_M
+EDGE_MAX_M = None            # parametri.PRM_MAX_EDGE_M
 
 # Reticolo: passo fra i nodi, arrotondato a LATO_CELLA_M / n; anelli di vicini collegati.
-PASSO_RETICOLO_M = None      # parametri.MISSION_LATTICE_SPACING_M
-ANELLI = None                # parametri.MISSION_LATTICE_RINGS (None anche li' = tutti)
+LATTICE_SPACING_M = None      # parametri.MISSION_LATTICE_SPACING_M
+RINGS = None                # parametri.MISSION_LATTICE_RINGS (None anche li' = tutti)
 
 # Nodi casuali: nodi per m2 ('come_reticolo' = stesso numero di nodi del reticolo) e seme.
 # Seme None (anche in parametri.py) = estratto a caso: e' scritto nel titolo dell'immagine e
 # in fondo, per rifare in missione lo stesso grafo.
-DENSITA_NODI_M2 = None       # parametri.MISSION_RANDOM_DENSITY
-SEME = None                  # parametri.MISSION_RANDOM_SEED
+NODE_DENSITY_M2 = None       # parametri.MISSION_RANDOM_DENSITY
+SEED = None                  # parametri.MISSION_RANDOM_SEED
 
 # Quali metodi mettere a confronto: togli quelli che non vuoi vedere.
-METODI = ['reticolo', 'uniforme', 'poisson', 'perturbata', 'halton']
+METHODS = ['reticolo', 'uniforme', 'poisson', 'perturbata', 'halton']
 
 # Riquadro da disegnare: None = tutta l'area; oppure (x_min, x_max, y_min, y_max) in metri,
 # con il robot in (0, 0), x in avanti e y a sinistra. Esempio: (-2, 2, -2, 2).
 ZOOM = None
 
 # Immagine da salvare, e se aprirla alla fine.
-IMMAGINE = 'grafi.png'
-APRI = True
+IMAGE = 'grafi.png'
+OPEN = True
 # ======================================================================================
 
 
-def _scelta(valore, missione):
-    return missione if valore is None else valore
+def _choice(value, mission):
+    return mission if value is None else value
 
 
 def main():
-    rows = _scelta(RIGHE, P.MISSION_GRID_ROWS)
-    cols = _scelta(COLONNE, P.MISSION_GRID_COLS)
-    cell = _scelta(LATO_CELLA_M, P.MISSION_CELL_SIZE_M)
-    e_min = _scelta(ARCO_MIN_M, P.PRM_MIN_EDGE_M)
-    e_max = _scelta(ARCO_MAX_M, P.PRM_MAX_EDGE_M)
-    spacing = _scelta(PASSO_RETICOLO_M, P.MISSION_LATTICE_SPACING_M)
-    rings = _scelta(ANELLI, P.MISSION_LATTICE_RINGS)
-    density = _scelta(DENSITA_NODI_M2, P.MISSION_RANDOM_DENSITY)
-    seed = _scelta(SEME, P.MISSION_RANDOM_SEED)
+    rows = _choice(ROWS, P.MISSION_GRID_ROWS)
+    cols = _choice(COLS, P.MISSION_GRID_COLS)
+    cell = _choice(CELL_SIZE_M, P.MISSION_CELL_SIZE_M)
+    e_min = _choice(EDGE_MIN_M, P.PRM_MIN_EDGE_M)
+    e_max = _choice(EDGE_MAX_M, P.PRM_MAX_EDGE_M)
+    spacing = _choice(LATTICE_SPACING_M, P.MISSION_LATTICE_SPACING_M)
+    rings = _choice(RINGS, P.MISSION_LATTICE_RINGS)
+    density = _choice(NODE_DENSITY_M2, P.MISSION_RANDOM_DENSITY)
+    seed = _choice(SEED, P.MISSION_RANDOM_SEED)
     if seed is None:
         seed = mission_graph.draw_seed()
     print(f"Area {rows} x {cols} celle da {cell:g} m, archi {e_min:g}-{e_max:g} m, "
           f"passo del reticolo {spacing}, anelli {rings if rings is not None else 'tutti'}, "
           f"densita' {density}, seme {seed}"
-          + ("" if all(v is None for v in (RIGHE, COLONNE, LATO_CELLA_M, ARCO_MIN_M, ARCO_MAX_M,
-                                           PASSO_RETICOLO_M, ANELLI, DENSITA_NODI_M2))
+          + ("" if all(v is None for v in (ROWS, COLS, CELL_SIZE_M, EDGE_MIN_M, EDGE_MAX_M,
+                                           LATTICE_SPACING_M, RINGS, NODE_DENSITY_M2))
              else "  (alcuni valori dal blocco PROVA, non da parametri.py)"))
 
     path, graphs = mission_graph.compare_methods_png(
-        IMMAGINE, zoom=ZOOM, seed=seed, methods=METODI, verbose=True,
+        IMAGE, zoom=ZOOM, seed=seed, methods=METHODS, verbose=True,
         rows=rows, cols=cols, cell_size_m=cell,
         spacing_m=spacing, rings=rings,
         min_edge_length=e_min, max_edge_length=e_max,
@@ -108,16 +108,16 @@ def main():
         if g.is_random:
             d = g.describe()
             dens = d.get('densita_nodi_m2', density)
-            righe = (f"MISSION_GRAPH_SAMPLING = 'casuale'   MISSION_RANDOM_DISTRIBUTION = "
+            lines = (f"MISSION_GRAPH_SAMPLING = 'casuale'   MISSION_RANDOM_DISTRIBUTION = "
                      f"'{g.distribution}'   MISSION_RANDOM_DENSITY = {dens:g}   "
                      f"MISSION_RANDOM_SEED = {seed}")
-            cmd = (f"--grafo casuale --distribuzione {g.distribution} --densita {dens:g} "
-                   f"--seme {seed}")
+            cmd = (f"--graph casuale --distribution {g.distribution} --density {dens:g} "
+                   f"--seed {seed}")
             name = g.distribution
         else:
-            righe = (f"MISSION_GRAPH_SAMPLING = 'reticolo'   MISSION_LATTICE_SPACING_M = "
+            lines = (f"MISSION_GRAPH_SAMPLING = 'reticolo'   MISSION_LATTICE_SPACING_M = "
                      f"{spacing}   MISSION_LATTICE_RINGS = {rings}")
-            cmd = f"--grafo reticolo --spacing {spacing}" + (f" --rings {rings}" if rings else "")
+            cmd = f"--graph reticolo --spacing {spacing}" + (f" --rings {rings}" if rings else "")
             name = 'reticolo'
         extra = ""
         if area:
@@ -125,14 +125,14 @@ def main():
         if edges:
             extra += f" --min-edge {e_min:g} --max-edge {e_max:g}"
         print(f"  {name}:")
-        print(f"    in parametri.py:  {righe}")
+        print(f"    in parametri.py:  {lines}")
         print(f"    oppure una volta: python3 easy_walk.py {cmd}{extra}")
     if P.MISSION_RANDOM_SEED is None:
         print("  Attenzione: in parametri.py il seme e' None, cioe' nuovo a ogni missione. Per "
               "avere in missione un grafo casuale visto qui serve il suo seme.")
 
     print(f"\nImmagine salvata in {os.path.abspath(path)}")
-    if APRI:
+    if OPEN:
         try:
             subprocess.Popen(['xdg-open', path], stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL)

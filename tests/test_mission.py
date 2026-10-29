@@ -71,10 +71,10 @@ from spot_explorer.robot import connection as spotLogInUtils
 CELL = 3.0
 ROWS, COLS = 3, 3
 START = (1.5, 1.5, 0.0)
-_CHIUSA_22 = [(6.1, 9.0, 6.0, 6.2), (6.1, 6.3, 6.0, 9.0), (8.8, 9.0, 6.0, 9.0), (6.1, 9.0, 8.8, 9.0)]
+_CLOSED_22 = [(6.1, 9.0, 6.0, 6.2), (6.1, 6.3, 6.0, 9.0), (8.8, 9.0, 6.0, 9.0), (6.1, 9.0, 8.8, 9.0)]
 WORLDS = {
-    'A': [(5.9, 6.1, 0.0, 3.0)] + _CHIUSA_22 + [(4.2, 4.8, 4.2, 4.8)],
-    'B': [(5.9, 6.1, 0.0, 4.6)] + _CHIUSA_22 + [(4.2, 4.8, 4.2, 4.8), (7.0, 7.4, 3.6, 5.4)],
+    'A': [(5.9, 6.1, 0.0, 3.0)] + _CLOSED_22 + [(4.2, 4.8, 4.2, 4.8)],
+    'B': [(5.9, 6.1, 0.0, 4.6)] + _CLOSED_22 + [(4.2, 4.8, 4.2, 4.8), (7.0, 7.4, 3.6, 5.4)],
 }
 WALLS = WORLDS['A']
 # Fiducial del mondo in corso: (ID, x, y), None = nessuno. Nel mondo A un tag 1 m DIETRO il
@@ -330,7 +330,7 @@ class _Tracker(T.FakeTracker):
 
 
 @contextlib.contextmanager
-def _con_fallimenti():
+def _with_failures():
     """Fallimenti forzati, sempre gli stessi: il 1o, 4o, 7o... tentativo e il 2o falliscono
     senza muovere il robot, una scelta dell'obiettivo su 5 non trova punti, il primo
     spostamento GraphNav finisce con una caduta (finta: il robot e' gia' in piedi)."""
@@ -373,23 +373,23 @@ def _con_fallimenti():
 
 
 @contextlib.contextmanager
-def _con_batteria(da_pct=36.0, punti_a_lettura=1.0):
+def _with_battery(from_pct=36.0, points_per_read=1.0):
     """Batteria finta: ogni lettura (una per giro del ciclo, intervallo 0 s) un punto in
     meno, da da_pct."""
-    real_read, real_s = batteria.leggi_batteria, parametri.BATTERY_SAMPLE_S
+    real_read, real_s = batteria.read_battery, parametri.BATTERY_SAMPLE_S
     n = {'letture': 0}
 
     def read(rsc):
         n['letture'] += 1
-        return {'charge_pct': max(0.0, da_pct - punti_a_lettura * (n['letture'] - 1)),
+        return {'charge_pct': max(0.0, from_pct - points_per_read * (n['letture'] - 1)),
                 'spot_runtime_min': 40.0}
 
-    batteria.leggi_batteria = read
+    batteria.read_battery = read
     parametri.BATTERY_SAMPLE_S = 0.0
     try:
         yield n
     finally:
-        batteria.leggi_batteria = real_read
+        batteria.read_battery = real_read
         parametri.BATTERY_SAMPLE_S = real_s
 
 
@@ -415,7 +415,7 @@ def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0_m=None, wp0_offset
     mission_run.DATA_ROOT = root                                    # cartelle dei dati qui
     argv = sys.argv
     sys.argv = ["easy_walk.py", "--rows", str(ROWS), "--cols", str(COLS), "--cell", str(CELL),
-                "--grafo", "reticolo", "--spacing", "0.5"]
+                "--graph", "reticolo", "--spacing", "0.5"]
     t0 = time.time()
     out = io.StringIO()
     try:
@@ -433,18 +433,18 @@ def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0_m=None, wp0_offset
     return dict(ok=ok, log=log, gn=gn, root=root, seconds=time.time() - t0, out=out.getvalue())
 
 
-def _controlli_comuni(r, ritorno=True):
+def _check_common(r, return_ok=True):
     log = r['log']
     print(f"  ({r['seconds']:.0f} s)")
     check(r['ok'] is True, "main() arriva in fondo senza eccezioni")
     check('Traceback' not in log and 'Traceback' not in r['out'], "nessuna eccezione nel log")
-    if ritorno:
+    if return_ok:
         check("ritorno a wp_0: arrivato" in log, "ritorno a wp_0 riuscito")
     check("[FINAL SCAN] Fatto" in log, "scansione finale fatta")
     check("[ANCHORING]" in log, "ancoraggio finale chiamato")
 
 
-def _controlli_mondo(name, r):
+def _check_world(name, r):
     log = r['log']
     grid = log.split("--- Mappa delle celle ---")[-1].splitlines()[1:ROWS + 1]
     cells = [line.split()[1:] for line in grid]
@@ -456,9 +456,9 @@ def _controlli_mondo(name, r):
     check(len(r['gn'].trips) >= 2, f"spostamenti GraphNav: {len(r['gn'].trips)}")
     check("[PROGRESSO] Fine esplorazione: 9/9 celle chiuse (100%): 8 visitate, 1 bloccate" in log,
           "avanzamento finale: 9/9 celle chiuse, 8 visitate e 1 bloccata")
-    righe = [l for l in log.splitlines() if '[PROGRESSO]' in l and 'Fine' not in l]
-    chiuse = [int(l.split('[PROGRESSO] ')[1].split('/')[0]) for l in righe]
-    check(chiuse == sorted(set(chiuse)), f"una riga [PROGRESSO] per ogni cella chiusa in piu': {chiuse}")
+    lines = [l for l in log.splitlines() if '[PROGRESSO]' in l and 'Fine' not in l]
+    closed = [int(l.split('[PROGRESSO] ')[1].split('/')[0]) for l in lines]
+    check(closed == sorted(set(closed)), f"una riga [PROGRESSO] per ogni cella chiusa in piu': {closed}")
     check("[BATTERIA] Carica non disponibile" in log and "RIENTRO" not in log,
           "senza la carica nello stato del robot la missione va avanti senza rientro")
     check("arrivo girato verso" in log and len(r['gn'].headings) > 0,
@@ -482,7 +482,7 @@ def _controlli_mondo(name, r):
         check("[BLOCCO] Confermato" in log and "[RITORNO]" in log, "blocco confermato e ritorno con GraphNav")
 
 
-def _controlli_fallimenti(r):
+def _check_failures(r):
     log = r['log']
     check("ritorno a wp_0: arrivato" not in log
           and "Ritorno a wp_0 NON riuscito ma vicino: fermo a 0.60 m da wp_0 (motivo: bloccato (STUCK)" in log,
@@ -497,7 +497,7 @@ def _controlli_fallimenti(r):
           "nessuna cella persa dalla frontiera: ogni cella rimandata ritentata dagli altri lati")
 
 
-def _controlli_emergenza():
+def _check_emergency():
     """Missione interrotta a meta' (eccezione o Ctrl+C): il robot si siede, i motori si spengono e
     la mappa GraphNav si scarica, poi l'errore risale come prima."""
     for nome, err in (("eccezione", RuntimeError("guasto finto")), ("Ctrl+C", KeyboardInterrupt())):
@@ -514,9 +514,9 @@ def _controlli_emergenza():
         try:
             try:
                 r = run(WORLDS['A'], f"MISSIONE_F_{'eccezione' if nome == 'eccezione' else 'ctrlc'}")
-                risalita = r['ok'] is False
+                rise = r['ok'] is False
             except KeyboardInterrupt:
-                risalita, r = True, None
+                rise, r = True, None
         finally:
             cell_attempt.attempt_enter_cell_from_position = real
         if r is None:      # Ctrl+C: il log e' nella cartella della missione
@@ -525,12 +525,12 @@ def _controlli_emergenza():
             log = open(logs[-1]).read() if logs else ""
         else:
             log = r['log']
-        check(risalita, f"{nome}: la missione finisce con l'errore, come prima")
+        check(rise, f"{nome}: la missione finisce con l'errore, come prima")
         check("[EMERGENZA] Robot seduto e motori spenti." in log, f"{nome}: robot seduto e motori spenti")
         check("[EMERGENZA] Mappa GraphNav scaricata." in log, f"{nome}: mappa GraphNav scaricata")
 
 
-def _controlli_scelta_celle():
+def _check_cell_choice():
     """
     Il caso del 28-10 13:50, griglia 8 x 7 da 2 m: la (7,2) e' stata visitata con il robot
     appena fuori, nella (6,3), e la (7,1) era gia' stata provata dal lato della (6,1). Il robot
@@ -551,22 +551,22 @@ def _controlli_scelta_celle():
            for r_ in range(8) for c_ in range(7) if env.map[r_][c_] == 1}
     ri = NS(get_manual_waypoint_by_cell=lambda r_, c_: wps.get((r_, c_)),
             find_nearest_waypoint_cell_to_target=lambda *a: (6, 1))
-    m = exploration.Missione.__new__(exploration.Missione)
+    m = exploration.Mission.__new__(exploration.Mission)
     m.env, m.recordingInterface, m.robot_state_client = env, ri, None
-    m._ultima_visitata = (7, 2)
+    m._last_visited = (7, 2)
     T.ROBOT.x, T.ROBOT.y = 4.0, 12.75                 # 0.25 m fuori dalla (7,2), nella (6,2)
     with contextlib.redirect_stdout(io.StringIO()):
-        cella = m._cella_del_robot()
-        partenza = m._cella_di_partenza_per(7, 1, wps)
-    check(cella == (7, 2), f"robot appena fuori dalla (7,2) appena visitata: cella del robot {cella}")
-    check(partenza == (7, 2), f"avvicinamento alla (7,1) dal lato non ancora provato: dalla {partenza}")
+        cell = m._robot_cell()
+        start_xy = m._start_cell_for(7, 1, wps)
+    check(cell == (7, 2), f"robot appena fuori dalla (7,2) appena visitata: cella del robot {cell}")
+    check(start_xy == (7, 2), f"avvicinamento alla (7,1) dal lato non ancora provato: dalla {start_xy}")
     T.ROBOT.x, T.ROBOT.y = 4.0, 11.5                  # ben dentro la (6,2): vale la cella vera
     with contextlib.redirect_stdout(io.StringIO()):
-        cella = m._cella_del_robot()
-    check(cella == (6, 2), f"robot lontano dalla cella visitata: vale quella in cui sta ({cella})")
+        cell = m._robot_cell()
+    check(cell == (6, 2), f"robot lontano dalla cella visitata: vale quella in cui sta ({cell})")
 
 
-def _controlli_batteria(r):
+def _check_battery(r):
     log = r['log']
     grid = log.split("--- Mappa delle celle ---")[-1].splitlines()[1:ROWS + 1]
     visited = sum(v == '1' for line in grid for v in line.split()[1:])
@@ -592,21 +592,21 @@ if __name__ == '__main__':
         print(f"\nMissione intera nel mondo {name}, robot e GraphNav finti: 3 x 3 celle da 3 m.")
         r = run(walls, f"MISSIONE_{name}",
                 fiducial=(7, START[0] - 1.0, START[1]) if name == 'A' else None)
-        _controlli_comuni(r)
-        _controlli_mondo(name, r)
+        _check_common(r)
+        _check_world(name, r)
         shutil.rmtree(r['root'], ignore_errors=True)
     print("\nMissione intera nel mondo C: il B con fallimenti forzati.")
-    with _con_fallimenti():
+    with _with_failures():
         r = run(WORLDS['B'], "MISSIONE_C", stuck_wp0_m=0.6)
-    _controlli_comuni(r, ritorno=False)
-    _controlli_fallimenti(r)
+    _check_common(r, return_ok=False)
+    _check_failures(r)
     shutil.rmtree(r['root'], ignore_errors=True)
-    _controlli_scelta_celle()
-    _controlli_emergenza()
+    _check_cell_choice()
+    _check_emergency()
     print("\nMissione intera nel mondo G: il mondo A con il ritorno a wp_0 'arrivato' ma 0.8 m di lato "
           "(29-10 10:57: 1.2 m).")
     r = run(WORLDS['A'], "MISSIONE_G", fiducial=(7, START[0] - 1.0, START[1]), wp0_offset_m=0.8)
-    _controlli_comuni(r)
+    _check_common(r)
     log = r['log']
     check("[WP0] Secondo il tag il robot e' a 0.80 m dal punto di partenza" in log,
           "il tag misura lo scarto vero dalla partenza (0.80 m)")
@@ -616,8 +616,8 @@ if __name__ == '__main__':
           and "CORREZIONE 2/2" not in log, "una correzione basta: 0.00 m dalla partenza")
     shutil.rmtree(r['root'], ignore_errors=True)
     print("\nMissione intera nel mondo E: partenza chiusa tutto intorno (28-10 14:17, erba alta).")
-    chiuso = [(0.4, 2.6, 0.4, 0.6), (0.4, 2.6, 2.4, 2.6), (0.4, 0.6, 0.4, 2.6), (2.4, 2.6, 0.4, 2.6)]
-    r = run(chiuso, "MISSIONE_E")
+    enclosed = [(0.4, 2.6, 0.4, 0.6), (0.4, 2.6, 2.4, 2.6), (0.4, 0.6, 0.4, 2.6), (2.4, 2.6, 0.4, 2.6)]
+    r = run(enclosed, "MISSIONE_E")
     log = r['log']
     check(r['ok'] is True and 'Traceback' not in log, "main() arriva in fondo senza eccezioni")
     check("[FINE] Nessuna cella raggiungibile dalla partenza" in log,
@@ -625,10 +625,10 @@ if __name__ == '__main__':
     check("ritorno a wp_0" in log, "chiusura normale della missione")
     shutil.rmtree(r['root'], ignore_errors=True)
     print("\nMissione intera nel mondo D: il mondo A con la batteria che si scarica.")
-    with _con_batteria():
+    with _with_battery():
         r = run(WORLDS['A'], "MISSIONE_D")
-    _controlli_comuni(r)
-    _controlli_batteria(r)
+    _check_common(r)
+    _check_battery(r)
     shutil.rmtree(r['root'], ignore_errors=True)
     print("\n" + "=" * 70)
     print("TUTTO OK" if not FAILS else f"{len(FAILS)} CONTROLLI FALLITI:\n  - " + "\n  - ".join(FAILS))

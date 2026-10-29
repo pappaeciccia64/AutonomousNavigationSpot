@@ -119,7 +119,7 @@ def _emit_mission_summary_once():
               f"{getattr(lg_main, 'rejected_scans', 0)}, controllo in movimento {getattr(lg_trk, 'rejected_scans', 0)}")
         print(f"Pacchetti di scansione salvati: {MISSION_STATS['scan_bundles']}")
         if MISSION_CTX.get('batteria') is not None:
-            print(MISSION_CTX['batteria'].riepilogo())
+            print(MISSION_CTX['batteria'].summary())
         times = MISSION_STATS['time_s']
         if times:
             tot = sum(times.values())

@@ -108,20 +108,20 @@ COME SI USA
   momento.
   save_npz/load_npz servono ad avere un reticolo IDENTICO fra piu' missioni, non per la
   velocita': con la missione di default (3185 nodi) costruire da zero costa ~180 ms,
-  ricaricare ~70 ms (python3 mission_graph.py --tempi).
+  ricaricare ~70 ms (python3 mission_graph.py --timings).
 
 Il modulo dipende SOLO da numpy: si importa e si prova fuori dal robot, senza l'SDK.
 environmentMap, prm_graph, scipy (solo per i nodi casuali) e matplotlib sono importati
 dentro le funzioni che li usano.
 
 Da riga di comando:
-    python3 mission_graph.py --confronto
+    python3 mission_graph.py --compare
     python3 mission_graph.py --spacing 0.25 --rings 2 --preview p.png --zoom -2 2 -2 2
-    python3 mission_graph.py --grafo casuale --distribuzione poisson --densita 16 --seme 7 --preview p.png
-    python3 mission_graph.py --confronta-metodi metodi.png --seme 7 --zoom -2 2 -2 2
+    python3 mission_graph.py --graph casuale --distribution poisson --density 16 --seed 7 --preview p.png
+    python3 mission_graph.py --compare-methods metodi.png --seed 7 --zoom -2 2 -2 2
     python3 mission_graph.py --rows 2 --cols 3 --cell 3
     python3 mission_graph.py --save reticolo_2x4x5.npz
-    python3 mission_graph.py --tempi
+    python3 mission_graph.py --timings
 """
 
 import math
@@ -148,8 +148,8 @@ DEFAULT_LATTICE_SPACING_M = 0.25
 # COME SI GENERANO I NODI (vedi NODI CASUALI nel commento in cima).
 #   'reticolo' il reticolo rettangolare, deterministico (default);
 #   'casuale'  nodi sparsi con P.MISSION_RANDOM_DISTRIBUTION, centri cella sempre compresi.
-# Si cambiano per una sola missione con gli argomenti di easy_walk.py (--grafo,
-# --distribuzione, --densita, --seme).
+# Si cambiano per una sola missione con gli argomenti di easy_walk.py (--graph,
+# --distribution, --density, --seed).
 # ----------------------------------------------------------------------------------------
 GRAPH_SAMPLINGS = ('reticolo', 'casuale')
 RANDOM_DISTRIBUTIONS = ('uniforme', 'poisson', 'perturbata', 'halton')
@@ -802,8 +802,8 @@ class MissionGraph:
                 # test_replay legge distribuzione, densita' e seme da questa riga.
                 f"[GRAFO] Nodi casuali: distribuzione {self.distribution}, densita' "
                 f"{self.density_per_m2:.2f} nodi/m2, seme {self.seed} "
-                f"(per ripetere: --grafo casuale --distribuzione {self.distribution} "
-                f"--densita {self.density_per_m2:g} --seme {self.seed})",
+                f"(per ripetere: --graph casuale --distribution {self.distribution} "
+                f"--density {self.density_per_m2:g} --seed {self.seed})",
             ]
             if self.sampling_note:
                 head.append(f"[GRAFO] ATTENZIONE: {self.sampling_note}")
@@ -1374,15 +1374,15 @@ def _main():
     p.add_argument('--rings', default=str(P.MISSION_LATTICE_RINGS),
                    help="anelli di vicini collegati (k = entro la diagonale dell'anello k), "
                         "o 'tutti' (default: tutti, come in missione)")
-    p.add_argument('--grafo', choices=GRAPH_SAMPLINGS, default=P.MISSION_GRAPH_SAMPLING,
+    p.add_argument('--graph', choices=GRAPH_SAMPLINGS, default=P.MISSION_GRAPH_SAMPLING,
                    help=f"come si generano i nodi (default {P.MISSION_GRAPH_SAMPLING})")
-    p.add_argument('--distribuzione', choices=RANDOM_DISTRIBUTIONS, default=P.MISSION_RANDOM_DISTRIBUTION,
+    p.add_argument('--distribution', choices=RANDOM_DISTRIBUTIONS, default=P.MISSION_RANDOM_DISTRIBUTION,
                    help=f"nodi casuali: distribuzione (default {P.MISSION_RANDOM_DISTRIBUTION})")
-    p.add_argument('--densita', type=float, default=P.MISSION_RANDOM_DENSITY,
+    p.add_argument('--density', type=float, default=P.MISSION_RANDOM_DENSITY,
                    help=f"nodi casuali: nodi per m2 (default {P.MISSION_RANDOM_DENSITY:g})")
-    p.add_argument('--seme', type=int, default=P.MISSION_RANDOM_SEED,
+    p.add_argument('--seed', type=int, default=P.MISSION_RANDOM_SEED,
                    help="nodi casuali: seme (default: estratto a caso e scritto nel riepilogo)")
-    p.add_argument('--dist-min', type=float, default=P.MISSION_POISSON_MIN_DIST_M,
+    p.add_argument('--min-dist', type=float, default=P.MISSION_POISSON_MIN_DIST_M,
                    help="nodi poisson: distanza minima fra i nodi in m (default 0.75/sqrt(densita'))")
     p.add_argument('--min-edge', type=float, default=P.PRM_MIN_EDGE_M)
     p.add_argument('--max-edge', type=float, default=P.PRM_MAX_EDGE_M)
@@ -1392,11 +1392,11 @@ def _main():
     p.add_argument('--zoom', type=float, nargs=4, metavar=('XMIN', 'XMAX', 'YMIN', 'YMAX'),
                    help="riquadro del disegno, in coordinate griglia")
     p.add_argument('--save', metavar='NPZ', help="salva il reticolo (si ricarica con load_npz)")
-    p.add_argument('--confronto', action='store_true', help="tabella passo x anelli")
-    p.add_argument('--confronta-metodi', metavar='PNG',
+    p.add_argument('--compare', action='store_true', help="tabella passo x anelli")
+    p.add_argument('--compare-methods', metavar='PNG',
                    help="reticolo e le quattro distribuzioni casuali affiancati in un PNG "
                         "(stessi parametri e seme; riquadro --zoom, default -2 2 -2 2)")
-    p.add_argument('--tempi', nargs='?', const=True, metavar='NPZ',
+    p.add_argument('--timings', nargs='?', const=True, metavar='NPZ',
                    help="misura costruzione da zero contro ricarica da file")
     a = p.parse_args()
 
@@ -1405,24 +1405,24 @@ def _main():
         a.spacing = None                 # 0 = passo suggerito da suggested_spacing()
     common = dict(rows=a.rows, cols=a.cols, cell_size_m=a.cell, min_edge_length=a.min_edge,
                   max_edge_length=a.max_edge, connection_radius=a.radius,
-                  border_margin_m=a.margin, sampling=a.grafo, distribution=a.distribuzione,
-                  density_per_m2=a.densita, seed=a.seme, poisson_min_dist_m=a.dist_min)
+                  border_margin_m=a.margin, sampling=a.graph, distribution=a.distribution,
+                  density_per_m2=a.density, seed=a.seed, poisson_min_dist_m=a.min_dist)
 
-    if a.confronta_metodi:
+    if a.compare_methods:
         common.pop('sampling')
         common.pop('distribution')
         common.pop('seed')
         print(f"[GRAFO] confronto salvato in "
-              f"{compare_methods_png(a.confronta_metodi, zoom=tuple(a.zoom) if a.zoom else (-2.0, 2.0, -2.0, 2.0), seed=a.seme, spacing_m=a.spacing, rings=rings, **common)[0]}")
+              f"{compare_methods_png(a.compare_methods, zoom=tuple(a.zoom) if a.zoom else (-2.0, 2.0, -2.0, 2.0), seed=a.seed, spacing_m=a.spacing, rings=rings, **common)[0]}")
         return
-    if a.confronto:
+    if a.comparison:
         compare(rows=a.rows, cols=a.cols, cell_size_m=a.cell, min_edge_length=a.min_edge,
                 sampling='reticolo',
                 max_edge_length=a.max_edge, connection_radius=a.radius,
                 border_margin_m=a.margin)
         return
-    if a.tempi:
-        timing(None if a.tempi is True else a.tempi, spacing_m=a.spacing, rings=rings, **common)
+    if a.timings:
+        timing(None if a.timings is True else a.timings, spacing_m=a.spacing, rings=rings, **common)
         return
 
     mg = build_mission_graph(spacing_m=a.spacing, rings=rings, **common)

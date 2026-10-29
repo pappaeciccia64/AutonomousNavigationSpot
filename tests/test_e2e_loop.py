@@ -497,10 +497,10 @@ if __name__ == '__main__':
     check(r['min_clear'] > 0.0, f"non entra mai nel muro (distanza minima {r['min_clear']:.2f} m)")
     # Il secondo [SUBITO] sullo stesso tratto lo toglie dal piano per il resto del tentativo
     # (28-10 14:23: lo stesso tratto scartato quattro volte di fila).
-    tratti = re.findall(r"\[SUBITO\] \w+ in \([^)]*\) sul tratto (\d+->\d+)", r['log'])
+    legs = re.findall(r"\[SUBITO\] \w+ in \([^)]*\) sul tratto (\d+->\d+)", r['log'])
     check("fuori dal piano per il resto del tentativo" in r['log'] and max(
-          [tratti.count(t) for t in tratti] or [0]) <= 2,
-          f"[SUBITO] ripetuto: alla seconda volta il tratto esce dal piano ({tratti})")
+          [legs.count(t) for t in legs] or [0]) <= 2,
+          f"[SUBITO] ripetuto: alla seconda volta il tratto esce dal piano ({legs})")
 
     r = run("S5. partenza in uno spazio stretto: 0.45 m dal muro, bersaglio a 90 gradi",
             [(2.45, 2.65, 0.0, 6.0)], (2.0, 3.0, 1.5708), (0, 0))
@@ -544,12 +544,12 @@ if __name__ == '__main__':
     r = run("S11. corridoio da 0.80 m, obiettivo dietro: rotazione impossibile (caso 16:35)",
             [(0.0, 12.0, 0.0, 3.10), (0.0, 12.0, 3.90, 12.0)], (7.0, 3.5, 0.0), (0, 0))
     check(r['err'] is None, "nessuna eccezione")
-    giri = r['log'].count('[FRONTE]')
-    rifiuti = r['log'].count('[ROTAZIONE] Servono')
-    check(rifiuti >= 1, f"la rotazione di ~180 gradi nel corridoio viene rifiutata ({rifiuti} volte)")
+    loops = r['log'].count('[FRONTE]')
+    refusals = r['log'].count('[ROTAZIONE] Servono')
+    check(refusals >= 1, f"la rotazione di ~180 gradi nel corridoio viene rifiutata ({refusals} volte)")
     check(r['turns'] == 0, f"il robot non ruota mai nel corridoio (rotazioni eseguite: {r['turns']})")
-    check(r['ok'] is False and giri <= 8,
-          f"il tentativo si chiude in modo ordinato e in pochi giri: {giri} giri, esito {r['ok']} "
+    check(r['ok'] is False and loops <= 8,
+          f"il tentativo si chiude in modo ordinato e in pochi giri: {loops} giri, esito {r['ok']} "
           f"(il 16:35 ne fece 8 in 3.2 s, e senza limite poteva continuare)")
     print(f"       [STALLO] x{r['tags']['[STALLO]']}, "
           f"limite rifiuti-rotazione x{r['log'].count('tratti scartati in questo tentativo')}, "
@@ -593,33 +593,33 @@ if __name__ == '__main__':
     check(r['min_clear'] > 0.0, f"non entra nel muro (distanza minima {r['min_clear']:.2f} m)")
 
     print("\n--- Confronto: quanto cammina il robot per ogni comando di movimento ---")
-    confronto = {}
-    for etichetta, maxe in (("archi 0.5-0.707 (missione 16:35)", 0.70711),
+    comparison = {}
+    for label, maxe in (("archi 0.5-0.707 (missione 16:35)", 0.70711),
                             ("archi 0.5-1.25 (nuovo)", 1.25)):
         parametri.PRM_MAX_EDGE_M = maxe
-        r = run(f"S9. {etichetta}", [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)],
+        r = run(f"S9. {label}", [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)],
                 (3.5, 3.5, 0.0), (0, 1))
-        confronto[etichetta] = (r['commands'], r['walked'], r['stats'].get('multinode_moves', 0),
+        comparison[label] = (r['commands'], r['walked'], r['stats'].get('multinode_moves', 0),
                                 r['stats'].get('multinode_nodes', 0), r['scans'], r['ok'],
                                 r['turns'], r['turn_deg'])
     parametri.PRM_MAX_EDGE_M = 1.25
     print()
-    for k, (c, w, mm, mn, sc, ok, tn, td) in confronto.items():
+    for k, (c, w, mm, mn, sc, ok, tn, td) in comparison.items():
         print(f"  {k:<34} {c:2d} comandi, {w:4.1f} m -> {w / max(1, c):.2f} m/comando; "
               f"rotazioni oltre 10 gradi: {tn} ({td:.0f} gradi in tutto); "
               f"multinodo {mm} ({mn} nodi); {sc} scansioni; arrivato: {ok}")
 
     print("\n--- Confronto: reticolo e nodi casuali (16 nodi/m2, seme 7), corridoio di S9 ---")
-    for etichetta, kw in [("reticolo", {})] + [
+    for label, kw in [("reticolo", {})] + [
             (f"casuale {d}", dict(sampling='casuale', distribution=d, density_per_m2=16.0, seed=7))
             for d in ("uniforme", "poisson", "perturbata", "halton")]:
         GRAPH_KW.clear()
         GRAPH_KW.update(kw)
-        r = run(f"S13. {etichetta}", [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)],
+        r = run(f"S13. {label}", [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)],
                 (3.5, 3.5, 0.0), (0, 1))
-        check(r['err'] is None and r['ok'], f"{etichetta}: arrivato nella cella senza eccezioni")
+        check(r['err'] is None and r['ok'], f"{label}: arrivato nella cella senza eccezioni")
         check(r['min_clear'] >= geometry.FRONTIER_CLEARANCE_M - 0.10,
-              f"{etichetta}: non sfiora il muro (distanza minima {r['min_clear']:.2f} m)")
+              f"{label}: non sfiora il muro (distanza minima {r['min_clear']:.2f} m)")
         print(f"       {r['commands']} comandi, {r['walked']:.1f} m, rotazioni oltre 10 gradi "
               f"{r['turns']} ({r['turn_deg']:.0f} gradi), {r['scans']} scansioni")
     GRAPH_KW.clear()
@@ -630,32 +630,32 @@ if __name__ == '__main__':
     # ([SUBITO], fino a 8) fino al blocco, e su questi stessi casi il codice del 28-10 mattina
     # falliva la cella 7 volte su 24 (seme 9: 143 comandi). Nodi casuali come in missione.
     obstacle_beyond = [(8.75, 9.15, 2.0, 5.0)]
-    for etichetta, seed, x0, attesa in (("passo finale sotto il passo minimo", 4, 8.85, 'passo'),
+    for label, seed, x0, attesa in (("passo finale sotto il passo minimo", 4, 8.85, 'passo'),
                                         ("nuovo obiettivo alla prima fermata", 9, 8.75, 'attesa')):
         GRAPH_KW.clear()
         GRAPH_KW.update(sampling='casuale', distribution='poisson', density_per_m2=4.0, seed=seed)
-        r = run(f"S15. ostacolo subito oltre l'obiettivo: {etichetta}",
+        r = run(f"S15. ostacolo subito oltre l'obiettivo: {label}",
                 [(x0, x0 + 0.4, 2.0, 5.0)], (2.0, 3.0, 0.0), (0, 1))
-        check(r['err'] is None and r['ok'] is True, f"{etichetta}: cella raggiunta senza eccezioni")
+        check(r['err'] is None and r['ok'] is True, f"{label}: cella raggiunta senza eccezioni")
         check(r['tags']['[SUBITO]'] == 0 and r['tags']['[BLOCCO] Confermato'] == 0,
-              f"{etichetta}: nessun [SUBITO] ne' blocco ({r['tags']['[SUBITO]']}, "
+              f"{label}: nessun [SUBITO] ne' blocco ({r['tags']['[SUBITO]']}, "
               f"{r['tags']['[BLOCCO] Confermato']})")
         if attesa == 'passo':
             check('[PASSO FINALE]' in r['log'], "il passo sotto 0.40 m che basta per arrivare si fa")
         else:
             check("[TARGET] Il fronte si ferma" in r['log'] and "oltre la fine del percorso" in r['log'],
                   "il fronte fermo oltre l'obiettivo fa scegliere subito un altro obiettivo")
-        check(r['scans'] <= 9, f"{etichetta}: {r['scans']} scansioni")
+        check(r['scans'] <= 9, f"{label}: {r['scans']} scansioni")
 
     # Lo stesso caso con la regola dell'attesa tolta: il blocco confermato a ridosso
     # dell'obiettivo deve far scegliere un altro obiettivo, non ripianificare verso quello
     # appena escluso (28-10 11:36: "escluso", e subito dopo un percorso verso lo stesso nodo).
-    real_check = cell_attempt.TentativoCella._fronte_fermo_sull_obiettivo
+    real_check = cell_attempt.CellAttempt._frontier_stops_at_goal
 
-    def _solo_nel_blocco(self):
-        return sys._getframe(1).f_code.co_name != '_cambia_obiettivo_irraggiungibile' and real_check(self)
-    cell_attempt.TentativoCella._fronte_fermo_sull_obiettivo = _solo_nel_blocco
-    parametri_early = parametri.MAX_EARLY_REPLANS
+    def _only_in_block(self):
+        return sys._getframe(1).f_code.co_name != '_repick_unreachable_goal' and real_check(self)
+    cell_attempt.CellAttempt._frontier_stops_at_goal = _only_in_block
+    early_saved = parametri.MAX_EARLY_REPLANS
     parametri.MAX_EARLY_REPLANS = 0
     try:
         GRAPH_KW.clear()
@@ -663,8 +663,8 @@ if __name__ == '__main__':
         r = run("S15. ostacolo subito oltre l'obiettivo: blocco, poi nuovo obiettivo",
                 obstacle_beyond, (2.0, 3.0, 0.0), (0, 1))
     finally:
-        cell_attempt.TentativoCella._fronte_fermo_sull_obiettivo = real_check
-        parametri.MAX_EARLY_REPLANS = parametri_early
+        cell_attempt.CellAttempt._frontier_stops_at_goal = real_check
+        parametri.MAX_EARLY_REPLANS = early_saved
     check(r['err'] is None and r['ok'] is True, "blocco vicino all'obiettivo: cella raggiunta")
     check("[TARGET] Blocco a" in r['log'] and "[REPLAN] Dopo il blocco" not in r['log'],
           "dopo il blocco a ridosso dell'obiettivo se ne sceglie un altro, senza ripianificare "

@@ -69,7 +69,7 @@ def _robot_in_tag_frame(snapshot, frame, vision_tform_tag, robot_state_client):
         return None
 
 
-def _scarto_dalla_partenza(start, now):
+def _offset_from_start(start, now):
     """Distanza (m) fra la posizione del robot alla partenza e adesso, nel frame del tag di
     partenza. Senza la posa del tag (None), dalle posizioni VISION del tag rispetto al robot,
     che risentono della rotazione dell'odometria."""
@@ -107,7 +107,7 @@ def graphnav_check_start_fiducial(robot, robot_state_client):
     print(f"[FIDUCIAL] Al ritorno su wp_0 rivedo il {describe_fiducial(now[0])}. Nel frame "
           f"VISION si e' spostato di {drift:.2f} m (dx {dx:+.2f}, dy {dy:+.2f}) da quando "
           f"l'ho visto alla partenza: e' la deriva dell'odometria di tutta la missione.")
-    offset = _scarto_dalla_partenza(start, now[0])
+    offset = _offset_from_start(start, now[0])
     if offset is not None:
         print(f"[WP0] Secondo il tag il robot e' a {offset:.2f} m dal punto di partenza.")
     return {'drift': drift, 'offset': offset}
@@ -154,7 +154,7 @@ def graphnav_correct_wp0_with_fiducial(robot, recordingInterface, robot_state_cl
                                        f"correzione {k} del ritorno a wp_0", move='graphnav_correzione')
         MISSION_STATS['wp0_corrections'] = k
         now = find_fiducials(robot, robot_state_client, wait_s=P.START_FIDUCIAL_WAIT_S, fiducial_id=start['id'])
-        new = _scarto_dalla_partenza(start, now[0]) if now else None
+        new = _offset_from_start(start, now[0]) if now else None
         if new is None:
             print(f"[WP0] Dopo la correzione {k} il tag non si vede piu' (GraphNav: "
                   f"{'arrivato' if arrived else 'non arrivato'}): non so di quanto sono lontano.")

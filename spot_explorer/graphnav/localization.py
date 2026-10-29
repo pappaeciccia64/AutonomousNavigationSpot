@@ -119,10 +119,10 @@ def graphnav_log_localization(env, recordingInterface, robot_state_client, where
         det = (f"localizzazioni accettate {loc['accepted']}, rifiutate {loc['rejected']} "
                f"({loc['rej_since']} dall'ultima accettata, {loc['dist_rej']:.1f} m fatti cosi'), "
                f"archi cattivi di fila {loc['bad_edges']}")
-    stato = ("PERSO" if loc.get('is_lost') else
+    loc_state = ("PERSO" if loc.get('is_lost') else
              (f"localizzato su {wp_name_by_id(recordingInterface, loc['wp_id'])}" if loc.get('wp_id')
               else "NON localizzato"))
-    print(f"[LOCALIZZAZIONE] {where}: {stato} | {det} | ultimo passo {MISSION_STATS.get('last_tier')}, "
+    print(f"[LOCALIZZAZIONE] {where}: {loc_state} | {det} | ultimo passo {MISSION_STATS.get('last_tier')}, "
           f"beccheggio {pitch:.1f} gradi.")
     return loc
 

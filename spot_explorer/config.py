@@ -6,7 +6,7 @@ prove sul campo che l'hanno deciso) sta in CHANGELOG.md. I parametri propri di u
 (griglie e mappe in spotGrid.py, grafo in prm_graph.py, fronte in arcVerification.py,
 movimento in movements.py) restano in quel modulo.
 
-Gli argomenti da riga di comando di easy_walk.py (--rows, --grafo, --spacing, ...) cambiano
+Gli argomenti da riga di comando di easy_walk.py (--rows, --graph, --spacing, ...) cambiano
 questi valori per una sola missione. Il codice li legge come parametri.NOME al momento
 dell'uso, quindi anche le prove (test_replay.py, test_e2e_loop.py) li possono cambiare.
 """
@@ -30,7 +30,7 @@ MISSION_CELL_SIZE_M = 2.0
 #   'reticolo' reticolo rettangolare, deterministico; il centro di ogni cella e' un nodo;
 #   'casuale'  nodi sparsi con MISSION_RANDOM_DISTRIBUTION ('uniforme', 'poisson',
 #              'perturbata', 'halton'), centri delle celle sempre compresi.
-# Da riga di comando: --grafo --distribuzione --densita --seme.
+# Da riga di comando: --graph --distribution --density --seed.
 MISSION_GRAPH_SAMPLING = 'casuale'
 MISSION_RANDOM_DISTRIBUTION = 'poisson'
 # Nodi per m2: con 4 il numero di nodi e' quello del reticolo a passo 0.5 m; 5 un po' di

@@ -290,23 +290,23 @@ def cell_has_reachable_target(env, sampler, global_map, row, col, safety_margin=
         return True, 0, 0, 0
     if safety_margin is None:
         safety_margin = geometry.PRM_EDGE_SAFETY_MARGIN_M
-    centro = env.get_world_position_from_cell(row, col)
-    if centro is None:
+    center = env.get_world_position_from_cell(row, col)
+    if center is None:
         return False, 0, 0, 0
-    punti = [centro]
+    points = [center]
     try:
-        punti += list(sampler.get_point_in_cell(row, col))
+        points += list(sampler.get_point_in_cell(row, col))
     except Exception:
         pass
-    liberi = ignoti = occupati = 0
-    for (px, py) in punti:
+    free = unknown = occupied = 0
+    for (px, py) in points:
         if global_map.is_occupied(px, py, safety_margin=safety_margin):
-            occupati += 1
+            occupied += 1
         elif global_map.is_known(px, py):
-            liberi += 1
+            free += 1
         else:
-            ignoti += 1
-    return (liberi + ignoti) > 0, liberi, ignoti, occupati
+            unknown += 1
+    return (free + unknown) > 0, free, unknown, occupied
 
 
 def finalize_or_defer_blocked_cell(env, row, col, sampler=None, global_map=None):
@@ -328,7 +328,7 @@ def finalize_or_defer_blocked_cell(env, row, col, sampler=None, global_map=None)
     # altro lato e' inutile -- l'obiettivo e' dentro un ostacolo, non dietro un varco
     # che si apre da un'altra parte. Vedi cell_has_reachable_target.
     if sampler is not None and global_map is not None:
-        ok, liberi, ignoti, occupati = cell_has_reachable_target(env, sampler, global_map, row, col)
+        ok, free, unknown, occupied = cell_has_reachable_target(env, sampler, global_map, row, col)
         # Diagnostica: dice subito se la cella sta dentro un ostacolo o non e' mai stata
         # vista, cioe' se la griglia di missione non sta nello spazio.
         # ATTENZIONE a come si legge: i punti candidati per cella sono decine (reticolo a
@@ -336,11 +336,11 @@ def finalize_or_defer_blocked_cell(env, row, col, sampler=None, global_map=None)
         # dire che gran parte della cella e' dentro un ostacolo. Il blocco immediato sotto
         # scatta solo nel caso estremo in cui NON resta un solo punto libero o ignoto.
         print(f"[CELLA] ({row},{col}) dopo il tentativo fallito: dei punti candidati, "
-              f"{liberi} visti liberi, {ignoti} mai visti, {occupati} dentro un ostacolo "
+              f"{free} visti liberi, {unknown} mai visti, {occupied} dentro un ostacolo "
               f"nella mappa globale.")
         if not ok:
             env.mark_cell_blocked(row, col)
-            print(f"[BLOCKED] Cella ({row},{col}) bloccata subito: tutti i {occupati} punti "
+            print(f"[BLOCKED] Cella ({row},{col}) bloccata subito: tutti i {occupied} punti "
                   f"candidati risultano dentro un ostacolo nella mappa globale (nessuno libero, "
                   f"nessuno ignoto). Non c'e' un lato da cui entrare: l'obiettivo e' nel muro.")
             return

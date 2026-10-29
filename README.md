@@ -31,24 +31,24 @@ SPOT_MISSION_GRID="2,3,4" python3 easy_walk.py       # variabile d'ambiente
 ```
 La riga `[CONFIG] Griglia di missione` del log dice quale valore è stato usato e da dove.
 
-**Grafo della missione.** I nodi si generano in due modi (`--grafo`, default in `parametri.MISSION_GRAPH_SAMPLING`):
+**Grafo della missione.** I nodi si generano in due modi (`--graph`, default in `parametri.MISSION_GRAPH_SAMPLING`):
 ```bash
-python3 easy_walk.py --grafo casuale --distribuzione poisson --densita 5 --seme 7       # nodi casuali (default: poisson, 5 nodi/m², seme a caso)
-python3 easy_walk.py --grafo reticolo --spacing 0.5                                    # reticolo
+python3 easy_walk.py --graph casuale --distribution poisson --density 5 --seed 7       # nodi casuali (default: poisson, 5 nodi/m², seme a caso)
+python3 easy_walk.py --graph reticolo --spacing 0.5                                    # reticolo
 ```
 | Argomento | Default | Cosa fa |
 |---|---|---|
 | `--min-edge`, `--max-edge` | 0.5, 1.25 m | Lunghezza minima e massima degli archi, per tutti e due i metodi |
 | `--spacing` | 0.5 m | Reticolo: passo fra i nodi, arrotondato a lato cella / n |
 | `--rings` | tutti | Reticolo: anelli di vicini collegati (dentro min e max) |
-| `--distribuzione` | `poisson` | Nodi casuali: `uniforme` (PRM classico, con buchi e grumi), `poisson` (distanza minima fra i nodi), `perturbata` (un punto a caso in ogni quadretto), `halton` (quasi casuale, molto uniforme) |
-| `--densita` | 5 nodi/m² | Nodi casuali: quanti per m² (4 = la densità del reticolo a 0.5 m) |
-| `--seme` | a caso | Nodi casuali: stesso seme, stesso grafo. Se manca se ne estrae uno; quello usato è nel log (`[GRAFO] Nodi casuali`, con il comando per ripetere) e in `mission_summary.json` |
+| `--distribution` | `poisson` | Nodi casuali: `uniforme` (PRM classico, con buchi e grumi), `poisson` (distanza minima fra i nodi), `perturbata` (un punto a caso in ogni quadretto), `halton` (quasi casuale, molto uniforme) |
+| `--density` | 5 nodi/m² | Nodi casuali: quanti per m² (4 = la densità del reticolo a 0.5 m) |
+| `--seed` | a caso | Nodi casuali: stesso seme, stesso grafo. Se manca se ne estrae uno; quello usato è nel log (`[GRAFO] Nodi casuali`, con il comando per ripetere) e in `mission_summary.json` |
 
 Con i nodi casuali i centri delle celle e il punto di partenza restano comunque nodi. La copertura (quanto può distare un punto dell'area dal nodo più vicino) è misurata e scritta nel log. Per guardare i grafi prima di uscire: `python3 prova_grafo.py`. Usa gli stessi parametri della missione (`parametri.py`) e apre un'immagine con i metodi affiancati e una tabella; in fondo stampa, per ogni grafo, le righe da mettere in `parametri.py` (o gli argomenti di `easy_walk.py`) per usare in missione proprio quello, seme compreso. Per provare altri valori senza toccare `parametri.py` si cambia il blocco PROVA in cima al file. Da riga di comando, con gli stessi default della missione:
 ```bash
-python3 mission_graph.py --confronta-metodi metodi.png --seme 7 --zoom -2 2 -2 2       # i cinque metodi affiancati, con i numeri
-python3 mission_graph.py --grafo casuale --distribuzione halton --seme 7 --preview halton.png --zoom -2 2 -2 2   # uno solo
+python3 mission_graph.py --compare-methods metodi.png --seed 7 --zoom -2 2 -2 2       # i cinque metodi affiancati, con i numeri
+python3 mission_graph.py --graph casuale --distribution halton --seed 7 --preview halton.png --zoom -2 2 -2 2   # uno solo
 ```
 
 ---
@@ -144,7 +144,7 @@ Ogni missione ha un nome `Mission_<giorno-mese-anno>_<ora>` e tre cartelle:
 
 ```bash
 python3 visualizzatore_live.py                   # in un secondo terminale: l'ultima missione, dal vivo
-python3 visualizzatore_live.py 28-10-2026_14-23-50 --rigioca --velocita 20   # una missione finita, rigiocata
+python3 visualizzatore_live.py 28-10-2026_14-23-50 --replay --speed 20   # una missione finita, rigiocata
 ```
 
 Una sola figura con tutto sopra: mappa vista finora (rosso ostacolo, verde libero), ultima scansione nel riquadro azzurro, celle (verde visitata, rossa bloccata, bordo blu = obiettivo), grafo PRM, strada fatta (blu, tratteggio = GraphNav), percorso pianificato (arancione), obiettivo (stella), punto dove si ferma il fronte (X) e avanzamento consentito (verde spesso), robot (freccia). A destra cella, decisione, fronte, avanzamento, batteria e le ultime righe utili del log. Legge solo i file che la missione scrive già: non la rallenta e non la può fermare. Tasti: `f` segui il robot / tutta la missione, spazio pausa, `q` esci.
@@ -152,22 +152,22 @@ Una sola figura con tutto sopra: mappa vista finora (rosso ostacolo, verde liber
 ## Dopo la missione
 
 ```bash
-python3 mission_report.py                        # rapporto dell'ultima missione (o: nome della missione, --tutte)
+python3 mission_report.py                        # rapporto dell'ultima missione (o: nome della missione, --all)
 python3 mission_viewer.py 13-10-2026_12-40-38    # scansioni, mappa globale e grafo, interattivo (--png <dir> per esportare)
-python3 test_replay.py --missioni <missione>     # rigioca le scansioni attraverso il codice di oggi
-python3 test_replay.py --tutte --grafo casuale --distribuzione halton --seme 7   # stesse scansioni, altro grafo
+python3 test_replay.py --missions <missione>     # rigioca le scansioni attraverso il codice di oggi
+python3 test_replay.py --all --graph casuale --distribution halton --seed 7   # stesse scansioni, altro grafo
 ```
 
 - **`mission_report.py`**: una pagina con celle, tempi, fluidità del movimento, andature e inclinazioni, fermate del fronte, ritorno a wp_0, e i **controlli della prova** (OK / DA GUARDARE / NON SCATTATO / DECISIONE).
 - **`mission_viewer.py`**: le figure si fanno qui, dopo; durante la missione il robot non disegna.
-- **`test_replay.py`**: verifica una modifica senza il robot, sulle scansioni vere di 10 missioni (`--tutte`, circa 5 minuti): invarianti che devono valere sempre, e confronto con il comportamento di riferimento (`test_replay_riferimento.json`). Con `--grafo` (e `--distribuzione`, `--densita`, `--seme`, `--min-edge`, `--max-edge`) rigioca le stesse scansioni con un altro grafo: la tabella finale (percorsi trovati, lunghezza, archi per percorso, tempo del grafo) si confronta con quella del reticolo.
+- **`test_replay.py`**: verifica una modifica senza il robot, sulle scansioni vere di 10 missioni (`--all`, circa 5 minuti): invarianti che devono valere sempre, e confronto con il comportamento di riferimento (`test_replay_riferimento.json`). Con `--graph` (e `--distribution`, `--density`, `--seed`, `--min-edge`, `--max-edge`) rigioca le stesse scansioni con un altro grafo: la tabella finale (percorsi trovati, lunghezza, archi per percorso, tempo del grafo) si confronta con quella del reticolo.
 - **`test_e2e_loop.py`**: il ciclo di navigazione vero contro un robot finto in mondi sintetici (corridoi, trappole, muri).
 - **`test_missione.py`**: la missione intera (`easy_walk.main()` vero) con robot e GraphNav finti, in quattro mondi: muri, cella chiusa, blocchi, ritorni, fallimenti forzati, rientro a batteria bassa.
 - **`test_obiettivi.py`**: la scelta dell'obiettivo rigiocata sulle missioni vere.
 - **`confronta_log.py`**: confronta i log di due versioni (`E2E_LOG_DIR=<cartella> python3 test_e2e_loop.py`, idem `test_missione.py`), togliendo ore e durate: una modifica che non deve cambiare il comportamento deve dare log identici.
 - **`preflight.py`**: controlla che i moduli siano coerenti fra loro.
 
-Ogni modifica si verifica con `test_replay.py --tutte`, `test_e2e_loop.py`, `test_missione.py` e `preflight.py` prima di andare sul robot.
+Ogni modifica si verifica con `test_replay.py --all`, `test_e2e_loop.py`, `test_missione.py` e `preflight.py` prima di andare sul robot.
 
 ---
 

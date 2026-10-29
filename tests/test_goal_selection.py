@@ -23,8 +23,8 @@ Per il codice di oggi un obiettivo rifiutabile viene escluso per il resto della 
 
 Uso:
     python3 test_obiettivi.py                          # la missione all'aperto del 22-10
-    python3 test_obiettivi.py --missioni 13-10-2026_12-40-38 22-10-2026_15-50-23
-    python3 test_obiettivi.py --dettaglio              # una riga per tentativo
+    python3 test_obiettivi.py --missions 13-10-2026_12-40-38 22-10-2026_15-50-23
+    python3 test_obiettivi.py --detail              # una riga per tentativo
 
 Prima del rigioco, controlli sintetici delle regole su casi costruiti a mano.
 
@@ -265,11 +265,11 @@ def prm_graph_ignore():
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[1])
-    ap.add_argument('--missioni', nargs='+', default=DEFAULT)
-    ap.add_argument('--dettaglio', action='store_true')
+    ap.add_argument('--missions', nargs='+', default=DEFAULT)
+    ap.add_argument('--detail', action='store_true')
     args = ap.parse_args()
     worse = bool(synthetic_checks())
-    for name in args.missioni:
+    for name in args.missions:
         res = replay_goals(name)
         if res is None:
             print(f"{name}: scansioni o log non trovati su questo PC, salto.")
@@ -281,7 +281,7 @@ def main():
                          ('riproposti', 'riproposti dopo rifiuto'), ('sul_bordo', 'sul bordo della cella'),
                          ('senza_obiettivo', 'senza obiettivo')):
             print(f"  {label:22s}{o[k]:10d}{n[k]:8d}")
-        if args.dettaglio:
+        if args.detail:
             for at in res['tentativi']:
                 def fmt(g_):
                     if g_['xy'] is None:

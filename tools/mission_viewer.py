@@ -12,9 +12,9 @@ registro.py): salva i dati grezzi, e le figure si fanno qui, dopo.
     python3 mission_viewer.py <file.npz>                       # una scansione o una vista PRM
     python3 mission_viewer.py <cartella_missione> --png <dir>  # esporta tutte le figure in PNG
     python3 mission_viewer.py <cartella_missione> --overview   # solo il riepilogo della missione
-    ... --sfondo terreno | fusione                             # sfondo iniziale del pannello globale
+    ... --background terreno | fusione                             # sfondo iniziale del pannello globale
     ... --navgraph                                             # nav graph visibile dall'inizio
-    ... --frame-missione                                       # pannello globale nel frame della missione
+    ... --mission-frame                                       # pannello globale nel frame della missione
 
 Tasti (modalita' interattiva):
     A sinistra la scansione (layer a scelta), a destra la MAPPA GLOBALE in quel momento:
@@ -1600,7 +1600,7 @@ def _latest_mission_folder():
 
 
 def main():
-    skip = {sys.argv.index(o) + 1 for o in ("--png", "--sfondo") if o in sys.argv}
+    skip = {sys.argv.index(o) + 1 for o in ("--png", "--background") if o in sys.argv}
     args = [a for k, a in enumerate(sys.argv[1:], 1) if not a.startswith("--") and k not in skip]
     if not args:
         found = _latest_mission_folder()
@@ -1619,11 +1619,11 @@ def main():
     out_dir = sys.argv[sys.argv.index("--png") + 1] if PNG_MODE else None
     bg0 = 'ostacoli'
     ng0 = "--navgraph" in sys.argv
-    mf0 = "--frame-missione" in sys.argv
-    if "--sfondo" in sys.argv:
-        bg0 = sys.argv[sys.argv.index("--sfondo") + 1]
+    mf0 = "--mission-frame" in sys.argv
+    if "--background" in sys.argv:
+        bg0 = sys.argv[sys.argv.index("--background") + 1]
         if bg0 not in BACKGROUNDS:
-            print(f"--sfondo: uno fra {', '.join(BACKGROUNDS)}")
+            print(f"--background: uno fra {', '.join(BACKGROUNDS)}")
             return 1
 
     if os.path.isdir(target):

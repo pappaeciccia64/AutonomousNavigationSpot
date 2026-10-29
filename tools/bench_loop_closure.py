@@ -34,9 +34,9 @@ Tutte le misure senza modificare la mappa (modify_map_on_server=False).
 
 Uso (chiede utente e password del robot, se non sono in BOSDYN_CLIENT_USERNAME/PASSWORD):
     python3 prova_anelli.py                 # serie 3, circa 10 minuti
-    python3 prova_anelli.py --serie 2       # la serie del 26-10 13:02, circa 20 minuti
-    python3 prova_anelli.py --serie 1       # la serie del 26-10 12:41
-    python3 prova_anelli.py --grafo graph/Mission_<nome>/Grafo_<...> --hostname 192.168.80.3
+    python3 prova_anelli.py --series 2       # la serie del 26-10 13:02, circa 20 minuti
+    python3 prova_anelli.py --series 1       # la serie del 26-10 12:41
+    python3 prova_anelli.py --graph graph/Mission_<nome>/Grafo_<...> --hostname 192.168.80.3
 
 Risultati a schermo e in MissionLogs/prova_anelli_<data>.txt (+ .json).
 """
@@ -178,7 +178,7 @@ def measure(ri, fh, name, kw, n_wp, rows):
     rows.append(row)
 
 
-def serie_1(ri, gn, gdir, graph, fh, results):
+def series_1(ri, gn, gdir, graph, fh, results):
     dt, _, _ = upload(gn, gdir, graph, fh)
     results['caricamento_s'] = round(dt, 1)
     log(fh, f"[ANELLI-BANCO] Caricato in {dt:.0f} s\n")
@@ -206,7 +206,7 @@ def serie_1(ri, gn, gdir, graph, fh, results):
             f"(prima {len(graph.edges)})")
 
 
-def serie_2(ri, gn, gdir, graph, fh, results):
+def series_2(ri, gn, gdir, graph, fh, results):
     results['prove'] = []
     results['caricamenti_s'] = []
     done_wp, done_edges = None, None
@@ -234,7 +234,7 @@ CONFIGS_3 = [
 ]
 
 
-def serie_3(ri, gn, gdir, graph, fh, results):
+def series_3(ri, gn, gdir, graph, fh, results):
     dt, _, _ = upload(gn, gdir, graph, fh)
     results['caricamento_s'] = round(dt, 1)
     src = {}
@@ -265,26 +265,26 @@ def serie_3(ri, gn, gdir, graph, fh, results):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[1])
-    ap.add_argument('--grafo', default=None)
+    ap.add_argument('--graph', default=None)
     ap.add_argument('--hostname', default="192.168.80.3")
-    ap.add_argument('--serie', type=int, choices=(1, 2, 3), default=3)
+    ap.add_argument('--series', type=int, choices=(1, 2, 3), default=3)
     args = ap.parse_args()
-    if args.grafo is None:
-        args.grafo = DEFAULT_GRAPH_3 if args.serie == 3 else DEFAULT_GRAPH
+    if args.graph is None:
+        args.graph = DEFAULT_GRAPH_3 if args.series == 3 else DEFAULT_GRAPH
 
     from bosdyn.api.graph_nav import map_pb2
     import bosdyn.client.lease
     from spot_explorer.robot import connection as spotLogInUtils
     from spot_explorer.graphnav import map_recording
 
-    gdir = args.grafo if os.path.isabs(args.grafo) else os.path.join(HERE, args.grafo)
+    gdir = args.graph if os.path.isabs(args.graph) else os.path.join(HERE, args.graph)
     graph = map_pb2.Graph()
     with open(os.path.join(gdir, 'graph'), 'rb') as f:
         graph.ParseFromString(f.read())
     stamp = datetime.datetime.now().strftime('%d-%m-%Y_%H-%M-%S')
     out_txt = os.path.join(HERE, 'MissionLogs', f'prova_anelli_{stamp}.txt')
     fh = open(out_txt, 'w')
-    log(fh, f"[ANELLI-BANCO] Serie {args.serie}. Grafo {gdir}: {len(graph.waypoints)} waypoint, "
+    log(fh, f"[ANELLI-BANCO] Serie {args.series}. Grafo {gdir}: {len(graph.waypoints)} waypoint, "
             f"{len(graph.edges)} archi")
 
     options = SimpleNamespace(name="provaAnelli", hostname=args.hostname, verbose=False,
@@ -292,7 +292,7 @@ def main():
     robot, lease_client, _rsc, client_metadata = spotLogInUtils.setLogInfo(options)
     ri = map_recording.RecordingInterface(robot, HERE, client_metadata)
     gn = ri._graph_nav_client
-    results = dict(serie=args.serie, grafo=gdir, waypoint=len(graph.waypoints), archi=len(graph.edges))
+    results = dict(serie=args.series, grafo=gdir, waypoint=len(graph.waypoints), archi=len(graph.edges))
 
     with bosdyn.client.lease.LeaseKeepAlive(lease_client, must_acquire=True, return_at_exit=True):
         try:
@@ -300,7 +300,7 @@ def main():
         except Exception:
             pass
         try:
-            {1: serie_1, 2: serie_2, 3: serie_3}[args.serie](ri, gn, gdir, graph, fh, results)
+            {1: series_1, 2: series_2, 3: series_3}[args.series](ri, gn, gdir, graph, fh, results)
         finally:
             gn.clear_graph()
             log(fh, "[ANELLI-BANCO] Mappa del robot svuotata.")
