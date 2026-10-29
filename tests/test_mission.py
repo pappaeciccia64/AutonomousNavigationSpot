@@ -58,7 +58,9 @@ from bosdyn.client.math_helpers import Quat, SE3Pose
 
 from spot_explorer.planning import safe_frontier as arcVerification
 from spot_explorer.robot import battery as batteria
-from spot_explorer.mission import explorer as easy_walk
+from spot_explorer.mission import cell_attempt, exploration
+from spot_explorer.mission import run as mission_run
+from spot_explorer.planning import goal
 from spot_explorer.robot import motion as movements
 from spot_explorer.graphnav import graphnav as navGraphUtils
 from spot_explorer import config as parametri
@@ -332,8 +334,8 @@ def _con_fallimenti():
     """Fallimenti forzati, sempre gli stessi: il 1o, 4o, 7o... tentativo e il 2o falliscono
     senza muovere il robot, una scelta dell'obiettivo su 5 non trova punti, il primo
     spostamento GraphNav finisce con una caduta (finta: il robot e' gia' in piedi)."""
-    real_attempt = easy_walk.attempt_enter_cell_from_position
-    real_best = easy_walk.find_best_point_in_cell
+    real_attempt = cell_attempt.attempt_enter_cell_from_position
+    real_best = goal.find_best_point_in_cell
     real_fall = movements.check_and_recover_fall
     n = {'tentativi': 0, 'obiettivi': 0, 'viaggi': 0}
 
@@ -359,14 +361,14 @@ def _con_fallimenti():
                 return 'caduto'
         return real_fall(rsc, cc, gm, why, *a, **k)
 
-    easy_walk.attempt_enter_cell_from_position = attempt
-    easy_walk.find_best_point_in_cell = best
+    cell_attempt.attempt_enter_cell_from_position = attempt
+    goal.find_best_point_in_cell = best
     movements.check_and_recover_fall = fall
     try:
         yield n
     finally:
-        easy_walk.attempt_enter_cell_from_position = real_attempt
-        easy_walk.find_best_point_in_cell = real_best
+        cell_attempt.attempt_enter_cell_from_position = real_attempt
+        goal.find_best_point_in_cell = real_best
         movements.check_and_recover_fall = real_fall
 
 
@@ -403,14 +405,14 @@ def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0_m=None, wp0_offset
     spotLogInUtils.setLogInfo = lambda o: (robot, NS(), robot.state, None)
     spotLogInUtils.SimpleEstop = lambda r, n: NS(stop=lambda: None, allow=lambda: None)
     bosdyn.client.lease.LeaseKeepAlive = lambda *a, **k: contextlib.nullcontext()
-    easy_walk.blocking_stand = lambda *a, **k: None
+    mission_run.blocking_stand = lambda *a, **k: None
     spotGrid.LocalGrid = lambda r: T.FakeLocalGrid()
     arcVerification.ArcVerificationTracker = lambda r: _Tracker()
-    easy_walk.BodyTiltRecorder = registro.BodyTiltRecorder = _NoTilt
+    cell_attempt.BodyTiltRecorder = registro.BodyTiltRecorder = _NoTilt
     parametri.MISSION_GRAPH_SAMPLING = 'reticolo'
 
     root = tempfile.mkdtemp(prefix="missione_finta_")
-    easy_walk.DATA_ROOT = root                                    # cartelle dei dati qui
+    mission_run.DATA_ROOT = root                                    # cartelle dei dati qui
     argv = sys.argv
     sys.argv = ["easy_walk.py", "--rows", str(ROWS), "--cols", str(COLS), "--cell", str(CELL),
                 "--grafo", "reticolo", "--spacing", "0.5"]
@@ -418,7 +420,7 @@ def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0_m=None, wp0_offset
     out = io.StringIO()
     try:
         with contextlib.redirect_stdout(out):
-            ok = easy_walk.main()
+            ok = mission_run.main()
     finally:
         sys.argv = argv
     logs = [os.path.join(dp, f) for dp, _, fs in os.walk(os.path.join(root, "MissionLogs")) for f in fs
@@ -500,7 +502,7 @@ def _controlli_emergenza():
     la mappa GraphNav si scarica, poi l'errore risale come prima."""
     for nome, err in (("eccezione", RuntimeError("guasto finto")), ("Ctrl+C", KeyboardInterrupt())):
         print(f"\nMissione intera nel mondo F: interrotta da {nome} al terzo tentativo.")
-        real = easy_walk.attempt_enter_cell_from_position
+        real = cell_attempt.attempt_enter_cell_from_position
         n = {'k': 0}
 
         def attempt(*a, _err=err, **k):
@@ -508,7 +510,7 @@ def _controlli_emergenza():
             if n['k'] == 3:
                 raise _err
             return real(*a, **k)
-        easy_walk.attempt_enter_cell_from_position = attempt
+        cell_attempt.attempt_enter_cell_from_position = attempt
         try:
             try:
                 r = run(WORLDS['A'], f"MISSIONE_F_{'eccezione' if nome == 'eccezione' else 'ctrlc'}")
@@ -516,7 +518,7 @@ def _controlli_emergenza():
             except KeyboardInterrupt:
                 risalita, r = True, None
         finally:
-            easy_walk.attempt_enter_cell_from_position = real
+            cell_attempt.attempt_enter_cell_from_position = real
         if r is None:      # Ctrl+C: il log e' nella cartella della missione
             logs = sorted(glob.glob(os.path.join(tempfile.gettempdir(), "missione_finta_*", "MissionLogs",
                                                  "*", "mission_log.txt")), key=os.path.getmtime)
@@ -549,7 +551,7 @@ def _controlli_scelta_celle():
            for r_ in range(8) for c_ in range(7) if env.map[r_][c_] == 1}
     ri = NS(get_manual_waypoint_by_cell=lambda r_, c_: wps.get((r_, c_)),
             find_nearest_waypoint_cell_to_target=lambda *a: (6, 1))
-    m = easy_walk.Missione.__new__(easy_walk.Missione)
+    m = exploration.Missione.__new__(exploration.Missione)
     m.env, m.recordingInterface, m.robot_state_client = env, ri, None
     m._ultima_visitata = (7, 2)
     T.ROBOT.x, T.ROBOT.y = 4.0, 12.75                 # 0.25 m fuori dalla (7,2), nella (6,2)

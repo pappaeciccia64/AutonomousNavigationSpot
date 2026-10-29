@@ -117,7 +117,8 @@ with _quiet():
     from spot_explorer.planning import mission_graph
     from spot_explorer.graphnav import graphnav as navGraphUtils
     from spot_explorer.robot import motion as movements
-    from spot_explorer.mission import explorer as ew
+    from spot_explorer.planning import goal
+    from spot_explorer import records
     from spot_explorer import config as P
 
 
@@ -402,7 +403,7 @@ def gait_check(m):
             continue
         with _quiet():
             movements.select_mobility_params(max(lo, la), float(x['roughness']))
-        rows.append(dict(time=x['timestamp'][11:], tier=ew.MISSION_STATS['last_tier'],
+        rows.append(dict(time=x['timestamp'][11:], tier=records.MISSION_STATS['last_tier'],
                          pitch=float(x['pitch_peak_abs_deg']), slope=round(max(lo, la), 3)))
     return rows
 

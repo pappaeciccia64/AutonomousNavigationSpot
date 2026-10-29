@@ -47,7 +47,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import test_replay as tr          # noqa: E402  (importa anche easy_walk in silenzio)
-from test_replay import ew, sg, P    # noqa: E402
+from test_replay import goal, sg, P    # noqa: E402
 
 DEFAULT = ['22-10-2026_16-04-22']
 
@@ -113,7 +113,7 @@ def replay_goals(name):
                     nid = prm.anchor_node(px, py, gm, sg.PRM_EDGE_SAFETY_MARGIN_M)
                     return nid is not None and prm.find_path_dijkstra(_rn, nid) is not None
 
-                nx_, ny_ = ew.find_best_point_in_cell(
+                nx_, ny_ = goal.find_best_point_in_cell(
                     rx, ry, env, rr, cc, a['pts'], a['od_raw'].ravel(), sampler,
                     global_map=gm, reachable=reach)[:2]
                 mx, my = map(float, d['goal_xy'])
@@ -142,7 +142,7 @@ def replay_goals(name):
         # L'obiettivo nuovo rifiutabile si esclude per la missione, come fa il ciclo.
         if _bad(cur['new']):
             with tr._quiet():
-                ew._refuse_goal(env, rr, cc, *cur['new']['xy'], "rigioco")
+                goal._refuse_goal(env, rr, cc, *cur['new']['xy'], "rigioco")
     # Misure
     out = {}
     for k in ('old', 'new'):
@@ -201,7 +201,7 @@ def synthetic_checks():
         pts = [(x, y) for x in np.linspace(-0.9, 0.9, 7) for y in np.linspace(-0.9, 0.9, 7)]
         sampler = type('S', (), {'get_point_in_cell': lambda self, r, c: pts})()
         with tr._quiet():
-            x, y, _, _ = ew.find_best_point_in_cell(robot[0], robot[1], env, 0, 0, None, None, sampler,
+            x, y, _, _ = goal.find_best_point_in_cell(robot[0], robot[1], env, 0, 0, None, None, sampler,
                                                     global_map=_Map(obstacles), reachable=reachable)
         return env, (x, y)
 
@@ -241,7 +241,7 @@ def synthetic_checks():
           f"centro occupato: il ripiego sta ad almeno {P.TARGET_CELL_BORDER_M:.2f} m dal bordo ({b:.2f})")
     env, g1 = pick([(0.0, 0.0)])
     with tr._quiet():
-        ew._refuse_goal(env, 0, 0, *g1, "prova")
+        goal._refuse_goal(env, 0, 0, *g1, "prova")
     env, g2 = pick([(0.0, 0.0)], env=env)
     check(math.dist(g1, g2) >= P.RECOVERY_SAME_GOAL_M,
           f"obiettivo rifiutato non riproposto: {tuple(round(v, 2) for v in g1)} -> "
@@ -250,8 +250,8 @@ def synthetic_checks():
     with tr._quiet():
         for x in np.linspace(-0.9, 0.9, 7):
             for y in np.linspace(-0.9, 0.9, 7):
-                ew._refuse_goal(env2, 0, 0, x, y, "prova")
-        ew._refuse_goal(env2, 0, 0, 0.0, 0.0, "prova")
+                goal._refuse_goal(env2, 0, 0, x, y, "prova")
+        goal._refuse_goal(env2, 0, 0, 0.0, 0.0, "prova")
     _, g = pick([], env=env2)
     check(g[0] is not None, "tutti i punti rifiutati: si riprova il migliore invece di arrendersi")
     return fails

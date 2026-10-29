@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.dirname(HERE))   # il pacchetto spot_explorer
 
 import matplotlib  # noqa: E402
 matplotlib.use("Agg")
-from spot_explorer.mission import explorer as easy_walk     # noqa: E402
+from spot_explorer.mission import cell_attempt     # noqa: E402
 from spot_explorer import config as parametri     # noqa: E402
 from spot_explorer import records as registro      # noqa: E402
 from spot_explorer.perception import grids as spotGrid      # noqa: E402
@@ -125,7 +125,7 @@ def window():
 
 
 def fake_get_a_tform_b(snapshot, a, b):
-    if b == easy_walk.BODY_FRAME_NAME:
+    if b == cell_attempt.BODY_FRAME_NAME:
         x, y, yaw = snapshot.robot
         return NS(position=NS(x=x, y=y, z=-2.7), rotation=quat(yaw))
     ox, oy = snapshot.origin
@@ -322,7 +322,7 @@ class FakeSampler:
 
 
 # ---- patch: solo i confini col robot ------------------------------------------------------
-easy_walk.get_a_tform_b = spotGrid.get_a_tform_b = fake_get_a_tform_b
+cell_attempt.get_a_tform_b = spotGrid.get_a_tform_b = fake_get_a_tform_b
 spotUtils.getPosition = lambda rsc: (ROBOT.x, ROBOT.y, -2.7, quat(ROBOT.yaw))
 movements.navigate_to = fake_navigate_to
 movements.move_to_world_point_without_turning = fake_move_no_turn
@@ -339,7 +339,7 @@ class _NoTilt:
                     pitch_peak_abs=0, samples=0, errors=0)
 
 
-easy_walk.BodyTiltRecorder = registro.BodyTiltRecorder = _NoTilt
+cell_attempt.BodyTiltRecorder = registro.BodyTiltRecorder = _NoTilt
 
 
 def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, second_attempt=False,
@@ -354,7 +354,7 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
     av.OBSTACLE_HISTORY.reset()
     DYNAMIC_TRIGGER.update(armed=dynamic is not None, rect=dynamic)
     FALL.update(armed=fall is not None, fallen=False, recoverable=(fall == 'recuperabile'), where=None)
-    easy_walk.MISSION_STATS['falls'] = easy_walk.MISSION_STATS['self_rights'] = 0
+    registro.MISSION_STATS['falls'] = registro.MISSION_STATS['self_rights'] = 0
     # Il reticolo vero della missione: passo 0.25 m, archi 0.5-1.25 m, sulle 2 x 2 celle da
     # 5 m di FakeEnv, per tutti gli scenari. GRAPH_KW sceglie i nodi casuali (confronto in fondo).
     from spot_explorer.planning import mission_graph
@@ -370,12 +370,12 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
     prm.mission_graph = mg
     mg.into_prm(prm)
     folder = tempfile.mkdtemp(prefix="missione_e2e_")
-    for k in list(easy_walk.MISSION_STATS['time_s']):
-        easy_walk.MISSION_STATS['time_s'][k] = 0.0
+    for k in list(registro.MISSION_STATS['time_s']):
+        registro.MISSION_STATS['time_s'][k] = 0.0
     for k in ('frontier_blocks', 'frontier_aborts', 'scan_bundles', 'prm_refresh',
               'prm_refresh_skipped', 'multinode_moves', 'multinode_nodes', 'idle_loops'):
-        if k in easy_walk.MISSION_STATS:
-            easy_walk.MISSION_STATS[k] = 0
+        if k in registro.MISSION_STATS:
+            registro.MISSION_STATS[k] = 0
     gg = NS(global_occupancy_map=None, global_terrain_map=None)
     if memory:
         # Ostacoli gia' nella mappa globale da osservazioni precedenti (in missione: le celle
@@ -394,7 +394,7 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
     t0 = time.time()
     with contextlib.redirect_stdout(out):
         try:
-            ok = easy_walk.attempt_enter_cell_from_position(
+            ok = cell_attempt.attempt_enter_cell_from_position(
                 FakeLocalGrid(), gg, None, None, FakeEnv(), target_cell[0], target_cell[1],
                 FakeSampler(), prm, mission_folder=folder, iteration=0,
                 recordingInterface=None, verification_tracker=FakeTracker())
@@ -408,7 +408,7 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
         if second_attempt and err is None:
             ROBOT.track.append((ROBOT.x, ROBOT.y))
             track2_from = len(ROBOT.track) - 1
-            ok2 = easy_walk.attempt_enter_cell_from_position(
+            ok2 = cell_attempt.attempt_enter_cell_from_position(
                 FakeLocalGrid(), gg, None, None, FakeEnv(), target_cell[0], target_cell[1],
                 FakeSampler(), prm, mission_folder=folder, iteration=1,
                 recordingInterface=None, verification_tracker=FakeTracker())
@@ -440,14 +440,14 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
     print("       " + "  ".join(f"{k} x{v}" for k, v in tags.items() if v))
     print(f"       scarto massimo fra punto comandato e raggiunto: {ROBOT.max_endpoint_error:.3f} m")
     print(f"       comandi di movimento: {ROBOT.commands}, metri percorsi: {ROBOT.walked:.1f}, "
-          f"scansioni: {n_scans}, refresh {easy_walk.MISSION_STATS.get('prm_refresh', 0)} fatti / "
-          f"{easy_walk.MISSION_STATS.get('prm_refresh_skipped', 0)} saltati")
+          f"scansioni: {n_scans}, refresh {registro.MISSION_STATS.get('prm_refresh', 0)} fatti / "
+          f"{registro.MISSION_STATS.get('prm_refresh_skipped', 0)} saltati")
     return dict(ok=ok, err=err, log=log, scans=n_scans, folder=folder, tags=tags,
                 min_clear=ROBOT.min_clear, final=(ROBOT.x, ROBOT.y), ok2=ok2, gg=gg,
                 commands=ROBOT.commands, walked=ROBOT.walked,
                 turns=ROBOT.turns, turn_deg=ROBOT.turn_deg,
                 endpoint_error=ROBOT.max_endpoint_error,
-                stats=dict(easy_walk.MISSION_STATS),
+                stats=dict(registro.MISSION_STATS),
                 track2=ROBOT.track[track2_from:] if track2_from is not None else [])
 
 
@@ -506,7 +506,7 @@ if __name__ == '__main__':
     r = run("S6. caduta a meta' movimento, il robot si rialza; poi un secondo tentativo",
             [], (2.0, 2.0, 0.785), (0, 1), fall='recuperabile', second_attempt=True)
     check(r['err'] is None, "nessuna eccezione")
-    check(r['tags']["[CADUTA] Rilevata"] == 1 and easy_walk.MISSION_STATS['self_rights'] == 1,
+    check(r['tags']["[CADUTA] Rilevata"] == 1 and registro.MISSION_STATS['self_rights'] == 1,
           "caduta rilevata e robot rialzato")
     fx, fy = FALL['where']
     gm = r['gg'].global_occupancy_map
@@ -647,11 +647,11 @@ if __name__ == '__main__':
     # Lo stesso caso con la regola dell'attesa tolta: il blocco confermato a ridosso
     # dell'obiettivo deve far scegliere un altro obiettivo, non ripianificare verso quello
     # appena escluso (28-10 11:36: "escluso", e subito dopo un percorso verso lo stesso nodo).
-    real_check = easy_walk.TentativoCella._fronte_fermo_sull_obiettivo
+    real_check = cell_attempt.TentativoCella._fronte_fermo_sull_obiettivo
 
     def _solo_nel_blocco(self):
         return sys._getframe(1).f_code.co_name != '_cambia_obiettivo_irraggiungibile' and real_check(self)
-    easy_walk.TentativoCella._fronte_fermo_sull_obiettivo = _solo_nel_blocco
+    cell_attempt.TentativoCella._fronte_fermo_sull_obiettivo = _solo_nel_blocco
     parametri_early = parametri.MAX_EARLY_REPLANS
     parametri.MAX_EARLY_REPLANS = 0
     try:
@@ -660,7 +660,7 @@ if __name__ == '__main__':
         r = run("S15. ostacolo subito oltre l'obiettivo: blocco, poi nuovo obiettivo",
                 obstacle_beyond, (2.0, 3.0, 0.0), (0, 1))
     finally:
-        easy_walk.TentativoCella._fronte_fermo_sull_obiettivo = real_check
+        cell_attempt.TentativoCella._fronte_fermo_sull_obiettivo = real_check
         parametri.MAX_EARLY_REPLANS = parametri_early
     check(r['err'] is None and r['ok'] is True, "blocco vicino all'obiettivo: cella raggiunta")
     check("[TARGET] Blocco a" in r['log'] and "[REPLAN] Dopo il blocco" not in r['log'],
