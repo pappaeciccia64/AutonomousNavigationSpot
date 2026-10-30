@@ -173,7 +173,7 @@ def shortcut_index(robot_xy, path_waypoints, snap, global_map=None, prm=None, ro
                    for t in np.linspace(0.0, 1.0, n)[1:]):
                 continue
         f = compute_safe_frontier([(rx, ry), (wx, wy)], snap)
-        if f['reason'] == 'fine_percorso':
+        if f['reason'] == 'end_of_path':
             return k
     return 0
 
@@ -290,7 +290,7 @@ def arrival_has_exit(snap, arrival_xy, heading, min_advance_m=P.ESCAPE_FAN_MIN_A
     # this, in a corridor the forward direction ended at the edge of the scan (0.09 m) and the
     # step was refused; at the third refusal it went anyway, and it was the right step
     # (28-10 12:16, and scenario S16 of test_e2e_loop.py).
-    return any(d['usable'] or (d['rotatable'] and d['reason'] == 'fine_dati') for d in dirs), dirs
+    return any(d['usable'] or (d['rotatable'] and d['reason'] == 'end_of_data') for d in dirs), dirs
 
 
 def plan_cone_move(robot_xy, robot_yaw, snap, goal_xy, max_dyaw_deg=P.CONE_SWEEP_MAX_DEG,

@@ -81,6 +81,7 @@ from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
 from spot_explorer.perception import slopes
 from spot_explorer.perception import spot_grid
+from spot_explorer.legacy import modern
 
 SLOPE_THRESHOLD = slopes.SLOPE_THRESHOLD    # only used to colour the edges
 
@@ -141,8 +142,8 @@ NAVGRAPH_EDGE_STYLE = {    # edge source -> (colour, width, style, label)
 }
 NAVGRAPH_OTHER_STYLE = ('gray', 0.9, ':', 'nav graph: altro arco')
 
-REASON_COLORS = {'fine_percorso': 'tab:green', 'fine_dati': 'tab:blue', 'ostacolo': 'tab:red',
-                 'rugosita': 'tab:orange', 'pendenza': 'tab:purple'}
+REASON_COLORS = {'end_of_path': 'tab:green', 'end_of_data': 'tab:blue', 'obstacle': 'tab:red',
+                 'roughness': 'tab:orange', 'slope': 'tab:purple'}
 
 # name, function extracting the matrix, colour map, vmin, vmax, label
 LAYERS = [
@@ -317,8 +318,8 @@ def draw_scan(ax, d, layer_idx, title_prefix="", ctx=None):
                                        ls='--', zorder=6))
     # The frontier checks the path EXTENDED by half a body beyond the goal (the nose,
     # see safe_frontier.compute_safe_frontier): the X is where the check ends, which with
-    # 'fine_percorso' is half a body beyond the commanded point. The extension is dashed.
-    reason = str(d['frontier_reason'])
+    # 'end_of_path' is half a body beyond the commanded point. The extension is dashed.
+    reason = modern(str(d['frontier_reason']))
     sx, sy = d['frontier_stop_xy']
     poly = np.asarray(d['polyline']) if 'polyline' in d else np.zeros((0, 2))
     path_len = float(d['frontier_path_len']) if 'frontier_path_len' in d else np.nan
@@ -759,9 +760,9 @@ class MissionContext:
                         rows = list(csv.DictReader(f))
                     # fourth column: 1 GraphNav move ('move' column, since 2026-10-26),
                     # 2 correction of the return to wp_0 with the fiducial (since 29-10), 0 the rest
-                    kind = {'graphnav': 1.0, 'graphnav_correzione': 2.0}
+                    kind = {'graphnav': 1.0, 'graphnav_correction': 2.0}
                     return np.array([(float(r['time']), float(r['x']), float(r['y']),
-                                      kind.get(r.get('move'), 0.0)) for r in rows]).reshape(-1, 4)
+                                      kind.get(modern(r.get('move')), 0.0)) for r in rows]).reshape(-1, 4)
                 except Exception as e:
                     print(f"[viewer] trajectory.csv non leggibile: {e}")
         return None
@@ -1521,7 +1522,7 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=Fals
         ax.plot(pl[:, 0], pl[:, 1], '-', color='magenta', lw=2.5, zorder=6, label='percorso pianificato')
         x0, x1, y0, y1 = _extent(d)
         ax.add_patch(patches.Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False, edgecolor='cyan', lw=2, zorder=6))
-        reason = str(d['frontier_reason'])
+        reason = modern(str(d['frontier_reason']))
         ax.plot(*d['frontier_stop_xy'], 'X', color=REASON_COLORS.get(reason, 'k'), ms=11, mec='white', zorder=8)
     rx, ry = d['robot_xyz'][:2]
     ax.plot(rx, ry, 'o', color='blue', ms=9, mec='white', zorder=9)

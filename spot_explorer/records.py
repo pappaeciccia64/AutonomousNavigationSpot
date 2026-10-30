@@ -126,8 +126,8 @@ _CSV_LOCK = threading.Lock()
 
 
 # trajectory.csv columns. 'move' (2026-10-26) tells what kind of movement produced the
-# sample: 'prm' (navigation loop leg), 'graphnav', 'cono', 'arretramento',
-# 'ritirata'. Until 2026-10-26 movements other than 'prm' did NOT end up in the file: the
+# sample: 'prm' (navigation loop leg), 'graphnav', 'cone', 'backoff',
+# 'retreat'. Until 2026-10-26 movements other than 'prm' did NOT end up in the file: the
 # viewer joined with a straight line the last point before a GraphNav return and the first
 # after, a line that cut through obstacles (mission of 22-10, around 16:00).
 _TRAJECTORY_COLUMNS = ['time', 'iteration', 'cell_row', 'cell_col', 'loop_iter', 'node_from', 'node_to',

@@ -27,11 +27,11 @@ MISSION_GRID_COLS = 7
 MISSION_CELL_SIZE_M = 2.0
 
 # How the graph nodes are generated (see mission_graph.py, RANDOM NODES):
-#   'reticolo' rectangular lattice, deterministic; the centre of every cell is a node;
-#   'casuale'  scattered nodes with MISSION_RANDOM_DISTRIBUTION ('uniforme', 'poisson',
-#              'perturbata', 'halton'), cell centres always included.
+#   'lattice' rectangular lattice, deterministic; the centre of every cell is a node;
+#   'random'  scattered nodes with MISSION_RANDOM_DISTRIBUTION ('uniform', 'poisson',
+#              'jittered', 'halton'), cell centres always included.
 # From the command line: --graph --distribution --density --seed.
-MISSION_GRAPH_SAMPLING = 'casuale'
+MISSION_GRAPH_SAMPLING = 'random'
 MISSION_RANDOM_DISTRIBUTION = 'poisson'
 # Nodes per m2: with 4 the number of nodes is that of the lattice at 0.5 m spacing; 5 a bit
 # more, for narrow passages.
@@ -372,15 +372,15 @@ GRAPHNAV_LOST_DETECTOR_STRICTNESS = 'LOST_DETECTOR_STRICTNESS_PERMISSIVE'   # No
 
 # HEADING ON ARRIVAL of the GraphNav trips between cells and of the returns to breadcrumbs (the
 # final return to wp_0 always keeps the starting heading):
-#   'verso_obiettivo'  arrives facing the centre of the cell to attempt (trips between cells)
+#   'toward_goal'  arrives facing the centre of the cell to attempt (trips between cells)
 #                      or the goal of the attempt (returns): the first move after
 #                      arrival starts almost straight;
 #   'waypoint'         the heading the robot had when it created the waypoint (as
 #                      until 28-10);
-#   'libero'           GraphNav does not turn at the end (ignore_final_yaw).
+#   'free'           GraphNav does not turn at the end (ignore_final_yaw).
 # On 26-10 15:11 (8 arrivals): after arrival the robot rotated in place 79 degrees on average
 # (38 s in all); left free it would have been 82, facing the goal 22.
-GRAPHNAV_ARRIVAL_HEADING = 'verso_obiettivo'
+GRAPHNAV_ARRIVAL_HEADING = 'toward_goal'
 GRAPHNAV_ARRIVAL_HEADING_MIN_M = 0.5   # goal closer than this to the waypoint: direction not reliable, the waypoint's is used
 GRAPHNAV_MAX_RELOCALIZATIONS = 3       # re-anchorings per single GraphNav move
 GRAPHNAV_RELOC_MAX_DIST_M = 0.5        # ICP search radius around the guess

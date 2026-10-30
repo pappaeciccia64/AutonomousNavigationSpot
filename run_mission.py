@@ -2,7 +2,7 @@
 """
 Run an exploration mission with Spot.
 
-    python3 run_mission.py [--rows R --cols C --cell L --graph reticolo|casuale ...]
+    python3 run_mission.py [--rows R --cols C --cell L --graph lattice|random ...]
 
 The arguments are those of spot_explorer.mission.run (python3 run_mission.py --help).
 """

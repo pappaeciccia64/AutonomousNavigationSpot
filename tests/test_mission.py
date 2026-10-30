@@ -407,13 +407,13 @@ def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0_m=None, wp0_offset
     spot_grid.LocalGrid = lambda r: T.FakeLocalGrid()
     safe_frontier.ArcVerificationTracker = lambda r: _Tracker()
     cell_attempt.BodyTiltRecorder = registro.BodyTiltRecorder = _NoTilt
-    parametri.MISSION_GRAPH_SAMPLING = 'reticolo'
+    parametri.MISSION_GRAPH_SAMPLING = 'lattice'
 
     root = tempfile.mkdtemp(prefix="missione_finta_")
     mission_run.DATA_ROOT = root                                    # data folders here
     argv = sys.argv
-    sys.argv = ["easy_walk.py", "--rows", str(ROWS), "--cols", str(COLS), "--cell", str(CELL),
-                "--graph", "reticolo", "--spacing", "0.5"]
+    sys.argv = ["run_mission.py", "--rows", str(ROWS), "--cols", str(COLS), "--cell", str(CELL),
+                "--graph", "lattice", "--spacing", "0.5"]
     t0 = time.time()
     out = io.StringIO()
     try:

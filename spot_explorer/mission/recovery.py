@@ -249,7 +249,7 @@ def retreat_along_traveled_path(env, robot_state_client, command_client,
 
         print(f"[RITIRATA] Tratto {done + 1}/{max_segments}: rientro verso "
               f"({from_x:.2f}, {from_y:.2f}), {seg_len:.2f} m all'indietro.")
-        with TrajectoryLog(robot_state_client, 'ritirata', (from_x, from_y)):
+        with TrajectoryLog(robot_state_client, 'retreat', (from_x, from_y)):
             success, dist = movements.move_to_world_point_without_turning(
                 from_x, from_y, "vision", command_client, robot_state_client, **mobility_kwargs)
         total += dist
@@ -284,7 +284,7 @@ def cell_has_reachable_target(env, sampler, global_map, row, col, safety_margin=
     have nothing to do with it.
 
     Only what has been SEEN is considered: unknown is not occupied (the same rule as the
-    frontier, which tells 'fine_dati' from 'ostacolo'). So a cell never seen always answers
+    frontier, which tells 'end_of_data' from 'obstacle'). So a cell never seen always answers
     yes, and this check cannot prevent a first exploration.
     """
     if global_map is None:

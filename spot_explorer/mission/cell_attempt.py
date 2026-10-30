@@ -448,15 +448,15 @@ class CellAttempt:
 
     def _drop_edge(self, a, b, duration):
         """Remove leg a-b from the graph. duration:
-          'ora'       -- until the next refresh, which puts it back if the data says it is free
+          'now'       -- until the next refresh, which puts it back if the data says it is free
                          (see roadmap.mark_edge_blocked_soft);
-          'tentativo' -- for the rest of the attempt (attempt penalty);
-          'missione'  -- forever: block confirmed while still or physical failure."""
-        if duration == 'missione':
+          'attempt' -- for the rest of the attempt (attempt penalty);
+          'mission'  -- forever: block confirmed while still or physical failure."""
+        if duration == 'mission':
             self.prm_graph.mark_edge_invalid(a, b)
             return
         prm_graph_module.mark_edge_blocked_soft(self.prm_graph, a, b)
-        if duration == 'tentativo':
+        if duration == 'attempt':
             self.prm_graph.edge_penalty_persistent[(min(a, b), max(a, b))] = self.prm_graph._ATTEMPT_MARK
 
     def _walked_path(self, x0, y0):
@@ -517,7 +517,7 @@ class CellAttempt:
         """The frontier stops for an obstacle (or roughness, slope) right next to the goal
         (within REFUSED_GOAL_BLOCK_M) or beyond the end of the path, in the extension for the
         nose: no path to this goal can pass, the problem is the point."""
-        if self.frontier['reason'] not in ('ostacolo', 'rugosita', 'pendenza'):
+        if self.frontier['reason'] not in ('obstacle', 'roughness', 'slope'):
             return False
         sx, sy = self.frontier['stop_xy']
         return (self.frontier['dist'] >= self.frontier['path_len']
@@ -1003,7 +1003,7 @@ class CellAttempt:
                 # not on the edge -- the same edge, approached from another point or with another
                 # heading, can be perfectly travelable. Only what is confirmed by three still
                 # scans or by a physical failure stays permanent.
-                self._drop_edge(self.robot_node_id, self.next_node_id, 'ora')
+                self._drop_edge(self.robot_node_id, self.next_node_id, 'now')
                 new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
                 if new_ids is not None:
                     self._use_path(new_ids)
@@ -1058,7 +1058,7 @@ class CellAttempt:
         # at once. The still scans remain as the last net, to
         # declare the cell unreachable.
         if (self.early_replans < P.MAX_EARLY_REPLANS
-                and self.frontier['reason'] in ('ostacolo', 'rugosita', 'pendenza')
+                and self.frontier['reason'] in ('obstacle', 'roughness', 'slope')
                 and self.path_waypoints):
             poly_now = [(self.robot_x, self.robot_y)] + [(x, y) for _, x, y in self.path_waypoints]
             _, seg_blk = safe_frontier.point_along(poly_now, self.frontier['dist'])
@@ -1087,7 +1087,7 @@ class CellAttempt:
                   f"Direzioni utilizzabili da qui: {n_us}/{n_fan}.")
             # NON-permanent discard: after a single scan the edge must be removed from the plan,
             # not condemned for the mission (see mark_edge_blocked_soft).
-            self._drop_edge(ea, eb, 'ora')
+            self._drop_edge(ea, eb, 'now')
             # But if it is the SECOND time on the same leg, the "for now" discard was not
             # enough: the refresh put it back into the graph (the preliminary discard looks at one
             # scan at 0.25 m, the frontier at the median of three with hysteresis up to 0.29),
@@ -1096,7 +1096,7 @@ class CellAttempt:
             # repetitions of the same leg (197->569 four times in a row).
             key_s = (min(ea, eb), max(ea, eb))
             if key_s in self.early_replanned_edges:
-                self._drop_edge(ea, eb, 'tentativo')
+                self._drop_edge(ea, eb, 'attempt')
                 MISSION_STATS['early_replans_repeated'] = MISSION_STATS.get('early_replans_repeated', 0) + 1
                 print(f"[SUBITO] Il tratto {ea}->{eb} era gia' stato scartato in questo tentativo e "
                       f"il piano ci e' tornato: fuori dal piano per il resto del tentativo.")
@@ -1130,7 +1130,7 @@ class CellAttempt:
             MISSION_STATS['cone_moves'] += 1
             cx, cy = cone['target']
             self.need_refresh = True      # end of a move: see EVENT REFRESH
-            with TrajectoryLog(self.robot_state_client, 'cono', (cx, cy)):
+            with TrajectoryLog(self.robot_state_client, 'cone', (cx, cy)):
                 ok_c, dist_c, _ = movements.navigate_to(
                     cx, cy, self.robot_x, self.robot_y, self.robot_state_client, self.command_client,
                     get_a_tform_b(self.lg_proto_up.local_grid.transforms_snapshot,
@@ -1172,7 +1172,7 @@ class CellAttempt:
                 self.verification_tracker.clear_path()
             MISSION_STATS['straight_retreats'] += 1
             self.need_refresh = True      # end of a move: see EVENT REFRESH
-            with TrajectoryLog(self.robot_state_client, 'arretramento', (bx, by)):
+            with TrajectoryLog(self.robot_state_client, 'backoff', (bx, by)):
                 ok_back, dist_back = movements.move_to_world_point_without_turning(
                     bx, by, "vision", self.command_client, self.robot_state_client, **self.mobility_kwargs)
             if dist_back > 0.05:
@@ -1305,7 +1305,7 @@ class CellAttempt:
             # is not on the node it is attached to, the blocked leg is robot->node, not
             # the graph edge: the edge is discarded only for now.
             on_node = k > 0 or mission_graph.robot_on_node(self.prm_graph, edge_a, self.robot_x, self.robot_y)
-            self._drop_edge(edge_a, edge_b, 'missione' if on_node else 'ora')
+            self._drop_edge(edge_a, edge_b, 'mission' if on_node else 'now')
             self.block_replans += 1
             self.no_progress = 0
 
@@ -1385,7 +1385,7 @@ class CellAttempt:
 
             outcome = self._walk_leg(move_x, move_y, next_x, next_y, is_partial_step,
                                          vision_tform_body_current)
-            if outcome == 'fermo':
+            if outcome == 'stopped':
                 break
             if outcome is FAILED:
                 return FAILED
@@ -1421,7 +1421,7 @@ class CellAttempt:
                 # it is the arrival point that has no exits, so the refresh would put it back
                 # into the graph at the next turn and the same plan would be made again. On 28-10 12:16 the
                 # same step was refused three times in a row, and executed at the third.
-                self._drop_edge(self.robot_node_id, self.next_node_id, 'tentativo')
+                self._drop_edge(self.robot_node_id, self.next_node_id, 'attempt')
                 new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
                 if new_ids is not None and len(new_ids) > 1:
                     self._use_path(new_ids)
@@ -1568,7 +1568,7 @@ class CellAttempt:
             if not live_frontiers or live_frontiers[-1][0] != f['time']:
                 live_frontiers.append((f['time'], frx, fry, f['reason'], float(f['dist']), reach, remaining,
                                        abort_state['bad']))
-            if (f['reason'] == 'fine_dati'
+            if (f['reason'] == 'end_of_data'
                     and float(np.hypot(frx - self.robot_x, fry - self.robot_y)) < P.ABORT_IGNORE_DATA_EDGE_UNTIL_M):
                 abort_state['bad'] = 0      # still rotating in place: see the constant
                 return False
@@ -1644,7 +1644,7 @@ class CellAttempt:
 
     def _walk_leg(self, move_x, move_y, next_x, next_y, is_partial_step, vision_tform_body_current):
         """One leg: gait, move, outcome. 'avanti' = succeeded, the next leg can be done;
-        'fermo' = interrupted or replanned, look again; FAILED = physical failure."""
+        'stopped' = interrupted or replanned, look again; FAILED = physical failure."""
         terrain_info = self._leg_terrain(move_x, move_y)
         success_move, distance_traveled, distance_commanded, abort_reason = self._move_and_record(
             move_x, move_y, vision_tform_body_current, terrain_info)
@@ -1695,7 +1695,7 @@ class CellAttempt:
             MISSION_STATS['frontier_aborts'] += 1
             if distance_traveled > 0.05:
                 self._stop_node_here(*self._walked_path(self.robot_x, self.robot_y), "sosta (arresto)")
-            return 'fermo'
+            return 'stopped'
 
         else:
             print(f"[FAIL] Comando di movimento fallito meccanicamente per ({move_x:.2f}, {move_y:.2f}) "
@@ -1709,11 +1709,11 @@ class CellAttempt:
 
             # If the robot did not start from the node, the failed leg is not the graph edge.
             on_node = mission_graph.robot_on_node(self.prm_graph, self.robot_node_id, self.robot_x, self.robot_y)
-            self._drop_edge(self.robot_node_id, self.next_node_id, 'missione' if on_node else 'ora')
+            self._drop_edge(self.robot_node_id, self.next_node_id, 'mission' if on_node else 'now')
             print(f"[INFO] Tratto {self.robot_node_id}-{self.next_node_id} scartato dopo fallimento fisico.")
             if self._go_back((self.robot_node_id, self.next_node_id),
                              f"dal nodo {self.robot_node_id}"):
-                return 'fermo'
+                return 'stopped'
 
             fail_save_path = os.path.join(self.mission_folder,
                                           f"iteration_{self.iteration}_cell_{self.target_row}_{self.target_col}_MOVE_FAIL.png") if self.mission_folder else None

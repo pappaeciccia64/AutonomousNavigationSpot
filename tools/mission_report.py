@@ -29,6 +29,8 @@ from collections import Counter
 import numpy as np
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # project folder
+sys.path.insert(0, HERE)                                     # the spot_explorer package
+from spot_explorer.legacy import modern                      # noqa: E402
 LOGS = os.path.join(HERE, 'MissionLogs')
 MAPS = os.path.join(HERE, 'MissionMap')
 GRAPHS = os.path.join(HERE, 'graph')
@@ -191,10 +193,10 @@ def section_frontier(scans, thresholds=(0.30, 0.20)):
     data = [np.load(f) for f in scans]
     if 'frontier_reason' not in data[0].files:
         return None
-    reasons = Counter(str(d['frontier_reason']) for d in data if 'frontier_reason' in d.files)
+    reasons = Counter(modern(str(d['frontier_reason'])) for d in data if 'frontier_reason' in d.files)
     events, last = [], None
     for i, d in enumerate(data):
-        if str(d['frontier_reason']) != 'ostacolo':
+        if modern(str(d['frontier_reason'])) != 'obstacle':
             last = None
             continue
         p = np.asarray(d['frontier_stop_xy'], dtype=float)
@@ -250,7 +252,7 @@ def section_arrival_rotation(trajectory):
     for r in trajectory:
         try:
             rows.append((float(r['time']), float(r['x']), float(r['y']), float(r['yaw_deg']),
-                         float(r['target_x']), float(r['target_y']), r['move'].strip()))
+                         float(r['target_x']), float(r['target_y']), modern(r['move'].strip())))
         except (KeyError, ValueError):
             continue
     rows.sort()
@@ -597,7 +599,7 @@ def report(name):
     g = (summary or {}).get('grafo')
     if g:
         extra = (f"{g.get('distribuzione')}, {g.get('densita_nodi_m2'):g} nodi/m2, seme {g.get('seme')}"
-                 if g.get('metodo') == 'casuale' else f"passo {g.get('passo_m')} m")
+                 if modern(g.get('metodo')) == 'random' else f"passo {g.get('passo_m')} m")
         print(f"Grafo: {g.get('metodo')} ({extra}), {g.get('nodi')} nodi, archi "
               f"{g.get('arco_min_m'):g}-{g.get('arco_max_m'):g} m, copertura {g.get('copertura_m')} m")
     else:

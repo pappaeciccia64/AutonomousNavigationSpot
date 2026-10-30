@@ -36,7 +36,7 @@ Usage:
     python3 tests/test_replay.py --fast                # invariant 1 only on 3 scattered cell starts
     python3 tests/test_replay.py --missions 13-10-2026_12-40-38
     python3 tests/test_replay.py --update-reference
-    python3 tests/test_replay.py --all --graph casuale --distribution poisson --seed 7
+    python3 tests/test_replay.py --all --graph random --distribution poisson --seed 7
 
 GRAPH COMPARISON -- with --graph, --spacing (and --distribution, --density, --seed,
   --min-edge, --max-edge) the missions are replayed with a graph different from the one
@@ -110,6 +110,7 @@ def _quiet():
 with _quiet():
     import matplotlib
     matplotlib.use('Agg')
+    from spot_explorer.legacy import modern
     from spot_explorer.perception import geometry
     from spot_explorer.perception import global_maps
     from spot_explorer.perception import slopes
@@ -144,12 +145,12 @@ def mission_setup(name):
     # Since 22-10: node method and edge length; for random nodes distribution,
     # density and actual seed. The earlier missions are all lattice, edges 0.5-1.25.
     gr = re.search(r'\[CONFIG\] Grafo: nodi (\w+).*; archi da ([\d.]+) a ([\d.]+) m', log)
-    sampling, min_edge, max_edge = ((gr.group(1), float(gr.group(2)), float(gr.group(3)))
-                                    if gr else ('reticolo', 0.5, 1.25))
+    sampling, min_edge, max_edge = ((modern(gr.group(1)), float(gr.group(2)), float(gr.group(3)))
+                                    if gr else ('lattice', 0.5, 1.25))
     rnd = re.search(r"\[GRAFO\] Nodi casuali: distribuzione (\w+), densita' ([\d.]+) nodi/m2, "
                     r"seme (\d+)", log)
     graph = dict(sampling=sampling, min_edge=min_edge, max_edge=max_edge,
-                 distribution=rnd.group(1) if rnd else None,
+                 distribution=modern(rnd.group(1)) if rnd else None,
                  density=float(rnd.group(2)) if rnd else None,
                  seed=int(rnd.group(3)) if rnd else None)
     scans.sort(key=lambda f: float(np.load(f)['time']))
@@ -214,7 +215,7 @@ def replay_mission(job):
         g = m['graph']
         P.MISSION_GRAPH_SAMPLING = g['sampling']
         P.PRM_MIN_EDGE_M, P.PRM_MAX_EDGE_M = g['min_edge'], g['max_edge']
-        if g['sampling'] == 'casuale':
+        if g['sampling'] == 'random':
             P.MISSION_RANDOM_DISTRIBUTION = g['distribution']
             P.MISSION_RANDOM_DENSITY = g['density']
             P.MISSION_RANDOM_SEED = g['seed']
@@ -556,7 +557,7 @@ def main():
         override['PRM_MIN_EDGE_M'] = args.min_edge
     if args.max_edge is not None:
         override['PRM_MAX_EDGE_M'] = args.max_edge
-    if override and override.get('MISSION_GRAPH_SAMPLING', P.MISSION_GRAPH_SAMPLING) == 'casuale':
+    if override and override.get('MISSION_GRAPH_SAMPLING', P.MISSION_GRAPH_SAMPLING) == 'random':
         # A single seed for all missions, written below so the comparison can be repeated.
         override['MISSION_RANDOM_SEED'] = (args.seed if args.seed is not None
                                            else mission_graph.draw_seed())

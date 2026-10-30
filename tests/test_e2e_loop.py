@@ -366,7 +366,7 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
         origin_xy=(3.5, 3.5), origin_yaw=0.0, min_edge_length=parametri.PRM_MIN_EDGE_M,
         max_edge_length=parametri.PRM_MAX_EDGE_M,
         connection_radius=parametri.PRM_CONNECTION_RADIUS_M, verbose=False,
-        **dict({'sampling': 'reticolo'}, **GRAPH_KW))
+        **dict({'sampling': 'lattice'}, **GRAPH_KW))
     prm = prm_graph.PRM(min_edge_length=parametri.PRM_MIN_EDGE_M,
                         max_edge_length=parametri.PRM_MAX_EDGE_M,
                         connection_radius=parametri.PRM_CONNECTION_RADIUS_M)
@@ -610,9 +610,9 @@ if __name__ == '__main__':
               f"multinodo {mm} ({mn} nodi); {sc} scansioni; arrivato: {ok}")
 
     print("\n--- Confronto: reticolo e nodi casuali (16 nodi/m2, seme 7), corridoio di S9 ---")
-    for label, kw in [("reticolo", {})] + [
-            (f"casuale {d}", dict(sampling='casuale', distribution=d, density_per_m2=16.0, seed=7))
-            for d in ("uniforme", "poisson", "perturbata", "halton")]:
+    for label, kw in [("lattice", {})] + [
+            (f"casuale {d}", dict(sampling='random', distribution=d, density_per_m2=16.0, seed=7))
+            for d in ("uniform", "poisson", "jittered", "halton")]:
         GRAPH_KW.clear()
         GRAPH_KW.update(kw)
         r = run(f"S13. {label}", [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)],
@@ -633,7 +633,7 @@ if __name__ == '__main__':
     for label, seed, x0, attesa in (("passo finale sotto il passo minimo", 4, 8.85, 'passo'),
                                         ("nuovo obiettivo alla prima fermata", 9, 8.75, 'attesa')):
         GRAPH_KW.clear()
-        GRAPH_KW.update(sampling='casuale', distribution='poisson', density_per_m2=4.0, seed=seed)
+        GRAPH_KW.update(sampling='random', distribution='poisson', density_per_m2=4.0, seed=seed)
         r = run(f"S15. ostacolo subito oltre l'obiettivo: {label}",
                 [(x0, x0 + 0.4, 2.0, 5.0)], (2.0, 3.0, 0.0), (0, 1))
         check(r['err'] is None and r['ok'] is True, f"{label}: cella raggiunta senza eccezioni")
@@ -659,7 +659,7 @@ if __name__ == '__main__':
     parametri.MAX_EARLY_REPLANS = 0
     try:
         GRAPH_KW.clear()
-        GRAPH_KW.update(sampling='casuale', distribution='poisson', density_per_m2=4.0, seed=9)
+        GRAPH_KW.update(sampling='random', distribution='poisson', density_per_m2=4.0, seed=9)
         r = run("S15. ostacolo subito oltre l'obiettivo: blocco, poi nuovo obiettivo",
                 obstacle_beyond, (2.0, 3.0, 0.0), (0, 1))
     finally:
@@ -702,7 +702,7 @@ if __name__ == '__main__':
                          f"({sum(d['usable'] for d in fan_pocket)}/{len(fan_pocket)} direzioni)")
 
     GRAPH_KW.clear()
-    GRAPH_KW.update(sampling='casuale', distribution='poisson', density_per_m2=4.0, seed=1)
+    GRAPH_KW.update(sampling='random', distribution='poisson', density_per_m2=4.0, seed=1)
     r = run("S16. corridoio largo 0.9 m: nessun rifiuto [ARRIVO] a vuoto",
             [(5.0, 8.0, 0.0, 3.0), (5.0, 8.0, 3.9, 12.0)], (2.0, 3.5, 0.0), (0, 1))
     GRAPH_KW.clear()

@@ -36,7 +36,7 @@ def graphnav_arrival_heading(recordingInterface, waypoint_id, face_xy, label):
     one. None = waypoint heading, as without it: waypoint not created by us, face_xy missing
     or too close. Never raises.
     """
-    if face_xy is None or P.GRAPHNAV_ARRIVAL_HEADING != 'verso_obiettivo':
+    if face_xy is None or P.GRAPHNAV_ARRIVAL_HEADING != 'toward_goal':
         return None
     try:
         poses = getattr(recordingInterface, 'waypoint_poses', None) or {}
@@ -61,7 +61,7 @@ def graphnav_navigate_to(recordingInterface, waypoint_id, robot_state_client, co
     """Take the robot to a waypoint with GraphNav. True only if it really gets there.
 
     face_xy: VISION point to face on arrival (see graphnav_arrival_heading); None =
-    waypoint heading. With GRAPHNAV_ARRIVAL_HEADING = 'libero', if face_xy is given the
+    waypoint heading. With GRAPHNAV_ARRIVAL_HEADING = 'free', if face_xy is given the
     robot arrives without turning. move: label of the move in trajectory.csv."""
     # Before moving: Spot's loop closures (with recording stopped). The shortcuts from
     # the map are added by the caller, BEFORE stopping the recording.
@@ -102,7 +102,7 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
         except Exception:
             pass
     goal_pose = graphnav_arrival_heading(recordingInterface, waypoint_id, face_xy, label)
-    if face_xy is not None and P.GRAPHNAV_ARRIVAL_HEADING == 'libero' and hasattr(tp, 'ignore_final_yaw'):
+    if face_xy is not None and P.GRAPHNAV_ARRIVAL_HEADING == 'free' and hasattr(tp, 'ignore_final_yaw'):
         tp.ignore_final_yaw = True
     print(f"[GRAPHNAV] {label}: avvio (massimo {timeout_s:.0f} s, {P.GRAPHNAV_MAX_LINEAR_VEL_MPS:.1f} m/s).")
     # Before leaving, check the localizer state; if it is lost, re-anchor
@@ -191,12 +191,12 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
 def graphnav_return_to_start(recordingInterface, robot_state_client, command_client):
     """
     Return to wp_0 at the end of the mission, with a time limit. Three outcomes:
-      'arrivato'      GraphNav says it has arrived;
-      'vicino'        GraphNav stopped without arriving (STUCK, timeout...) but the robot
+      'arrived'      GraphNav says it has arrived;
+      'near'        GraphNav stopped without arriving (STUCK, timeout...) but the robot
                       is within P.GRAPHNAV_RETURN_NEAR_M of wp_0: the return did NOT
                       succeed, but the fiducial and the drift are measured anyway (13:50 on
                       28-10: stuck in the grass at 0.63 m, measurements lost);
-      'non arrivato'  everything else.
+      'not_arrived'  everything else.
     The distance from wp_0 is the one GraphNav reports if it is localized on wp_0,
     otherwise the one from the VISION poses (with the odometry drift in it).
     """
@@ -205,28 +205,28 @@ def graphnav_return_to_start(recordingInterface, robot_state_client, command_cli
         wp0 = next((w for w in graph.waypoints if w.annotations.name == "wp_0"), None)
     except Exception as e:
         print(f"[GRAPHNAV] Ritorno a wp_0: grafo non disponibile ({e}).")
-        return 'non arrivato'
+        return 'not_arrived'
     if wp0 is None:
         print("[GRAPHNAV] Ritorno a wp_0: waypoint wp_0 non trovato nel grafo.")
-        return 'non arrivato'
+        return 'not_arrived'
     if graphnav_navigate_to(recordingInterface, wp0.id, robot_state_client, command_client,
                             "ritorno a wp_0", timeout_s=2 * P.GRAPHNAV_TIMEOUT_S):
-        MISSION_STATS['wp0_return'] = 'arrivato'
-        return 'arrivato'
+        MISSION_STATS['wp0_return'] = 'arrived'
+        return 'arrived'
     why = _LAST_GRAPHNAV_FAIL.get('reason') or 'motivo non registrato'
     d, how = _distance_from_waypoint(recordingInterface, robot_state_client, wp0.id, 'wp_0')
-    MISSION_STATS['wp0_return'] = 'non arrivato'
+    MISSION_STATS['wp0_return'] = 'not_arrived'
     MISSION_STATS['wp0_return_dist_m'] = None if d is None else round(d, 2)
     if d is not None and d <= P.GRAPHNAV_RETURN_NEAR_M:
-        MISSION_STATS['wp0_return'] = 'vicino'
+        MISSION_STATS['wp0_return'] = 'near'
         print(f"[GRAPHNAV] Ritorno a wp_0 NON riuscito ma vicino: fermo a {d:.2f} m da wp_0 "
               f"(motivo: {why}; distanza {how}). Misuro comunque fiducial e deriva.")
         graphnav_log_drift(recordingInterface, robot_state_client, "ritorno a wp_0 (fermo vicino)")
-        return 'vicino'
+        return 'near'
     print(f"[GRAPHNAV] Ritorno a wp_0 NON riuscito: fermo "
           + (f"a {d:.2f} m da wp_0" if d is not None else "a distanza sconosciuta da wp_0")
           + f" (motivo: {why}).")
-    return 'non arrivato'
+    return 'not_arrived'
 
 
 def graphnav_step_back(env, recordingInterface, robot_state_client, command_client,

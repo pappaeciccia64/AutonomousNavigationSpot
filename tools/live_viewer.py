@@ -47,6 +47,8 @@ import matplotlib
 import matplotlib.patches as patches
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # project folder
+sys.path.insert(0, HERE)                                     # the spot_explorer package
+from spot_explorer.legacy import modern                      # noqa: E402
 MOSAIC_RES = 0.10           # side of the mosaic cells, m
 REFRESH_S = 1.0             # how often to re-read, live
 LOG_TAGS = ('[PROGRESSO]', '[TARGET]', '[ATTEMPT]', '[VISITED]', '[BLOCKED]', '[BLOCCO]',
@@ -54,8 +56,8 @@ LOG_TAGS = ('[PROGRESSO]', '[TARGET]', '[ATTEMPT]', '[VISITED]', '[BLOCKED]', '[
             '[GRAPHNAV]', '[BATTERIA]', '[FINE]', '[FRONTIERA]', '[STALLO]', '[EMERGENZA]',
             '[QUASI]', '[PASSO FINALE]', '[RITORNO]', '[MULTINODO]', '[DEFER]', '[PRECHECK]', '[WP0]')
 N_LOG_LINES = 12
-REASON_COLORS = {'ostacolo': 'red', 'rugosita': 'darkorange', 'pendenza': 'darkorange',
-                 'fine_dati': 'purple', 'fine_percorso': 'green'}
+REASON_COLORS = {'obstacle': 'red', 'roughness': 'darkorange', 'slope': 'darkorange',
+                 'end_of_data': 'purple', 'end_of_path': 'green'}
 
 
 def _folders(nome):
@@ -251,7 +253,7 @@ class LiveState:
                         t = float(r['time'])
                         if until is not None and t > until:
                             break
-                        kind = {'graphnav': 1.0, 'graphnav_correzione': 2.0}.get(r.get('move'), 0.0)
+                        kind = {'graphnav': 1.0, 'graphnav_correction': 2.0}.get(modern(r.get('move')), 0.0)
                         rows.append((t, float(r['x']), float(r['y']), kind))
                     except (TypeError, ValueError, KeyError):
                         continue
@@ -355,7 +357,7 @@ def draw(fig, ax_map, ax_txt, st, follow, until=None):
             ax_map.plot(poly[:, 0], poly[:, 1], '-o', color='darkorange', lw=2, ms=3, zorder=6)
         gx, gy = (float(v) for v in d['goal_xy'])
         ax_map.plot(gx, gy, '*', color='gold', mec='k', ms=16, zorder=8)
-        reason = str(d['frontier_reason'])
+        reason = modern(str(d['frontier_reason']))
         sx, sy = (float(v) for v in d['frontier_stop_xy'])
         ax_map.plot(sx, sy, 'x', color=REASON_COLORS.get(reason, 'k'), ms=12, mew=3, zorder=8)
         adv = float(d['allowed_advance'])

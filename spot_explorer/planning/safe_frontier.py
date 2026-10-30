@@ -182,7 +182,7 @@ def make_grid_snapshot(cells_obstacle_dist, rough_values, is_valid, terrain_vali
       It is not is_valid: is_valid also excludes the cells discarded by the ground height
       filter (walls), which have been seen; obstacle_distance flags the obstacle.
     - unwritten: cells never written by the sensors (correct_terrain with return_unwritten=True):
-      they count as NOT seen, so the frontier stops there with 'fine_dati'.
+      they count as NOT seen, so the frontier stops there with 'end_of_data'.
     """
     shape = (num_y, num_x)
     rough = np.asarray(rough_values, dtype=np.float64).reshape(shape)
@@ -360,9 +360,9 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
     if bad.any():
         k = int(np.argmax(bad))
         if no_data[k]:
-            reason, value = 'fine_dati', None
+            reason, value = 'end_of_data', None
         elif obstacle[k]:
-            reason, value = 'ostacolo', float(od[k])
+            reason, value = 'obstacle', float(od[k])
             # The EFFECTIVE threshold at that point and whether the hysteresis decided, for the log:
             # without it, "ostacolo a 0.27 m (minimo 0.25 m)" would look like a contradiction.
             result['stop_threshold'] = float(thr[k])
@@ -370,10 +370,10 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
                 snap.blocked_latch is not None and use_latch
                 and snap.blocked_latch[rows[k], cols[k]] and od[k] >= thr[k])
         else:
-            reason, value = 'rugosita', None
+            reason, value = 'roughness', None
         dist, stop_xy = float(ss[k]), (float(xs[k]), float(ys[k]))
     else:
-        reason, value = 'fine_percorso', None
+        reason, value = 'end_of_path', None
         dist, stop_xy = float(ss[-1]), (float(xs[-1]), float(ys[-1]))
 
     # Slope on the stretches already confirmed free, segment by segment: if a stretch is
@@ -394,7 +394,7 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
                     snap.terrain, snap.origin_x, snap.origin_y, snap.cell_size,
                     x1, y1, x1 + f * (x2 - x1), y1 + f * (y2 - y1), valid_2d=snap.valid)
                 if has and max(long_s, lat_s) > slopes.SLOPE_THRESHOLD:
-                    reason, value = 'pendenza', float(max(long_s, lat_s))
+                    reason, value = 'slope', float(max(long_s, lat_s))
                     dist, stop_xy = s_start, (x1, y1)
                     break
             s_start += L
@@ -409,10 +409,10 @@ def allowed_advance(frontier):
 
     If the whole path (extension included) is free, up to the goal. Otherwise the centre
     stops half a body length + margin before the first non-free point, so the nose also
-    stays on confirmed terrain. This also holds for 'fine_dati': the nose must not end up
+    stays on confirmed terrain. This also holds for 'end_of_data': the nose must not end up
     on terrain never seen.
     """
-    if frontier['reason'] == 'fine_percorso':
+    if frontier['reason'] == 'end_of_path':
         return frontier['path_len']
     half_along = frontier.get('half_along', geometry.FRONTIER_BODY_HALF_LENGTH_M)
     return max(0.0, frontier['dist'] - half_along - geometry.FRONTIER_MARGIN_M)
@@ -438,11 +438,11 @@ def describe_frontier(frontier):
     sx, sy = frontier['stop_xy']
     base = (f"{frontier['dist']:.2f} m confermati su {frontier['path_len']:.2f} m di percorso, "
             f"avanzamento consentito {adv:.2f} m")
-    if r == 'fine_percorso':
+    if r == 'end_of_path':
         return f"[FRONTE] {base} -- percorso libero fino all'obiettivo"
-    if r == 'fine_dati':
+    if r == 'end_of_data':
         return f"[FRONTE] {base} -- si ferma sul bordo dei dati in ({sx:.2f}, {sy:.2f}): avanzo e riguardo"
-    if r == 'ostacolo':
+    if r == 'obstacle':
         thr = frontier.get('stop_threshold', frontier.get('clearance_nominal',
                                                           geometry.FRONTIER_CLEARANCE_M))
         if frontier.get('stop_by_latch'):
@@ -452,7 +452,7 @@ def describe_frontier(frontier):
             why = f"(minimo {thr:.2f} m)"
         return (f"[FRONTE] {base} -- ostacolo a {frontier['value']:.2f} m dalla linea centrale in "
                 f"({sx:.2f}, {sy:.2f}) {why}")
-    if r == 'rugosita':
+    if r == 'roughness':
         return f"[FRONTE] {base} -- terreno troppo irregolare in ({sx:.2f}, {sy:.2f})"
     return (f"[FRONTE] {base} -- tratto troppo ripido da ({sx:.2f}, {sy:.2f}) "
             f"(pendenza {frontier['value']:.3f} > {slopes.SLOPE_THRESHOLD:.3f})")
@@ -654,7 +654,7 @@ def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=P.PRM_NODE_MIN_CLEAR
     destination and as a waypoint.
 
     Discarded ONLY where the cell has really been observed: unknown is not occupied (the
-    same rule by which the frontier tells 'fine_dati' from 'ostacolo'). A node outside the
+    same rule by which the frontier tells 'end_of_data' from 'obstacle'). A node outside the
     window or never seen stays where it is and will be judged when it is seen.
 
     Re-evaluated at every loop, so a node found to be inside a wall drops at once; and

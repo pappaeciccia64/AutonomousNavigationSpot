@@ -3,9 +3,9 @@ mission_graph.py -- the mission graph, built from the MISSION SIZE (rows, column
 side: the same three numbers as SPOT_MISSION_GRID and cells.EnvironmentMap). Nodes are
 generated in two ways (P.MISSION_GRAPH_SAMPLING, in config.py like all the P.* mentioned
 here):
-  - 'reticolo' (default): a rectangular LATTICE of equally spaced nodes, in closed form.
+  - 'lattice' (default): a rectangular LATTICE of equally spaced nodes, in closed form.
     Two flags: the SPACING between nodes and the connection RINGS.
-  - 'casuale': scattered nodes with a chosen distribution, to compare the two methods
+  - 'random': scattered nodes with a chosen distribution, to compare the two methods
     (see RANDOM NODES).
 Almost all of the comment below is about the lattice.
 
@@ -70,16 +70,16 @@ ALIASING -- the limit to know
   Guaranteed passage: lattice 2c + spacing, random nodes 2c + 2 * coverage. At spacing 0.25
   every strip wider than 0.25 m contains a row of nodes.
 
-RANDOM NODES (P.MISSION_GRAPH_SAMPLING = 'casuale')
+RANDOM NODES (P.MISSION_GRAPH_SAMPLING = 'random')
   As an alternative to the lattice, the nodes can be scattered at random over the mission
   area, to compare the two methods. The cell centres ALWAYS stay nodes (they are the goals,
   and the centre of the starting cell is the power-on point); the other nodes follow one of
   these distributions, with P.MISSION_RANDOM_DENSITY nodes per m^2:
-    'uniforme'   independent uniform points: the classic PRM, with holes and clumps;
+    'uniform'   independent uniform points: the classic PRM, with holes and clumps;
     'poisson'    Poisson-disk: uniform points discarded if closer than a minimum distance
                  to a node already placed (P.MISSION_POISSON_MIN_DIST_M; None = 0.75/sqrt(density),
                  which lets the requested density be reached): no clumps;
-    'perturbata' the area divided into squares of 1/density m^2, one random point in each
+    'jittered' the area divided into squares of 1/density m^2, one random point in each
                  (a few squares removed or points added at random to reach the exact
                  number): no area stays empty for more than one square;
     'halton'     Halton sequence in bases 2 and 3, quasi-random and very uniform; the
@@ -117,7 +117,7 @@ functions that use them.
 From the command line:
     python3 -m spot_explorer.planning.mission_graph --compare
     python3 -m spot_explorer.planning.mission_graph --spacing 0.25 --rings 2 --preview p.png --zoom -2 2 -2 2
-    python3 -m spot_explorer.planning.mission_graph --graph casuale --distribution poisson --density 16 --seed 7 --preview p.png
+    python3 -m spot_explorer.planning.mission_graph --graph random --distribution poisson --density 16 --seed 7 --preview p.png
     python3 -m spot_explorer.planning.mission_graph --compare-methods methods.png --seed 7 --zoom -2 2 -2 2
     python3 -m spot_explorer.planning.mission_graph --rows 2 --cols 3 --cell 3
     python3 -m spot_explorer.planning.mission_graph --save lattice_2x4x5.npz
@@ -146,13 +146,13 @@ DEFAULT_LATTICE_SPACING_M = 0.25
 
 # ----------------------------------------------------------------------------------------
 # HOW THE NODES ARE GENERATED (see RANDOM NODES in the comment at the top).
-#   'reticolo' the rectangular lattice, deterministic (default);
-#   'casuale'  scattered nodes with P.MISSION_RANDOM_DISTRIBUTION, cell centres always included.
+#   'lattice' the rectangular lattice, deterministic (default);
+#   'random'  scattered nodes with P.MISSION_RANDOM_DISTRIBUTION, cell centres always included.
 # They are changed for a single mission with the arguments of run_mission.py (--graph,
 # --distribution, --density, --seed).
 # ----------------------------------------------------------------------------------------
-GRAPH_SAMPLINGS = ('reticolo', 'casuale')
-RANDOM_DISTRIBUTIONS = ('uniforme', 'poisson', 'perturbata', 'halton')
+GRAPH_SAMPLINGS = ('lattice', 'random')
+RANDOM_DISTRIBUTIONS = ('uniform', 'poisson', 'jittered', 'halton')
 
 
 def mission_settings(rows=None, cols=None, cell_size_m=None, spacing_m=None):
@@ -373,10 +373,10 @@ def _random_points(distribution, density_per_m2, box, fixed_xy, rng, min_dist=No
     x0, x1, y0, y1 = box
     w, h = x1 - x0, y1 - y0
     n = int(round(float(density_per_m2) * w * h))
-    if distribution == 'uniforme':
+    if distribution == 'uniform':
         u = rng.random((n, 2))
         return np.column_stack((x0 + u[:, 0] * w, y0 + u[:, 1] * h)), ""
-    if distribution == 'perturbata':
+    if distribution == 'jittered':
         side = 1.0 / math.sqrt(float(density_per_m2))
         nx, ny = max(1, int(round(w / side))), max(1, int(round(h / side)))
         hx, hy = w / nx, h / ny                   # squares covering the exact rectangle
@@ -504,7 +504,7 @@ class MissionGraph:
 
     def __init__(self, spacing_m, rows, cols, cell_size_m, start_cell, origin_xy, origin_yaw,
                  ij, xy_local, pairs, lengths, node_cell, cell_center_ids, origin_node_id,
-                 min_edge_m, reach_m, rings, n_short_pairs, sampling='reticolo',
+                 min_edge_m, reach_m, rings, n_short_pairs, sampling='lattice',
                  distribution=None, density_per_m2=None, seed=None, covering=None,
                  sampling_note=""):
         self.spacing_m = float(spacing_m)
@@ -566,7 +566,7 @@ class MissionGraph:
 
     @property
     def is_random(self):
-        return self.sampling == 'casuale'
+        return self.sampling == 'random'
 
     @property
     def covering_m(self):
@@ -801,7 +801,7 @@ class MissionGraph:
                 # test_replay reads distribution, density and seed from this line.
                 f"[GRAFO] Nodi casuali: distribuzione {self.distribution}, densita' "
                 f"{self.density_per_m2:.2f} nodi/m2, seme {self.seed} "
-                f"(per ripetere: --graph casuale --distribution {self.distribution} "
+                f"(per ripetere: --graph random --distribution {self.distribution} "
                 f"--density {self.density_per_m2:g} --seed {self.seed})",
             ]
             if self.sampling_note:
@@ -970,8 +970,8 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
         env: an EnvironmentMap already created and with set_origin() done. If passed, size
             and pose come from it: it is the way to guarantee that graph and cell map cannot
             get out of sync.
-        sampling: 'reticolo' or 'casuale' (see RANDOM NODES); None = P.MISSION_GRAPH_SAMPLING. With
-            'casuale' spacing_m and rings do not count.
+        sampling: 'lattice' or 'random' (see RANDOM NODES); None = P.MISSION_GRAPH_SAMPLING. With
+            'random' spacing_m and rings do not count.
         distribution, density_per_m2, seed, poisson_min_dist_m: the parameters of the random
             nodes; None = P.MISSION_RANDOM_DISTRIBUTION, P.MISSION_RANDOM_DENSITY,
             P.MISSION_RANDOM_SEED, P.MISSION_POISSON_MIN_DIST_M. Seed None there too = drawn at random (and written in the log).
@@ -992,7 +992,7 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
     sampling = P.MISSION_GRAPH_SAMPLING if sampling is None else sampling
     if sampling not in GRAPH_SAMPLINGS:
         raise ValueError(f"metodo dei nodi sconosciuto {sampling!r}: uno di {GRAPH_SAMPLINGS}")
-    if sampling == 'casuale':
+    if sampling == 'random':
         return _build_random_graph(
             rows, cols, cell_size_m, start_cell, origin_xy, origin_yaw,
             float(min_edge_length), min(float(connection_radius), float(max_edge_length)),
@@ -1136,7 +1136,7 @@ def _build_random_graph(rows, cols, cell_size_m, start_cell, origin_xy, origin_y
                       start_cell, origin_xy, origin_yaw,
                       -np.ones((len(xy_local), 2), dtype=np.int64), xy_local, pairs, lengths,
                       node_cell, cell_center_ids, origin_node_id, min_edge_m, reach_m, None,
-                      n_short, sampling='casuale', distribution=distribution,
+                      n_short, sampling='random', distribution=distribution,
                       density_per_m2=float(density_per_m2), seed=seed,
                       covering=measured_covering(xy_local, box), sampling_note=note)
     if verbose:
@@ -1242,7 +1242,7 @@ def lattice_matched_density(**kw):
     """
     kw = {k: v for k, v in kw.items()
           if k not in ('sampling', 'distribution', 'density_per_m2', 'seed', 'verbose')}
-    ref = build_mission_graph(sampling='reticolo', verbose=False, **kw)
+    ref = build_mission_graph(sampling='lattice', verbose=False, **kw)
     margin = float(kw.get('border_margin_m', 0.0))
     x0, x1, y0, y1 = _mission_extent(ref.rows, ref.cols, ref.cell_size_m, ref.start_cell)
     area = (x1 - x0 - 2 * margin) * (y1 - y0 - 2 * margin)
@@ -1250,7 +1250,7 @@ def lattice_matched_density(**kw):
 
 
 def compare_methods_png(path, zoom=(-2.0, 2.0, -2.0, 2.0), seed=None,
-                        methods=('reticolo',) + RANDOM_DISTRIBUTIONS, verbose=False, **kw):
+                        methods=('lattice',) + RANDOM_DISTRIBUTIONS, verbose=False, **kw):
     """
     The node methods side by side (default: the lattice and the four random distributions),
     with the same parameters (mission, edges, density) and the same seed, to see the
@@ -1273,10 +1273,10 @@ def compare_methods_png(path, zoom=(-2.0, 2.0, -2.0, 2.0), seed=None,
     for m in methods:
         if verbose:
             print(f"\n--- {m}")
-        if m == 'reticolo':
-            graphs.append(build_mission_graph(sampling='reticolo', verbose=verbose, **kw))
+        if m == 'lattice':
+            graphs.append(build_mission_graph(sampling='lattice', verbose=verbose, **kw))
         else:
-            graphs.append(build_mission_graph(sampling='casuale', distribution=m, seed=seed,
+            graphs.append(build_mission_graph(sampling='random', distribution=m, seed=seed,
                                               verbose=verbose, **kw))
     n_cols = 3 if len(graphs) >= 3 else len(graphs) + 1
     n_rows = int(math.ceil((len(graphs) + 1) / n_cols))
@@ -1302,7 +1302,7 @@ def compare_methods_png(path, zoom=(-2.0, 2.0, -2.0, 2.0), seed=None,
     ax.axis('off')
     rows = []
     for mg in graphs:
-        name = 'reticolo' if not mg.is_random else mg.distribution
+        name = 'lattice' if not mg.is_random else mg.distribution
         if mg.covering is None:
             # Lattice: the maximum from the formula (the measurement grid may miss its point).
             cov = (mg.covering_m, measured_covering(mg.xy_local, _mission_extent(
@@ -1416,7 +1416,7 @@ def _main():
         return
     if a.comparison:
         compare(rows=a.rows, cols=a.cols, cell_size_m=a.cell, min_edge_length=a.min_edge,
-                sampling='reticolo',
+                sampling='lattice',
                 max_edge_length=a.max_edge, connection_radius=a.radius,
                 border_margin_m=a.margin)
         return

@@ -197,7 +197,7 @@ def _mission_grid(options):
     print(f"[CONFIG] Grafo: nodi {P.MISSION_GRAPH_SAMPLING}"
           + (f" ({P.MISSION_RANDOM_DISTRIBUTION}, {P.MISSION_RANDOM_DENSITY:g} nodi/m2, seme "
              f"{'a caso' if P.MISSION_RANDOM_SEED is None else P.MISSION_RANDOM_SEED})"
-             if P.MISSION_GRAPH_SAMPLING == 'casuale' else "")
+             if P.MISSION_GRAPH_SAMPLING == 'random' else "")
           + f"; archi da {P.PRM_MIN_EDGE_M:g} a {P.PRM_MAX_EDGE_M:g} m")
     return environmentMap.EnvironmentMap(rows=grid_rows, cols=grid_cols, cell_size=grid_cell)
 
@@ -232,15 +232,15 @@ def _close_mission(robot, robot_state_client, command_client, recordingInterface
         monitor.check("inizio del ritorno a wp_0")
     _pct0 = MISSION_STATS.get('battery_last_pct')
     wp0_outcome = navigation.graphnav_return_to_start(recordingInterface, robot_state_client, command_client)
-    if wp0_outcome in ('arrivato', 'vicino'):
+    if wp0_outcome in ('arrived', 'near'):
         # Even when stopped near wp_0 the tag is searched: it measures the drift of the whole mission.
         measure = apriltags.graphnav_check_start_fiducial(robot, robot_state_client)
         # Arrived according to GraphNav but far according to the tag: correction (see
         # WP0_FIDUCIAL_CORRECTION). Not when stopped nearby (STUCK): the way is blocked.
-        if wp0_outcome == 'arrivato' and measure and measure.get('offset') is not None:
+        if wp0_outcome == 'arrived' and measure and measure.get('offset') is not None:
             apriltags.graphnav_correct_wp0_with_fiducial(robot, recordingInterface, robot_state_client,
                                                              command_client, measure['offset'])
-    if wp0_outcome != 'arrivato':
+    if wp0_outcome != 'arrived':
         print("[GRAPHNAV] Ritorno a wp_0 non riuscito: il robot si siede dove si trova.")
     _t_close['ritorno a wp_0'] = time.perf_counter() - _t
     if monitor is not None:

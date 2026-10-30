@@ -41,14 +41,14 @@ EDGE_MAX_M = None            # config.PRM_MAX_EDGE_M
 LATTICE_SPACING_M = None      # config.MISSION_LATTICE_SPACING_M
 RINGS = None                # config.MISSION_LATTICE_RINGS (None there too = all)
 
-# Random nodes: nodes per m2 ('come_reticolo' = same number of nodes as the lattice) and seed.
+# Random nodes: nodes per m2 ('match_lattice' = same number of nodes as the lattice) and seed.
 # Seed None (also in config.py) = drawn at random: it is written in the image title and
 # at the end, to rebuild the same graph in a mission.
 NODE_DENSITY_M2 = None       # config.MISSION_RANDOM_DENSITY
 SEED = None                  # config.MISSION_RANDOM_SEED
 
 # Which methods to compare: remove the ones you don't want to see.
-METHODS = ['reticolo', 'uniforme', 'poisson', 'perturbata', 'halton']
+METHODS = ['lattice', 'uniform', 'poisson', 'jittered', 'halton']
 
 # Region to draw: None = the whole area; or (x_min, x_max, y_min, y_max) in metres,
 # with the robot at (0, 0), x forward and y to the left. Example: (-2, 2, -2, 2).
@@ -88,12 +88,12 @@ def main():
         rows=rows, cols=cols, cell_size_m=cell,
         spacing_m=spacing, rings=rings,
         min_edge_length=e_min, max_edge_length=e_max,
-        density_per_m2=None if density == 'come_reticolo' else density)
+        density_per_m2=None if density == 'match_lattice' else density)
     # Nodes per cell, with nodes on the borders counted as half (see nodes_per_cell).
     print("\nNodi per cella (righe dall'alto, come nell'immagine; i nodi sui confini fra "
           "celle contano a meta'):")
     for g in graphs:
-        name = g.distribution if g.is_random else 'reticolo'
+        name = g.distribution if g.is_random else 'lattice'
         counts = mission_graph.nodes_per_cell(g)
         print(f"  {name:11s} totale {g.n_nodes:5d}, per cella {counts.min():.0f}-{counts.max():.0f}")
         for r in reversed(range(counts.shape[0])):
@@ -109,17 +109,17 @@ def main():
         if g.is_random:
             d = g.describe()
             dens = d.get('densita_nodi_m2', density)
-            lines = (f"MISSION_GRAPH_SAMPLING = 'casuale'   MISSION_RANDOM_DISTRIBUTION = "
+            lines = (f"MISSION_GRAPH_SAMPLING = 'random'   MISSION_RANDOM_DISTRIBUTION = "
                      f"'{g.distribution}'   MISSION_RANDOM_DENSITY = {dens:g}   "
                      f"MISSION_RANDOM_SEED = {seed}")
-            cmd = (f"--graph casuale --distribution {g.distribution} --density {dens:g} "
+            cmd = (f"--graph random --distribution {g.distribution} --density {dens:g} "
                    f"--seed {seed}")
             name = g.distribution
         else:
-            lines = (f"MISSION_GRAPH_SAMPLING = 'reticolo'   MISSION_LATTICE_SPACING_M = "
+            lines = (f"MISSION_GRAPH_SAMPLING = 'lattice'   MISSION_LATTICE_SPACING_M = "
                      f"{spacing}   MISSION_LATTICE_RINGS = {rings}")
-            cmd = f"--graph reticolo --spacing {spacing}" + (f" --rings {rings}" if rings else "")
-            name = 'reticolo'
+            cmd = f"--graph lattice --spacing {spacing}" + (f" --rings {rings}" if rings else "")
+            name = 'lattice'
         extra = ""
         if area:
             extra += f" --rows {rows} --cols {cols} --cell {cell:g}"
@@ -127,7 +127,7 @@ def main():
             extra += f" --min-edge {e_min:g} --max-edge {e_max:g}"
         print(f"  {name}:")
         print(f"    in parametri.py:  {lines}")
-        print(f"    oppure una volta: python3 easy_walk.py {cmd}{extra}")
+        print(f"    oppure una volta: python3 run_mission.py {cmd}{extra}")
     if P.MISSION_RANDOM_SEED is None:
         print("  Attenzione: in parametri.py il seme e' None, cioe' nuovo a ogni missione. Per "
               "avere in missione un grafo casuale visto qui serve il suo seme.")

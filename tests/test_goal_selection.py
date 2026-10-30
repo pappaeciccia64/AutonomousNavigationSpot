@@ -49,6 +49,7 @@ sys.path.insert(0, HERE)
 import test_replay as tr          # noqa: E402  (also imports the mission code quietly)
 from test_replay import goal, P    # noqa: E402
 from spot_explorer.perception import geometry, global_maps   # noqa: E402
+from spot_explorer.legacy import modern   # noqa: E402
 
 DEFAULT = ['22-10-2026_16-04-22']
 
@@ -79,7 +80,7 @@ def replay_goals(name):
         g = m['graph']
         P.MISSION_GRAPH_SAMPLING = g['sampling']
         P.PRM_MIN_EDGE_M, P.PRM_MAX_EDGE_M = g['min_edge'], g['max_edge']
-        if g['sampling'] == 'casuale':
+        if g['sampling'] == 'random':
             P.MISSION_RANDOM_DISTRIBUTION = g['distribution']
             P.MISSION_RANDOM_DENSITY = g['density']
             P.MISSION_RANDOM_SEED = g['seed']
@@ -133,7 +134,7 @@ def replay_goals(name):
         # Block confirmed right next to the mission's goal (the replayed path is the one
         # towards it): it applies to the new goal only if it is the same point.
         if (str(d['decision_kind']) == 'blocked'
-                and str(d['frontier_reason']) in ('ostacolo', 'rugosita', 'pendenza')):
+                and modern(str(d['frontier_reason'])) in ('obstacle', 'roughness', 'slope')):
             sxy = tuple(map(float, d['frontier_stop_xy']))
             if math.dist(sxy, cur['old']['xy']) <= P.REFUSED_GOAL_BLOCK_M:
                 cur['old']['blocked'] = True

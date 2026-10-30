@@ -151,7 +151,7 @@ def graphnav_correct_wp0_with_fiducial(robot, recordingInterface, robot_state_cl
             print("[WP0] Senza rilocalizzazione sul tag non correggo: resto dove sono.")
             break
         arrived = graphnav_navigate_to(recordingInterface, wp0.id, robot_state_client, command_client,
-                                       f"correzione {k} del ritorno a wp_0", move='graphnav_correzione')
+                                       f"correzione {k} del ritorno a wp_0", move='graphnav_correction')
         MISSION_STATS['wp0_corrections'] = k
         now = find_fiducials(robot, robot_state_client, wait_s=P.START_FIDUCIAL_WAIT_S, fiducial_id=start['id'])
         new = _offset_from_start(start, now[0]) if now else None
