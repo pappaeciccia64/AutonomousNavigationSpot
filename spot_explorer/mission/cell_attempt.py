@@ -191,7 +191,7 @@ class CellAttempt:
         # slope and roughness, obstacle mask
         self.local_grid.process_scan(scan, self.robot_x, self.robot_y, self.robot_yaw,
                                 ground_label="scan-initial")
-        self.footprint_mask_2d, terrain_real, is_valid = scan.footprint_mask, scan.terrain, scan.is_valid
+        terrain_real, is_valid = scan.terrain, scan.is_valid
         obstacle_mask = scan.obstacle_mask
 
         # Update the global maps (occupancy and terrain) with the data just processed
@@ -501,7 +501,7 @@ class CellAttempt:
         esc = recovery._trap_backtrack(
             self.trap_state, block_arc,
             self.env, self.prm_graph, self.goal_id, self.recordingInterface, self.robot_state_client,
-            self.command_client, self.global_map, self.mobility_kwargs, self.pts_up, self.obstacle_mask_updated,
+            self.command_client, self.global_map, self.mobility_kwargs, self.scan.pts, self.scan.obstacle_mask,
             label=label, skip_if_graph_cannot_help=skip_if_graph_cannot_help)
         if not esc['ok']:
             return False
@@ -546,7 +546,7 @@ class CellAttempt:
         new_ids = None
         for _k in range(P.GOAL_REPICK_CANDIDATES):
             new_tx, new_ty, _vs, _rs = goal.find_best_point_in_cell(
-                self.robot_x, self.robot_y, self.env, self.target_row, self.target_col, self.pts_up, self.cells_obs_up,
+                self.robot_x, self.robot_y, self.env, self.target_row, self.target_col, self.scan.pts, self.scan.od,
                 self.sampler, global_map=self.global_map, exclude=self.tried_goals,
                 reachable=self._reachable_from_robot)
             if new_tx is None or new_ty is None:
@@ -656,41 +656,35 @@ class CellAttempt:
             return FAILED
         self.t_scan = time.perf_counter()
 
-        self.grids_data_up, main_proto_up = scan.grids_data, scan.proto
-        self.lg_proto_up = main_proto_up
-        self.pts_up, self.cells_obs_up = scan.pts, scan.od
-        self.terrain_up, self.valid_up = scan.terrain_raw, scan.valid
-        self.num_x_up, self.num_y_up, self.cell_size_up = scan.num_x, scan.num_y, scan.cell_size
-        self.grid_origin_x_up, self.grid_origin_y_up = self.local_grid.grid_origin(scan)
+        self.scan = scan
+        scan.grid_origin_x, scan.grid_origin_y = self.local_grid.grid_origin(scan)
+        scan.shape = (scan.num_y, scan.num_x)
 
         self.local_grid.process_scan(scan, self.robot_x, self.robot_y, self.robot_yaw,
                                 ground_label="scan-step")
-        self.footprint_mask_2d = scan.footprint_mask
-        self.terrain_real_up, self.is_valid_up, self.unwritten_up = scan.terrain, scan.is_valid, scan.unwritten
-        self.grad_up, self.rough_up, self.obstacle_mask_updated = scan.grad, scan.rough, scan.obstacle_mask
 
         self.t_proc = time.perf_counter()
-        _gm_core_up = global_maps.fold_scan_into_global_maps(
-            self.global_map, self.global_terrain_map, self.pts_up, self.terrain_real_up, self.obstacle_mask_updated,
-            self.is_valid_up, self.cells_obs_up, (self.num_y_up, self.num_x_up), (self.robot_x, self.robot_y, self.robot_yaw))
+        body_core = global_maps.fold_scan_into_global_maps(
+            self.global_map, self.global_terrain_map, scan.pts, scan.terrain, scan.obstacle_mask,
+            scan.is_valid, scan.od, scan.shape, (self.robot_x, self.robot_y, self.robot_yaw))
         self.t_maps = time.perf_counter()
 
         # 2. Fresh local data into the PRM, then replanning from the current node if needed
-        grad_up_2d = self.grad_up.reshape((self.num_y_up, self.num_x_up))
-        self.rough_up_2d = self.rough_up.reshape((self.num_y_up, self.num_x_up))
-        self.terrain_up_2d = self.terrain_real_up.reshape((self.num_y_up, self.num_x_up))
+        scan.grad_2d = scan.grad.reshape(scan.shape)
+        scan.rough_2d = scan.rough.reshape(scan.shape)
+        scan.terrain_2d = scan.terrain.reshape(scan.shape)
 
         # The local data is always injected: it costs nothing (it stores the array references) and
         # it is needed anyway by sample_terrain_between_points for the gait of the leg about to
         # be travelled.
         self.prm_graph.update_local_grid_data(
-            grad_values_2d=grad_up_2d,
-            rough_values_2d=self.rough_up_2d,
-            terrain_values_2d=self.terrain_up_2d,
-            valid_2d=spot_grid.slope_usable_mask(self.is_valid_up, self.cells_obs_up, (self.num_y_up, self.num_x_up)),
-            grid_origin_x=self.grid_origin_x_up,
-            grid_origin_y=self.grid_origin_y_up,
-            cell_size=self.cell_size_up
+            grad_values_2d=scan.grad_2d,
+            rough_values_2d=scan.rough_2d,
+            terrain_values_2d=scan.terrain_2d,
+            valid_2d=spot_grid.slope_usable_mask(scan.is_valid, scan.od, scan.shape),
+            grid_origin_x=scan.grid_origin_x,
+            grid_origin_y=scan.grid_origin_y,
+            cell_size=scan.cell_size
         )
 
         # Snapshot of the scan just made: it is needed already here -- by the preliminary edge
@@ -698,16 +692,16 @@ class CellAttempt:
         # in obstacles -- and then by the safe frontier. It must be created ONLY ONCE per scan:
         # make_grid_snapshot also updates the temporal obstacle filter.
         self.snap = safe_frontier.make_grid_snapshot(
-            self.cells_obs_up, self.rough_up, self.is_valid_up, self.valid_up, self.terrain_real_up,
-            self.num_x_up, self.num_y_up, self.grid_origin_x_up, self.grid_origin_y_up, self.cell_size_up,
-            self.robot_x, self.robot_y, unwritten=self.unwritten_up, robot_yaw=self.robot_yaw)
+            scan.od, scan.rough, scan.is_valid, scan.valid, scan.terrain,
+            scan.num_x, scan.num_y, scan.grid_origin_x, scan.grid_origin_y, scan.cell_size,
+            self.robot_x, self.robot_y, unwritten=scan.unwritten, robot_yaw=self.robot_yaw)
 
         # Free-space map: HERE, not together with global_map.update, because it needs the
         # filtered obstacle_distance that lives in the snapshot (see global_maps.update_clearance_map).
         # It is fed only by the navigation loop, so all observations go through
         # the same filter.
-        global_maps.update_clearance_map(self.global_map, self.pts_up, self.snap, self.is_valid_up, self.unwritten_up,
-                              _gm_core_up, (self.robot_x, self.robot_y))
+        global_maps.update_clearance_map(self.global_map, scan.pts, self.snap, scan.is_valid, scan.unwritten,
+                              body_core, (self.robot_x, self.robot_y))
 
     def _update_graph(self):
         """Edges re-evaluated on the new data (only after a move or an event), nodes in
@@ -811,13 +805,13 @@ class CellAttempt:
             ) if self.mission_folder else None
 
             visualize_grid_with_candidates(
-                pts=self.pts_up, terrain_real=self.terrain_real_up, obstacle_mask=self.obstacle_mask_updated,
+                pts=self.scan.pts, terrain_real=self.scan.terrain, obstacle_mask=self.scan.obstacle_mask,
                 robot_x=self.robot_x, robot_y=self.robot_y,
                 candidates={'rejected': [], 'valid': []},
                 chosen_point=(self.target_x, self.target_y), iteration=self.iteration, env=self.env,
                 save_path=replan_save_path, prm_graph=self.prm_graph, chosen_path=self.full_path_coords,
-                cells_obstacle_dist=self.cells_obs_up, valid_values=self.valid_up,
-                grad_values=self.grad_up, rough_values=self.rough_up,
+                cells_obstacle_dist=self.scan.od, valid_values=self.scan.valid,
+                grad_values=self.scan.grad, rough_values=self.scan.rough,
                 include_diagnostics=False  # light: main view and global map
             )
         else:
@@ -890,7 +884,7 @@ class CellAttempt:
         # robot_yaw and decision_target.
         if P.SAVE_SCAN_BUNDLES and self.mission_folder is not None:
             gf = self.local_grid.last_ground_filter
-            shape_up = (self.num_y_up, self.num_x_up)
+            shape = self.scan.shape
             extra = {}
             if P.SAVE_EXTRA_LAYERS:
                 t_x = time.perf_counter()
@@ -904,32 +898,32 @@ class CellAttempt:
                              f"scan_it{self.iteration:03d}_cell{self.target_row}_{self.target_col}_{self.loop_iter:03d}.npz"),
                 time=time.time(), iteration=self.iteration, cell=np.array([self.target_row, self.target_col]),
                 loop_iter=self.loop_iter,
-                terrain_raw=np.asarray(self.terrain_up, dtype=np.float32).reshape(shape_up),
-                terrain_valid_raw=np.asarray(self.valid_up, dtype=np.float32).reshape(shape_up),
-                obstacle_distance=np.asarray(self.cells_obs_up, dtype=np.float32).reshape(shape_up),
+                terrain_raw=np.asarray(self.scan.terrain_raw, dtype=np.float32).reshape(shape),
+                terrain_valid_raw=np.asarray(self.scan.valid, dtype=np.float32).reshape(shape),
+                obstacle_distance=np.asarray(self.scan.od, dtype=np.float32).reshape(shape),
                 # The layer the frontier DECIDES on (median over the last readings + hysteresis,
                 # see safe_frontier._ObstacleHistory) and the latch mask. Without these
                 # two an offline replay cannot reproduce the blocks that come from the
                 # thread's readings during the move. Same orientation as the others:
                 # (num_y, num_x), row = y.
                 obstacle_distance_filtered=np.asarray(self.snap.obstacle_dist, dtype=np.float32),
-                blocked_latch=(np.zeros(shape_up, bool) if self.snap.blocked_latch is None
+                blocked_latch=(np.zeros(shape, bool) if self.snap.blocked_latch is None
                                else np.asarray(self.snap.blocked_latch, dtype=bool)),
-                terrain_corrected=np.asarray(self.terrain_real_up, dtype=np.float32).reshape(shape_up),
-                is_valid=np.asarray(self.is_valid_up, dtype=bool).reshape(shape_up),
-                roughness=np.asarray(self.rough_up, dtype=np.float32).reshape(shape_up),
-                gradient=np.asarray(self.grad_up, dtype=np.float32).reshape(shape_up),
-                obstacle_mask=np.asarray(self.obstacle_mask_updated, dtype=np.int8).reshape(shape_up),
-                footprint_mask=(np.zeros(shape_up, bool) if self.footprint_mask_2d is None
-                                else np.asarray(self.footprint_mask_2d, dtype=bool).reshape(shape_up)),
-                grid_origin=np.array([self.grid_origin_x_up, self.grid_origin_y_up]), cell_size=self.cell_size_up,
+                terrain_corrected=np.asarray(self.scan.terrain, dtype=np.float32).reshape(shape),
+                is_valid=np.asarray(self.scan.is_valid, dtype=bool).reshape(shape),
+                roughness=np.asarray(self.scan.rough, dtype=np.float32).reshape(shape),
+                gradient=np.asarray(self.scan.grad, dtype=np.float32).reshape(shape),
+                obstacle_mask=np.asarray(self.scan.obstacle_mask, dtype=np.int8).reshape(shape),
+                footprint_mask=(np.zeros(shape, bool) if self.scan.footprint_mask is None
+                                else np.asarray(self.scan.footprint_mask, dtype=bool).reshape(shape)),
+                grid_origin=np.array([self.scan.grid_origin_x, self.scan.grid_origin_y]), cell_size=self.scan.cell_size,
                 robot_xyz=np.array([self.robot_x, self.robot_y, self.robot_z]), robot_yaw=self.robot_yaw,
                 ground_z=np.nan if gf.get('ground_z') is None else gf['ground_z'],
                 ground_n_above=gf.get('n_above', 0),
                 mission_z0=mission_z0(),
-                terrain_raw_zero=np.nan if spot_grid.raw_zero(self.grids_data_up) is None else spot_grid.raw_zero(self.grids_data_up),
-                terrain_scale=np.nan if not spot_grid.raw_scale(self.grids_data_up) else spot_grid.raw_scale(self.grids_data_up),
-                unwritten=np.asarray(self.unwritten_up, dtype=bool).reshape(shape_up),
+                terrain_raw_zero=np.nan if spot_grid.raw_zero(self.scan.grids_data) is None else spot_grid.raw_zero(self.scan.grids_data),
+                terrain_scale=np.nan if not spot_grid.raw_scale(self.scan.grids_data) else spot_grid.raw_scale(self.scan.grids_data),
+                unwritten=np.asarray(self.scan.unwritten, dtype=bool).reshape(shape),
                 polyline=np.array(self.polyline), path_node_ids=np.array([w[0] for w in self.path_waypoints]),
                 robot_node_id=self.robot_node_id, goal_xy=np.array([self.target_x, self.target_y]),
                 frontier_dist=self.frontier['dist'], frontier_reason=self.frontier['reason'],
@@ -1133,7 +1127,7 @@ class CellAttempt:
             with TrajectoryLog(self.robot_state_client, 'cone', (cx, cy)):
                 ok_c, dist_c, _ = movements.navigate_to(
                     cx, cy, self.robot_x, self.robot_y, self.robot_state_client, self.command_client,
-                    get_a_tform_b(self.lg_proto_up.local_grid.transforms_snapshot,
+                    get_a_tform_b(self.scan.proto.local_grid.transforms_snapshot,
                                   VISION_FRAME_NAME, BODY_FRAME_NAME),
                     should_abort=None, keep_heading=False, **self.mobility_kwargs)
             if dist_c > 0.05:
@@ -1201,10 +1195,10 @@ class CellAttempt:
                     npz_blocked,
                     obstacle_distance=self.snap.obstacle_dist, rough_veto=self.snap.rough_veto,
                     seen=self.snap.seen, terrain=self.snap.terrain,
-                    terrain_raw=np.asarray(self.terrain_up).reshape((self.num_y_up, self.num_x_up)),
-                    terrain_valid_raw=np.asarray(self.valid_up).reshape((self.num_y_up, self.num_x_up)),
-                    obstacle_mask=np.asarray(self.obstacle_mask_updated).reshape((self.num_y_up, self.num_x_up)),
-                    roughness=self.rough_up_2d,
+                    terrain_raw=np.asarray(self.scan.terrain_raw).reshape(self.scan.shape),
+                    terrain_valid_raw=np.asarray(self.scan.valid).reshape(self.scan.shape),
+                    obstacle_mask=np.asarray(self.scan.obstacle_mask).reshape(self.scan.shape),
+                    roughness=self.scan.rough_2d,
                     grid_origin_x=self.snap.origin_x, grid_origin_y=self.snap.origin_y, cell_size=self.snap.cell_size,
                     robot_xy=np.array([self.robot_x, self.robot_y]), robot_yaw=self.robot_yaw,
                     polyline=np.array(self.polyline), frontier_dist=self.frontier['dist'],
@@ -1329,13 +1323,13 @@ class CellAttempt:
             blocked_save_path = os.path.join(self.mission_folder,
                                              f"iteration_{self.iteration}_cell_{self.target_row}_{self.target_col}_BLOCKED.png") if self.mission_folder else None
             visualize_grid_with_candidates(
-                pts=self.pts_up, terrain_real=self.terrain_real_up, obstacle_mask=self.obstacle_mask_updated,
+                pts=self.scan.pts, terrain_real=self.scan.terrain, obstacle_mask=self.scan.obstacle_mask,
                 robot_x=self.robot_x, robot_y=self.robot_y,
                 candidates={'rejected': [], 'valid': []},
                 chosen_point=self.frontier['stop_xy'], iteration=self.iteration, env=self.env,
                 save_path=blocked_save_path, prm_graph=self.prm_graph, chosen_path=self.full_path_coords,
-                cells_obstacle_dist=self.cells_obs_up, valid_values=self.valid_up,
-                grad_values=self.grad_up, rough_values=self.rough_up
+                cells_obstacle_dist=self.scan.od, valid_values=self.scan.valid,
+                grad_values=self.scan.grad, rough_values=self.scan.rough
             )
             return FAILED
 
@@ -1372,7 +1366,7 @@ class CellAttempt:
                 if vision_tform_body_current is None:
                     break
             else:
-                vision_tform_body_current = get_a_tform_b(self.lg_proto_up.local_grid.transforms_snapshot,
+                vision_tform_body_current = get_a_tform_b(self.scan.proto.local_grid.transforms_snapshot,
                                                           VISION_FRAME_NAME, BODY_FRAME_NAME)
             self.no_progress = 0
             self.retreats_in_a_row = 0   # a real advance breaks the chain of back-offs
@@ -1520,9 +1514,9 @@ class CellAttempt:
                     f"arc{self.robot_node_id}-{self.next_node_id}_NEARLIMIT.npz")
                 np.savez_compressed(
                     npz_near,
-                    obstacle_grid=np.asarray(self.obstacle_mask_updated).reshape((self.num_y_up, self.num_x_up)),
-                    terrain_grid=np.asarray(self.terrain_real_up).reshape((self.num_y_up, self.num_x_up)),
-                    grid_origin_x=self.grid_origin_x_up, grid_origin_y=self.grid_origin_y_up, cell_size=self.cell_size_up,
+                    obstacle_grid=np.asarray(self.scan.obstacle_mask).reshape(self.scan.shape),
+                    terrain_grid=np.asarray(self.scan.terrain).reshape(self.scan.shape),
+                    grid_origin_x=self.scan.grid_origin_x, grid_origin_y=self.scan.grid_origin_y, cell_size=self.scan.cell_size,
                     arc_xy=np.array([self.robot_x, self.robot_y, move_x, move_y]),
                     long_slope=segment_long_slope, lat_slope=segment_lat_slope,
                     slope_threshold=slopes.SLOPE_THRESHOLD)
@@ -1718,13 +1712,13 @@ class CellAttempt:
             fail_save_path = os.path.join(self.mission_folder,
                                           f"iteration_{self.iteration}_cell_{self.target_row}_{self.target_col}_MOVE_FAIL.png") if self.mission_folder else None
             visualize_grid_with_candidates(
-                pts=self.pts_up, terrain_real=self.terrain_real_up, obstacle_mask=self.obstacle_mask_updated,
+                pts=self.scan.pts, terrain_real=self.scan.terrain, obstacle_mask=self.scan.obstacle_mask,
                 robot_x=self.robot_x, robot_y=self.robot_y,
                 candidates={'rejected': [], 'valid': []},
                 chosen_point=(next_x, next_y), iteration=self.iteration, env=self.env,
                 save_path=fail_save_path, prm_graph=self.prm_graph, chosen_path=self.full_path_coords,
-                cells_obstacle_dist=self.cells_obs_up, valid_values=self.valid_up,
-                grad_values=self.grad_up, rough_values=self.rough_up
+                cells_obstacle_dist=self.scan.od, valid_values=self.scan.valid,
+                grad_values=self.scan.grad, rough_values=self.scan.rough
             )
             return FAILED
         return 'ahead'

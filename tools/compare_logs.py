@@ -24,6 +24,8 @@ _RULES = [
     (re.compile(r'0x[0-9a-f]+'), '<ADDR>'),                      # object addresses
     (re.compile(r'\d{2}-\d{2}-\d{4}_\d{2}-\d{2}-\d{2}'), '<DATA>'),   # folder names
     (re.compile(r'\d+(\.\d+)?\s*min\b'), '<T>min'),               # waypoint ages
+    (re.compile(r'\d+ failed readings'), '<N> failed readings'),  # battery reads (timing)
+    (re.compile(r'(File "[^"]+", line )\d+'), r'\1<N>'),    # traceback line numbers
 ]
 
 
