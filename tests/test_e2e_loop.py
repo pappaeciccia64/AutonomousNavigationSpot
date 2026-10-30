@@ -31,16 +31,16 @@ sys.path.insert(0, os.path.dirname(HERE))   # the spot_explorer package
 import matplotlib  # noqa: E402
 matplotlib.use("Agg")
 from spot_explorer.mission import attempt_legs, attempt_obstacles, attempt_scan, cell_attempt     # noqa: E402
-from spot_explorer import config as parametri     # noqa: E402
-from spot_explorer import records as registro      # noqa: E402
+from spot_explorer import config
+from spot_explorer import records
 from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
 from spot_explorer.perception import spot_grid
 from spot_explorer.planning import decisions
 from spot_explorer.planning import safe_frontier
-from spot_explorer.planning import roadmap as prm_graph     # noqa: E402
-from spot_explorer.robot import motion as movements     # noqa: E402
-from spot_explorer.robot import connection as spotUtils     # noqa: E402
+from spot_explorer.planning import roadmap
+from spot_explorer.robot import motion
+from spot_explorer.robot import connection
 
 FAILS = []
 
@@ -209,7 +209,7 @@ def fake_recover(cc, rsc, status=None):
     if not FALL['fallen']:
         return True
     if not FALL['recoverable']:
-        raise movements.RobotFallenError("test: the robot does not get up by itself")
+        raise motion.RobotFallenError("test: the robot does not get up by itself")
     FALL['fallen'] = False
     return True
 
@@ -326,12 +326,12 @@ class FakeSampler:
 
 # ---- patches: only the boundaries with the robot ----------------------------------------
 attempt_scan.get_a_tform_b = attempt_obstacles.get_a_tform_b = attempt_legs.get_a_tform_b = spot_grid.get_a_tform_b = fake_get_a_tform_b
-spotUtils.getPosition = lambda rsc: (ROBOT.x, ROBOT.y, -2.7, quat(ROBOT.yaw))
-movements.navigate_to = fake_navigate_to
-movements.move_to_world_point_without_turning = fake_move_no_turn
-parametri.FRONTIER_RESCAN_WAIT_S = 0.0
-movements.check_fall = fake_check_fall
-movements.recover_from_fall = fake_recover
+connection.getPosition = lambda rsc: (ROBOT.x, ROBOT.y, -2.7, quat(ROBOT.yaw))
+motion.navigate_to = fake_navigate_to
+motion.move_to_world_point_without_turning = fake_move_no_turn
+config.FRONTIER_RESCAN_WAIT_S = 0.0
+motion.check_fall = fake_check_fall
+motion.recover_from_fall = fake_recover
 
 
 class _NoTilt:
@@ -342,7 +342,7 @@ class _NoTilt:
                     pitch_peak_abs=0, samples=0, errors=0)
 
 
-attempt_legs.BodyTiltRecorder = registro.BodyTiltRecorder = _NoTilt
+attempt_legs.BodyTiltRecorder = records.BodyTiltRecorder = _NoTilt
 
 
 def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, second_attempt=False,
@@ -357,28 +357,28 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
     safe_frontier.OBSTACLE_HISTORY.reset()
     DYNAMIC_TRIGGER.update(armed=dynamic is not None, rect=dynamic)
     FALL.update(armed=fall is not None, fallen=False, recoverable=(fall == 'recuperabile'), where=None)
-    registro.MISSION_STATS['falls'] = registro.MISSION_STATS['self_rights'] = 0
+    records.MISSION_STATS['falls'] = records.MISSION_STATS['self_rights'] = 0
     # The real mission lattice: 0.25 m spacing, 0.5-1.25 m edges, on FakeEnv's 2 x 2 cells of
     # 5 m, for all scenarios. GRAPH_KW selects the random nodes (comparison at the end).
     from spot_explorer.planning import mission_graph
     mg = mission_graph.build_mission_graph(
         rows=2, cols=2, cell_size_m=5.0, spacing_m=0.25, rings=None,
-        origin_xy=(3.5, 3.5), origin_yaw=0.0, min_edge_length=parametri.PRM_MIN_EDGE_M,
-        max_edge_length=parametri.PRM_MAX_EDGE_M,
-        connection_radius=parametri.PRM_CONNECTION_RADIUS_M, verbose=False,
+        origin_xy=(3.5, 3.5), origin_yaw=0.0, min_edge_length=config.PRM_MIN_EDGE_M,
+        max_edge_length=config.PRM_MAX_EDGE_M,
+        connection_radius=config.PRM_CONNECTION_RADIUS_M, verbose=False,
         **dict({'sampling': 'lattice'}, **GRAPH_KW))
-    prm = prm_graph.PRM(min_edge_length=parametri.PRM_MIN_EDGE_M,
-                        max_edge_length=parametri.PRM_MAX_EDGE_M,
-                        connection_radius=parametri.PRM_CONNECTION_RADIUS_M)
+    prm = roadmap.PRM(min_edge_length=config.PRM_MIN_EDGE_M,
+                        max_edge_length=config.PRM_MAX_EDGE_M,
+                        connection_radius=config.PRM_CONNECTION_RADIUS_M)
     prm.mission_graph = mg
     mg.into_prm(prm)
     folder = tempfile.mkdtemp(prefix="mission_e2e_")
-    for k in list(registro.MISSION_STATS['time_s']):
-        registro.MISSION_STATS['time_s'][k] = 0.0
+    for k in list(records.MISSION_STATS['time_s']):
+        records.MISSION_STATS['time_s'][k] = 0.0
     for k in ('frontier_blocks', 'frontier_aborts', 'scan_bundles', 'prm_refresh',
               'prm_refresh_skipped', 'multinode_moves', 'multinode_nodes', 'idle_loops'):
-        if k in registro.MISSION_STATS:
-            registro.MISSION_STATS[k] = 0
+        if k in records.MISSION_STATS:
+            records.MISSION_STATS[k] = 0
     gg = NS(global_occupancy_map=None, global_terrain_map=None)
     if memory:
         # Obstacles already in the global map from earlier observations (in a mission: the cells
@@ -401,7 +401,7 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
                 FakeLocalGrid(), gg, None, None, FakeEnv(), target_cell[0], target_cell[1],
                 FakeSampler(), prm, mission_folder=folder, iteration=0,
                 recordingInterface=None, verification_tracker=FakeTracker())
-        except movements.RobotFallenError as e:
+        except motion.RobotFallenError as e:
             err, ok = None, f"RobotFallenError: {e}"
         except Exception as e:
             import traceback
@@ -415,7 +415,7 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
                 FakeLocalGrid(), gg, None, None, FakeEnv(), target_cell[0], target_cell[1],
                 FakeSampler(), prm, mission_folder=folder, iteration=1,
                 recordingInterface=None, verification_tracker=FakeTracker())
-    registro.VIS_EXECUTOR.submit(lambda: None).result()      # wait for the saves
+    records.VIS_EXECUTOR.submit(lambda: None).result()      # wait for the saves
     # The real code returns env.is_point_in_cell(...), which with numpy coordinates is an
     # np.bool_: the caller does `if check:` and it works, but the checks here use `is True`.
     if isinstance(ok, np.bool_):
@@ -443,14 +443,14 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
     print("       " + "  ".join(f"{k} x{v}" for k, v in tags.items() if v))
     print(f"       maximum gap between commanded and reached point: {ROBOT.max_endpoint_error:.3f} m")
     print(f"       motion commands: {ROBOT.commands}, metres travelled: {ROBOT.walked:.1f}, "
-          f"scans: {n_scans}, refresh {registro.MISSION_STATS.get('prm_refresh', 0)} done / "
-          f"{registro.MISSION_STATS.get('prm_refresh_skipped', 0)} skipped")
+          f"scans: {n_scans}, refresh {records.MISSION_STATS.get('prm_refresh', 0)} done / "
+          f"{records.MISSION_STATS.get('prm_refresh_skipped', 0)} skipped")
     return dict(ok=ok, err=err, log=log, scans=n_scans, folder=folder, tags=tags,
                 min_clear=ROBOT.min_clear, final=(ROBOT.x, ROBOT.y), ok2=ok2, gg=gg,
                 commands=ROBOT.commands, walked=ROBOT.walked,
                 turns=ROBOT.turns, turn_deg=ROBOT.turn_deg,
                 endpoint_error=ROBOT.max_endpoint_error,
-                stats=dict(registro.MISSION_STATS),
+                stats=dict(records.MISSION_STATS),
                 track2=ROBOT.track[track2_from:] if track2_from is not None else [])
 
 
@@ -509,7 +509,7 @@ if __name__ == '__main__':
     r = run("S6. fall halfway through a move, the robot gets up; then a second attempt",
             [], (2.0, 2.0, 0.785), (0, 1), fall='recuperabile', second_attempt=True)
     check(r['err'] is None, "no exception")
-    check(r['tags']["[FALL] Detected"] == 1 and registro.MISSION_STATS['self_rights'] == 1,
+    check(r['tags']["[FALL] Detected"] == 1 and records.MISSION_STATS['self_rights'] == 1,
           "fall detected and robot up again")
     fx, fy = FALL['where']
     gm = r['gg'].global_occupancy_map
@@ -559,10 +559,10 @@ if __name__ == '__main__':
     # S12: multi-node advance must pass the robot's TRUE heading
     # at every leg. With short edges multi-node triggers, and with a path
     # that curves a heading one leg old sends the robot off the path.
-    parametri.PRM_MAX_EDGE_M = 0.70711
+    config.PRM_MAX_EDGE_M = 0.70711
     r = run("S12. multi-node on a curving path: every leg goes where it was commanded",
             [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)], (3.5, 3.5, 0.0), (0, 1))
-    parametri.PRM_MAX_EDGE_M = 1.25
+    config.PRM_MAX_EDGE_M = 1.25
     check(r['err'] is None, "no exception")
     check(r['stats'].get('multinode_moves', 0) >= 1,
           f"multi-node triggered ({r['stats'].get('multinode_moves', 0)} moves, "
@@ -587,8 +587,8 @@ if __name__ == '__main__':
     check('GRAPH DISCONNECTED' not in r['log'], "the graph reaches the chosen goal")
     check(r['ok'] is True, f"the cell counts as reached (final position "
                            f"({r['final'][0]:.2f}, {r['final'][1]:.2f}), border at x = 6.00)")
-    check(r['final'][0] >= 6.0 - parametri.ARRIVAL_OUTSIDE_CELL_M - 0.02,
-          f"the robot is outside the cell by at most {parametri.ARRIVAL_OUTSIDE_CELL_M:.2f} m "
+    check(r['final'][0] >= 6.0 - config.ARRIVAL_OUTSIDE_CELL_M - 0.02,
+          f"the robot is outside the cell by at most {config.ARRIVAL_OUTSIDE_CELL_M:.2f} m "
           f"({max(0.0, 6.0 - r['final'][0]):.2f} m)")
     check(r['min_clear'] > 0.0, f"does not enter the wall (minimum distance {r['min_clear']:.2f} m)")
 
@@ -596,13 +596,13 @@ if __name__ == '__main__':
     comparison = {}
     for label, maxe in (("edges 0.5-0.707 (mission 16:35)", 0.70711),
                             ("edges 0.5-1.25 (new)", 1.25)):
-        parametri.PRM_MAX_EDGE_M = maxe
+        config.PRM_MAX_EDGE_M = maxe
         r = run(f"S9. {label}", [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)],
                 (3.5, 3.5, 0.0), (0, 1))
         comparison[label] = (r['commands'], r['walked'], r['stats'].get('multinode_moves', 0),
                                 r['stats'].get('multinode_nodes', 0), r['scans'], r['ok'],
                                 r['turns'], r['turn_deg'])
-    parametri.PRM_MAX_EDGE_M = 1.25
+    config.PRM_MAX_EDGE_M = 1.25
     print()
     for k, (c, w, mm, mn, sc, ok, tn, td) in comparison.items():
         print(f"  {k:<34} {c:2d} commands, {w:4.1f} m -> {w / max(1, c):.2f} m/command; "
@@ -655,8 +655,8 @@ if __name__ == '__main__':
     def _only_in_block(self):
         return sys._getframe(1).f_code.co_name != '_repick_unreachable_goal' and real_check(self)
     cell_attempt.CellAttempt._frontier_stops_at_goal = _only_in_block
-    early_saved = parametri.MAX_EARLY_REPLANS
-    parametri.MAX_EARLY_REPLANS = 0
+    early_saved = config.MAX_EARLY_REPLANS
+    config.MAX_EARLY_REPLANS = 0
     try:
         GRAPH_KW.clear()
         GRAPH_KW.update(sampling='random', distribution='poisson', density_per_m2=4.0, seed=9)
@@ -664,7 +664,7 @@ if __name__ == '__main__':
                 obstacle_beyond, (2.0, 3.0, 0.0), (0, 1))
     finally:
         cell_attempt.CellAttempt._frontier_stops_at_goal = real_check
-        parametri.MAX_EARLY_REPLANS = early_saved
+        config.MAX_EARLY_REPLANS = early_saved
     check(r['err'] is None and r['ok'] is True, "block near the goal: cell reached")
     check("[TARGET] Block " in r['log'] and "[REPLAN] After the block" not in r['log'],
           "after the block right next to the goal another one is chosen, without replanning "

@@ -14,7 +14,7 @@ from bosdyn.client.recording import GraphNavRecordingServiceClient
 from bosdyn.client.math_helpers import Quat, SE3Pose
 from google.protobuf import wrappers_pb2 as wrappers
 from spot_explorer import config as P
-from spot_explorer.robot import connection as spotUtils
+from spot_explorer.robot import connection
 from spot_explorer.graphnav.localization import graphnav_log_localization
 
 class LoopClosureUploadError(Exception):
@@ -361,7 +361,7 @@ class RecordingInterface(object):
         wp_1, ...), and save its pose and, if given, the cell in waypoint_poses.
         """
         robot_state_client = self.robot.ensure_client('robot-state')
-        x, y, z, quat = spotUtils.getPosition(robot_state_client)
+        x, y, z, quat = connection.getPosition(robot_state_client)
 
         yaw = np.arctan2(
             2.0 * (quat.w * quat.z + quat.x * quat.y),
@@ -671,7 +671,7 @@ def graphnav_drop_breadcrumb(env, recordingInterface, robot_state_client, prm_no
     if trail is None:
         trail = env._graphnav_trail = []
     try:
-        x, y, _, _ = spotUtils.getPosition(robot_state_client)
+        x, y, _, _ = connection.getPosition(robot_state_client)
     except Exception as e:
         print(f"[BREADCRUMB] Position not readable: {e}")
         return None

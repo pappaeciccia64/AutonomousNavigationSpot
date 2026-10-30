@@ -4,7 +4,7 @@ import numpy as np
 from bosdyn.client.frame_helpers import VISION_FRAME_NAME, BODY_FRAME_NAME, get_a_tform_b
 from bosdyn.client.math_helpers import Quat, SE3Pose
 from spot_explorer import config as P
-from spot_explorer.robot import connection as spotUtils
+from spot_explorer.robot import connection
 from spot_explorer.records import MISSION_CTX, MISSION_STATS
 from spot_explorer.graphnav.navigation import graphnav_navigate_to
 
@@ -27,7 +27,7 @@ def find_fiducials(robot, robot_state_client, wait_s=0.0, fiducial_id=None):
     while True:
         found = []
         try:
-            rx, ry, _, q = spotUtils.getPosition(robot_state_client)
+            rx, ry, _, q = connection.getPosition(robot_state_client)
             yaw = float(np.arctan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y ** 2 + q.z ** 2)))
             resp = client.list_world_objects(object_type=[world_object_pb2.WORLD_OBJECT_APRILTAG])
             for o in resp.world_objects:
@@ -61,7 +61,7 @@ def _robot_in_tag_frame(snapshot, frame, vision_tform_tag, robot_state_client):
     try:
         tag_tform_body = get_a_tform_b(snapshot, frame, BODY_FRAME_NAME)
         if tag_tform_body is None:
-            x, y, z, q = spotUtils.getPosition(robot_state_client)
+            x, y, z, q = connection.getPosition(robot_state_client)
             vision_tform_body = SE3Pose(x, y, z, Quat(w=q.w, x=q.x, y=q.y, z=q.z))
             tag_tform_body = vision_tform_tag.inverse() * vision_tform_body
         return (float(tag_tform_body.x), float(tag_tform_body.y), float(tag_tform_body.z))

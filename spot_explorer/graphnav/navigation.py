@@ -3,9 +3,9 @@ import time
 import numpy as np
 from bosdyn.api.graph_nav import graph_nav_pb2 as _graph_nav_pb2
 from bosdyn.api import geometry_pb2
-from spot_explorer.robot import motion as movements
+from spot_explorer.robot import motion
 from spot_explorer import config as P
-from spot_explorer.robot import connection as spotUtils
+from spot_explorer.robot import connection
 from spot_explorer.records import MISSION_STATS, TrajectoryLog, timing_add
 from spot_explorer.graphnav.localization import (_distance_from_waypoint, graphnav_is_lost, graphnav_log_drift, graphnav_log_localization, graphnav_relocalize)
 from spot_explorer.graphnav.map_shortcuts import graphnav_add_shortcuts
@@ -83,7 +83,7 @@ _LAST_GRAPHNAV_FAIL = {'reason': None}
 
 def _stop_graphnav(command_client, reason):
     _LAST_GRAPHNAV_FAIL['reason'] = reason.replace("GraphNav: ", "")
-    movements.stop_robot(command_client, reason=reason)
+    motion.stop_robot(command_client, reason=reason)
 
 
 def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_client, command_client,
@@ -91,7 +91,7 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
     _LAST_GRAPHNAV_FAIL['reason'] = None
     client = recordingInterface._graph_nav_client
     tp = _graph_nav_pb2.TravelParams()
-    tp.velocity_limit.CopyFrom(movements._velocity_limit(P.GRAPHNAV_MAX_LINEAR_VEL_MPS, P.GRAPHNAV_MAX_ANGULAR_VEL_RPS))
+    tp.velocity_limit.CopyFrom(motion._velocity_limit(P.GRAPHNAV_MAX_LINEAR_VEL_MPS, P.GRAPHNAV_MAX_ANGULAR_VEL_RPS))
     # Permissive loss detector (see GRAPHNAV LOCALIZATION).
     if P.GRAPHNAV_LOST_DETECTOR_STRICTNESS and hasattr(tp, 'lost_detector_strictness'):
         try:
@@ -249,7 +249,7 @@ def graphnav_step_back(env, recordingInterface, robot_state_client, command_clie
     if not trail:
         return False, None
     try:
-        rx, ry, _, _ = spotUtils.getPosition(robot_state_client)
+        rx, ry, _, _ = connection.getPosition(robot_state_client)
     except Exception:
         rx, ry = trail[-1]['x'], trail[-1]['y']
     idx = None

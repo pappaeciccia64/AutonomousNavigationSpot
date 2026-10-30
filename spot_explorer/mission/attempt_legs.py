@@ -8,10 +8,10 @@ from types import SimpleNamespace
 import numpy as np
 from bosdyn.client.frame_helpers import BODY_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b
 from spot_explorer.graphnav import map_recording
-from spot_explorer.robot import motion as movements
+from spot_explorer.robot import motion
 from spot_explorer.perception import geometry
 from spot_explorer.perception import slopes
-from spot_explorer.robot import connection as spotUtils
+from spot_explorer.robot import connection
 from spot_explorer.planning import decisions
 from spot_explorer.planning import safe_frontier
 from spot_explorer.mission import mission_prm
@@ -131,7 +131,7 @@ class LegSteps:
         #    by the wrong angle and walk off the verified path;
         #  - the distance to travel is computed from (robot_x, robot_y);
         #  - the stop halfway through the move measures the remaining path from here.
-        self.robot_x, self.robot_y, self.robot_z, robot_quat = spotUtils.getPosition(self.robot_state_client)
+        self.robot_x, self.robot_y, self.robot_z, robot_quat = connection.getPosition(self.robot_state_client)
         self.robot_yaw = np.arctan2(
             2.0 * (robot_quat.w * robot_quat.z + robot_quat.x * robot_quat.y),
             1.0 - 2.0 * (robot_quat.y ** 2 + robot_quat.z ** 2))
@@ -224,7 +224,7 @@ class LegSteps:
             segment_tier = 'override'
         else:
             segment_gradient = max(segment_long_slope, segment_lat_slope)
-            segment_mobility_kwargs = movements.select_mobility_params(segment_gradient, segment_roughness)
+            segment_mobility_kwargs = motion.select_mobility_params(segment_gradient, segment_roughness)
             segment_tier = MISSION_STATS['last_tier']
         return (segment_long_slope, segment_lat_slope, segment_roughness, slope_source,
                 segment_mobility_kwargs, segment_tier)
@@ -273,7 +273,7 @@ class LegSteps:
         tilt_recorder.start()
         try:
             self.need_refresh = True              # end of a move: see EVENT REFRESH
-            success_move, distance_traveled, distance_commanded = movements.navigate_to(
+            success_move, distance_traveled, distance_commanded = motion.navigate_to(
                 move_x, move_y, self.robot_x, self.robot_y, self.robot_state_client, self.command_client,
                 vision_tform_body_current, should_abort=_should_abort_move,
                 keep_heading=self.keep_heading,
@@ -339,7 +339,7 @@ class LegSteps:
         # segments.csv keeps the real outcome of the command.
         if not success_move and abort_reason is None:
             try:
-                ax, ay, _, _ = spotUtils.getPosition(self.robot_state_client)
+                ax, ay, _, _ = connection.getPosition(self.robot_state_client)
                 d_left = float(np.hypot(move_x - ax, move_y - ay))
             except Exception:
                 d_left = float('inf')
@@ -356,7 +356,7 @@ class LegSteps:
             self.env._traveled_arcs.append((self.robot_x, self.robot_y, move_x, move_y))
 
             if is_partial_step:
-                ax, ay, _, _ = spotUtils.getPosition(self.robot_state_client)
+                ax, ay, _, _ = connection.getPosition(self.robot_state_client)
                 self._stop_node_here(ax, ay, "stop (partial step)")
             else:
                 # Edge "travelled" only if the robot started from the node: otherwise the leg
@@ -385,7 +385,7 @@ class LegSteps:
             print(f"[FAIL] Motion command failed mechanically for ({move_x:.2f}, {move_y:.2f}) "
                   f"(travelled {distance_traveled:.2f}m out of {distance_commanded:.2f}m requested)")
 
-            movements.check_and_recover_fall(self.robot_state_client, self.command_client, self.global_map,
+            motion.check_and_recover_fall(self.robot_state_client, self.command_client, self.global_map,
                                     "after the motion failure")
 
             if distance_traveled > 0.05:

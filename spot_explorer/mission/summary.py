@@ -2,7 +2,7 @@
 import os
 import json
 
-from spot_explorer.robot import motion as movements
+from spot_explorer.robot import motion
 from spot_explorer.perception import geometry
 from spot_explorer.perception import slopes
 from spot_explorer.perception import spot_grid
@@ -29,25 +29,25 @@ def mission_switches():
     which settings each mission ran with (for on/off comparisons).
     """
     return {
-        'parametri.MISSION_GRAPH_SAMPLING': P.MISSION_GRAPH_SAMPLING,
+        'config.MISSION_GRAPH_SAMPLING': P.MISSION_GRAPH_SAMPLING,
         'mission_graph.BATCH_SLOPES': mission_graph.BATCH_SLOPES,
-        'prm_graph.REFRESH_BATCH_SLOPES': edge_evaluation.REFRESH_BATCH_SLOPES,
-        'parametri.PLAN_ONLY_EXPLORED_CELLS': P.PLAN_ONLY_EXPLORED_CELLS,
-        'parametri.GRAPHNAV_SHORTCUTS': P.GRAPHNAV_SHORTCUTS,
-        'parametri.GRAPHNAV_PRECHECK': P.GRAPHNAV_PRECHECK,
-        'parametri.REPICK_ON_REPLAN_FAIL': P.REPICK_ON_REPLAN_FAIL,
-        'parametri.GRAPHNAV_ARRIVAL_HEADING': P.GRAPHNAV_ARRIVAL_HEADING,
-        'parametri.WP0_FIDUCIAL_CORRECTION': P.WP0_FIDUCIAL_CORRECTION,
-        'parametri.MOVE_NEAR_GOAL_M': P.MOVE_NEAR_GOAL_M,
-        'parametri.GRAPHNAV_SDK_LOOP_CLOSURE': P.GRAPHNAV_SDK_LOOP_CLOSURE,
-        'parametri.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S': P.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S,
-        'parametri.SAVE_SCAN_BUNDLES': P.SAVE_SCAN_BUNDLES,
-        'parametri.SAVE_EXTRA_LAYERS': list(P.SAVE_EXTRA_LAYERS),
-        'movements.DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT': movements.DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT,
+        'edge_evaluation.REFRESH_BATCH_SLOPES': edge_evaluation.REFRESH_BATCH_SLOPES,
+        'config.PLAN_ONLY_EXPLORED_CELLS': P.PLAN_ONLY_EXPLORED_CELLS,
+        'config.GRAPHNAV_SHORTCUTS': P.GRAPHNAV_SHORTCUTS,
+        'config.GRAPHNAV_PRECHECK': P.GRAPHNAV_PRECHECK,
+        'config.REPICK_ON_REPLAN_FAIL': P.REPICK_ON_REPLAN_FAIL,
+        'config.GRAPHNAV_ARRIVAL_HEADING': P.GRAPHNAV_ARRIVAL_HEADING,
+        'config.WP0_FIDUCIAL_CORRECTION': P.WP0_FIDUCIAL_CORRECTION,
+        'config.MOVE_NEAR_GOAL_M': P.MOVE_NEAR_GOAL_M,
+        'config.GRAPHNAV_SDK_LOOP_CLOSURE': P.GRAPHNAV_SDK_LOOP_CLOSURE,
+        'config.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S': P.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S,
+        'config.SAVE_SCAN_BUNDLES': P.SAVE_SCAN_BUNDLES,
+        'config.SAVE_EXTRA_LAYERS': list(P.SAVE_EXTRA_LAYERS),
+        'motion.DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT': motion.DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT,
         'slopes.ARC_BODY_EXTENSION_M': slopes.ARC_BODY_EXTENSION_M,
         'geometry.ROBOT_CLEARANCE_AIR_M': geometry.ROBOT_CLEARANCE_AIR_M,
         'geometry.PLAN_CLEARANCE_EXTRA_M': geometry.PLAN_CLEARANCE_EXTRA_M,
-        'parametri.BATTERY_RETURN_PCT': P.BATTERY_RETURN_PCT,
+        'config.BATTERY_RETURN_PCT': P.BATTERY_RETURN_PCT,
     }
 
 

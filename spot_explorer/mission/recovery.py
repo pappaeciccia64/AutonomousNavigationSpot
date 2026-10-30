@@ -2,12 +2,12 @@
 import numpy as np
 
 from spot_explorer.graphnav import navigation
-from spot_explorer.robot import motion as movements
+from spot_explorer.robot import motion
 from spot_explorer.perception import geometry
-from spot_explorer.robot import connection as spotUtils
+from spot_explorer.robot import connection
 from spot_explorer.planning import safe_frontier
 
-from spot_explorer.planning import roadmap as prm_graph
+from spot_explorer.planning import roadmap
 
 from spot_explorer import config as P
 from spot_explorer.records import MISSION_STATS, TrajectoryLog
@@ -39,7 +39,7 @@ def backtracking_cannot_help(env, prm_graph, goal_id, robot_state_client, max_ho
     if not trail or goal_id not in prm_graph.nodes:
         return False
     try:
-        rx, ry, _, _ = spotUtils.getPosition(robot_state_client)
+        rx, ry, _, _ = connection.getPosition(robot_state_client)
     except Exception:
         return False
     candidates = [c for c in reversed(trail)
@@ -144,7 +144,7 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
         # body exclusion would be where the robot was): drop it, until the next scan.
         prm_graph.set_live_obstacles(None, None, 0, 0, 1, 0, 0)
         try:
-            ax, ay, _, _ = spotUtils.getPosition(robot_state_client)
+            ax, ay, _, _ = connection.getPosition(robot_state_client)
         except Exception:
             ax, ay = crumb['x'], crumb['y']
         new_node = prm_graph.add_stop_node(
@@ -215,7 +215,7 @@ def retreat_along_traveled_path(env, robot_state_client, command_client,
             break
 
         from_x, from_y, to_x, to_y = traveled[-1]
-        robot_x, robot_y, _, _ = spotUtils.getPosition(robot_state_client)
+        robot_x, robot_y, _, _ = connection.getPosition(robot_state_client)
         seg_len = float(np.hypot(from_x - robot_x, from_y - robot_y))
 
         gap = float(np.hypot(to_x - robot_x, to_y - robot_y))
@@ -250,7 +250,7 @@ def retreat_along_traveled_path(env, robot_state_client, command_client,
         print(f"[RETREAT] Leg {done + 1}/{max_segments}: going back towards "
               f"({from_x:.2f}, {from_y:.2f}), {seg_len:.2f} m backwards.")
         with TrajectoryLog(robot_state_client, 'retreat', (from_x, from_y)):
-            success, dist = movements.move_to_world_point_without_turning(
+            success, dist = motion.move_to_world_point_without_turning(
                 from_x, from_y, "vision", command_client, robot_state_client, **mobility_kwargs)
         total += dist
         traveled.pop()

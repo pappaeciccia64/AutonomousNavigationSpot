@@ -25,7 +25,7 @@ import time
 import numpy as np
 
 from spot_explorer import config as P
-from spot_explorer.robot import connection as spotUtils
+from spot_explorer.robot import connection
 from spot_explorer.records import MISSION_STATS, append_csv
 
 _BATTERY_COLUMNS = ['t_s', 'wall_time', 'charge_pct', 'spot_runtime_min', 'voltage_v',
@@ -125,7 +125,7 @@ class BatteryMonitor:
                 return self.return_due
             self._t_last = now
             try:
-                x, y, _, _ = spotUtils.getPosition(self.robot_state_client)
+                x, y, _, _ = connection.getPosition(self.robot_state_client)
                 if self._xy_last is not None:
                     self._dist_m += float(np.hypot(x - self._xy_last[0], y - self._xy_last[1]))
                 self._xy_last = (x, y)

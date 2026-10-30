@@ -55,14 +55,14 @@ from bosdyn.api.graph_nav import graph_nav_pb2, map_pb2, map_processing_pb2, rec
 from bosdyn.client.math_helpers import Quat, SE3Pose
 
 from spot_explorer.planning import safe_frontier
-from spot_explorer.robot import battery as batteria
+from spot_explorer.robot import battery
 from spot_explorer.mission import attempt_legs, cell_attempt, exploration
 from spot_explorer.mission import run as mission_run
 from spot_explorer.planning import goal
-from spot_explorer.robot import motion as movements
+from spot_explorer.robot import motion
 from spot_explorer.graphnav import map_recording
-from spot_explorer import config as parametri
-from spot_explorer import records as registro
+from spot_explorer import config
+from spot_explorer import records
 from spot_explorer.perception import spot_grid
 from spot_explorer.robot import connection
 
@@ -334,7 +334,7 @@ def _with_failures():
     move ends with a fall (fake: the robot is already standing)."""
     real_attempt = cell_attempt.attempt_enter_cell_from_position
     real_best = goal.find_best_point_in_cell
-    real_fall = movements.check_and_recover_fall
+    real_fall = motion.check_and_recover_fall
     n = {'attempts': 0, 'goals': 0, 'trips': 0}
 
     def attempt(*a, **k):
@@ -361,20 +361,20 @@ def _with_failures():
 
     cell_attempt.attempt_enter_cell_from_position = attempt
     goal.find_best_point_in_cell = best
-    movements.check_and_recover_fall = fall
+    motion.check_and_recover_fall = fall
     try:
         yield n
     finally:
         cell_attempt.attempt_enter_cell_from_position = real_attempt
         goal.find_best_point_in_cell = real_best
-        movements.check_and_recover_fall = real_fall
+        motion.check_and_recover_fall = real_fall
 
 
 @contextlib.contextmanager
 def _with_battery(from_pct=36.0, points_per_read=1.0):
     """Fake battery: every reading (one per loop turn, interval 0 s) one point less,
     from from_pct."""
-    real_read, real_s = batteria.read_battery, parametri.BATTERY_SAMPLE_S
+    real_read, real_s = battery.read_battery, config.BATTERY_SAMPLE_S
     n = {'reads': 0}
 
     def read(rsc):
@@ -382,13 +382,13 @@ def _with_battery(from_pct=36.0, points_per_read=1.0):
         return {'charge_pct': max(0.0, from_pct - points_per_read * (n['reads'] - 1)),
                 'spot_runtime_min': 40.0}
 
-    batteria.read_battery = read
-    parametri.BATTERY_SAMPLE_S = 0.0
+    battery.read_battery = read
+    config.BATTERY_SAMPLE_S = 0.0
     try:
         yield n
     finally:
-        batteria.read_battery = real_read
-        parametri.BATTERY_SAMPLE_S = real_s
+        battery.read_battery = real_read
+        config.BATTERY_SAMPLE_S = real_s
 
 
 def run(walls=None, name='MISSION', fiducial=None, stuck_wp0_m=None, wp0_offset_m=None):
@@ -406,8 +406,8 @@ def run(walls=None, name='MISSION', fiducial=None, stuck_wp0_m=None, wp0_offset_
     mission_run.blocking_stand = lambda *a, **k: None
     spot_grid.LocalGrid = lambda r: T.FakeLocalGrid()
     safe_frontier.ArcVerificationTracker = lambda r: _Tracker()
-    attempt_legs.BodyTiltRecorder = registro.BodyTiltRecorder = _NoTilt
-    parametri.MISSION_GRAPH_SAMPLING = 'lattice'
+    attempt_legs.BodyTiltRecorder = records.BodyTiltRecorder = _NoTilt
+    config.MISSION_GRAPH_SAMPLING = 'lattice'
 
     root = tempfile.mkdtemp(prefix="fake_mission_")
     mission_run.DATA_ROOT = root                                    # data folders here
@@ -536,8 +536,8 @@ def _check_cell_choice():
     (6,1) (before: a jump, then the cell dropped out of the frontier).
     """
     print("\nCell choice: the case of 13:50 (cells (7,1) and (7,2))")
-    from spot_explorer.mission import cells as environmentMap
-    env = environmentMap.EnvironmentMap(rows=8, cols=7, cell_size=2.0)
+    from spot_explorer.mission import cells
+    env = cells.EnvironmentMap(rows=8, cols=7, cell_size=2.0)
     with contextlib.redirect_stdout(io.StringIO()):
         env.set_origin(0.0, 0.0, 0.0)
         for r_ in range(8):

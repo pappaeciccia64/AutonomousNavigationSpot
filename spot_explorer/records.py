@@ -24,7 +24,7 @@ from datetime import datetime
 import numpy as np
 from bosdyn.client.frame_helpers import GROUND_PLANE_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b
 
-from spot_explorer.robot import connection as spotUtils
+from spot_explorer.robot import connection
 
 # A helper thread to save data to disk without stopping the navigation loop.
 VIS_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vis_worker")
@@ -299,7 +299,7 @@ class BodyTiltRecorder:
 
     def _sample(self):
         try:
-            x, y, _, q = spotUtils.getPosition(self._client)
+            x, y, _, q = connection.getPosition(self._client)
             roll, pitch = _quat_to_roll_pitch_deg(q)
             yaw = float(np.degrees(np.arctan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y ** 2 + q.z ** 2))))
         except Exception:

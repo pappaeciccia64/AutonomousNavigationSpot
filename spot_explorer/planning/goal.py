@@ -3,7 +3,7 @@ import numpy as np
 
 from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
-from spot_explorer.mission import cells as environmentMap
+from spot_explorer.mission import cells
 
 
 from spot_explorer import config as P
@@ -149,7 +149,7 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
             continue
         tight = (global_map.is_occupied(px, py, safety_margin=pref_margin)
                  or (bool(known_c) and min(known_c) < P.TARGET_CLEARANCE_M))
-        border = environmentMap.cell_border_distance(env, cell_row, cell_col, px, py)
+        border = cells.cell_border_distance(env, cell_row, cell_col, px, py)
         rows.append(dict(
             p=(float(px), float(py)), center=is_center, refused=_near(p, refused),
             seen=(c_live is not None or global_map.is_known(px, py)), tight=tight,

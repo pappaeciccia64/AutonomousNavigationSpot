@@ -6,12 +6,12 @@ import time
 import numpy as np
 from bosdyn.client.frame_helpers import BODY_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b
 from spot_explorer.graphnav import map_recording
-from spot_explorer.robot import motion as movements
+from spot_explorer.robot import motion
 from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
 from spot_explorer.perception import spot_grid
 from spot_explorer.planning import safe_frontier
-from spot_explorer.planning import roadmap as prm_graph_module   # inside functions `prm_graph` is often the parameter (instance)
+from spot_explorer.planning import roadmap
 from spot_explorer.planning import edge_evaluation
 from spot_explorer.mission import mission_prm
 from spot_explorer import config as P
@@ -31,7 +31,7 @@ class ScanSteps:
         # fell in the meantime it gets up before anything else. Raises RobotFallenError if it cannot.
         # Then it leaves the hazard disk by retracing its steps: once up, it is still INSIDE
         # the spot of the fall, and from there every PRM edge would be discarded.
-        if movements.check_and_recover_fall(self.robot_state_client, self.command_client,
+        if motion.check_and_recover_fall(self.robot_state_client, self.command_client,
                                    self.global_grid.global_occupancy_map, "at the start of the attempt") is not None:
             recovery.retreat_along_traveled_path(self.env, self.robot_state_client, self.command_client,
                                         mobility_kwargs=self.mobility_kwargs)
@@ -165,10 +165,8 @@ class ScanSteps:
             print(f"[EDGES] Scan not usable for the preliminary discard ({e}).")
 
         t_build = time.perf_counter()
-        # CAREFUL WITH THE NAMES: here `self.prm_graph` is the PRM instance, not the module of the
-        # same name (imported as prm_graph_module). The candidate pairs are those of the mission
-        # graph (see mission_prm.build_mission_prm); vetoes and weights are computed by
-        # PRM._evaluate_and_add_edge.
+        # The candidate pairs are those of the mission graph (see mission_prm.build_mission_prm);
+        # vetoes and weights are computed by PRM._evaluate_and_add_edge.
         mission_prm.rebuild_prm_edges(self.prm_graph, self.global_map)
         timing_add('graph construction', time.perf_counter() - t_build)
         _upd = getattr(getattr(self.prm_graph, 'mission_graph', None), 'last_update', None)
@@ -403,8 +401,8 @@ class ScanSteps:
         for (from_id, to_id), n_fails in self.rotation_fails.items():
             fx, fy = self.rotation_fail_xy.get((from_id, to_id), (self.robot_x, self.robot_y))
             if (from_id == self.robot_node_id and n_fails > 0
-                    and float(np.hypot(self.robot_x - fx, self.robot_y - fy)) <= prm_graph_module.ANCHOR_ON_NODE_M):
-                prm_graph_module.mark_edge_blocked_soft(self.prm_graph, from_id, to_id)
+                    and float(np.hypot(self.robot_x - fx, self.robot_y - fy)) <= roadmap.ANCHOR_ON_NODE_M):
+                roadmap.mark_edge_blocked_soft(self.prm_graph, from_id, to_id)
         return touched_nodes
 
     def _replan(self, touched_nodes):

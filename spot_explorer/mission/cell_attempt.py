@@ -2,15 +2,14 @@
 import time
 import numpy as np
 
-from spot_explorer.robot import motion as movements
+from spot_explorer.robot import motion
 from spot_explorer.perception import geometry
-from spot_explorer.mission import cells as environmentMap
-from spot_explorer.robot import connection as spotUtils
+from spot_explorer.mission import cells
+from spot_explorer.robot import connection
 from spot_explorer.planning import decisions
 from spot_explorer.planning import safe_frontier
 
-from spot_explorer.planning import roadmap as prm_graph
-from spot_explorer.planning import roadmap as prm_graph_module   # inside functions `prm_graph` is often the parameter (instance)
+from spot_explorer.planning import roadmap
 
 from spot_explorer import config as P
 from spot_explorer.records import MISSION_STATS, timing_add
@@ -188,14 +187,14 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps):
         if duration == 'mission':
             self.prm_graph.mark_edge_invalid(a, b)
             return
-        prm_graph_module.mark_edge_blocked_soft(self.prm_graph, a, b)
+        roadmap.mark_edge_blocked_soft(self.prm_graph, a, b)
         if duration == 'attempt':
             self.prm_graph.edge_penalty_persistent[(min(a, b), max(a, b))] = self.prm_graph._ATTEMPT_MARK
 
     def _walked_path(self, x0, y0):
         """The leg walked from (x0, y0) to the current position, for the retreat. Returns the
         current position."""
-        ax, ay, _, _ = spotUtils.getPosition(self.robot_state_client)
+        ax, ay, _, _ = connection.getPosition(self.robot_state_client)
         if not hasattr(self.env, '_traveled_arcs'):
             self.env._traveled_arcs = []
         self.env._traveled_arcs.append((x0, y0, ax, ay))
@@ -326,7 +325,7 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps):
                 self.verification_tracker.clear_path()
             return FAILED
 
-        if movements.check_and_recover_fall(self.robot_state_client, self.command_client, self.global_map,
+        if motion.check_and_recover_fall(self.robot_state_client, self.command_client, self.global_map,
                                    "during the navigation loop") is not None:
             if self.verification_tracker is not None:
                 self.verification_tracker.clear_path()
@@ -334,7 +333,7 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps):
                                         mobility_kwargs=self.mobility_kwargs)
             return FAILED
 
-        self.robot_x, self.robot_y, self.robot_z, robot_quat = spotUtils.getPosition(self.robot_state_client)
+        self.robot_x, self.robot_y, self.robot_z, robot_quat = connection.getPosition(self.robot_state_client)
 
         self.robot_yaw = np.arctan2(2.0 * (robot_quat.w * robot_quat.z + robot_quat.x * robot_quat.y),
                                1.0 - 2.0 * (robot_quat.y ** 2 + robot_quat.z ** 2))
@@ -393,7 +392,7 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps):
         # Just outside the cell counts as inside, for the arrival by tolerance (see
         # ARRIVAL_OUTSIDE_CELL_M). On 22-10 16:04: "0.06 m to go ... still outside
         # cell (2,7)", with the robot outside by 0.01 m.
-        robot_border = environmentMap.cell_border_distance(self.env, self.target_row, self.target_col, self.robot_x, self.robot_y)
+        robot_border = cells.cell_border_distance(self.env, self.target_row, self.target_col, self.robot_x, self.robot_y)
         near_goal = (not in_target_cell and robot_border is not None
                      and -robot_border <= P.ARRIVAL_OUTSIDE_CELL_M)
         self.decision = decisions.decide_next_move((self.robot_x, self.robot_y), self.path_waypoints, self.frontier, self.no_progress,
@@ -457,7 +456,7 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps):
             self.verification_tracker.clear_path()
 
         # Final check of the position at the end of the path
-        self.robot_x, self.robot_y, _, _ = spotUtils.getPosition(self.robot_state_client)
+        self.robot_x, self.robot_y, _, _ = connection.getPosition(self.robot_state_client)
         if self.arrived_near_goal:
             return True
         return self.env.is_point_in_cell(self.robot_x, self.robot_y, self.target_row, self.target_col)

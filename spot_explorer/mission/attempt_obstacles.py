@@ -5,7 +5,7 @@ import os
 import time
 import numpy as np
 from bosdyn.client.frame_helpers import BODY_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b
-from spot_explorer.robot import motion as movements
+from spot_explorer.robot import motion
 from spot_explorer.perception import geometry
 from spot_explorer.planning import decisions
 from spot_explorer.planning import safe_frontier
@@ -110,7 +110,7 @@ class ObstacleSteps:
             cx, cy = cone['target']
             self.need_refresh = True      # end of a move: see EVENT REFRESH
             with TrajectoryLog(self.robot_state_client, 'cone', (cx, cy)):
-                ok_c, dist_c, _ = movements.navigate_to(
+                ok_c, dist_c, _ = motion.navigate_to(
                     cx, cy, self.robot_x, self.robot_y, self.robot_state_client, self.command_client,
                     get_a_tform_b(self.scan.proto.local_grid.transforms_snapshot,
                                   VISION_FRAME_NAME, BODY_FRAME_NAME),
@@ -152,7 +152,7 @@ class ObstacleSteps:
             MISSION_STATS['straight_retreats'] += 1
             self.need_refresh = True      # end of a move: see EVENT REFRESH
             with TrajectoryLog(self.robot_state_client, 'backoff', (bx, by)):
-                ok_back, dist_back = movements.move_to_world_point_without_turning(
+                ok_back, dist_back = motion.move_to_world_point_without_turning(
                     bx, by, "vision", self.command_client, self.robot_state_client, **self.mobility_kwargs)
             if dist_back > 0.05:
                 self._stop_node_here(*self._walked_path(self.robot_x, self.robot_y), "stop (back-off to rotate)")

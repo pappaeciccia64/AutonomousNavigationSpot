@@ -74,7 +74,7 @@ def replay_goals(name):
     if m is None:
         return None
     with tr._quiet():
-        env = tr.environmentMap.EnvironmentMap(rows=m['rows'], cols=m['cols'], cell_size=m['cell'])
+        env = tr.cells.EnvironmentMap(rows=m['rows'], cols=m['cols'], cell_size=m['cell'])
         env.set_origin(m['origin'][0], m['origin'][1], math.radians(m['yaw_deg']))
         P.MISSION_LATTICE_SPACING_M = m['spacing']
         g = m['graph']
@@ -160,7 +160,7 @@ def replay_goals(name):
             n['reachable'] += bool(g_['reach'])
             bad = _bad(g_)
             n['refusable'] += bad
-            b = tr.environmentMap.cell_border_distance(env, *at['cell'], *g_['xy'])
+            b = tr.cells.cell_border_distance(env, *at['cell'], *g_['xy'])
             n['on_border'] += b is not None and b < P.TARGET_CELL_BORDER_M
             prev = refused_by_cell.setdefault(at['cell'], [])
             n['proposed_again'] += any(math.dist(g_['xy'], p) < P.RECOVERY_SAME_GOAL_M for p in prev)
@@ -208,7 +208,7 @@ def synthetic_checks():
         return env, (x, y)
 
     def _env():
-        e = tr.environmentMap.EnvironmentMap(rows=1, cols=1, cell_size=2.0)
+        e = tr.cells.EnvironmentMap(rows=1, cols=1, cell_size=2.0)
         with tr._quiet():
             e.set_origin(0.0, 0.0, 0.0)
         return e
@@ -216,14 +216,14 @@ def synthetic_checks():
     print("Synthetic checks of the goal choice (2 m cell centred at (0, 0)):")
     e = _env()
     with tr._quiet():
-        e30 = tr.environmentMap.EnvironmentMap(rows=1, cols=1, cell_size=2.0)
+        e30 = tr.cells.EnvironmentMap(rows=1, cols=1, cell_size=2.0)
         e30.set_origin(0.0, 0.0, math.radians(30))
-    check(abs(tr.environmentMap.cell_border_distance(e, 0, 0, 0.0, 0.0) - 1.0) < 1e-9
-          and abs(tr.environmentMap.cell_border_distance(e, 0, 0, 0.9, 0.2) - 0.1) < 1e-9
-          and abs(tr.environmentMap.cell_border_distance(e, 0, 0, 1.2, 0.0) + 0.2) < 1e-9,
+    check(abs(tr.cells.cell_border_distance(e, 0, 0, 0.0, 0.0) - 1.0) < 1e-9
+          and abs(tr.cells.cell_border_distance(e, 0, 0, 0.9, 0.2) - 0.1) < 1e-9
+          and abs(tr.cells.cell_border_distance(e, 0, 0, 1.2, 0.0) + 0.2) < 1e-9,
           "distance from the border: 1.0 at the centre, 0.1 at 0.9 m, -0.2 outside")
     p = (0.9 * math.cos(math.radians(30)), 0.9 * math.sin(math.radians(30)))
-    check(abs(tr.environmentMap.cell_border_distance(e30, 0, 0, *p) - 0.1) < 1e-9,
+    check(abs(tr.cells.cell_border_distance(e30, 0, 0, *p) - 0.1) < 1e-9,
           "distance from the border with the grid rotated by 30 degrees")
 
     _, g = pick([])
@@ -238,7 +238,7 @@ def synthetic_checks():
           f"centre 0.30 m from an obstacle (below {P.TARGET_CLEARANCE_M:.2f}): a point with more "
           f"space {tuple(round(v, 2) for v in g)}")
     _, g = pick([(0.0, 0.0)])
-    b = tr.environmentMap.cell_border_distance(e, 0, 0, *g)
+    b = tr.cells.cell_border_distance(e, 0, 0, *g)
     check(b >= P.TARGET_CELL_BORDER_M,
           f"centre occupied: the fallback is at least {P.TARGET_CELL_BORDER_M:.2f} m from the border ({b:.2f})")
     env, g1 = pick([(0.0, 0.0)])
@@ -260,8 +260,8 @@ def synthetic_checks():
 
 
 def prm_graph_ignore():
-    from spot_explorer.planning import roadmap as prm_graph
-    return prm_graph.ANCHOR_IGNORE_NEAR_M
+    from spot_explorer.planning import roadmap
+    return roadmap.ANCHOR_IGNORE_NEAR_M
 
 
 def main():

@@ -5,7 +5,7 @@ from bosdyn.client.frame_helpers import get_odom_tform_body
 from bosdyn.client.math_helpers import SE3Pose
 from bosdyn.api.graph_nav import graph_nav_pb2 as _graph_nav_pb2
 from spot_explorer import config as P
-from spot_explorer.robot import connection as spotUtils
+from spot_explorer.robot import connection
 from spot_explorer.records import MISSION_STATS, append_csv
 
 _DRIFT_COLUMNS = ['time', 'where', 'waypoint', 'age_s', 'dx', 'dy', 'd', 'gn_x', 'gn_y', 'vision_x',
@@ -62,7 +62,7 @@ def graphnav_log_drift(recordingInterface, robot_state_client, where):
         c, sn = np.cos(wp['yaw']), np.sin(wp['yaw'])
         gx = wp['x'] + c * b.x - sn * b.y
         gy = wp['y'] + sn * b.x + c * b.y
-        rx, ry, _, _ = spotUtils.getPosition(robot_state_client)
+        rx, ry, _, _ = connection.getPosition(robot_state_client)
         dx, dy = rx - gx, ry - gy
         d = float(np.hypot(dx, dy))
         age = time.time() - wp['t'] if wp.get('t') else float('nan')
@@ -109,7 +109,7 @@ def graphnav_log_localization(env, recordingInterface, robot_state_client, where
         return loc
     pitch = float('nan')
     try:
-        q = spotUtils.getPosition(robot_state_client)[3]
+        q = connection.getPosition(robot_state_client)[3]
         pitch = float(np.degrees(np.arcsin(np.clip(2.0 * (q.w * q.y - q.z * q.x), -1.0, 1.0))))
     except Exception:
         pass
@@ -134,7 +134,7 @@ def graphnav_relocalize(recordingInterface, robot_state_client, why=""):
     odometry Spot recorded the waypoint with. True if Spot accepts.
     """
     try:
-        rx, ry, _, _ = spotUtils.getPosition(robot_state_client)
+        rx, ry, _, _ = connection.getPosition(robot_state_client)
         poses = getattr(recordingInterface, 'waypoint_poses', None) or {}
         cands = sorted(((float(np.hypot(p['x'] - rx, p['y'] - ry)), name, p['waypoint_id'])
                         for name, p in poses.items() if p.get('waypoint_id')), key=lambda c: c[0])
@@ -203,7 +203,7 @@ def _distance_from_waypoint(recordingInterface, robot_state_client, waypoint_id,
     try:
         wp = (getattr(recordingInterface, 'waypoint_poses', None) or {}).get(name)
         if wp is not None:
-            rx, ry, _, _ = spotUtils.getPosition(robot_state_client)
+            rx, ry, _, _ = connection.getPosition(robot_state_client)
             return float(np.hypot(rx - wp['x'], ry - wp['y'])), 'from the VISION poses'
     except Exception:
         pass

@@ -5,12 +5,12 @@ import numpy as np
 
 from spot_explorer.graphnav import map_shortcuts
 from spot_explorer.graphnav import navigation
-from spot_explorer.robot import motion as movements
+from spot_explorer.robot import motion
 from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
 from spot_explorer.perception import spot_grid
-from spot_explorer.mission import cells as environmentMap
-from spot_explorer.robot import connection as spotUtils
+from spot_explorer.mission import cells
+from spot_explorer.robot import connection
 
 from spot_explorer.mission import mission_prm
 
@@ -92,7 +92,7 @@ class Mission:
         # The neighbours of the cell JUST VISITED, not of the one the robot is in: with
         # arrival just outside the cell (ARRIVAL_OUTSIDE_CELL_M) the robot may still be
         # in the previous cell.
-        self.frontier.extend(environmentMap.find_new_borders(
+        self.frontier.extend(cells.find_new_borders(
             self.env, row, col, self.path, self.frontier))
 
     def _robot_cell(self):
@@ -103,11 +103,11 @@ class Mission:
         28-10 13:50 (7,2) was visited with the robot 0.29 m outside, in (6,3), and (7,1)
         next to it was never attempted from there.
         """
-        x, y, _, _ = spotUtils.getPosition(self.robot_state_client)
+        x, y, _, _ = connection.getPosition(self.robot_state_client)
         cell = tuple(int(v) for v in self.env.get_cell_from_world(x, y))
         uv = self._last_visited
         if uv is not None and cell != uv:
-            border = environmentMap.cell_border_distance(self.env, uv[0], uv[1], x, y)
+            border = cells.cell_border_distance(self.env, uv[0], uv[1], x, y)
             if border is not None and -border <= P.ARRIVAL_OUTSIDE_CELL_M:
                 print(f"[CELL] The robot is in cell {cell}, but {-border:.2f} m outside the "
                       f"just visited {uv}: I look for the neighbours from {uv}.")
@@ -127,7 +127,7 @@ class Mission:
         """
         env, ri = self.env, self.recordingInterface
         sides = env.get_cell_sides_status(row, col)
-        x, y, _, _ = spotUtils.getPosition(self.robot_state_client)
+        x, y, _, _ = connection.getPosition(self.robot_state_client)
         cands = []
         for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
             r, c = row + dr, col + dc
@@ -160,9 +160,9 @@ class Mission:
 
     def explore(self):
         """Visit the cells until the frontier is empty."""
-        x, y, z, _ = spotUtils.getPosition(self.robot_state_client)
+        x, y, z, _ = connection.getPosition(self.robot_state_client)
         robot_row, robot_col = self.env.get_cell_from_world(x, y)
-        self.frontier.extend(environmentMap.find_new_borders(
+        self.frontier.extend(cells.find_new_borders(
             self.env, robot_row, robot_col, self.path, self.frontier))
         self._t0 = time.time()
         self._closed_at_start = self._cell_counts()[0]
@@ -304,7 +304,7 @@ class Mission:
         check = self._attempt(row, col)
         self.frontier.remove(selected_border)
 
-        x_new, y_new, _, _ = spotUtils.getPosition(self.robot_state_client)
+        x_new, y_new, _, _ = connection.getPosition(self.robot_state_client)
         robot_row, robot_col = self.env.get_cell_from_world(x_new, y_new)
 
         if check or (row, col) == (robot_row, robot_col):
@@ -328,7 +328,7 @@ class Mission:
         prm, global_map = self.prm, self.global_grid.global_occupancy_map
 
         # Current position (the failure may be at the start or halfway)
-        x_curr, y_curr, _, _ = spotUtils.getPosition(self.robot_state_client)
+        x_curr, y_curr, _, _ = connection.getPosition(self.robot_state_client)
 
         # Fresh scan, to choose the goal point from here
         scan = self.local_grid.fetch_scan(self.robot_state_client)
@@ -402,7 +402,7 @@ class Mission:
         print(
             f"[RECOVERY] Found an alternative path with cost {len(path_ids) - 1} <= {MAX_RETRY_EDGES}. Retrying the entry...")
         if self._attempt(row, col):
-            x_final, y_final, _, _ = spotUtils.getPosition(self.robot_state_client)
+            x_final, y_final, _, _ = connection.getPosition(self.robot_state_client)
             self._on_visited(row, col, x_final, y_final)
         elif attempt_common.battery_low():
             self.frontier.append(selected_border)
@@ -476,7 +476,7 @@ class Mission:
         """With GraphNav up to the waypoint of cell nearest_cell, then the attempt on cell
         (target_row, target_col). 'caduta' if the robot fell during the trip."""
         recordingInterface = self.recordingInterface
-        x_current, y_current, _, _ = spotUtils.getPosition(self.robot_state_client)
+        x_current, y_current, _, _ = connection.getPosition(self.robot_state_client)
 
         nearest_wp = recordingInterface.get_manual_waypoint_by_cell(nearest_cell[0], nearest_cell[1])
         map_shortcuts.graphnav_add_shortcuts(recordingInterface, "before the move between cells",
@@ -491,7 +491,7 @@ class Mission:
         # GraphNav does not record the legs travelled: the old ones no longer describe the way
         # the robot came, the retreat must not use them.
         self.env._traveled_arcs = []
-        if movements.check_and_recover_fall(self.robot_state_client, self.command_client,
+        if motion.check_and_recover_fall(self.robot_state_client, self.command_client,
                                             self.global_grid.global_occupancy_map,
                                             "during the move with GraphNav") is not None:
             recordingInterface.start_recording()
@@ -510,7 +510,7 @@ class Mission:
         # attempt. Side marked as tried; the cell leaves the frontier only if it was
         # the LAST untried side (cell really blocked).
         if navigation_success and self._attempt(target_row, target_col):
-            x_final, y_final, _, _ = spotUtils.getPosition(self.robot_state_client)
+            x_final, y_final, _, _ = connection.getPosition(self.robot_state_client)
             self.frontier.remove((target_row, target_col, rank))
             self._on_visited(target_row, target_col, x_final, y_final)
         elif attempt_common.battery_low():
@@ -522,7 +522,7 @@ class Mission:
     def final_scan(self):
         """The area around the last position, before going back: it goes into the global maps."""
         print("[FINAL SCAN] Last scan around the robot before going back to the start...")
-        x_final, y_final, z_final, quat_final = spotUtils.getPosition(self.robot_state_client)
+        x_final, y_final, z_final, quat_final = connection.getPosition(self.robot_state_client)
         final_yaw = np.arctan2(2.0 * (quat_final.w * quat_final.z + quat_final.x * quat_final.y),
                                1.0 - 2.0 * (quat_final.y ** 2 + quat_final.z ** 2))
 

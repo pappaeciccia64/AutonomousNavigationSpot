@@ -115,13 +115,13 @@ with _quiet():
     from spot_explorer.perception import global_maps
     from spot_explorer.perception import slopes
     from spot_explorer.perception import spot_grid
-    from spot_explorer.planning import roadmap as prm_graph
+    from spot_explorer.planning import roadmap
     from spot_explorer.planning import edge_evaluation
-    from spot_explorer.mission import cells as environmentMap
+    from spot_explorer.mission import cells
     from spot_explorer.mission import mission_prm
     from spot_explorer.planning import graph_nodes
     from spot_explorer.graphnav import map_shortcuts
-    from spot_explorer.robot import motion as movements
+    from spot_explorer.robot import motion
     from spot_explorer.planning import goal
     from spot_explorer import records
     from spot_explorer import config as P
@@ -211,7 +211,7 @@ def replay_mission(job):
     rng = np.random.default_rng(0)
     out = dict(cell_starts=[], invariants={}, notes=[], graph_time_s=0.0)
     with _quiet():
-        env = environmentMap.EnvironmentMap(rows=m['rows'], cols=m['cols'], cell_size=m['cell'])
+        env = cells.EnvironmentMap(rows=m['rows'], cols=m['cols'], cell_size=m['cell'])
         env.set_origin(m['origin'][0], m['origin'][1], math.radians(m['yaw_deg']))
         P.MISSION_LATTICE_SPACING_M = m['spacing']
         g = m['graph']
@@ -285,8 +285,8 @@ def replay_mission(job):
                 # --- path towards the goal, with the mission's restrictions ------
                 if node_cells is None:
                     node_cells = mission_prm.node_cells(prm, env)
-                cells = set(done_cells) | {(tr, tc)} | {tuple(int(v) for v in env.get_cell_from_world(rx, ry))}
-                prm.set_allowed_nodes([n for n, c in node_cells.items() if c in cells])
+                allowed_cells = set(done_cells) | {(tr, tc)} | {tuple(int(v) for v in env.get_cell_from_world(rx, ry))}
+                prm.set_allowed_nodes([n for n, c in node_cells.items() if c in allowed_cells])
                 gx, gy = map(float, d['goal_xy'])
                 # With another graph the saved goal may not be a node: if the mission
                 # had moved it from the centre (occupied), the nearest node may be against
@@ -407,7 +407,7 @@ def gait_check(m):
         if not has:
             continue
         with _quiet():
-            movements.select_mobility_params(max(lo, la), float(x['roughness']))
+            motion.select_mobility_params(max(lo, la), float(x['roughness']))
         rows.append(dict(time=x['timestamp'][11:], tier=records.MISSION_STATS['last_tier'],
                          pitch=float(x['pitch_peak_abs_deg']), slope=round(max(lo, la), 3)))
     return rows
@@ -535,7 +535,6 @@ def main():
                     help=f"comparison with the full graph only on {FAST_FULL_CHECKS} scattered cell starts")
     ap.add_argument('--update-reference', action='store_true',
                     help="save the current behaviour as the new reference")
-    from spot_explorer.planning import graph_nodes
     ap.add_argument('--graph', choices=graph_nodes.GRAPH_SAMPLINGS,
                     help="replay with this node method (see GRAPH COMPARISON)")
     ap.add_argument('--distribution', choices=graph_nodes.RANDOM_DISTRIBUTIONS)

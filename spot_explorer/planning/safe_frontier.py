@@ -6,8 +6,8 @@ import numpy as np
 from bosdyn.client.robot_state import RobotStateClient
 from bosdyn.client.frame_helpers import get_a_tform_b, VISION_FRAME_NAME, BODY_FRAME_NAME
 from spot_explorer import config as P
-from spot_explorer.planning import roadmap as prm_graph
-from spot_explorer.robot import connection as spotUtils
+from spot_explorer.planning import roadmap
+from spot_explorer.robot import connection
 from spot_explorer.perception import geometry
 from spot_explorer.perception import slopes
 from spot_explorer.perception import spot_grid
@@ -612,7 +612,7 @@ def is_arc_in_fov(x1, y1, x2, y2, pts, fov_margin=0.0):
 
 def verify_arc_safety(x1, y1, x2, y2, pts, obstacle_mask):
     """Point check of a segment on the fused mask. Used by the retreat."""
-    return spotUtils.check_line_of_sight(x1, y1, x2, y2, pts, obstacle_mask)
+    return connection.check_line_of_sight(x1, y1, x2, y2, pts, obstacle_mask)
 
 
 # =========================================================================================
@@ -677,6 +677,6 @@ def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=P.PRM_NODE_MIN_CLEAR
     for k in np.nonzero(bad)[0]:
         nid = ids[int(k)]
         for nb in [n for n, _ in prm.edges.get(nid, [])]:
-            prm_graph.mark_edge_blocked_soft(prm, nid, nb)
+            roadmap.mark_edge_blocked_soft(prm, nid, nb)
         pruned.append(nid)
     return pruned

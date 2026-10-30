@@ -16,18 +16,18 @@ from spot_explorer.graphnav import apriltags
 from spot_explorer.graphnav import map_recording
 from spot_explorer.graphnav import map_shortcuts
 from spot_explorer.graphnav import navigation
-from spot_explorer.robot import motion as movements
+from spot_explorer.robot import motion
 from spot_explorer.perception import gait
 from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
 from spot_explorer.perception import slopes
 from spot_explorer.perception import spot_grid
 from spot_explorer.robot import connection
-from spot_explorer.mission import cells as environmentMap
+from spot_explorer.mission import cells
 from spot_explorer.planning import safe_frontier
 from spot_explorer.robot import battery
 
-from spot_explorer.planning import roadmap as prm_graph
+from spot_explorer.planning import roadmap
 from spot_explorer.mission import mission_prm
 from spot_explorer.planning import graph_nodes
 
@@ -51,7 +51,7 @@ def _emergency_shutdown(robot, command_client, recordingInterface, exc):
     renewed, cut the power (~9 s), and map lost. If the robot has fallen it is not sat down
     (it is already on the ground). Each step is tried on its own: never raises from here.
     """
-    fallen = isinstance(exc, movements.RobotFallenError)
+    fallen = isinstance(exc, motion.RobotFallenError)
     print(f"\n[EMERGENCY] Mission interrupted ({type(exc).__name__}): "
           + ("the robot is on the ground, " if fallen else "I stop the robot, sit it down, ")
           + "I save the GraphNav map.")
@@ -63,7 +63,7 @@ def _emergency_shutdown(robot, command_client, recordingInterface, exc):
             pass
     if not fallen:
         try:
-            movements.stop_robot(command_client, reason="mission interrupted")
+            motion.stop_robot(command_client, reason="mission interrupted")
             command_client.robot_command(RobotCommandBuilder.synchro_sit_command(),
                                          end_time_secs=time.time() + 20)
             sleep(3)
@@ -140,7 +140,7 @@ def _print_configuration():
           f"planning at every stop, then the cell is deferred; walked retreat "
           f"only as the last net. PRM nodes discarded below "
           f"{P.PRM_NODE_MIN_CLEARANCE_M:.2f} m of free space, only where seen. "
-          f"Exemption of {prm_graph.STOP_NODE_MAP_IGNORE_M:.2f} m from the global map "
+          f"Exemption of {roadmap.STOP_NODE_MAP_IGNORE_M:.2f} m from the global map "
           f"around the robot: now only after a fall")
     print(f"[CONFIG] OBSTACLES: median over {safe_frontier.OBSTACLE_MEDIAN_FRAMES} scans "
           f"+ hysteresis {safe_frontier.OBSTACLE_HYSTERESIS_M:.2f} m around "
@@ -199,7 +199,7 @@ def _mission_grid(options):
              f"{'random' if P.MISSION_RANDOM_SEED is None else P.MISSION_RANDOM_SEED})"
              if P.MISSION_GRAPH_SAMPLING == 'random' else "")
           + f"; edges from {P.PRM_MIN_EDGE_M:g} to {P.PRM_MAX_EDGE_M:g} m")
-    return environmentMap.EnvironmentMap(rows=grid_rows, cols=grid_cols, cell_size=grid_cell)
+    return cells.EnvironmentMap(rows=grid_rows, cols=grid_cols, cell_size=grid_cell)
 
 
 def _close_mission(robot, robot_state_client, command_client, recordingInterface):
@@ -479,7 +479,7 @@ def main():
     try:
         easy_walk(options)
         return True
-    except movements.RobotFallenError as exc:
+    except motion.RobotFallenError as exc:
         print("\n" + "=" * 70)
         print(f"[FALL] MISSION INTERRUPTED: {exc}")
         print("[FALL] The robot is on the ground and has NOT tried to go back to base.")
