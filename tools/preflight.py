@@ -159,7 +159,7 @@ def _cross_module(fname, tree, info):
                     alias[a.asname or a.name] = full
                 elif node.module in ours and a.name != '*' and a.name not in info[node.module][0]:
                     problems.append(f"{fname}:{node.lineno}: 'from {node.module} import {a.name}' "
-                                    f"-- {a.name} non esiste in {node.module}")
+                                    f"-- {a.name} does not exist in {node.module}")
 
     def visit(node, shadow):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -170,7 +170,7 @@ def _cross_module(fname, tree, info):
             mod = alias[node.value.id]
             names, funcs, _ = info[mod]
             if node.attr not in names:
-                problems.append(f"{fname}:{node.lineno}: {node.value.id}.{node.attr} non esiste in {mod}")
+                problems.append(f"{fname}:{node.lineno}: {node.value.id}.{node.attr} does not exist in {mod}")
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
                 and isinstance(node.func.value, ast.Name) and node.func.value.id in alias \
                 and node.func.value.id not in shadow:
@@ -180,7 +180,7 @@ def _cross_module(fname, tree, info):
                 params, has_kwargs = _params(fn)
                 for kw in node.keywords:
                     if kw.arg and kw.arg not in params and not has_kwargs:
-                        problems.append(f"{fname}:{node.lineno}: {mod}.{node.func.attr}() non accetta "
+                        problems.append(f"{fname}:{node.lineno}: {mod}.{node.func.attr}() does not accept "
                                         f"'{kw.arg}'")
         for c in ast.iter_child_nodes(node):
             visit(c, shadow)
@@ -202,18 +202,18 @@ def _modules(root):
 
 def main():
     root = sys.argv[1] if len(sys.argv) > 1 else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    print(f"Controllo pre-volo su: {root}\n")
+    print(f"Pre-flight check on: {root}\n")
 
     problems, trees, info = [], {}, {}
     files = _modules(root)
     if not files:
-        problems.append(f"{PACKAGE}/: PACCHETTO MANCANTE")
+        problems.append(f"{PACKAGE}/: PACKAGE MISSING")
     for mod, path in sorted(files.items()):
         try:
             trees[mod] = _parse(path)
             info[mod] = _top_names(trees[mod])
         except SyntaxError as e:
-            problems.append(f"{mod}: ERRORE DI SINTASSI riga {e.lineno}: {e.msg}")
+            problems.append(f"{mod}: SYNTAX ERROR line {e.lineno}: {e.msg}")
 
     for mod in sorted(trees):
         found = _cross_module(mod, trees[mod], info)
@@ -226,31 +226,31 @@ def main():
             continue
         classes = info[fname][2]
         if cls not in classes:
-            problems.append(f"{fname}: manca la classe {cls}")
+            problems.append(f"{fname}: class {cls} is missing")
         elif meth not in classes[cls]:
-            problems.append(f"{fname}: manca il metodo {cls}.{meth}() -- copia vecchia")
+            problems.append(f"{fname}: method {cls}.{meth}() is missing -- old copy")
     for fname, cls, meth, param in METHOD_PARAMS:
         fn = info.get(fname, (None, None, {}))[2].get(cls, {}).get(meth)
         if fn is not None:
             params, has_kwargs = _params(fn)
             if param not in params and not has_kwargs:
-                problems.append(f"{fname}: {cls}.{meth}() non accetta '{param}' -- copia vecchia")
+                problems.append(f"{fname}: {cls}.{meth}() does not accept '{param}' -- old copy")
 
     print()
     if problems:
         print("=" * 70)
-        print("NON LANCIARE LA MISSIONE. Problemi trovati:")
+        print("DO NOT LAUNCH THE MISSION. Problems found:")
         print("=" * 70)
         for p in problems:
             print(f"  - {p}")
-        print("\nRicopia i file segnalati dalla versione piu' recente.")
+        print("\nCopy the flagged files again from the latest version.")
         return 1
 
     print("=" * 70)
-    print("Tutti i file sono allineati fra loro.")
+    print("All files are consistent with each other.")
     print("=" * 70)
-    print("NB: questo controllo verifica solo che i moduli siano coerenti.")
-    print("    Non dice nulla sul comportamento del robot sul campo.")
+    print("NB: this check only verifies that the modules are consistent.")
+    print("    It says nothing about the robot's behaviour in the field.")
     return 0
 
 

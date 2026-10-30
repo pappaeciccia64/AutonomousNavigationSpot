@@ -195,9 +195,9 @@ def check_fall(robot_state_client):
                                               robot_state_pb2.BehaviorState.STATE_STEPPING)
     reasons = []
     if fall_faults:
-        reasons.append(f"fault di caduta ({len(fall_faults)})")
+        reasons.append(f"fall fault ({len(fall_faults)})")
     if tilted:
-        reasons.append(f"corpo inclinato (roll {roll:.0f}, pitch {pitch:.0f} gradi)")
+        reasons.append(f"body tilted (roll {roll:.0f}, pitch {pitch:.0f} deg)")
     return dict(fallen=bool(fall_faults) or tilted, reason=", ".join(reasons), roll=roll, pitch=pitch,
                 x=vision_tform_body.position.x, y=vision_tform_body.position.y,
                 fall_faults=fall_faults, clearable=clearable, unclearable=unclearable,
@@ -212,44 +212,44 @@ def recover_from_fall(robot_command_client, robot_state_client, status=None):
     st = status or check_fall(robot_state_client)
     if not st['fallen']:
         return True
-    print(f"[CADUTA] Robot a terra in ({st['x']:.2f}, {st['y']:.2f}): {st['reason']}.")
+    print(f"[FALL] Robot on the ground at ({st['x']:.2f}, {st['y']:.2f}): {st['reason']}.")
 
     for attempt in range(1, SELF_RIGHT_MAX_ATTEMPTS + 1):
         if st['unclearable']:
             raise RobotFallenError(
-                f"fault non cancellabile {st['unclearable']}: il robot non puo' rialzarsi da solo. "
-                f"Intervento dell'operatore.")
+                f"fault not clearable {st['unclearable']}: the robot cannot get up by itself. "
+                f"Operator intervention needed.")
         if not st['motors_on']:
             raise RobotFallenError(
-                "motori spenti dopo la caduta (E-Stop o guasto): il robot non puo' rialzarsi da solo. "
-                "Intervento dell'operatore.")
+                "motors off after the fall (E-Stop or failure): the robot cannot get up by itself. "
+                "Operator intervention needed.")
         try:
             for fid in st['clearable']:
                 robot_command_client.clear_behavior_fault(fid)
-            print(f"[CADUTA] Tentativo {attempt}/{SELF_RIGHT_MAX_ATTEMPTS}: cancellati {len(st['clearable'])} "
-                  f"fault, raddrizzamento in corso...")
+            print(f"[FALL] Attempt {attempt}/{SELF_RIGHT_MAX_ATTEMPTS}: cleared {len(st['clearable'])} "
+                  f"faults, self-righting in progress...")
             _robot_command.blocking_selfright(robot_command_client, timeout_sec=SELF_RIGHT_TIMEOUT_S)
             st = check_fall(robot_state_client)
             if max(abs(st['roll']), abs(st['pitch'])) > UPRIGHT_TILT_DEG:
-                print(f"[CADUTA] Dopo il raddrizzamento il corpo e' ancora inclinato "
-                      f"(roll {st['roll']:.0f}, pitch {st['pitch']:.0f} gradi).")
+                print(f"[FALL] After self-righting the body is still tilted "
+                      f"(roll {st['roll']:.0f}, pitch {st['pitch']:.0f} deg).")
                 continue
             for fid in st['clearable']:
                 robot_command_client.clear_behavior_fault(fid)
             _robot_command.blocking_stand(robot_command_client, timeout_sec=STAND_TIMEOUT_S)
             st = check_fall(robot_state_client)
             if not st['fallen'] and st['standing']:
-                print(f"[CADUTA] Rialzato al tentativo {attempt}: di nuovo in piedi in "
+                print(f"[FALL] Got up at attempt {attempt}: standing again at "
                       f"({st['x']:.2f}, {st['y']:.2f}).")
                 return True
-            print(f"[CADUTA] Dopo il comando di stand il robot non risulta in piedi ({st['reason'] or 'stato'}).")
+            print(f"[FALL] After the stand command the robot is not standing ({st['reason'] or 'state'}).")
         except RobotFallenError:
             raise
         except Exception as e:
-            print(f"[CADUTA] Tentativo {attempt} fallito: {e}")
+            print(f"[FALL] Attempt {attempt} failed: {e}")
             st = check_fall(robot_state_client)
-    raise RobotFallenError(f"{SELF_RIGHT_MAX_ATTEMPTS} tentativi di raddrizzamento non riusciti. "
-                           f"Intervento dell'operatore.")
+    raise RobotFallenError(f"{SELF_RIGHT_MAX_ATTEMPTS} self-righting attempts failed. "
+                           f"Operator intervention needed.")
 
 
 def stop_robot(robot_command_client, reason=""):
@@ -264,12 +264,12 @@ def stop_robot(robot_command_client, reason=""):
         robot_command_client.robot_command(RobotCommandBuilder.stop_command(),
                                            end_time_secs=time.time() + 5.0)
         if reason:
-            print(f"[STOP] Movimento interrotto: {reason}")
+            print(f"[STOP] Move interrupted: {reason}")
         else:
-            print("[STOP] Movimento interrotto.")
+            print("[STOP] Move interrupted.")
         return True
     except Exception as e:
-        print(f"[STOP] Impossibile fermare il robot: {e}")
+        print(f"[STOP] Could not stop the robot: {e}")
         return False
 
 
@@ -340,7 +340,7 @@ def relative_move(dx, dy, dyaw, frame_name, robot_command_client, robot_state_cl
     while True:
         if time.time() - t_start > timeout_s:
             stop_robot(robot_command_client,
-                       reason=f"tempo massimo {timeout_s:.0f} s superato (percorsi {distance_traveled:.2f}m)")
+                       reason=f"time limit {timeout_s:.0f} s exceeded (travelled {distance_traveled:.2f}m)")
             return False, distance_traveled
         try:
             feedback = robot_command_client.robot_command_feedback(cmd_id)
@@ -353,10 +353,10 @@ def relative_move(dx, dy, dyaw, frame_name, robot_command_client, robot_state_cl
             rpc_errors = 0
         except Exception as e:
             rpc_errors += 1
-            print(f"[MOVIMENTO] Errore di comunicazione durante il movimento ({rpc_errors}/"
+            print(f"[MOVE] Communication error during the move ({rpc_errors}/"
                   f"{MOVE_MAX_RPC_ERRORS}): {e}")
             if rpc_errors >= MOVE_MAX_RPC_ERRORS:
-                stop_robot(robot_command_client, reason="errori di comunicazione ripetuti")
+                stop_robot(robot_command_client, reason="repeated communication errors")
                 raise
             time.sleep(poll_period_s)
             continue
@@ -370,16 +370,16 @@ def relative_move(dx, dy, dyaw, frame_name, robot_command_client, robot_state_cl
             try:
                 abort_now = bool(should_abort())
             except Exception as e:
-                print(f"[STOP] Errore nella condizione di arresto, la ignoro: {e}")
+                print(f"[STOP] Error in the stop condition, ignoring it: {e}")
                 abort_now = False
             if abort_now:
                 stop_robot(robot_command_client,
-                           reason=f"richiesta del chiamante dopo {distance_traveled:.2f}m")
+                           reason=f"requested by the caller after {distance_traveled:.2f}m")
                 return False, distance_traveled
 
         if mobility_feedback.status != RobotCommandFeedbackStatus.STATUS_PROCESSING:
-            print(f"[MOVIMENTO] Obiettivo non raggiunto: percorsi {distance_traveled:.2f} m su "
-                  f"{float(np.hypot(dx, dy)):.2f} richiesti (stato del comando "
+            print(f"[MOVE] Goal not reached: travelled {distance_traveled:.2f} m out of "
+                  f"{float(np.hypot(dx, dy)):.2f} requested (command status "
                   f"{mobility_feedback.status}).")
             return False, distance_traveled
 
@@ -392,12 +392,12 @@ def relative_move(dx, dy, dyaw, frame_name, robot_command_client, robot_state_cl
                 turned = float(np.degrees(np.arctan2(
                     np.sin(current_tform_body.angle - initial_tform_body.angle),
                     np.cos(current_tform_body.angle - initial_tform_body.angle))))
-                print(f"[MOVIMENTO] Rotazione completata: {turned:+.0f} gradi su "
-                      f"{np.degrees(float(dyaw)):+.0f} richiesti (il centro del corpo si e' "
-                      f"spostato di {distance_traveled:.2f} m girando).")
+                print(f"[MOVE] Rotation completed: {turned:+.0f} deg out of "
+                      f"{np.degrees(float(dyaw)):+.0f} requested (the body centre moved "
+                      f"{distance_traveled:.2f} m while turning).")
             else:
-                print(f"[MOVIMENTO] Arrivato: percorsi {distance_traveled:.2f} m su "
-                      f"{float(np.hypot(dx, dy)):.2f} richiesti.")
+                print(f"[MOVE] Arrived: travelled {distance_traveled:.2f} m out of "
+                      f"{float(np.hypot(dx, dy)):.2f} requested.")
             return True, distance_traveled
 
         time.sleep(poll_period_s)
@@ -454,22 +454,22 @@ def check_and_recover_fall(robot_state_client, command_client, global_map, where
     try:
         st = check_fall(robot_state_client)
     except Exception as e:
-        print(f"[CADUTA] Impossibile leggere lo stato del robot ({where}): {e}")
+        print(f"[FALL] Could not read the robot state ({where}): {e}")
         return None
     if not st['fallen']:
         return None
     MISSION_STATS['falls'] += 1
-    print(f"[CADUTA] Rilevata {where} (caduta n. {MISSION_STATS['falls']} della missione).")
+    print(f"[FALL] Detected {where} (fall no. {MISSION_STATS['falls']} of the mission).")
     recover_from_fall(command_client, robot_state_client, status=st)
     MISSION_STATS['self_rights'] += 1
     if MISSION_STATS['falls'] >= P.MAX_FALLS_PER_MISSION:
         raise RobotFallenError(
-            f"{MISSION_STATS['falls']} cadute in questa missione: il robot si e' rialzato ma la missione "
-            f"si ferma qui. Controllare il terreno e il robot prima di ripartire.")
+            f"{MISSION_STATS['falls']} falls in this mission: the robot got up but the mission "
+            f"stops here. Check the terrain and the robot before starting again.")
     if global_map is not None:
         n = global_map.mark_hazard(st['x'], st['y'], P.FALL_HAZARD_RADIUS_M)
-        print(f"[CADUTA] Punto della caduta ({st['x']:.2f}, {st['y']:.2f}) segnato come pericoloso "
-              f"nella mappa: disco di {P.FALL_HAZARD_RADIUS_M:.1f} m ({n} celle), il pianificatore lo evitera'.")
+        print(f"[FALL] Fall point ({st['x']:.2f}, {st['y']:.2f}) marked as dangerous "
+              f"in the map: disk of {P.FALL_HAZARD_RADIUS_M:.1f} m ({n} cells), the planner will avoid it.")
     return (st['x'], st['y'])
 
 
@@ -518,7 +518,7 @@ def select_mobility_params(gradient, roughness):
                       max_linear_vel=gait.GAIT_VEL_HARD,
                       max_angular_vel=gait.GAIT_ANG_HARD)
 
-    print(f"[GAIT] Livello del terreno: {tier} (pendenza={gradient:.3f}, rugosita'={roughness:.3f}) -> "
+    print(f"[GAIT] Terrain level: {tier} (slope={gradient:.3f}, roughness={roughness:.3f}) -> "
           f"locomotion_hint={params['locomotion_hint']}, swing_height={params['swing_height']}, "
           f"ground_mu_hint={params['ground_mu_hint']}, "
           f"vel_max={params['max_linear_vel']:.2f} m/s, rot_max={params['max_angular_vel']:.2f} rad/s")
@@ -560,8 +560,8 @@ def navigate_to(target_x, target_y, robot_x, robot_y, robot_state_client, comman
     dyaw = np.arctan2(np.sin(target_yaw - current_yaw), np.cos(target_yaw - current_yaw))
 
     if keep_heading:
-        print(f"[INFO] Raggiungo il punto senza ruotare ({distance:.2f} m, "
-              f"{np.degrees(dyaw):.0f} gradi rispetto al muso)...")
+        print(f"[INFO] Reaching the point without rotating ({distance:.2f} m, "
+              f"{np.degrees(dyaw):.0f} deg from the nose)...")
         move_success, distance_traveled = move_to_world_point_without_turning(
             target_x, target_y, "vision", command_client, robot_state_client,
             should_abort=should_abort, **mobility_kwargs)
@@ -569,7 +569,7 @@ def navigate_to(target_x, target_y, robot_x, robot_y, robot_state_client, comman
         rotate_success, _ = relative_move(0, 0, dyaw, "vision", command_client, robot_state_client,
                                                     should_abort=should_abort, **mobility_kwargs)
         if not rotate_success:
-            print(f"[FAIL] Rotazione non riuscita: il movimento in avanti non parte.")
+            print(f"[FAIL] Rotation failed: the forward move does not start.")
             return False, 0.0, distance
 
         move_success, distance_traveled = relative_move(distance, 0, 0, "vision", command_client,
@@ -586,9 +586,9 @@ def navigate_to(target_x, target_y, robot_x, robot_y, robot_state_client, comman
     required_progress = max(MIN_PROGRESS_ABS_M, MIN_PROGRESS_FRACTION * distance)
 
     if move_success and distance > MIN_PROGRESS_ABS_M and distance_traveled < required_progress:
-        print(f"[FAIL] Movimento riportato come riuscito ma percorsi solo {distance_traveled:.2f}m "
-              f"su {distance:.2f}m richiesti -- trattato come fallimento meccanico reale (probabile "
-              f"ostacolo fisico non rilevato).")
+        print(f"[FAIL] Move reported as successful but only {distance_traveled:.2f}m travelled "
+              f"out of {distance:.2f}m requested -- treated as a real mechanical failure (probably "
+              f"an undetected physical obstacle).")
         move_success = False
 
     return move_success, distance_traveled, distance

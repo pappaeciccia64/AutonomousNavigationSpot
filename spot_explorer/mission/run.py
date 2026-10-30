@@ -22,11 +22,10 @@ from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
 from spot_explorer.perception import slopes
 from spot_explorer.perception import spot_grid
-from spot_explorer.robot import connection as spotLogInUtils
+from spot_explorer.robot import connection
 from spot_explorer.mission import cells as environmentMap
-from spot_explorer.robot import connection as spotUtils
 from spot_explorer.planning import safe_frontier
-from spot_explorer.robot import battery as batteria
+from spot_explorer.robot import battery
 
 from spot_explorer.planning import roadmap as prm_graph
 from spot_explorer.planning import mission_graph                   # mission node lattice
@@ -52,9 +51,9 @@ def _emergency_shutdown(robot, command_client, recordingInterface, exc):
     (it is already on the ground). Each step is tried on its own: never raises from here.
     """
     fallen = isinstance(exc, movements.RobotFallenError)
-    print(f"\n[EMERGENZA] Missione interrotta ({type(exc).__name__}): "
-          + ("il robot e' a terra, " if fallen else "fermo il robot, lo faccio sedere, ")
-          + "salvo la mappa GraphNav.")
+    print(f"\n[EMERGENCY] Mission interrupted ({type(exc).__name__}): "
+          + ("the robot is on the ground, " if fallen else "I stop the robot, sit it down, ")
+          + "I save the GraphNav map.")
     tracker = MISSION_CTX.get('tracker')
     if tracker is not None:
         try:
@@ -63,23 +62,23 @@ def _emergency_shutdown(robot, command_client, recordingInterface, exc):
             pass
     if not fallen:
         try:
-            movements.stop_robot(command_client, reason="missione interrotta")
+            movements.stop_robot(command_client, reason="mission interrupted")
             command_client.robot_command(RobotCommandBuilder.synchro_sit_command(),
                                          end_time_secs=time.time() + 20)
             sleep(3)
             robot.power_off(cut_immediately=False)
-            print("[EMERGENZA] Robot seduto e motori spenti.")
+            print("[EMERGENCY] Robot sitting and motors off.")
         except BaseException as e:
-            print(f"[EMERGENZA] Non sono riuscito a far sedere il robot ({e!r}): usare il tablet.")
+            print(f"[EMERGENCY] I could not sit the robot down ({e!r}): use the tablet.")
     try:
         recordingInterface.stop_recording()
     except BaseException:
         pass
     try:
         recordingInterface.download_full_graph()
-        print("[EMERGENZA] Mappa GraphNav scaricata.")
+        print("[EMERGENCY] GraphNav map downloaded.")
     except BaseException as e:
-        print(f"[EMERGENZA] Mappa GraphNav non scaricata ({e!r}).")
+        print(f"[EMERGENCY] GraphNav map not downloaded ({e!r}).")
 
 
 def _mission_folders():
@@ -99,65 +98,65 @@ def _mission_folders():
 def _print_configuration():
     """Switches and thresholds at the top of the log, so it can be read knowing which values
     produced it."""
-    print("[CONFIG] INTERRUTTORI: " + "  ".join(
+    print("[CONFIG] SWITCHES: " + "  ".join(
         f"{k.split('.')[-1]}={v}" for k, v in summary.mission_switches().items()))
     print(f"[CONFIG] SLOPE_THRESHOLD={slopes.SLOPE_THRESHOLD}  "
           f"LATERAL_SLOPE_COST_MULTIPLIER={slopes.LATERAL_SLOPE_COST_MULTIPLIER}  "
           f"OBSTACLE_THRESHOLD={geometry.OBSTACLE_THRESHOLD}  ROUGH_THRESHOLD={spot_grid.ROUGH_THRESHOLD}  "
           f"NEAR_THRESHOLD_MARGIN_FRACTION={slopes.NEAR_THRESHOLD_MARGIN_FRACTION}")
-    print(f"[CONFIG] PROFILO ARCO: base={slopes.SLOPE_BASELINE_M}m  "
-          f"fetta_laterale=+/-{slopes.LATERAL_SLICE_HALF_WIDTH_M}m  "
-          f"copertura_minima={slopes.MIN_ARC_SAMPLE_FRACTION:.0%}")
+    print(f"[CONFIG] EDGE PROFILE: base={slopes.SLOPE_BASELINE_M}m  "
+          f"lateral_slice=+/-{slopes.LATERAL_SLICE_HALF_WIDTH_M}m  "
+          f"min_coverage={slopes.MIN_ARC_SAMPLE_FRACTION:.0%}")
     print(f"[CONFIG] GAIT: plain<{gait.GAIT_PLAIN_SLOPE_MAX}/{gait.GAIT_PLAIN_ROUGH_MAX}  "
           f"moderate<{gait.GAIT_MODERATE_SLOPE_MAX}/{gait.GAIT_MODERATE_ROUGH_MAX}  "
           f"mu={gait.GAIT_MU_PLAIN}/{gait.GAIT_MU_MODERATE}/{gait.GAIT_MU_HARD}")
-    print(f"[CONFIG] TERRENO: terrain_valid >= {spot_grid.TERRAIN_VALID_MIN} "
-          f"(era > 0.0, dipendeva dal segno di un residuo numerico)  "
-          f"celle mai scritte: plateau >= {spot_grid.UNWRITTEN_MIN_CELLS} celle, "
-          f"almeno {spot_grid.UNWRITTEN_MIN_SPOT_INVALID:.0%} marcate non valide da Spot")
-    print(f"[CONFIG] ROTAZIONE: prefiltro {geometry.ROTATION_CLEARANCE_M:.3f} m "
-          f"(aria {geometry.ROTATION_CLEARANCE_AIR_M:.2f} m, separata dai "
-          f"{geometry.ROBOT_CLEARANCE_AIR_M:.2f} m dell'avanzamento), poi controllo sul "
-          f"settore spazzato a passi di {geometry.ROTATION_SWEEP_STEP_DEG:.0f} gradi "
-          f"(tolleranza {geometry.ROTATION_NOISE_TOLERANCE_M:.2f} m sul rumore); "
-          f"MARCIA DI TRAVERSO DISATTIVATA")
-    print(f"[CONFIG] SE NON PUO' RUOTARE: 1) ventaglio nel cono +/-{P.CONE_SWEEP_MAX_DEG:.0f} gradi "
-          f"a passi di {P.CONE_SWEEP_STEP_DEG:.0f}, si va nella direzione piu' libera fra quelle "
-          f"che avvicinano di almeno {P.CONE_MIN_GAIN_M:.2f} m; 2) arretramento dritto fino a "
-          f"{P.ROTATION_RETREAT_M:.2f} m SOLO se da li' la rotazione diventa possibile, "
-          f"max {P.MAX_STRAIGHT_RETREATS_IN_A_ROW} consecutivi; 3) si scarta il tratto")
-    print(f"[CONFIG] TRAPPOLA: ventaglio a 360 gradi a passi di {P.ESCAPE_FAN_STEP_DEG:.0f} "
-          f"({int(360/P.ESCAPE_FAN_STEP_DEG)} direzioni); una direzione vale se concede "
-          f"{P.ESCAPE_FAN_MIN_ADVANCE_M:.2f} m E il robot puo' girarsi per puntarla. Zero "
-          f"direzioni -> si ripercorre il tratto da cui si e' venuti SUBITO, senza "
-          f"scartare archi. Controllo sulla posa d'arrivo per i passi sotto "
-          f"{P.ARRIVAL_EXIT_CHECK_MAX_STEP_M:.2f} m o con obstacle_distance sotto "
-          f"{P.ARRIVAL_EXIT_CHECK_OD_M:.2f} m, max {P.MAX_ARRIVAL_REFUSALS} rifiuti. "
-          f"Scarto da [SUBITO] e da [ARRIVO]: NON permanente")
-    print(f"[CONFIG] RITORNI: briciola GraphNav ogni "
-          f"{P.GRAPHNAV_WAYPOINT_MIN_SPACING_M:.2f} m, ritorno con GraphNav fino a "
-          f"{P.GRAPHNAV_MAX_BACKTRACK_HOPS} waypoint indietro riprovando la "
-          f"pianificazione a ogni tappa, poi si rimanda la cella; ritirata a zampe "
-          f"solo come ultima rete. Nodi PRM scartati sotto "
-          f"{P.PRM_NODE_MIN_CLEARANCE_M:.2f} m di spazio libero, solo dove visti. "
-          f"Deroga di {prm_graph.STOP_NODE_MAP_IGNORE_M:.2f} m alla mappa globale "
-          f"attorno al robot: ora solo dopo una caduta")
-    print(f"[CONFIG] OSTACOLI: mediana su {safe_frontier.OBSTACLE_MEDIAN_FRAMES} scansioni "
-          f"+ isteresi {safe_frontier.OBSTACLE_HYSTERESIS_M:.2f} m attorno a "
-          f"{geometry.FRONTIER_CLEARANCE_M:.2f} m (rumore misurato 1.5 cm tipici, 7.3 di punta); "
-          f"celle-ostacolo escluse dal campionamento della pendenza d'arco")
-    print(f"[CONFIG] BATTERIA: rientro a wp_0 sotto {P.BATTERY_RETURN_PCT:.0f}% "
-          f"({P.BATTERY_RETURN_CONFIRM} letture di fila; 0 = spento), lettura al massimo ogni "
-          f"{P.BATTERY_SAMPLE_S:.0f} s, dati in battery.csv")
-    print(f"[CONFIG] OBIETTIVO: tolleranza d'arrivo {P.GOAL_REACHED_TOLERANCE_M:.2f} m "
-          f"(= meta' corpo + margine del fronte), riscelta del punto fino a "
-          f"{P.MAX_BLOCK_REPLANS} volte se risulta irraggiungibile; ripianificazione alla "
-          f"PRIMA cella bloccante, fino a {P.MAX_EARLY_REPLANS} volte per tentativo")
-    print(f"[CONFIG] SCELTA OBIETTIVO: solo punti raggiungibili dal robot nel grafo (se ce "
-          f"ne sono), spazio libero preferito {P.TARGET_CLEARANCE_M:.2f} m (minimo "
-          f"{geometry.PLAN_CLEARANCE_M:.2f}), almeno {P.TARGET_CELL_BORDER_M:.2f} m dal bordo "
-          f"della cella, obiettivi rifiutati dal fronte esclusi per la missione; arrivo "
-          f"valido anche col robot fuori dalla cella fino a {P.ARRIVAL_OUTSIDE_CELL_M:.2f} m")
+    print(f"[CONFIG] TERRAIN: terrain_valid >= {spot_grid.TERRAIN_VALID_MIN} "
+          f"(was > 0.0, depended on the sign of a numerical residue)  "
+          f"cells never written: plateau >= {spot_grid.UNWRITTEN_MIN_CELLS} cells, "
+          f"at least {spot_grid.UNWRITTEN_MIN_SPOT_INVALID:.0%} marked invalid by Spot")
+    print(f"[CONFIG] ROTATION: prefilter {geometry.ROTATION_CLEARANCE_M:.3f} m "
+          f"(air {geometry.ROTATION_CLEARANCE_AIR_M:.2f} m, separate from the "
+          f"{geometry.ROBOT_CLEARANCE_AIR_M:.2f} m of the advance), then check on the "
+          f"swept sector in steps of {geometry.ROTATION_SWEEP_STEP_DEG:.0f} deg "
+          f"(tolerance {geometry.ROTATION_NOISE_TOLERANCE_M:.2f} m on the noise); "
+          f"SIDEWAYS WALKING DISABLED")
+    print(f"[CONFIG] IF IT CANNOT ROTATE: 1) fan in the cone +/-{P.CONE_SWEEP_MAX_DEG:.0f} deg "
+          f"in steps of {P.CONE_SWEEP_STEP_DEG:.0f}, it goes in the freest direction among those "
+          f"getting closer by at least {P.CONE_MIN_GAIN_M:.2f} m; 2) straight back-off up to "
+          f"{P.ROTATION_RETREAT_M:.2f} m ONLY if from there the rotation becomes possible, "
+          f"max {P.MAX_STRAIGHT_RETREATS_IN_A_ROW} in a row; 3) the leg is discarded")
+    print(f"[CONFIG] TRAP: 360 degree fan in steps of {P.ESCAPE_FAN_STEP_DEG:.0f} "
+          f"({int(360/P.ESCAPE_FAN_STEP_DEG)} directions); a direction counts if it allows "
+          f"{P.ESCAPE_FAN_MIN_ADVANCE_M:.2f} m AND the robot can turn to point at it. Zero "
+          f"directions -> it retraces the leg it came from AT ONCE, without "
+          f"discarding edges. Check on the arrival pose for steps below "
+          f"{P.ARRIVAL_EXIT_CHECK_MAX_STEP_M:.2f} m or with obstacle_distance below "
+          f"{P.ARRIVAL_EXIT_CHECK_OD_M:.2f} m, max {P.MAX_ARRIVAL_REFUSALS} refusals. "
+          f"Discard by [EARLY] and [ARRIVAL]: NOT permanent")
+    print(f"[CONFIG] RETURNS: GraphNav breadcrumb every "
+          f"{P.GRAPHNAV_WAYPOINT_MIN_SPACING_M:.2f} m, return with GraphNav up to "
+          f"{P.GRAPHNAV_MAX_BACKTRACK_HOPS} waypoints back retrying the "
+          f"planning at every stop, then the cell is deferred; walked retreat "
+          f"only as the last net. PRM nodes discarded below "
+          f"{P.PRM_NODE_MIN_CLEARANCE_M:.2f} m of free space, only where seen. "
+          f"Exemption of {prm_graph.STOP_NODE_MAP_IGNORE_M:.2f} m from the global map "
+          f"around the robot: now only after a fall")
+    print(f"[CONFIG] OBSTACLES: median over {safe_frontier.OBSTACLE_MEDIAN_FRAMES} scans "
+          f"+ hysteresis {safe_frontier.OBSTACLE_HYSTERESIS_M:.2f} m around "
+          f"{geometry.FRONTIER_CLEARANCE_M:.2f} m (measured noise 1.5 cm typical, 7.3 peak); "
+          f"obstacle cells excluded from the edge slope sampling")
+    print(f"[CONFIG] BATTERY: return to wp_0 below {P.BATTERY_RETURN_PCT:.0f}% "
+          f"({P.BATTERY_RETURN_CONFIRM} readings in a row; 0 = off), reading at most every "
+          f"{P.BATTERY_SAMPLE_S:.0f} s, data in battery.csv")
+    print(f"[CONFIG] GOAL: arrival tolerance {P.GOAL_REACHED_TOLERANCE_M:.2f} m "
+          f"(= half body + frontier margin), point chosen again up to "
+          f"{P.MAX_BLOCK_REPLANS} times if it turns out unreachable; replan at the "
+          f"FIRST blocking cell, up to {P.MAX_EARLY_REPLANS} times per attempt")
+    print(f"[CONFIG] GOAL CHOICE: only points reachable from the robot in the graph (if there "
+          f"are any), preferred free space {P.TARGET_CLEARANCE_M:.2f} m (minimum "
+          f"{geometry.PLAN_CLEARANCE_M:.2f}), at least {P.TARGET_CELL_BORDER_M:.2f} m from the border "
+          f"of the cell, goals refused by the frontier excluded for the mission; arrival "
+          f"valid even with the robot outside the cell up to {P.ARRIVAL_OUTSIDE_CELL_M:.2f} m")
 
 
 def _mission_grid(options):
@@ -177,59 +176,59 @@ def _mission_grid(options):
             grid_rows, grid_cols, grid_cell = int(_r), int(_c), float(_cs)
             _grid_source = f"SPOT_MISSION_GRID='{_env_grid}'"
         except Exception:
-            print(f"[CONFIG] SPOT_MISSION_GRID='{_env_grid}' non valido (atteso 'righe,colonne,lato'): "
-                  f"uso {grid_rows},{grid_cols},{grid_cell:g}.")
+            print(f"[CONFIG] SPOT_MISSION_GRID='{_env_grid}' not valid (expected 'rows,cols,side'): "
+                  f"using {grid_rows},{grid_cols},{grid_cell:g}.")
     _cli = (getattr(options, 'grid_rows', None), getattr(options, 'grid_cols', None),
             getattr(options, 'grid_cell', None))
     if any(v is not None for v in _cli):
         grid_rows = int(_cli[0]) if _cli[0] is not None else grid_rows
         grid_cols = int(_cli[1]) if _cli[1] is not None else grid_cols
         grid_cell = float(_cli[2]) if _cli[2] is not None else grid_cell
-        _grid_source = "argomenti --rows/--cols/--cell"
-    print(f"[CONFIG] Griglia di missione: {grid_rows} x {grid_cols} celle da {grid_cell:.1f} m "
-          f"({grid_rows * grid_cell:.0f} m a sinistra x {grid_cols * grid_cell:.0f} m davanti; "
-          f"fonte: {_grid_source})")
-    print(f"[CONFIG] Reticolo: passo richiesto "
-          f"{'suggerito' if P.MISSION_LATTICE_SPACING_M is None else '%.3f m' % P.MISSION_LATTICE_SPACING_M}, "
-          f"anelli {P.MISSION_LATTICE_RINGS if P.MISSION_LATTICE_RINGS is not None else 'tutti'}")
+        _grid_source = "arguments --rows/--cols/--cell"
+    print(f"[CONFIG] Mission grid: {grid_rows} x {grid_cols} cells of {grid_cell:.1f} m "
+          f"({grid_rows * grid_cell:.0f} m to the left x {grid_cols * grid_cell:.0f} m ahead; "
+          f"source: {_grid_source})")
+    print(f"[CONFIG] Lattice: requested spacing "
+          f"{'suggested' if P.MISSION_LATTICE_SPACING_M is None else '%.3f m' % P.MISSION_LATTICE_SPACING_M}, "
+          f"rings {P.MISSION_LATTICE_RINGS if P.MISSION_LATTICE_RINGS is not None else 'all'}")
     # test_replay reads method and edges from this line; distribution, density and seed from
-    # the [GRAFO] Nodi casuali line, written when the graph is built.
-    print(f"[CONFIG] Grafo: nodi {P.MISSION_GRAPH_SAMPLING}"
-          + (f" ({P.MISSION_RANDOM_DISTRIBUTION}, {P.MISSION_RANDOM_DENSITY:g} nodi/m2, seme "
-             f"{'a caso' if P.MISSION_RANDOM_SEED is None else P.MISSION_RANDOM_SEED})"
+    # the [GRAPH] Random nodes line, written when the graph is built.
+    print(f"[CONFIG] Graph: nodes {P.MISSION_GRAPH_SAMPLING}"
+          + (f" ({P.MISSION_RANDOM_DISTRIBUTION}, {P.MISSION_RANDOM_DENSITY:g} nodes/m2, seed "
+             f"{'random' if P.MISSION_RANDOM_SEED is None else P.MISSION_RANDOM_SEED})"
              if P.MISSION_GRAPH_SAMPLING == 'random' else "")
-          + f"; archi da {P.PRM_MIN_EDGE_M:g} a {P.PRM_MAX_EDGE_M:g} m")
+          + f"; edges from {P.PRM_MIN_EDGE_M:g} to {P.PRM_MAX_EDGE_M:g} m")
     return environmentMap.EnvironmentMap(rows=grid_rows, cols=grid_cols, cell_size=grid_cell)
 
 
 def _close_mission(robot, robot_state_client, command_client, recordingInterface):
     """After the summary: GraphNav map closure, return to wp_0, sit, power off, map
-    download. Not counted in any [TEMPO] entry: it is measured separately and printed
+    download. Not counted in any [TIMING] entry: it is measured separately and printed
     at closure."""
     _t_close = {}
     _t = time.perf_counter()
     try:
         _wp0_id = next((w.id for w in recordingInterface._get_graph(force_refresh=True).waypoints
                         if w.annotations.name == "wp_0"), None)
-        _xy_end = spotUtils.getPosition(robot_state_client)[:2]
+        _xy_end = connection.getPosition(robot_state_client)[:2]
     except Exception:
         _wp0_id, _xy_end = None, None
-    map_shortcuts.graphnav_add_shortcuts(recordingInterface, "prima del ritorno a wp_0",
+    map_shortcuts.graphnav_add_shortcuts(recordingInterface, "before the return to wp_0",
                                          map_edges=True, target_wp_id=_wp0_id, robot_xy=_xy_end)
     recordingInterface.auto_close_loops(True, False)
     recordingInterface.stop_recording()
     # Spot's loop closure only once, BEFORE anchoring: its edges, verified on the scans,
     # correct the drift of the downloaded map and shorten the return
     # (see GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S).
-    map_shortcuts.graphnav_add_shortcuts(recordingInterface, "chiusura della mappa", map_edges=False,
+    map_shortcuts.graphnav_add_shortcuts(recordingInterface, "map closure", map_edges=False,
                                          loop_closure_s=P.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S)
     recordingInterface.optimize_anchoring()
-    _t_close['chiusura mappa e ancoraggio'] = time.perf_counter() - _t
+    _t_close['map closure and anchoring'] = time.perf_counter() - _t
 
     _t = time.perf_counter()
-    monitor = MISSION_CTX.get('batteria')
+    monitor = MISSION_CTX.get('battery')
     if monitor is not None:
-        monitor.check("inizio del ritorno a wp_0")
+        monitor.check("start of the return to wp_0")
     _pct0 = MISSION_STATS.get('battery_last_pct')
     wp0_outcome = navigation.graphnav_return_to_start(recordingInterface, robot_state_client, command_client)
     if wp0_outcome in ('arrived', 'near'):
@@ -241,28 +240,28 @@ def _close_mission(robot, robot_state_client, command_client, recordingInterface
             apriltags.graphnav_correct_wp0_with_fiducial(robot, recordingInterface, robot_state_client,
                                                              command_client, measure['offset'])
     if wp0_outcome != 'arrived':
-        print("[GRAPHNAV] Ritorno a wp_0 non riuscito: il robot si siede dove si trova.")
-    _t_close['ritorno a wp_0'] = time.perf_counter() - _t
+        print("[GRAPHNAV] Return to wp_0 failed: the robot sits down where it is.")
+    _t_close['return to wp_0'] = time.perf_counter() - _t
     if monitor is not None:
-        monitor.check("fine del ritorno a wp_0")
+        monitor.check("end of the return to wp_0")
         _pct1 = MISSION_STATS.get('battery_last_pct')
         if _pct0 is not None and _pct1 is not None:
             # What the return costs: used to tune BATTERY_RETURN_PCT.
             MISSION_STATS['battery_wp0_return_pct'] = round(_pct0 - _pct1, 1)
-            print(f"[BATTERIA] Ritorno a wp_0: da {_pct0:.0f}% a {_pct1:.0f}% "
-                  f"({_pct0 - _pct1:.1f} punti in {_t_close['ritorno a wp_0']:.0f} s)")
+            print(f"[BATTERY] Return to wp_0: from {_pct0:.0f}% to {_pct1:.0f}% "
+                  f"({_pct0 - _pct1:.1f} points in {_t_close['return to wp_0']:.0f} s)")
 
     _t = time.perf_counter()
     command_client.robot_command(RobotCommandBuilder.synchro_sit_command(), end_time_secs=time.time() + 20)
     sleep(3)
     robot.power_off(cut_immediately=False)
-    _t_close['seduta e spegnimento'] = time.perf_counter() - _t
+    _t_close['sit and power off'] = time.perf_counter() - _t
 
     _t = time.perf_counter()
     recordingInterface.download_full_graph()
-    _t_close['scaricamento della mappa'] = time.perf_counter() - _t
+    _t_close['map download'] = time.perf_counter() - _t
 
-    print(f"[TEMPO] Chiusura della missione, {sum(_t_close.values()):.1f} s in tutto:")
+    print(f"[TIMING] Mission closure, {sum(_t_close.values()):.1f} s in all:")
     for k, v in sorted(_t_close.items(), key=lambda kv: -kv[1]):
         print(f"  {k:32s} {v:6.1f} s")
 
@@ -270,8 +269,8 @@ def _close_mission(robot, robot_state_client, command_client, recordingInterface
 def easy_walk(options):
     """The whole mission: robot and GraphNav start-up, graph, cell-by-cell exploration
     (Mission), final scan, summary, return to the start and power-off."""
-    robot, lease_client, robot_state_client, client_metadata = spotLogInUtils.setLogInfo(options)
-    estop = spotLogInUtils.SimpleEstop(robot, options.name + "_estop")
+    robot, lease_client, robot_state_client, client_metadata = connection.setLogInfo(options)
+    estop = connection.SimpleEstop(robot, options.name + "_estop")
 
     local_grid = spot_grid.LocalGrid(robot)
     MISSION_CTX['local_grid'] = local_grid
@@ -291,23 +290,23 @@ def easy_walk(options):
             MISSION_CTX['log_folder'] = mission_log_folder
             MISSION_CTX['segment_log'] = SegmentLog(os.path.join(mission_log_folder, "segments.csv"))
             MISSION_CTX['summary_done'] = False
-            print(f"[LOG] Cartella log: {mission_log_folder}  |  dati e immagini: {mission_folder}")
+            print(f"[LOG] Log folder: {mission_log_folder}  |  data and images: {mission_folder}")
             _print_configuration()
         except Exception as e:
-            print(f"[LOG] Impossibile inizializzare il CSV dei segmenti: {e}")
+            print(f"[LOG] Could not initialize the segment CSV: {e}")
 
         command_client = robot.ensure_client(RobotCommandClient.default_service_name)
         robot.time_sync.wait_for_sync()
-        robot.logger.info('Accensione del robot...')
+        robot.logger.info('Powering on the robot...')
         robot.power_on()
-        assert robot.is_powered_on(), 'Accensione del robot non riuscita.'
-        robot.logger.info('Robot acceso.')
+        assert robot.is_powered_on(), 'Robot power-on failed.'
+        robot.logger.info('Robot powered on.')
         try:
             blocking_stand(command_client)
 
             # Battery: first reading, then at every loop turn (see battery.py).
-            MISSION_CTX['batteria'] = batteria.BatteryMonitor(robot_state_client)
-            MISSION_CTX['batteria'].check("avvio")
+            MISSION_CTX['battery'] = battery.BatteryMonitor(robot_state_client)
+            MISSION_CTX['battery'].check("start")
 
             # Grids and local maps all come from Spot's cameras (no Velodyne).
             recordingInterface.clear_map()
@@ -320,14 +319,14 @@ def easy_walk(options):
                                                      fiducial_id=P.START_FIDUCIAL_ID)
             MISSION_CTX['start_fiducial'] = fiducials[0] if fiducials else None
             if fiducials:
-                print(f"[FIDUCIAL] Fiducial di partenza: {apriltags.describe_fiducial(fiducials[0])}"
-                      + (f"; ne vedo altri {len(fiducials) - 1}: "
+                print(f"[FIDUCIAL] Starting fiducial: {apriltags.describe_fiducial(fiducials[0])}"
+                      + (f"; I see {len(fiducials) - 1} more: "
                          + ", ".join(str(f['id']) for f in fiducials[1:]) if len(fiducials) > 1 else ""))
             else:
-                print(f"[FIDUCIAL] Nessun fiducial "
-                      f"{'' if P.START_FIDUCIAL_ID is None else f'con ID {P.START_FIDUCIAL_ID} '}"
-                      f"visto in {P.START_FIDUCIAL_WAIT_S:.0f} s da nessuna telecamera: si parte senza. "
-                      f"Spot riconosce solo gli AprilTag 36h11 (i fiducial di Boston Dynamics).")
+                print(f"[FIDUCIAL] No fiducial "
+                      f"{'' if P.START_FIDUCIAL_ID is None else f'with ID {P.START_FIDUCIAL_ID} '}"
+                      f"seen in {P.START_FIDUCIAL_WAIT_S:.0f} s by any camera: starting without. "
+                      f"Spot only recognizes AprilTag 36h11 (the Boston Dynamics fiducials).")
 
             start_row, start_col = 0, 0
             recordingInterface.create_default_waypoint(cell_row=start_row, cell_col=start_col)
@@ -349,7 +348,7 @@ def easy_walk(options):
             mobility_kwargs = {}
 
             # --- Starting pose, BEFORE building the graph: the lattice is relative to it ---
-            x_boot, y_boot, z_boot, quat_boot = spotUtils.getPosition(robot_state_client)
+            x_boot, y_boot, z_boot, quat_boot = connection.getPosition(robot_state_client)
             yaw_boot = np.arctan2(2.0 * (quat_boot.w * quat_boot.z + quat_boot.x * quat_boot.y),
                                   1.0 - 2.0 * (quat_boot.y ** 2 + quat_boot.z ** 2))
             env.set_origin(x_boot, y_boot, yaw_boot, start_row=start_row, start_col=start_col)
@@ -375,9 +374,9 @@ def easy_walk(options):
 
             env.print_map()
             if cell_attempt._battery_low():
-                print("[BATTERIA] Missione chiusa prima di finire l'esplorazione: la chiusura e' "
-                      "quella normale (scansione finale, riepilogo, ritorno a wp_0, mappa scaricata).")
-            x_final, y_final, _, _ = spotUtils.getPosition(robot_state_client)
+                print("[BATTERY] Mission closed before finishing the exploration: the closure is "
+                      "the normal one (final scan, summary, return to wp_0, map downloaded).")
+            x_final, y_final, _, _ = connection.getPosition(robot_state_client)
             final_row, final_col = env.get_cell_from_world(x_final, y_final)
             recordingInterface.create_default_waypoint(cell_row=final_row, cell_col=final_col)
 
@@ -405,43 +404,43 @@ def _parse_args(argv=None):
     MISSION_LATTICE_SPACING_M, MISSION_LATTICE_RINGS, MISSION_GRAPH_SAMPLING...).
     """
     import argparse
-    p = argparse.ArgumentParser(description="Missione di esplorazione autonoma con Spot")
+    p = argparse.ArgumentParser(description="Autonomous exploration mission with Spot")
     p.add_argument('--rows', type=int, default=None,
-                   help=f"righe di celle, a sinistra del robot (default {P.MISSION_GRID_ROWS})")
+                   help=f"rows of cells, to the robot's left (default {P.MISSION_GRID_ROWS})")
     p.add_argument('--cols', type=int, default=None,
-                   help=f"colonne di celle, davanti al robot (default {P.MISSION_GRID_COLS})")
+                   help=f"columns of cells, ahead of the robot (default {P.MISSION_GRID_COLS})")
     p.add_argument('--cell', type=float, default=None,
-                   help=f"lato della cella in m (default {P.MISSION_CELL_SIZE_M:g})")
+                   help=f"cell side in m (default {P.MISSION_CELL_SIZE_M:g})")
     p.add_argument('--spacing', type=float, default=None,
-                   help=f"passo fra i nodi del reticolo in m, arrotondato a cell/n; gli archi "
-                        f"restano >= {P.PRM_MIN_EDGE_M:g} m (default {P.MISSION_LATTICE_SPACING_M}; "
-                        f"0 = suggerito)")
+                   help=f"spacing between lattice nodes in m, rounded to cell/n; the edges "
+                        f"stay >= {P.PRM_MIN_EDGE_M:g} m (default {P.MISSION_LATTICE_SPACING_M}; "
+                        f"0 = suggested)")
     p.add_argument('--rings', default=None,
-                   help=f"anelli di vicini collegati, o 'tutti' (default {P.MISSION_LATTICE_RINGS})")
+                   help=f"rings of linked neighbours, or 'all' (default {P.MISSION_LATTICE_RINGS})")
     p.add_argument('--graph', choices=mission_graph.GRAPH_SAMPLINGS, default=None,
-                   help=f"come si generano i nodi (default {P.MISSION_GRAPH_SAMPLING})")
+                   help=f"how the nodes are generated (default {P.MISSION_GRAPH_SAMPLING})")
     p.add_argument('--distribution', choices=mission_graph.RANDOM_DISTRIBUTIONS, default=None,
-                   help=f"nodi casuali: distribuzione (default {P.MISSION_RANDOM_DISTRIBUTION})")
+                   help=f"random nodes: distribution (default {P.MISSION_RANDOM_DISTRIBUTION})")
     p.add_argument('--density', type=float, default=None,
-                   help=f"nodi casuali: nodi per m2 (default {P.MISSION_RANDOM_DENSITY:g})")
+                   help=f"random nodes: nodes per m2 (default {P.MISSION_RANDOM_DENSITY:g})")
     p.add_argument('--seed', type=int, default=None,
-                   help="nodi casuali: seme, per ripetere un grafo (default: estratto a caso, "
-                        "scritto nel log)")
+                   help="random nodes: seed, to repeat a graph (default: drawn at random, "
+                        "written in the log)")
     p.add_argument('--min-edge', type=float, default=None,
-                   help=f"lunghezza minima degli archi in m (default {P.PRM_MIN_EDGE_M:g})")
+                   help=f"minimum edge length in m (default {P.PRM_MIN_EDGE_M:g})")
     p.add_argument('--max-edge', type=float, default=None,
-                   help=f"lunghezza massima degli archi in m (default {P.PRM_MAX_EDGE_M:g})")
+                   help=f"maximum edge length in m (default {P.PRM_MAX_EDGE_M:g})")
     a = p.parse_args(argv)
     if a.rows is not None and a.rows < 1 or a.cols is not None and a.cols < 1:
-        p.error("--rows e --cols devono essere almeno 1")
+        p.error("--rows and --cols must be at least 1")
     if a.cell is not None and a.cell <= 0:
-        p.error("--cell deve essere positivo")
+        p.error("--cell must be positive")
     if a.density is not None and a.density <= 0:
-        p.error("--density deve essere positiva")
+        p.error("--density must be positive")
     lo = P.PRM_MIN_EDGE_M if a.min_edge is None else a.min_edge
     hi = P.PRM_MAX_EDGE_M if a.max_edge is None else a.max_edge
     if lo <= 0 or hi < lo:
-        p.error("serve 0 < --min-edge <= --max-edge")
+        p.error("0 < --min-edge <= --max-edge is required")
     return a
 
 
@@ -481,17 +480,17 @@ def main():
         return True
     except movements.RobotFallenError as exc:
         print("\n" + "=" * 70)
-        print(f"[CADUTA] MISSIONE INTERROTTA: {exc}")
-        print("[CADUTA] Il robot e' a terra e NON ha tentato di tornare alla base.")
-        print("[CADUTA] Prendere il controllo dal tablet, verificare il robot, poi rialzarlo a mano.")
+        print(f"[FALL] MISSION INTERRUPTED: {exc}")
+        print("[FALL] The robot is on the ground and has NOT tried to go back to base.")
+        print("[FALL] Take control from the tablet, check the robot, then stand it up by hand.")
         print("=" * 70)
         return False
     except Exception as exc:
         logger = bosdyn.client.util.get_logger()
-        logger.error('La missione si e\' interrotta per un\'eccezione: %r', exc)
+        logger.error('The mission was interrupted by an exception: %r', exc)
         try:
             import traceback
-            print(f"[LOG] La missione e' terminata con un'eccezione: {exc!r}")
+            print(f"[LOG] The mission ended with an exception: {exc!r}")
             print(traceback.format_exc())
         except Exception:
             pass

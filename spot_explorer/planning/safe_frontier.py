@@ -436,26 +436,26 @@ def describe_frontier(frontier):
     r = frontier['reason']
     adv = allowed_advance(frontier)
     sx, sy = frontier['stop_xy']
-    base = (f"{frontier['dist']:.2f} m confermati su {frontier['path_len']:.2f} m di percorso, "
-            f"avanzamento consentito {adv:.2f} m")
+    base = (f"{frontier['dist']:.2f} m confirmed out of {frontier['path_len']:.2f} m of path, "
+            f"allowed advance {adv:.2f} m")
     if r == 'end_of_path':
-        return f"[FRONTE] {base} -- percorso libero fino all'obiettivo"
+        return f"[FRONTIER] {base} -- path free up to the goal"
     if r == 'end_of_data':
-        return f"[FRONTE] {base} -- si ferma sul bordo dei dati in ({sx:.2f}, {sy:.2f}): avanzo e riguardo"
+        return f"[FRONTIER] {base} -- stops at the edge of the data at ({sx:.2f}, {sy:.2f}): I advance and look again"
     if r == 'obstacle':
         thr = frontier.get('stop_threshold', frontier.get('clearance_nominal',
                                                           geometry.FRONTIER_CLEARANCE_M))
         if frontier.get('stop_by_latch'):
-            why = (f"(minimo {thr:.2f} m; qui decide l'isteresi, che tiene bloccante la cella "
-                   f"fino a {thr + OBSTACLE_HYSTERESIS_M:.2f} m)")
+            why = (f"(minimum {thr:.2f} m; here the hysteresis decides, which keeps the cell blocking "
+                   f"up to {thr + OBSTACLE_HYSTERESIS_M:.2f} m)")
         else:
-            why = f"(minimo {thr:.2f} m)"
-        return (f"[FRONTE] {base} -- ostacolo a {frontier['value']:.2f} m dalla linea centrale in "
+            why = f"(minimum {thr:.2f} m)"
+        return (f"[FRONTIER] {base} -- obstacle {frontier['value']:.2f} m from the centre line at "
                 f"({sx:.2f}, {sy:.2f}) {why}")
     if r == 'roughness':
-        return f"[FRONTE] {base} -- terreno troppo irregolare in ({sx:.2f}, {sy:.2f})"
-    return (f"[FRONTE] {base} -- tratto troppo ripido da ({sx:.2f}, {sy:.2f}) "
-            f"(pendenza {frontier['value']:.3f} > {slopes.SLOPE_THRESHOLD:.3f})")
+        return f"[FRONTIER] {base} -- terrain too rough at ({sx:.2f}, {sy:.2f})"
+    return (f"[FRONTIER] {base} -- stretch too steep from ({sx:.2f}, {sy:.2f}) "
+            f"(slope {frontier['value']:.3f} > {slopes.SLOPE_THRESHOLD:.3f})")
 
 
 # =============================================================================
@@ -516,7 +516,7 @@ class ArcVerificationTracker:
         self._running = True
         self._thread = threading.Thread(target=self._process_loop, daemon=True)
         self._thread.start()
-        print("ArcVerificationTracker (fronte sicuro) avviato in background.")
+        print("ArcVerificationTracker (safe frontier) started in the background.")
 
     def stop(self):
         self._running = False
@@ -548,7 +548,7 @@ class ArcVerificationTracker:
                     if version == self._path_version:   # the path has not changed in the meantime
                         self._latest = frontier
             except Exception as e:
-                LOGGER.error(f"Errore nel calcolo del fronte: {e}")
+                LOGGER.error(f"Error computing the frontier: {e}")
             time.sleep(0.2)
 
     def _fresh_snapshot(self):

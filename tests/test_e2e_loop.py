@@ -199,7 +199,7 @@ STALL = {'n': 0, 'short_m': 0.0}
 
 
 def fake_check_fall(rsc):
-    return dict(fallen=FALL['fallen'], reason="fault di caduta (prova)" if FALL['fallen'] else "",
+    return dict(fallen=FALL['fallen'], reason="fall fault (test)" if FALL['fallen'] else "",
                 roll=80.0 if FALL['fallen'] else 0.0, pitch=0.0, x=ROBOT.x, y=ROBOT.y,
                 fall_faults=[1] if FALL['fallen'] else [], clearable=[1] if FALL['fallen'] else [],
                 unclearable=[], motors_on=True, standing=not FALL['fallen'])
@@ -209,7 +209,7 @@ def fake_recover(cc, rsc, status=None):
     if not FALL['fallen']:
         return True
     if not FALL['recoverable']:
-        raise movements.RobotFallenError("prova: il robot non si rialza da solo")
+        raise movements.RobotFallenError("test: the robot does not get up by itself")
     FALL['fallen'] = False
     return True
 
@@ -372,7 +372,7 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
                         connection_radius=parametri.PRM_CONNECTION_RADIUS_M)
     prm.mission_graph = mg
     mg.into_prm(prm)
-    folder = tempfile.mkdtemp(prefix="missione_e2e_")
+    folder = tempfile.mkdtemp(prefix="mission_e2e_")
     for k in list(registro.MISSION_STATS['time_s']):
         registro.MISSION_STATS['time_s'][k] = 0.0
     for k in ('frontier_blocks', 'frontier_aborts', 'scan_bundles', 'prm_refresh',
@@ -435,16 +435,16 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
     print(f"\n{name}  ({time.time() - t0:.1f} s)")
     if err:
         print(err)
-    tags = {t: log.count(t) for t in ("[CADUTA] Rilevata", "[FRONTE]", "[PASSO PARZIALE]", "[OK] Tratto",
-                                      "[BLOCCO] Confermato", "[SCORCIATOIA]", "[MULTINODO]",
-                                      "[REPLAN] Dopo il blocco", "[STOP]", "[NODO]", "[RITIRATA]",
-                                      "[ROTAZIONE]", "[GROUND-FILTER]", "[OBIETTIVO]", "[STALLO]",
-                                      "[SUBITO]", "[TRAPPOLA]", "[ARRIVO]", "[CONO]")}
+    tags = {t: log.count(t) for t in ("[FALL] Detected", "[FRONTIER]", "[PARTIAL STEP]", "[OK] Leg",
+                                      "[BLOCK] Confirmed", "[SHORTCUT]", "[MULTINODE]",
+                                      "[REPLAN] After the block", "[STOP]", "[NODE]", "[RETREAT]",
+                                      "[ROTATION]", "[GROUND-FILTER]", "[GOAL]", "[STALL]",
+                                      "[EARLY]", "[TRAP]", "[ARRIVAL]", "[CONE]")}
     print("       " + "  ".join(f"{k} x{v}" for k, v in tags.items() if v))
-    print(f"       scarto massimo fra punto comandato e raggiunto: {ROBOT.max_endpoint_error:.3f} m")
-    print(f"       comandi di movimento: {ROBOT.commands}, metri percorsi: {ROBOT.walked:.1f}, "
-          f"scansioni: {n_scans}, refresh {registro.MISSION_STATS.get('prm_refresh', 0)} fatti / "
-          f"{registro.MISSION_STATS.get('prm_refresh_skipped', 0)} saltati")
+    print(f"       maximum gap between commanded and reached point: {ROBOT.max_endpoint_error:.3f} m")
+    print(f"       motion commands: {ROBOT.commands}, metres travelled: {ROBOT.walked:.1f}, "
+          f"scans: {n_scans}, refresh {registro.MISSION_STATS.get('prm_refresh', 0)} done / "
+          f"{registro.MISSION_STATS.get('prm_refresh_skipped', 0)} skipped")
     return dict(ok=ok, err=err, log=log, scans=n_scans, folder=folder, tags=tags,
                 min_clear=ROBOT.min_clear, final=(ROBOT.x, ROBOT.y), ok2=ok2, gg=gg,
                 commands=ROBOT.commands, walked=ROBOT.walked,
@@ -455,147 +455,147 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
 
 
 if __name__ == '__main__':
-    print("Robot finto, codice vero. Cella obiettivo (0,1): centro (8.5, 3.5).")
-    print("NB: la cella obiettivo deve essere ADIACENTE a una visitata -- dal 2026-10-08\n    la pianificazione e' limitata alle celle esplorate (PLAN_ONLY_EXPLORED_CELLS).")
+    print("Fake robot, real code. Goal cell (0,1): centre (8.5, 3.5).")
+    print("NB: the goal cell must be ADJACENT to a visited one -- since 2026-10-08\n    planning is limited to the explored cells (PLAN_ONLY_EXPLORED_CELLS).")
 
-    r = run("S1. campo libero, celle fantasma negli angoli di ogni finestra (2026-10-05)",
+    r = run("S1. open field, ghost cells in the corners of every window (2026-10-05)",
             [], (2.0, 2.0, 0.785), (0, 1))
-    check(r['err'] is None, "nessuna eccezione")
-    check(r['ok'] is True, f"entrato nella cella, posizione finale ({r['final'][0]:.2f}, {r['final'][1]:.2f})")
-    check(r['tags']["[BLOCCO] Confermato"] == 0 and r['tags']["[RITIRATA]"] == 0,
-          "nessun blocco e nessuna ritirata su terreno libero")
-    check(r['scans'] > 0, f"{r['scans']} pacchetti di scansione salvati")
+    check(r['err'] is None, "no exception")
+    check(r['ok'] is True, f"entered the cell, final position ({r['final'][0]:.2f}, {r['final'][1]:.2f})")
+    check(r['tags']["[BLOCK] Confirmed"] == 0 and r['tags']["[RETREAT]"] == 0,
+          "no block and no retreat on free terrain")
+    check(r['scans'] > 0, f"{r['scans']} scan bundles saved")
     _b = np.load(os.path.join(r['folder'], 'scans', sorted(os.listdir(os.path.join(r['folder'], 'scans')))[0]))
     check('intensity' in _b.files and _b['intensity'].shape == (N, N) and 'intensity_origin' in _b.files
           and 'no_step' not in _b.files,
-          "layer in piu' nel pacchetto: intensity salvata con la sua origine, no_step assente senza danni")
-    check("[TEMPO]" in r['log'], "riga [TEMPO] presente")
+          "extra layers in the bundle: intensity saved with its origin, no_step absent without harm")
+    check("[TIMING]" in r['log'], "[TIMING] line present")
 
-    r = run("S2. muro con un varco largo 1.2 m lontano dalla retta: va trovato aggirando",
+    r = run("S2. wall with a 1.2 m gap far from the straight line: it must be found by going around",
             [(5.0, 5.2, 0.0, 5.0), (5.0, 5.2, 6.2, 12.0)], (2.0, 2.0, 0.785), (0, 1))
-    check(r['err'] is None, "nessuna eccezione")
-    check(r['ok'] is True, f"entrato nella cella passando dal varco ({r['final'][0]:.2f}, {r['final'][1]:.2f})")
+    check(r['err'] is None, "no exception")
+    check(r['ok'] is True, f"entered the cell through the gap ({r['final'][0]:.2f}, {r['final'][1]:.2f})")
     check(r['min_clear'] >= geometry.FRONTIER_CLEARANCE_M - 0.05,
-          f"distanza minima del centro dagli ostacoli lungo tutto il tragitto: {r['min_clear']:.2f} m")
+          f"minimum distance of the centre from obstacles along the whole way: {r['min_clear']:.2f} m")
 
-    r = run("S3. una persona si mette davanti al robot mentre cammina",
+    r = run("S3. a person steps in front of the robot while it walks",
             [], (2.0, 2.0, 0.785), (0, 1), dynamic=True)
-    check(r['err'] is None, "nessuna eccezione")
+    check(r['err'] is None, "no exception")
     check(r['min_clear'] > 0.0,
-          f"non tocca mai l'ostacolo apparso durante il movimento "
-          f"(distanza minima del centro {r['min_clear']:.2f} m)")
+          f"never touches the obstacle that appeared during the move "
+          f"(minimum distance of the centre {r['min_clear']:.2f} m)")
     check(r['min_clear'] >= geometry.FRONTIER_CLEARANCE_M - 0.10,
-          f"e resta oltre la distanza minima richiesta dal fronte "
-          f"({geometry.FRONTIER_CLEARANCE_M:.2f} m): misurata {r['min_clear']:.2f} m")
-    print(f"       [STOP] x{r['tags']['[STOP]']}, [MULTINODO] x{r['tags']['[MULTINODO]']}")
+          f"and stays beyond the minimum distance required by the frontier "
+          f"({geometry.FRONTIER_CLEARANCE_M:.2f} m): measured {r['min_clear']:.2f} m")
+    print(f"       [STOP] x{r['tags']['[STOP]']}, [MULTINODE] x{r['tags']['[MULTINODE]']}")
 
-    r = run("S4. cella obiettivo chiusa da muri su tutti i lati",
+    r = run("S4. goal cell closed by walls on all sides",
             [(6.1, 6.3, 1.0, 6.0), (6.1, 10.9, 1.0, 1.2), (10.7, 10.9, 1.0, 6.0), (6.1, 10.9, 5.8, 6.0)],
             (2.0, 2.0, 0.785), (0, 1))
-    check(r['err'] is None, "nessuna eccezione")
-    check(r['ok'] is False, "tentativo fallito in modo ordinato (cella irraggiungibile)")
-    check(r['min_clear'] > 0.0, f"non entra mai nel muro (distanza minima {r['min_clear']:.2f} m)")
+    check(r['err'] is None, "no exception")
+    check(r['ok'] is False, "attempt failed in an orderly way (cell unreachable)")
+    check(r['min_clear'] > 0.0, f"never enters the wall (minimum distance {r['min_clear']:.2f} m)")
     # The second [SUBITO] on the same leg removes it from the plan for the rest of the attempt
     # (28-10 14:23: the same leg discarded four times in a row).
-    legs = re.findall(r"\[SUBITO\] \w+ in \([^)]*\) sul tratto (\d+->\d+)", r['log'])
-    check("fuori dal piano per il resto del tentativo" in r['log'] and max(
+    legs = re.findall(r"\[EARLY\] \w+ at \([^)]*\) on the leg (\d+->\d+)", r['log'])
+    check("out of the plan for the rest of the attempt" in r['log'] and max(
           [legs.count(t) for t in legs] or [0]) <= 2,
-          f"[SUBITO] ripetuto: alla seconda volta il tratto esce dal piano ({legs})")
+          f"[EARLY] repeated: at the second time the leg leaves the plan ({legs})")
 
-    r = run("S5. partenza in uno spazio stretto: 0.45 m dal muro, bersaglio a 90 gradi",
+    r = run("S5. start in a tight space: 0.45 m from the wall, target at 90 degrees",
             [(2.45, 2.65, 0.0, 6.0)], (2.0, 3.0, 1.5708), (0, 0))
-    check(r['err'] is None, "nessuna eccezione")
+    check(r['err'] is None, "no exception")
 
-    r = run("S6. caduta a meta' movimento, il robot si rialza; poi un secondo tentativo",
+    r = run("S6. fall halfway through a move, the robot gets up; then a second attempt",
             [], (2.0, 2.0, 0.785), (0, 1), fall='recuperabile', second_attempt=True)
-    check(r['err'] is None, "nessuna eccezione")
-    check(r['tags']["[CADUTA] Rilevata"] == 1 and registro.MISSION_STATS['self_rights'] == 1,
-          "caduta rilevata e robot rialzato")
+    check(r['err'] is None, "no exception")
+    check(r['tags']["[FALL] Detected"] == 1 and registro.MISSION_STATS['self_rights'] == 1,
+          "fall detected and robot up again")
     fx, fy = FALL['where']
     gm = r['gg'].global_occupancy_map
     check(gm is not None and gm.is_occupied(fx, fy),
-          f"punto della caduta ({fx:.2f}, {fy:.2f}) occupato nella mappa globale")
+          f"fall point ({fx:.2f}, {fy:.2f}) occupied in the global map")
 
-    r = run("S7. caduta da cui il robot NON si rialza da solo",
+    r = run("S7. fall from which the robot does NOT get up by itself",
             [], (2.0, 2.0, 0.785), (0, 1), fall='irrecuperabile')
     check(r['err'] is None and isinstance(r['ok'], str) and r['ok'].startswith("RobotFallenError"),
-          "la missione si ferma con RobotFallenError (main() la intercetta e chiama l'operatore)")
-    check("[RITIRATA]" not in r['log'], "nessun tentativo di muoversi da terra")
+          "the mission stops with RobotFallenError (main() catches it and calls the operator)")
+    check("[RETREAT]" not in r['log'], "no attempt to move from the ground")
 
-    r = run("S8. reticolo VERO (passo 0.25, archi 0.5-1.25) su campo libero",
+    r = run("S8. REAL lattice (spacing 0.25, edges 0.5-1.25) on open field",
             [], (3.5, 3.5, 0.0), (0, 1))
-    check(r['err'] is None, "nessuna eccezione con il grafo di missione vero")
-    check(r['ok'] is True, f"entrato nella cella ({r['final'][0]:.2f}, {r['final'][1]:.2f})")
+    check(r['err'] is None, "no exception with the real mission graph")
+    check(r['ok'] is True, f"entered the cell ({r['final'][0]:.2f}, {r['final'][1]:.2f})")
     check(r['walked'] > 0 and r['commands'] > 0,
-          f"{r['commands']} comandi per {r['walked']:.1f} m = {r['walked'] / max(1, r['commands']):.2f} m per comando")
+          f"{r['commands']} commands for {r['walked']:.1f} m = {r['walked'] / max(1, r['commands']):.2f} m per command")
 
-    r = run("S10. reticolo VERO + muro con varco: il percorso CURVA (qui serve il multinodo)",
+    r = run("S10. REAL lattice + wall with gap: the path CURVES (multi-node is needed here)",
             [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)], (3.5, 3.5, 0.0), (0, 1))
-    check(r['err'] is None, "nessuna eccezione")
+    check(r['err'] is None, "no exception")
     check(r['min_clear'] >= geometry.FRONTIER_CLEARANCE_M - 0.10,
-          f"non sfiora il muro passando dal varco (distanza minima {r['min_clear']:.2f} m)")
-    print(f"       [MULTINODO] x{r['tags']['[MULTINODO]']}, [SCORCIATOIA] x{r['tags']['[SCORCIATOIA]']}, "
-          f"nodi attraversati dai movimenti multinodo: {r['stats'].get('multinode_nodes', 0)}")
+          f"does not graze the wall passing through the gap (minimum distance {r['min_clear']:.2f} m)")
+    print(f"       [MULTINODE] x{r['tags']['[MULTINODE]']}, [SHORTCUT] x{r['tags']['[SHORTCUT]']}, "
+          f"nodes crossed by the multi-node moves: {r['stats'].get('multinode_nodes', 0)}")
 
     # Reconstruction of the situation of mission 08-10 16:35: narrow corridor and
     # goal BEHIND the robot, i.e. a ~180 degree rotation where it cannot turn. There
     # the loop made 8 turns in 3.2 s without moving. The robot must start OUTSIDE the goal
     # cell, otherwise the scenario passes without testing anything.
-    r = run("S11. corridoio da 0.80 m, obiettivo dietro: rotazione impossibile (caso 16:35)",
+    r = run("S11. 0.80 m corridor, goal behind: rotation impossible (case 16:35)",
             [(0.0, 12.0, 0.0, 3.10), (0.0, 12.0, 3.90, 12.0)], (7.0, 3.5, 0.0), (0, 0))
-    check(r['err'] is None, "nessuna eccezione")
-    loops = r['log'].count('[FRONTE]')
-    refusals = r['log'].count('[ROTAZIONE] Servono')
-    check(refusals >= 1, f"la rotazione di ~180 gradi nel corridoio viene rifiutata ({refusals} volte)")
-    check(r['turns'] == 0, f"il robot non ruota mai nel corridoio (rotazioni eseguite: {r['turns']})")
+    check(r['err'] is None, "no exception")
+    loops = r['log'].count('[FRONTIER]')
+    refusals = r['log'].count('deg needed towards node')
+    check(refusals >= 1, f"the ~180 degree rotation in the corridor is refused ({refusals} times)")
+    check(r['turns'] == 0, f"the robot never rotates in the corridor (rotations executed: {r['turns']})")
     check(r['ok'] is False and loops <= 8,
-          f"il tentativo si chiude in modo ordinato e in pochi giri: {loops} giri, esito {r['ok']} "
-          f"(il 16:35 ne fece 8 in 3.2 s, e senza limite poteva continuare)")
-    print(f"       [STALLO] x{r['tags']['[STALLO]']}, "
-          f"limite rifiuti-rotazione x{r['log'].count('tratti scartati in questo tentativo')}, "
-          f"'nessuna alternativa nel grafo' x{r['log'].count('Nessuna alternativa nel grafo dal punto')}, "
-          f"[TRAPPOLA] x{r['tags']['[TRAPPOLA]']}, [CONO] x{r['tags']['[CONO]']}")
+          f"the attempt closes in an orderly way and in few turns: {loops} turns, outcome {r['ok']} "
+          f"(at 16:35 it made 8 in 3.2 s, and without a limit it could go on)")
+    print(f"       [STALL] x{r['tags']['[STALL]']}, "
+          f"rotation-refusal limit x{r['log'].count('legs discarded in this attempt')}, "
+          f"'no alternative in the graph' x{r['log'].count('No alternative in the graph from where')}, "
+          f"[TRAP] x{r['tags']['[TRAP]']}, [CONE] x{r['tags']['[CONE]']}")
 
     # S12: multi-node advance must pass the robot's TRUE heading
     # at every leg. With short edges multi-node triggers, and with a path
     # that curves a heading one leg old sends the robot off the path.
     parametri.PRM_MAX_EDGE_M = 0.70711
-    r = run("S12. multinodo su percorso che curva: ogni gamba va dove e' stata comandata",
+    r = run("S12. multi-node on a curving path: every leg goes where it was commanded",
             [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)], (3.5, 3.5, 0.0), (0, 1))
     parametri.PRM_MAX_EDGE_M = 1.25
-    check(r['err'] is None, "nessuna eccezione")
+    check(r['err'] is None, "no exception")
     check(r['stats'].get('multinode_moves', 0) >= 1,
-          f"il multinodo e' scattato ({r['stats'].get('multinode_moves', 0)} movimenti, "
-          f"{r['stats'].get('multinode_nodes', 0)} nodi)")
+          f"multi-node triggered ({r['stats'].get('multinode_moves', 0)} moves, "
+          f"{r['stats'].get('multinode_nodes', 0)} nodes)")
     check(r['endpoint_error'] < 0.02,
-          f"ogni gamba arriva dove e' stata comandata: scarto massimo {r['endpoint_error']:.3f} m")
+          f"every leg arrives where it was commanded: maximum gap {r['endpoint_error']:.3f} m")
     check(r['min_clear'] >= geometry.FRONTIER_CLEARANCE_M - 0.10,
-          f"non sfiora il muro (distanza minima {r['min_clear']:.2f} m)")
+          f"does not graze the wall (minimum distance {r['min_clear']:.2f} m)")
 
     # S14: of the goal cell only a strip along the border near the robot is free; the
     # rest is already known occupied (memory: with 5 m cells the centre is outside the scan
     # window, and without memory it would stay unknown and be chosen). In front
     # of the obstacle the frontier stops the centre half a body short, just outside the cell:
     # it must count as arrival (ARRIVAL_OUTSIDE_CELL_M). On 22-10 16:04 the same case gave
-    # "Mancano 0.06 m ... ancora fuori dalla cella" until the block.
-    r = run("S14. cella occupata salvo una striscia lungo il bordo: arrivo appena fuori",
+    # "0.06 m to go ... still outside cell" until the block.
+    r = run("S14. cell occupied except a strip along the border: arrival just outside",
             [(6.75, 12.0, 0.0, 12.0)], (5.0, 3.5, 0.0), (0, 1), memory=[(6.75, 12.0, 0.0, 12.0)])
-    check(r['err'] is None, "nessuna eccezione")
-    tgt = [l for l in r['log'].splitlines() if l.startswith('[TARGET] Cella (0,1)')]
-    check(bool(tgt) and 'uso il centro' not in tgt[0],
-          f"obiettivo nella striscia libera: {tgt[0][:120] if tgt else 'nessuna riga [TARGET]'}")
-    check('GRAFO DISCONNESSO' not in r['log'], "il grafo arriva all'obiettivo scelto")
-    check(r['ok'] is True, f"la cella vale come raggiunta (posizione finale "
-                           f"({r['final'][0]:.2f}, {r['final'][1]:.2f}), bordo a x = 6.00)")
+    check(r['err'] is None, "no exception")
+    tgt = [l for l in r['log'].splitlines() if l.startswith('[TARGET] Cell (0,1)')]
+    check(bool(tgt) and 'using the geometric centre' not in tgt[0],
+          f"goal in the free strip: {tgt[0][:120] if tgt else 'no [TARGET] line'}")
+    check('GRAPH DISCONNECTED' not in r['log'], "the graph reaches the chosen goal")
+    check(r['ok'] is True, f"the cell counts as reached (final position "
+                           f"({r['final'][0]:.2f}, {r['final'][1]:.2f}), border at x = 6.00)")
     check(r['final'][0] >= 6.0 - parametri.ARRIVAL_OUTSIDE_CELL_M - 0.02,
-          f"il robot e' fuori dalla cella al massimo di {parametri.ARRIVAL_OUTSIDE_CELL_M:.2f} m "
+          f"the robot is outside the cell by at most {parametri.ARRIVAL_OUTSIDE_CELL_M:.2f} m "
           f"({max(0.0, 6.0 - r['final'][0]):.2f} m)")
-    check(r['min_clear'] > 0.0, f"non entra nel muro (distanza minima {r['min_clear']:.2f} m)")
+    check(r['min_clear'] > 0.0, f"does not enter the wall (minimum distance {r['min_clear']:.2f} m)")
 
-    print("\n--- Confronto: quanto cammina il robot per ogni comando di movimento ---")
+    print("\n--- Comparison: how far the robot walks for every motion command ---")
     comparison = {}
-    for label, maxe in (("archi 0.5-0.707 (missione 16:35)", 0.70711),
-                            ("archi 0.5-1.25 (nuovo)", 1.25)):
+    for label, maxe in (("edges 0.5-0.707 (mission 16:35)", 0.70711),
+                            ("edges 0.5-1.25 (new)", 1.25)):
         parametri.PRM_MAX_EDGE_M = maxe
         r = run(f"S9. {label}", [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)],
                 (3.5, 3.5, 0.0), (0, 1))
@@ -605,23 +605,23 @@ if __name__ == '__main__':
     parametri.PRM_MAX_EDGE_M = 1.25
     print()
     for k, (c, w, mm, mn, sc, ok, tn, td) in comparison.items():
-        print(f"  {k:<34} {c:2d} comandi, {w:4.1f} m -> {w / max(1, c):.2f} m/comando; "
-              f"rotazioni oltre 10 gradi: {tn} ({td:.0f} gradi in tutto); "
-              f"multinodo {mm} ({mn} nodi); {sc} scansioni; arrivato: {ok}")
+        print(f"  {k:<34} {c:2d} commands, {w:4.1f} m -> {w / max(1, c):.2f} m/command; "
+              f"rotations above 10 degrees: {tn} ({td:.0f} degrees in all); "
+              f"multi-node {mm} ({mn} nodes); {sc} scans; arrived: {ok}")
 
-    print("\n--- Confronto: reticolo e nodi casuali (16 nodi/m2, seme 7), corridoio di S9 ---")
+    print("\n--- Comparison: lattice and random nodes (16 nodes/m2, seed 7), corridor of S9 ---")
     for label, kw in [("lattice", {})] + [
-            (f"casuale {d}", dict(sampling='random', distribution=d, density_per_m2=16.0, seed=7))
+            (f"random {d}", dict(sampling='random', distribution=d, density_per_m2=16.0, seed=7))
             for d in ("uniform", "poisson", "jittered", "halton")]:
         GRAPH_KW.clear()
         GRAPH_KW.update(kw)
         r = run(f"S13. {label}", [(5.0, 5.2, 0.0, 5.5), (5.0, 5.2, 6.9, 12.0)],
                 (3.5, 3.5, 0.0), (0, 1))
-        check(r['err'] is None and r['ok'], f"{label}: arrivato nella cella senza eccezioni")
+        check(r['err'] is None and r['ok'], f"{label}: arrived in the cell without exceptions")
         check(r['min_clear'] >= geometry.FRONTIER_CLEARANCE_M - 0.10,
-              f"{label}: non sfiora il muro (distanza minima {r['min_clear']:.2f} m)")
-        print(f"       {r['commands']} comandi, {r['walked']:.1f} m, rotazioni oltre 10 gradi "
-              f"{r['turns']} ({r['turn_deg']:.0f} gradi), {r['scans']} scansioni")
+              f"{label}: does not graze the wall (minimum distance {r['min_clear']:.2f} m)")
+        print(f"       {r['commands']} commands, {r['walked']:.1f} m, rotations above 10 degrees "
+              f"{r['turns']} ({r['turn_deg']:.0f} degrees), {r['scans']} scans")
     GRAPH_KW.clear()
 
     # S15: an obstacle right BEYOND the goal (28-10 11:36, cell (0,2)). The frontier checks
@@ -630,22 +630,22 @@ if __name__ == '__main__':
     # ([SUBITO], up to 8) until the block, and on these same cases the code of the morning of 28-10
     # failed the cell 7 times out of 24 (seed 9: 143 commands). Random nodes as in the mission.
     obstacle_beyond = [(8.75, 9.15, 2.0, 5.0)]
-    for label, seed, x0, attesa in (("passo finale sotto il passo minimo", 4, 8.85, 'passo'),
-                                        ("nuovo obiettivo alla prima fermata", 9, 8.75, 'attesa')):
+    for label, seed, x0, wait in (("final step below the minimum step", 4, 8.85, 'step'),
+                                        ("new goal at the first stop", 9, 8.75, 'wait')):
         GRAPH_KW.clear()
         GRAPH_KW.update(sampling='random', distribution='poisson', density_per_m2=4.0, seed=seed)
-        r = run(f"S15. ostacolo subito oltre l'obiettivo: {label}",
+        r = run(f"S15. obstacle right beyond the goal: {label}",
                 [(x0, x0 + 0.4, 2.0, 5.0)], (2.0, 3.0, 0.0), (0, 1))
-        check(r['err'] is None and r['ok'] is True, f"{label}: cella raggiunta senza eccezioni")
-        check(r['tags']['[SUBITO]'] == 0 and r['tags']['[BLOCCO] Confermato'] == 0,
-              f"{label}: nessun [SUBITO] ne' blocco ({r['tags']['[SUBITO]']}, "
-              f"{r['tags']['[BLOCCO] Confermato']})")
-        if attesa == 'passo':
-            check('[PASSO FINALE]' in r['log'], "il passo sotto 0.40 m che basta per arrivare si fa")
+        check(r['err'] is None and r['ok'] is True, f"{label}: cell reached without exceptions")
+        check(r['tags']['[EARLY]'] == 0 and r['tags']['[BLOCK] Confirmed'] == 0,
+              f"{label}: no [EARLY] nor block ({r['tags']['[EARLY]']}, "
+              f"{r['tags']['[BLOCK] Confirmed']})")
+        if wait == 'step':
+            check('[FINAL STEP]' in r['log'], "the step below 0.40 m that is enough to arrive is taken")
         else:
-            check("[TARGET] Il fronte si ferma" in r['log'] and "oltre la fine del percorso" in r['log'],
-                  "il fronte fermo oltre l'obiettivo fa scegliere subito un altro obiettivo")
-        check(r['scans'] <= 9, f"{label}: {r['scans']} scansioni")
+            check("[TARGET] The frontier stops" in r['log'] and "beyond the end of the path" in r['log'],
+                  "the frontier stopped beyond the goal makes it choose another goal at once")
+        check(r['scans'] <= 9, f"{label}: {r['scans']} scans")
 
     # The same case with the wait rule removed: the confirmed block right next to
     # the goal must make it choose another goal, not replan towards the one
@@ -660,15 +660,15 @@ if __name__ == '__main__':
     try:
         GRAPH_KW.clear()
         GRAPH_KW.update(sampling='random', distribution='poisson', density_per_m2=4.0, seed=9)
-        r = run("S15. ostacolo subito oltre l'obiettivo: blocco, poi nuovo obiettivo",
+        r = run("S15. obstacle right beyond the goal: block, then new goal",
                 obstacle_beyond, (2.0, 3.0, 0.0), (0, 1))
     finally:
         cell_attempt.CellAttempt._frontier_stops_at_goal = real_check
         parametri.MAX_EARLY_REPLANS = early_saved
-    check(r['err'] is None and r['ok'] is True, "blocco vicino all'obiettivo: cella raggiunta")
-    check("[TARGET] Blocco a" in r['log'] and "[REPLAN] Dopo il blocco" not in r['log'],
-          "dopo il blocco a ridosso dell'obiettivo se ne sceglie un altro, senza ripianificare "
-          "verso quello escluso")
+    check(r['err'] is None and r['ok'] is True, "block near the goal: cell reached")
+    check("[TARGET] Block " in r['log'] and "[REPLAN] After the block" not in r['log'],
+          "after the block right next to the goal another one is chosen, without replanning "
+          "towards the excluded one")
     GRAPH_KW.clear()
 
     # S16: the check on the arrival pose (arrival_has_exit). A turnable direction that stops
@@ -676,7 +676,7 @@ if __name__ == '__main__':
     # 12:16 the same step in the corridor was refused three times in a row ("0/24
     # direzioni"), and executed at the third: it was the right one. First a direct test on two
     # hand-made grids, then a short mission in the corridor.
-    print("\nS16. controllo sulla posa d'arrivo: corridoio che continua oltre i dati, nicchia cieca")
+    print("\nS16. check on the arrival pose: corridor continuing beyond the data, blind niche")
     from scipy.ndimage import distance_transform_edt
 
     def _snap(occupied, seen, ax, ay, cs=0.03, n=128, ox=0.0, oy=-1.92):
@@ -693,40 +693,40 @@ if __name__ == '__main__':
     seen_corr = X <= 2.2                                 # the scan ends at x = 2.2
     ok_corr, fan_corr = decisions.arrival_has_exit(_snap(walls, seen_corr, 2.0, 0.0), (2.0, 0.0), 0.0)
     fwd = [d for d in fan_corr if abs(d['rel_deg']) < 1.0][0]
-    check(ok_corr, f"corridoio che continua oltre i dati: un'uscita c'e' (avanti {fwd['advance']:.2f} m, "
-                   f"{fwd['reason']}, girabile {fwd['rotatable']})")
+    check(ok_corr, f"corridor continuing beyond the data: there is an exit (forward {fwd['advance']:.2f} m, "
+                   f"{fwd['reason']}, turnable {fwd['rotatable']})")
     pocket = walls | (X >= 2.45)                         # same width, closed in front
     ok_pocket, fan_pocket = decisions.arrival_has_exit(_snap(pocket, np.ones((n, n), bool), 2.0, 0.0),
                                                 (2.0, 0.0), 0.0)
-    check(not ok_pocket, f"nicchia cieca tutta vista: nessuna uscita "
-                         f"({sum(d['usable'] for d in fan_pocket)}/{len(fan_pocket)} direzioni)")
+    check(not ok_pocket, f"blind niche all seen: no exit "
+                         f"({sum(d['usable'] for d in fan_pocket)}/{len(fan_pocket)} directions)")
 
     GRAPH_KW.clear()
     GRAPH_KW.update(sampling='random', distribution='poisson', density_per_m2=4.0, seed=1)
-    r = run("S16. corridoio largo 0.9 m: nessun rifiuto [ARRIVO] a vuoto",
+    r = run("S16. 0.9 m wide corridor: no empty [ARRIVAL] refusal",
             [(5.0, 8.0, 0.0, 3.0), (5.0, 8.0, 3.9, 12.0)], (2.0, 3.5, 0.0), (0, 1))
     GRAPH_KW.clear()
-    check(r['err'] is None and r['ok'] is True, "cella raggiunta attraverso il corridoio")
-    check(r['tags']['[ARRIVO]'] == 0, f"nessun rifiuto [ARRIVO] ({r['tags']['[ARRIVO]']}; "
-                                      f"prima della correzione 3, l'ultimo poi eseguito lo stesso)")
-    check(r['scans'] <= 8, f"{r['scans']} scansioni (prima 10)")
+    check(r['err'] is None and r['ok'] is True, "cell reached through the corridor")
+    check(r['tags']['[ARRIVAL]'] == 0, f"no [ARRIVAL] refusal ({r['tags']['[ARRIVAL]']}; "
+                                      f"before correction 3, the last one then executed anyway)")
+    check(r['scans'] <= 8, f"{r['scans']} scans (before 10)")
 
     # S17: command that expires a few cm from the point (28-10 13:50, cell (3,2): 0.42 m out of 0.44
     # uphill). Within MOVE_NEAR_GOAL_M it counts as arrived; farther it is a physical failure.
     STALL.update(n=1, short_m=0.03)
-    r = run("S17. tempo scaduto a 3 cm dal punto: vale come arrivato", [], (2.0, 2.0, 0.785), (0, 1))
-    check(r['err'] is None and r['ok'] is True, "cella raggiunta")
-    check("[QUASI]" in r['log'] and "fallito meccanicamente" not in r['log'],
-          "il tratto vale come riuscito, nessun arco scartato per fallimento fisico")
+    r = run("S17. timeout 3 cm from the point: counts as arrived", [], (2.0, 2.0, 0.785), (0, 1))
+    check(r['err'] is None and r['ok'] is True, "cell reached")
+    check("[ALMOST]" in r['log'] and "failed mechanically" not in r['log'],
+          "the leg counts as successful, no edge discarded for physical failure")
     STALL.update(n=1, short_m=0.30)
-    r = run("S17. tempo scaduto a 30 cm dal punto: fallimento fisico come prima", [], (2.0, 2.0, 0.785), (0, 1))
+    r = run("S17. timeout 30 cm from the point: physical failure as before", [], (2.0, 2.0, 0.785), (0, 1))
     STALL.update(n=0)
-    check(r['err'] is None, "nessuna eccezione")
-    check("[QUASI]" not in r['log'] and "fallito meccanicamente" in r['log'],
-          "oltre la soglia resta un fallimento fisico")
+    check(r['err'] is None, "no exception")
+    check("[ALMOST]" not in r['log'] and "failed mechanically" in r['log'],
+          "beyond the threshold it stays a physical failure")
 
-    for d in [x for x in os.listdir(tempfile.gettempdir()) if x.startswith("missione_e2e_")]:
+    for d in [x for x in os.listdir(tempfile.gettempdir()) if x.startswith("mission_e2e_")]:
         shutil.rmtree(os.path.join(tempfile.gettempdir(), d), ignore_errors=True)
     print("\n" + "=" * 70)
-    print("TUTTO OK" if not FAILS else f"{len(FAILS)} CONTROLLI FALLITI:\n  - " + "\n  - ".join(FAILS))
+    print("ALL OK" if not FAILS else f"{len(FAILS)} CHECKS FAILED:\n  - " + "\n  - ".join(FAILS))
     sys.exit(1 if FAILS else 0)

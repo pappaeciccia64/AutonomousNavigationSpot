@@ -21,7 +21,7 @@ def find_fiducials(robot, robot_state_client, wait_s=0.0, fiducial_id=None):
         from bosdyn.client.world_object import WorldObjectClient
         client = robot.ensure_client(WorldObjectClient.default_service_name)
     except Exception as e:
-        print(f"[FIDUCIAL] Servizio degli oggetti visti non disponibile: {e}")
+        print(f"[FIDUCIAL] World-object service not available: {e}")
         return []
     t_end = time.time() + max(0.0, wait_s)
     while True:
@@ -40,14 +40,14 @@ def find_fiducials(robot, robot_state_client, wait_s=0.0, fiducial_id=None):
                     continue
                 dx, dy = pose.x - rx, pose.y - ry
                 found.append({'id': int(tag.tag_id), 'xy': (float(pose.x), float(pose.y)),
-                              'robot_nel_tag': _robot_in_tag_frame(o.transforms_snapshot, frame, pose,
+                              'robot_in_tag': _robot_in_tag_frame(o.transforms_snapshot, frame, pose,
                                                                     robot_state_client),
                               'dist': float(np.hypot(dx, dy)),
-                              'avanti': float(dx * np.cos(yaw) + dy * np.sin(yaw)),
-                              'sinistra': float(-dx * np.sin(yaw) + dy * np.cos(yaw)),
+                              'forward': float(dx * np.cos(yaw) + dy * np.sin(yaw)),
+                              'left': float(-dx * np.sin(yaw) + dy * np.cos(yaw)),
                               'camera': tag.frame_name_camera})
         except Exception as e:
-            print(f"[FIDUCIAL] Lettura dei fiducial non riuscita: {e}")
+            print(f"[FIDUCIAL] Reading the fiducials failed: {e}")
             return []
         if found or time.time() >= t_end:
             return sorted(found, key=lambda f: f['dist'])
@@ -73,7 +73,7 @@ def _offset_from_start(start, now):
     """Distance (m) between the robot position at the start and now, in the frame of the
     starting tag. Without the tag pose (None), from the VISION positions of the tag relative
     to the robot, which are affected by the odometry rotation."""
-    a, b = start.get('robot_nel_tag'), now.get('robot_nel_tag')
+    a, b = start.get('robot_in_tag'), now.get('robot_in_tag')
     if a is not None and b is not None:
         return float(np.linalg.norm(np.subtract(a, b)))
     return None
@@ -81,9 +81,9 @@ def _offset_from_start(start, now):
 
 def describe_fiducial(f):
     """One log line for a fiducial from find_fiducials."""
-    side = 'davanti' if f['avanti'] >= 0 else 'dietro'
-    return (f"tag {f['id']} a {f['dist']:.2f} m, {side} ({f['avanti']:+.2f} m avanti, "
-            f"{f['sinistra']:+.2f} m a sinistra), telecamera {f['camera'] or '?'}")
+    side = 'in front' if f['forward'] >= 0 else 'behind'
+    return (f"tag {f['id']} at {f['dist']:.2f} m, {side} ({f['forward']:+.2f} m forward, "
+            f"{f['left']:+.2f} m to the left), camera {f['camera'] or '?'}")
 
 
 def graphnav_check_start_fiducial(robot, robot_state_client):
@@ -98,18 +98,18 @@ def graphnav_check_start_fiducial(robot, robot_state_client):
     now = find_fiducials(robot, robot_state_client, wait_s=P.START_FIDUCIAL_WAIT_S,
                          fiducial_id=start['id'])
     if not now:
-        print(f"[FIDUCIAL] Al ritorno su wp_0 il tag {start['id']} di partenza non si vede: "
-              f"niente misura della deriva di fine missione.")
+        print(f"[FIDUCIAL] Back on wp_0 the starting tag {start['id']} is not visible: "
+              f"no end-of-mission drift measurement.")
         return None
     dx, dy = now[0]['xy'][0] - start['xy'][0], now[0]['xy'][1] - start['xy'][1]
     drift = float(np.hypot(dx, dy))
     MISSION_STATS['start_fiducial_drift_m'] = drift
-    print(f"[FIDUCIAL] Al ritorno su wp_0 rivedo il {describe_fiducial(now[0])}. Nel frame "
-          f"VISION si e' spostato di {drift:.2f} m (dx {dx:+.2f}, dy {dy:+.2f}) da quando "
-          f"l'ho visto alla partenza: e' la deriva dell'odometria di tutta la missione.")
+    print(f"[FIDUCIAL] Back on wp_0 I see again {describe_fiducial(now[0])}. In the "
+          f"VISION frame it moved by {drift:.2f} m (dx {dx:+.2f}, dy {dy:+.2f}) since "
+          f"I saw it at the start: it is the odometry drift of the whole mission.")
     offset = _offset_from_start(start, now[0])
     if offset is not None:
-        print(f"[WP0] Secondo il tag il robot e' a {offset:.2f} m dal punto di partenza.")
+        print(f"[WP0] According to the tag the robot is {offset:.2f} m from the starting point.")
     return {'drift': drift, 'offset': offset}
 
 
@@ -135,33 +135,33 @@ def graphnav_correct_wp0_with_fiducial(robot, recordingInterface, robot_state_cl
         wp0 = next(w for w in recordingInterface._get_graph(force_refresh=True).waypoints
                    if w.annotations.name == "wp_0")
     except Exception as e:
-        print(f"[WP0] Correzione non possibile: wp_0 non trovato ({e}).")
+        print(f"[WP0] Correction not possible: wp_0 not found ({e}).")
         MISSION_STATS['wp0_offset_final_m'] = round(offset, 2)
         return offset
     for k in range(1, P.WP0_FIDUCIAL_MAX_CORRECTIONS + 1):
-        print(f"[WP0] CORREZIONE {k}/{P.WP0_FIDUCIAL_MAX_CORRECTIONS}: GraphNav dice arrivato, ma "
-              f"secondo il tag {start['id']} il robot e' a {offset:.2f} m dalla partenza (oltre "
-              f"{P.WP0_FIDUCIAL_TOLERANCE_M:.2f} m). Rilocalizzo GraphNav sul tag e torno a wp_0.")
+        print(f"[WP0] CORRECTION {k}/{P.WP0_FIDUCIAL_MAX_CORRECTIONS}: GraphNav says arrived, but "
+              f"according to tag {start['id']} the robot is {offset:.2f} m from the start (beyond "
+              f"{P.WP0_FIDUCIAL_TOLERANCE_M:.2f} m). I relocalize GraphNav on the tag and go back to wp_0.")
         try:
             ok = recordingInterface.initialize_with_fiducial(robot_state_client, fiducial_id=start['id'])
         except Exception as e:
-            print(f"[WP0] Rilocalizzazione sul tag non riuscita ({e}).")
+            print(f"[WP0] Relocalization on the tag failed ({e}).")
             ok = False
         if not ok:
-            print("[WP0] Senza rilocalizzazione sul tag non correggo: resto dove sono.")
+            print("[WP0] Without relocalization on the tag I do not correct: I stay where I am.")
             break
         arrived = graphnav_navigate_to(recordingInterface, wp0.id, robot_state_client, command_client,
-                                       f"correzione {k} del ritorno a wp_0", move='graphnav_correction')
+                                       f"correction {k} of the return to wp_0", move='graphnav_correction')
         MISSION_STATS['wp0_corrections'] = k
         now = find_fiducials(robot, robot_state_client, wait_s=P.START_FIDUCIAL_WAIT_S, fiducial_id=start['id'])
         new = _offset_from_start(start, now[0]) if now else None
         if new is None:
-            print(f"[WP0] Dopo la correzione {k} il tag non si vede piu' (GraphNav: "
-                  f"{'arrivato' if arrived else 'non arrivato'}): non so di quanto sono lontano.")
+            print(f"[WP0] After correction {k} the tag is no longer visible (GraphNav: "
+                  f"{'arrived' if arrived else 'not arrived'}): I do not know how far I am.")
             offset = float('nan')
             break
-        print(f"[WP0] Dopo la correzione {k}: a {new:.2f} m dalla partenza (prima {offset:.2f} m), "
-              f"GraphNav {'arrivato' if arrived else 'NON arrivato'}.")
+        print(f"[WP0] After correction {k}: {new:.2f} m from the start (before {offset:.2f} m), "
+              f"GraphNav {'arrived' if arrived else 'NOT arrived'}.")
         offset = new
         if offset <= P.WP0_FIDUCIAL_TOLERANCE_M:
             break

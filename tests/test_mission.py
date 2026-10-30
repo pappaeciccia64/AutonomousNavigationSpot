@@ -64,7 +64,7 @@ from spot_explorer.graphnav import map_recording
 from spot_explorer import config as parametri
 from spot_explorer import records as registro
 from spot_explorer.perception import spot_grid
-from spot_explorer.robot import connection as spotLogInUtils
+from spot_explorer.robot import connection
 
 CELL = 3.0
 ROWS, COLS = 3, 3
@@ -110,7 +110,7 @@ class FakeGraphNav:
     # --- recording -----------------------------------------------------------------------
     def _new_waypoint(self, name):
         self.n += 1
-        wid = f"wp-finto-{self.n}"
+        wid = f"wp-fake-{self.n}"
         w = self.graph.waypoints.add()
         w.id = wid
         w.annotations.name = name
@@ -157,7 +157,7 @@ class FakeGraphNav:
 
     def create_edge(self, edge=None, **kw):
         if not self.recording:
-            raise RuntimeError("NotRecordingError (finto)")
+            raise RuntimeError("NotRecordingError (fake)")
         self.graph.edges.add().CopyFrom(edge)
 
     # --- GraphNav ------------------------------------------------------------------
@@ -188,7 +188,7 @@ class FakeGraphNav:
             if self.wp0_returns > 0:
                 self.relocated = True             # from here GraphNav really knows where wp_0 is
             return graph_nav_pb2.SetLocalizationResponse(status=graph_nav_pb2.SetLocalizationResponse.STATUS_OK)
-        raise RuntimeError("STATUS_NO_MATCHING_FIDUCIAL (finto: nessun fiducial nel mondo)")
+        raise RuntimeError("STATUS_NO_MATCHING_FIDUCIAL (fake: no fiducial in the world)")
 
     def navigate_to(self, waypoint_id, cmd_duration, command_id=None, travel_params=None,
                     destination_waypoint_tform_body_goal=None, **kw):
@@ -289,11 +289,11 @@ map_recording.RecordingInterface.initialize_with_fiducial = _initialize_with_fid
 class FakeRobot:
     def __init__(self, gn):
         self.gn = gn
-        self.logger = logging.getLogger("robot-finto")
+        self.logger = logging.getLogger("fake-robot")
         self.time_sync = NS(wait_for_sync=lambda *a, **k: None)
         self._current_user = "prova"
         self.powered = False
-        self.state = NS(get_robot_state=lambda: (_ for _ in ()).throw(RuntimeError("stato finto")))
+        self.state = NS(get_robot_state=lambda: (_ for _ in ()).throw(RuntimeError("fake state")))
         self.commands = NS(robot_command=lambda *a, **k: 1)
 
     def ensure_client(self, name):
@@ -335,28 +335,28 @@ def _with_failures():
     real_attempt = cell_attempt.attempt_enter_cell_from_position
     real_best = goal.find_best_point_in_cell
     real_fall = movements.check_and_recover_fall
-    n = {'tentativi': 0, 'obiettivi': 0, 'viaggi': 0}
+    n = {'attempts': 0, 'goals': 0, 'trips': 0}
 
     def attempt(*a, **k):
-        n['tentativi'] += 1
-        if n['tentativi'] % 3 == 1 or n['tentativi'] % 7 == 2:
-            print(f"[FINTO] tentativo {n['tentativi']} fallito d'ufficio")
+        n['attempts'] += 1
+        if n['attempts'] % 3 == 1 or n['attempts'] % 7 == 2:
+            print(f"[FAKE] attempt {n['attempts']} failed on purpose")
             return False
         return real_attempt(*a, **k)
 
     def best(*a, **k):
-        n['obiettivi'] += 1
-        if n['obiettivi'] % 5 == 3:
-            print(f"[FINTO] nessun punto obiettivo ({n['obiettivi']})")
+        n['goals'] += 1
+        if n['goals'] % 5 == 3:
+            print(f"[FAKE] no goal point ({n['goals']})")
             return None, None, None, None
         return real_best(*a, **k)
 
     def fall(rsc, cc, gm, why, *a, **k):
-        if why == "durante lo spostamento con GraphNav":
-            n['viaggi'] += 1
-            if n['viaggi'] == 1:
-                print("[FINTO] caduta durante lo spostamento GraphNav")
-                return 'caduto'
+        if why == "during the move with GraphNav":
+            n['trips'] += 1
+            if n['trips'] == 1:
+                print("[FAKE] fall during the GraphNav move")
+                return 'fallen'
         return real_fall(rsc, cc, gm, why, *a, **k)
 
     cell_attempt.attempt_enter_cell_from_position = attempt
@@ -375,11 +375,11 @@ def _with_battery(from_pct=36.0, points_per_read=1.0):
     """Fake battery: every reading (one per loop turn, interval 0 s) one point less,
     from from_pct."""
     real_read, real_s = batteria.read_battery, parametri.BATTERY_SAMPLE_S
-    n = {'letture': 0}
+    n = {'reads': 0}
 
     def read(rsc):
-        n['letture'] += 1
-        return {'charge_pct': max(0.0, from_pct - points_per_read * (n['letture'] - 1)),
+        n['reads'] += 1
+        return {'charge_pct': max(0.0, from_pct - points_per_read * (n['reads'] - 1)),
                 'spot_runtime_min': 40.0}
 
     batteria.read_battery = read
@@ -391,7 +391,7 @@ def _with_battery(from_pct=36.0, points_per_read=1.0):
         parametri.BATTERY_SAMPLE_S = real_s
 
 
-def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0_m=None, wp0_offset_m=None):
+def run(walls=None, name='MISSION', fiducial=None, stuck_wp0_m=None, wp0_offset_m=None):
     global FIDUCIAL_TAG
     FIDUCIAL_TAG = fiducial
     T.WORLD, T.ROBOT = T.World(WALLS if walls is None else walls, ghosts=True), T.Robot(*START)
@@ -400,8 +400,8 @@ def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0_m=None, wp0_offset
     gn.stuck_wp0_m = stuck_wp0_m
     gn.wp0_offset_m = wp0_offset_m
     robot = FakeRobot(gn)
-    spotLogInUtils.setLogInfo = lambda o: (robot, NS(), robot.state, None)
-    spotLogInUtils.SimpleEstop = lambda r, n: NS(stop=lambda: None, allow=lambda: None)
+    connection.setLogInfo = lambda o: (robot, NS(), robot.state, None)
+    connection.SimpleEstop = lambda r, n: NS(stop=lambda: None, allow=lambda: None)
     bosdyn.client.lease.LeaseKeepAlive = lambda *a, **k: contextlib.nullcontext()
     mission_run.blocking_stand = lambda *a, **k: None
     spot_grid.LocalGrid = lambda r: T.FakeLocalGrid()
@@ -409,7 +409,7 @@ def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0_m=None, wp0_offset
     cell_attempt.BodyTiltRecorder = registro.BodyTiltRecorder = _NoTilt
     parametri.MISSION_GRAPH_SAMPLING = 'lattice'
 
-    root = tempfile.mkdtemp(prefix="missione_finta_")
+    root = tempfile.mkdtemp(prefix="fake_mission_")
     mission_run.DATA_ROOT = root                                    # data folders here
     argv = sys.argv
     sys.argv = ["run_mission.py", "--rows", str(ROWS), "--cols", str(COLS), "--cell", str(CELL),
@@ -434,72 +434,72 @@ def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0_m=None, wp0_offset
 def _check_common(r, return_ok=True):
     log = r['log']
     print(f"  ({r['seconds']:.0f} s)")
-    check(r['ok'] is True, "main() arriva in fondo senza eccezioni")
-    check('Traceback' not in log and 'Traceback' not in r['out'], "nessuna eccezione nel log")
+    check(r['ok'] is True, "main() gets to the end without exceptions")
+    check('Traceback' not in log and 'Traceback' not in r['out'], "no exception in the log")
     if return_ok:
-        check("ritorno a wp_0: arrivato" in log, "ritorno a wp_0 riuscito")
-    check("[FINAL SCAN] Fatto" in log, "scansione finale fatta")
-    check("[ANCHORING]" in log, "ancoraggio finale chiamato")
+        check("return to wp_0: arrived" in log, "return to wp_0 successful")
+    check("[FINAL SCAN] Done" in log, "final scan done")
+    check("[ANCHORING]" in log, "final anchoring called")
 
 
 def _check_world(name, r):
     log = r['log']
-    grid = log.split("--- Mappa delle celle ---")[-1].splitlines()[1:ROWS + 1]
+    grid = log.split("--- Cell map ---")[-1].splitlines()[1:ROWS + 1]
     cells = [line.split()[1:] for line in grid]
     visited = sum(v == '1' for row in cells for v in row)
-    check(visited == 8, f"visitate tutte le 8 celle raggiungibili (visitate {visited})")
-    check(cells and cells[2][2] == '-1', "la cella chiusa (2,2) e' bloccata")
-    check("[OBIETTIVO] Il robot e' fuori dalla cella (1,1)" in log,
-          "in (1,1) l'arrivo vale con il robot appena fuori dalla cella")
-    check(len(r['gn'].trips) >= 2, f"spostamenti GraphNav: {len(r['gn'].trips)}")
-    check("[PROGRESSO] Fine esplorazione: 9/9 celle chiuse (100%): 8 visitate, 1 bloccate" in log,
-          "avanzamento finale: 9/9 celle chiuse, 8 visitate e 1 bloccata")
-    lines = [l for l in log.splitlines() if '[PROGRESSO]' in l and 'Fine' not in l]
-    closed = [int(l.split('[PROGRESSO] ')[1].split('/')[0]) for l in lines]
-    check(closed == sorted(set(closed)), f"una riga [PROGRESSO] per ogni cella chiusa in piu': {closed}")
-    check("[BATTERIA] Carica non disponibile" in log and "RIENTRO" not in log,
-          "senza la carica nello stato del robot la missione va avanti senza rientro")
-    check("arrivo girato verso" in log and len(r['gn'].headings) > 0,
-          f"viaggi GraphNav con l'arrivo girato verso la cella ({len(r['gn'].headings)})")
+    check(visited == 8, f"all 8 reachable cells visited (visited {visited})")
+    check(cells and cells[2][2] == '-1', "the closed cell (2,2) is blocked")
+    check("[GOAL] The robot is outside cell (1,1)" in log,
+          "in (1,1) the arrival counts with the robot just outside the cell")
+    check(len(r['gn'].trips) >= 2, f"GraphNav moves: {len(r['gn'].trips)}")
+    check("[PROGRESS] End of exploration: 9/9 cells closed (100%): 8 visited, 1 blocked" in log,
+          "final progress: 9/9 cells closed, 8 visited and 1 blocked")
+    lines = [l for l in log.splitlines() if '[PROGRESS]' in l and 'End' not in l]
+    closed = [int(l.split('[PROGRESS] ')[1].split('/')[0]) for l in lines]
+    check(closed == sorted(set(closed)), f"one [PROGRESS] line for every additional closed cell: {closed}")
+    check("[BATTERY] Charge not available" in log and "[BATTERY] RETURN" not in log,
+          "without the charge in the robot state the mission goes on without a return")
+    check("arrival facing" in log and len(r['gn'].headings) > 0,
+          f"GraphNav trips arriving turned towards the cell ({len(r['gn'].headings)})")
     check(len(r['gn'].headings) < len(r['gn'].trips),
-          "il ritorno a wp_0 tiene l'orientamento del waypoint")
+          "the return to wp_0 keeps the waypoint heading")
     if name == 'A':
-        check("[PRECHECK]" in log, "il controllo prima dello spostamento GraphNav scatta")
-        check("[FIDUCIAL] Fiducial di partenza: tag 7 a 1.00 m, dietro" in log,
-              "fiducial di partenza visto dietro il robot, qualunque ID")
-        check("[FIDUCIAL INIT] Fiducial cercato: ID 7" in log and "[FIDUCIAL INIT] ✓" in log,
-              "localizzazione sul fiducial trovato, dopo wp_0")
-        check("[WP0] Secondo il tag il robot e' a 0.00 m dal punto di partenza" in log
-              and "[WP0] CORREZIONE" not in log, "ritorno a wp_0 giusto: nessuna correzione")
-        check("rivedo il tag 7" in log and "si e' spostato di 0.00 m" in log,
-              "al ritorno su wp_0 il tag si rivede e la deriva si misura")
+        check("[PRECHECK]" in log, "the check before the GraphNav move triggers")
+        check("[FIDUCIAL] Starting fiducial: tag 7 at 1.00 m, behind" in log,
+              "starting fiducial seen behind the robot, any ID")
+        check("[FIDUCIAL INIT] Fiducial searched: ID 7" in log and "[FIDUCIAL INIT] ✓" in log,
+              "localization on the fiducial found, after wp_0")
+        check("[WP0] According to the tag the robot is 0.00 m from the starting point" in log
+              and "[WP0] CORRECTION" not in log, "right return to wp_0: no correction")
+        check("I see again tag 7" in log and "it moved by 0.00 m" in log,
+              "back on wp_0 the tag is seen again and the drift is measured")
     else:
-        check("[FIDUCIAL] Nessun fiducial" in log and "[FIDUCIAL INIT]" not in log,
-              "senza fiducial si parte senza, e senza tentare la localizzazione")
+        check("[FIDUCIAL] No fiducial" in log and "[FIDUCIAL INIT]" not in log,
+              "without a fiducial it starts without, and without trying the localization")
     if name == 'B':
-        check("[BLOCCO] Confermato" in log and "[RITORNO]" in log, "blocco confermato e ritorno con GraphNav")
+        check("[BLOCK] Confirmed" in log and "[RETURN]" in log, "block confirmed and return with GraphNav")
 
 
 def _check_failures(r):
     log = r['log']
-    check("ritorno a wp_0: arrivato" not in log
-          and "Ritorno a wp_0 NON riuscito ma vicino: fermo a 0.60 m da wp_0 (motivo: bloccato (STUCK)" in log,
-          "ritorno a wp_0 fermo a 0.60 m: NON riuscito, ma vicino")
-    check("[DERIVA] ritorno a wp_0 (fermo vicino)" in log, "deriva misurata anche fermo vicino a wp_0")
-    check("Ritorno a wp_0 non riuscito: il robot si siede" in log, "il robot si siede dove si trova")
-    check("[RECOVERY] Trovato percorso alternativo" in log, "nuovo tentativo subito dopo il recupero")
-    check("[FAIL] Anche il percorso alternativo" in log, "nuovo tentativo fallito: lato segnato")
-    check("[SKIP] Nessun punto obiettivo valido" in log, "nessun punto obiettivo nel recupero")
-    check("[CADUTA] Rialzato dopo lo spostamento con GraphNav" in log, "caduta durante il viaggio")
-    check("[PROGRESSO] Fine esplorazione: 9/9 celle chiuse" in log and "SKIP-ROUND" not in log,
-          "nessuna cella persa dalla frontiera: ogni cella rimandata ritentata dagli altri lati")
+    check("return to wp_0: arrived" not in log
+          and "Return to wp_0 NOT successful but near: stopped 0.60 m from wp_0 (reason: blocked (STUCK)" in log,
+          "return to wp_0 stopped at 0.60 m: NOT successful, but near")
+    check("[DRIFT] return to wp_0 (stopped nearby)" in log, "drift measured even when stopped near wp_0")
+    check("Return to wp_0 failed: the robot sits down" in log, "the robot sits down where it is")
+    check("[RECOVERY] Found an alternative path" in log, "new attempt right after the recovery")
+    check("[FAIL] The alternative path failed too" in log, "new attempt failed: side marked")
+    check("[SKIP] No valid goal point" in log, "no goal point in the recovery")
+    check("[FALL] Got up after the move with GraphNav" in log, "fall during the trip")
+    check("[PROGRESS] End of exploration: 9/9 cells closed" in log and "SKIP-ROUND" not in log,
+          "no cell lost from the frontier: every deferred cell retried from the other sides")
 
 
 def _check_emergency():
     """Mission interrupted halfway (exception or Ctrl+C): the robot sits, the motors power off
     and the GraphNav map is downloaded, then the error propagates as before."""
-    for nome, err in (("eccezione", RuntimeError("guasto finto")), ("Ctrl+C", KeyboardInterrupt())):
-        print(f"\nMissione intera nel mondo F: interrotta da {nome} al terzo tentativo.")
+    for how, err in (("exception", RuntimeError("fake failure")), ("Ctrl+C", KeyboardInterrupt())):
+        print(f"\nWhole mission in world F: interrupted by {how} at the third attempt.")
         real = cell_attempt.attempt_enter_cell_from_position
         n = {'k': 0}
 
@@ -511,21 +511,21 @@ def _check_emergency():
         cell_attempt.attempt_enter_cell_from_position = attempt
         try:
             try:
-                r = run(WORLDS['A'], f"MISSIONE_F_{'eccezione' if nome == 'eccezione' else 'ctrlc'}")
+                r = run(WORLDS['A'], f"MISSION_F_{'exception' if how == 'exception' else 'ctrlc'}")
                 rise = r['ok'] is False
             except KeyboardInterrupt:
                 rise, r = True, None
         finally:
             cell_attempt.attempt_enter_cell_from_position = real
         if r is None:      # Ctrl+C: the log is in the mission folder
-            logs = sorted(glob.glob(os.path.join(tempfile.gettempdir(), "missione_finta_*", "MissionLogs",
+            logs = sorted(glob.glob(os.path.join(tempfile.gettempdir(), "fake_mission_*", "MissionLogs",
                                                  "*", "mission_log.txt")), key=os.path.getmtime)
             log = open(logs[-1]).read() if logs else ""
         else:
             log = r['log']
-        check(rise, f"{nome}: la missione finisce con l'errore, come prima")
-        check("[EMERGENZA] Robot seduto e motori spenti." in log, f"{nome}: robot seduto e motori spenti")
-        check("[EMERGENZA] Mappa GraphNav scaricata." in log, f"{nome}: mappa GraphNav scaricata")
+        check(rise, f"{how}: the mission ends with the error, as before")
+        check("[EMERGENCY] Robot sitting and motors off." in log, f"{how}: robot sitting and motors off")
+        check("[EMERGENCY] GraphNav map downloaded." in log, f"{how}: GraphNav map downloaded")
 
 
 def _check_cell_choice():
@@ -535,7 +535,7 @@ def _check_cell_choice():
     must look for the neighbours from (7,2), and approach (7,1) from (7,2), not again from
     (6,1) (before: a jump, then the cell dropped out of the frontier).
     """
-    print("\nScelta delle celle: il caso delle 13:50 (celle (7,1) e (7,2))")
+    print("\nCell choice: the case of 13:50 (cells (7,1) and (7,2))")
     from spot_explorer.mission import cells as environmentMap
     env = environmentMap.EnvironmentMap(rows=8, cols=7, cell_size=2.0)
     with contextlib.redirect_stdout(io.StringIO()):
@@ -556,78 +556,78 @@ def _check_cell_choice():
     with contextlib.redirect_stdout(io.StringIO()):
         cell = m._robot_cell()
         start_xy = m._start_cell_for(7, 1, wps)
-    check(cell == (7, 2), f"robot appena fuori dalla (7,2) appena visitata: cella del robot {cell}")
-    check(start_xy == (7, 2), f"avvicinamento alla (7,1) dal lato non ancora provato: dalla {start_xy}")
+    check(cell == (7, 2), f"robot just outside the just visited (7,2): robot cell {cell}")
+    check(start_xy == (7, 2), f"approach to (7,1) from the side not yet tried: from {start_xy}")
     T.ROBOT.x, T.ROBOT.y = 4.0, 11.5                  # well inside (6,2): the real cell counts
     with contextlib.redirect_stdout(io.StringIO()):
         cell = m._robot_cell()
-    check(cell == (6, 2), f"robot lontano dalla cella visitata: vale quella in cui sta ({cell})")
+    check(cell == (6, 2), f"robot far from the visited cell: the one it is in counts ({cell})")
 
 
 def _check_battery(r):
     log = r['log']
-    grid = log.split("--- Mappa delle celle ---")[-1].splitlines()[1:ROWS + 1]
+    grid = log.split("--- Cell map ---")[-1].splitlines()[1:ROWS + 1]
     visited = sum(v == '1' for line in grid for v in line.split()[1:])
-    check("[BATTERIA] RIENTRO: carica 29% <= soglia 30% (2 letture di fila)" in log,
-          "il rientro scatta alla seconda lettura sotto il 30%")
-    check("[BATTERIA] Fine dell'esplorazione per batteria bassa" in log and 0 < visited < 8,
-          f"l'esplorazione si ferma prima di finire (visitate {visited} celle su 8)")
-    check("[BATTERIA] Ritorno a wp_0: da" in log, "carica misurata prima e dopo il ritorno a wp_0")
-    check("RIENTRO ANTICIPATO" in log, "il riepilogo dice che la missione e' rientrata per la batteria")
+    check("[BATTERY] RETURN: charge 29% <= threshold 30% (2 readings in a row)" in log,
+          "the return triggers at the second reading below 30%")
+    check("[BATTERY] End of exploration for low battery" in log and 0 < visited < 8,
+          f"exploration stops before finishing (visited {visited} cells out of 8)")
+    check("[BATTERY] Return to wp_0: from" in log, "charge measured before and after the return to wp_0")
+    check("EARLY RETURN" in log, "the summary says the mission returned because of the battery")
     csv_path = [os.path.join(dp, f) for dp, _, fs in os.walk(os.path.join(r['root'], "MissionLogs"))
                 for f in fs if f == "battery.csv"]
-    check(bool(csv_path) and len(open(csv_path[0]).read().splitlines()) > 5, "battery.csv scritto")
+    check(bool(csv_path) and len(open(csv_path[0]).read().splitlines()) > 5, "battery.csv written")
     js = [os.path.join(dp, f) for dp, _, fs in os.walk(os.path.join(r['root'], "MissionLogs"))
           for f in fs if f == "mission_summary.json"]
     import json
     st = json.load(open(js[0]))['mission_stats'] if js else {}
     check(st.get('battery_return') is True and st.get('battery_return_cells_left', 0) > 0,
-          f"mission_summary.json: rientro e celle rimaste ({st.get('battery_return_cells_left')})")
+          f"mission_summary.json: return and cells left ({st.get('battery_return_cells_left')})")
 
 
 if __name__ == '__main__':
     for name, walls in WORLDS.items():
-        print(f"\nMissione intera nel mondo {name}, robot e GraphNav finti: 3 x 3 celle da 3 m.")
-        r = run(walls, f"MISSIONE_{name}",
+        print(f"\nWhole mission in world {name}, fake robot and GraphNav: 3 x 3 cells of 3 m.")
+        r = run(walls, f"MISSION_{name}",
                 fiducial=(7, START[0] - 1.0, START[1]) if name == 'A' else None)
         _check_common(r)
         _check_world(name, r)
         shutil.rmtree(r['root'], ignore_errors=True)
-    print("\nMissione intera nel mondo C: il B con fallimenti forzati.")
+    print("\nWhole mission in world C: B with forced failures.")
     with _with_failures():
-        r = run(WORLDS['B'], "MISSIONE_C", stuck_wp0_m=0.6)
+        r = run(WORLDS['B'], "MISSION_C", stuck_wp0_m=0.6)
     _check_common(r, return_ok=False)
     _check_failures(r)
     shutil.rmtree(r['root'], ignore_errors=True)
     _check_cell_choice()
     _check_emergency()
-    print("\nMissione intera nel mondo G: il mondo A con il ritorno a wp_0 'arrivato' ma 0.8 m di lato "
+    print("\nWhole mission in world G: world A with the return to wp_0 'arrived' but 0.8 m to the side "
           "(29-10 10:57: 1.2 m).")
-    r = run(WORLDS['A'], "MISSIONE_G", fiducial=(7, START[0] - 1.0, START[1]), wp0_offset_m=0.8)
+    r = run(WORLDS['A'], "MISSION_G", fiducial=(7, START[0] - 1.0, START[1]), wp0_offset_m=0.8)
     _check_common(r)
     log = r['log']
-    check("[WP0] Secondo il tag il robot e' a 0.80 m dal punto di partenza" in log,
-          "il tag misura lo scarto vero dalla partenza (0.80 m)")
-    check("[WP0] CORREZIONE 1/2" in log and "correzione 1 del ritorno a wp_0: arrivato" in log,
-          "rilocalizzazione sul tag e nuovo ritorno a wp_0")
-    check("[WP0] Dopo la correzione 1: a 0.00 m dalla partenza (prima 0.80 m)" in log
-          and "CORREZIONE 2/2" not in log, "una correzione basta: 0.00 m dalla partenza")
+    check("[WP0] According to the tag the robot is 0.80 m from the starting point" in log,
+          "the tag measures the true offset from the start (0.80 m)")
+    check("[WP0] CORRECTION 1/2" in log and "correction 1 of the return to wp_0: arrived" in log,
+          "relocalization on the tag and new return to wp_0")
+    check("[WP0] After correction 1: 0.00 m from the start (before 0.80 m)" in log
+          and "CORRECTION 2/2" not in log, "one correction is enough: 0.00 m from the start")
     shutil.rmtree(r['root'], ignore_errors=True)
-    print("\nMissione intera nel mondo E: partenza chiusa tutto intorno (28-10 14:17, erba alta).")
+    print("\nWhole mission in world E: start closed all around (28-10 14:17, tall grass).")
     enclosed = [(0.4, 2.6, 0.4, 0.6), (0.4, 2.6, 2.4, 2.6), (0.4, 0.6, 0.4, 2.6), (2.4, 2.6, 0.4, 2.6)]
-    r = run(enclosed, "MISSIONE_E")
+    r = run(enclosed, "MISSION_E")
     log = r['log']
-    check(r['ok'] is True and 'Traceback' not in log, "main() arriva in fondo senza eccezioni")
-    check("[FINE] Nessuna cella raggiungibile dalla partenza" in log,
-          "la riga [FINE] dice che dalla partenza non si raggiunge nessuna cella")
-    check("ritorno a wp_0" in log, "chiusura normale della missione")
+    check(r['ok'] is True and 'Traceback' not in log, "main() gets to the end without exceptions")
+    check("[END] No cell reachable from the start" in log,
+          "the [END] line says no cell can be reached from the start")
+    check("return to wp_0" in log, "normal closure of the mission")
     shutil.rmtree(r['root'], ignore_errors=True)
-    print("\nMissione intera nel mondo D: il mondo A con la batteria che si scarica.")
+    print("\nWhole mission in world D: world A with the battery running down.")
     with _with_battery():
-        r = run(WORLDS['A'], "MISSIONE_D")
+        r = run(WORLDS['A'], "MISSION_D")
     _check_common(r)
     _check_battery(r)
     shutil.rmtree(r['root'], ignore_errors=True)
     print("\n" + "=" * 70)
-    print("TUTTO OK" if not FAILS else f"{len(FAILS)} CONTROLLI FALLITI:\n  - " + "\n  - ".join(FAILS))
+    print("ALL OK" if not FAILS else f"{len(FAILS)} CHECKS FAILED:\n  - " + "\n  - ".join(FAILS))
     sys.exit(1 if FAILS else 0)

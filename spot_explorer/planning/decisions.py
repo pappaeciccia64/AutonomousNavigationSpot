@@ -119,19 +119,19 @@ def rotation_plan(robot_yaw, robot_xy, target_xy, od_robot, snap=None):
 
     if abs(dyaw) < geometry.ROTATION_CHECK_MIN_DYAW_DEG:
         return {'turn': True, 'dyaw_deg': dyaw, 'motion_dir': motion_dir, 'margin': None,
-                'why': 'rotazione trascurabile'}
+                'why': 'negligible rotation'}
     if od_robot >= geometry.ROTATION_CLEARANCE_M:
         return {'turn': True, 'dyaw_deg': dyaw, 'motion_dir': motion_dir, 'margin': None,
-                'why': 'cerchio circoscritto libero'}
+                'why': 'circumscribed circle free'}
     if snap is not None:
         ok, margin = geometry.rotation_is_clear(
             snap.obstacle_dist, snap.origin_x, snap.origin_y, snap.cell_size,
             rx, ry, robot_yaw, float(np.radians(dyaw)))
         return {'turn': bool(ok), 'dyaw_deg': dyaw, 'motion_dir': motion_dir,
                 'margin': float(margin) if np.isfinite(margin) else None,
-                'why': 'settore spazzato'}
+                'why': 'swept sector'}
     return {'turn': False, 'dyaw_deg': dyaw, 'motion_dir': motion_dir, 'margin': None,
-            'why': 'nessun dato di griglia'}
+            'why': 'no grid data'}
 
 
 def shortcut_index(robot_xy, path_waypoints, snap, global_map=None, prm=None, robot_node_id=None):
@@ -246,8 +246,8 @@ def describe_escape_fan(dirs, max_rows=4):
     """Compact log line: how many usable directions and the best ones, for the logs."""
     usable = [d for d in dirs if d['usable']]
     best = sorted(dirs, key=lambda d: -d['advance'])[:max_rows]
-    txt = "; ".join(f"{d['dir_deg']:+.0f} gradi: {d['advance']:.2f} m "
-                    f"({'ruotabile' if d['rotatable'] else 'NON ruotabile'})" for d in best)
+    txt = "; ".join(f"{d['dir_deg']:+.0f} deg: {d['advance']:.2f} m "
+                    f"({'turnable' if d['rotatable'] else 'NOT turnable'})" for d in best)
     return len(usable), txt
 
 

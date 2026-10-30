@@ -17,10 +17,10 @@ import re
 import sys
 
 _RULES = [
-    (re.compile(r'\d+(\.\d+)?\s*s\b'), '<T>s'),                 # durate
+    (re.compile(r'\d+(\.\d+)?\s*s\b'), '<T>s'),                 # durations
     (re.compile(r'\d+(\.\d+)?\s*ms\b'), '<T>ms'),
     (re.compile(r'/tmp/[^\s\'",)]+'), '<TMP>'),                  # temporary folders
-    (re.compile(r'\b\d{2}:\d{2}:\d{2}(\.\d+)?\b'), '<ORA>'),     # orari
+    (re.compile(r'\b\d{2}:\d{2}:\d{2}(\.\d+)?\b'), '<TIME>'),     # clock times
     (re.compile(r'0x[0-9a-f]+'), '<ADDR>'),                      # object addresses
     (re.compile(r'\d{2}-\d{2}-\d{4}_\d{2}-\d{2}-\d{2}'), '<DATA>'),   # folder names
     (re.compile(r'\d+(\.\d+)?\s*min\b'), '<T>min'),               # waypoint ages
@@ -30,7 +30,7 @@ _RULES = [
 def normalize(text):
     out = []
     for line in text.splitlines():
-        if line.startswith('[TEMPO]') or '[TEMPO]' in line:
+        if line.startswith('[TIMING]') or '[TIMING]' in line:
             continue                                            # timing-only lines
         for rx, rep in _RULES:
             line = rx.sub(rep, line)
@@ -46,18 +46,18 @@ def main(a, b):
     for n in names:
         pa, pb = os.path.join(a, n), os.path.join(b, n)
         if not (os.path.exists(pa) and os.path.exists(pb)):
-            print(f"[MANCA] {n}: solo in {'prima' if os.path.exists(pa) else 'dopo'}")
+            print(f"[MISSING] {n}: only in {'before' if os.path.exists(pa) else 'after'}")
             bad += 1
             continue
         la, lb = normalize(open(pa).read()), normalize(open(pb).read())
         if la != lb:
             bad += 1
-            diff = list(difflib.unified_diff(la, lb, 'prima', 'dopo', n=1, lineterm=''))
-            print(f"[DIVERSO] {n}: {sum(1 for d in diff if d[:1] in '+-') - 2} righe")
+            diff = list(difflib.unified_diff(la, lb, 'before', 'after', n=1, lineterm=''))
+            print(f"[DIFFERENT] {n}: {sum(1 for d in diff if d[:1] in '+-') - 2} lines")
             print("\n".join(diff[:30]))
         else:
-            print(f"[UGUALE] {n} ({len(la)} righe)")
-    print("\nIDENTICI" if not bad else f"\n{bad} SCENARI DIVERSI")
+            print(f"[SAME] {n} ({len(la)} lines)")
+    print("\nIDENTICI" if not bad else f"\n{bad} SCENARIOS DIFFERENT")
     return 1 if bad else 0
 
 

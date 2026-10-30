@@ -128,46 +128,46 @@ HILLSHADE_STRENGTH = 0.45               # 0 = no relief shading
 CHECKPOINT_EVERY = 25
 
 # NAV GRAPH (2026-10-26), 'n' key. The GraphNav graph downloaded at the end of the mission in
-# graph/<mission>/Grafo_*/: for every waypoint the position is that of the body in the
+# graph/<mission>/Graph_*/ (Grafo_* before 30-10): for every waypoint the position is that of the body in the
 # VISION frame when the waypoint was created (from the snapshot), i.e. the same frame as the
 # map. From the snapshots (558 MB in the mission of 22-10 16:04, almost all point clouds)
 # only the robot state is read, without decoding the rest: 0.3 s instead of 51.
 # Reading the Boston Dynamics format requires the SDK (bosdyn); without it, the key does nothing.
 NAVGRAPH_EDGE_STYLE = {    # edge source -> (colour, width, style, label)
-    'EDGE_SOURCE_ODOMETRY': ('#303030', 0.9, '-', 'nav graph: arco registrato'),
-    'EDGE_SOURCE_USER_REQUEST': ('deepskyblue', 1.2, '-', 'nav graph: scorciatoia nostra'),
-    'EDGE_SOURCE_LOCALIZATION': ('darkviolet', 1.2, '--', "nav graph: chiusura d'anello"),
-    'EDGE_SOURCE_SMALL_LOOP_CLOSURE': ('darkviolet', 1.2, '--', "nav graph: chiusura d'anello"),
-    'EDGE_SOURCE_ALTERNATE_ROUTE_FINDING': ('darkviolet', 1.2, '--', "nav graph: chiusura d'anello"),
+    'EDGE_SOURCE_ODOMETRY': ('#303030', 0.9, '-', 'nav graph: recorded edge'),
+    'EDGE_SOURCE_USER_REQUEST': ('deepskyblue', 1.2, '-', 'nav graph: our shortcut'),
+    'EDGE_SOURCE_LOCALIZATION': ('darkviolet', 1.2, '--', "nav graph: loop closure"),
+    'EDGE_SOURCE_SMALL_LOOP_CLOSURE': ('darkviolet', 1.2, '--', "nav graph: loop closure"),
+    'EDGE_SOURCE_ALTERNATE_ROUTE_FINDING': ('darkviolet', 1.2, '--', "nav graph: loop closure"),
 }
-NAVGRAPH_OTHER_STYLE = ('gray', 0.9, ':', 'nav graph: altro arco')
+NAVGRAPH_OTHER_STYLE = ('gray', 0.9, ':', 'nav graph: other edge')
 
 REASON_COLORS = {'end_of_path': 'tab:green', 'end_of_data': 'tab:blue', 'obstacle': 'tab:red',
                  'roughness': 'tab:orange', 'slope': 'tab:purple'}
 
 # name, function extracting the matrix, colour map, vmin, vmax, label
 LAYERS = [
-    ("quota rispetto al suolo", lambda d: d['terrain_raw'] - _ground(d), 'terrain', -0.5, 0.5,
-     "quota grezza - suolo stimato (m)"),
-    ("terrain_valid grezzo", lambda d: d['terrain_valid_raw'], 'gray_r', 0, 1, "1 = valido"),
-    ("obstacle_distance", lambda d: d['obstacle_distance'], 'plasma', 0, 1.0, "distanza dall'ostacolo (m)"),
-    ("rugosita'", lambda d: d['roughness'], 'coolwarm', 0, 0.3, "deviazione standard (m)"),
-    ("gradiente", lambda d: d['gradient'], 'viridis', 0, 1.0, "tan(pendenza)"),
-    ("maschera fusa", lambda d: d['obstacle_mask'], 'RdYlGn', -1, 1, "-1 = ostacolo"),
-    ("celle usate (is_valid)", lambda d: d['is_valid'].astype(float), 'gray_r', 0, 1,
-     "0 = riempita/scartata"),
-    ("quota corretta", lambda d: d['terrain_corrected'] - _ground(d), 'terrain', -0.5, 0.5,
-     "quota corretta - suolo (m)"),
-    ("quota rispetto all'avvio missione", lambda d: d['terrain_corrected'] - _mission_z0(d), 'terrain',
-     -2.0, 2.0, "quota corretta - suolo all'avvio missione (m)"),
-    ("celle mai scritte", lambda d: d['unwritten'].astype(float) if 'unwritten' in d
-     else np.zeros_like(d['terrain_raw']), 'gray_r', 0, 1, "1 = mai scritta: trattata come non vista"),
+    ("height relative to the ground", lambda d: d['terrain_raw'] - _ground(d), 'terrain', -0.5, 0.5,
+     "raw height - estimated ground (m)"),
+    ("raw terrain_valid", lambda d: d['terrain_valid_raw'], 'gray_r', 0, 1, "1 = valid"),
+    ("obstacle_distance", lambda d: d['obstacle_distance'], 'plasma', 0, 1.0, "distance from the obstacle (m)"),
+    ("roughness", lambda d: d['roughness'], 'coolwarm', 0, 0.3, "standard deviation (m)"),
+    ("gradient", lambda d: d['gradient'], 'viridis', 0, 1.0, "tan(pendenza)"),
+    ("fused mask", lambda d: d['obstacle_mask'], 'RdYlGn', -1, 1, "-1 = obstacle"),
+    ("cells used (is_valid)", lambda d: d['is_valid'].astype(float), 'gray_r', 0, 1,
+     "0 = filled/discarded"),
+    ("corrected height", lambda d: d['terrain_corrected'] - _ground(d), 'terrain', -0.5, 0.5,
+     "corrected height - ground (m)"),
+    ("height relative to the mission start", lambda d: d['terrain_corrected'] - _mission_z0(d), 'terrain',
+     -2.0, 2.0, "corrected height - ground at mission start (m)"),
+    ("cells never written", lambda d: d['unwritten'].astype(float) if 'unwritten' in d
+     else np.zeros_like(d['terrain_raw']), 'gray_r', 0, 1, "1 = never written: treated as not seen"),
     # Spot layers saved since 26-10 (config.SAVE_EXTRA_LAYERS), each on its own grid
     # (<name>_origin, <name>_cell): seventh element = field name.
-    ("intensita' (Spot)", lambda d: _extra(d, 'intensity'), 'gray', 0, 255,
-     "intensita' del ritorno del sensore", 'intensity'),
+    ("intensity (Spot)", lambda d: _extra(d, 'intensity'), 'gray', 0, 255,
+     "intensity of the sensor return", 'intensity'),
     ("no_step (Spot)", lambda d: _extra(d, 'no_step'), 'RdBu', -0.3, 0.3,
-     "distanza dal confine no-step (m): < 0 = Spot non ci mette le zampe", 'no_step'),
+     "distance from the no-step boundary (m): < 0 = Spot does not put its feet there", 'no_step'),
 ]
 # Layer keys: 1..9, 0 for the first ten, then these.
 LAYER_KEYS = {'i': 10, 'x': 11}
@@ -221,9 +221,9 @@ def _body_masks(d):
 # cells covered, 1.5 cm from the surrounding terrain. Drawing only: the robot treats them as not seen.
 # Height layer -> subtracted reference (same as the layer).
 QUOTA_LAYER_REF = {
-    "quota rispetto al suolo": lambda d: _ground(d),
-    "quota corretta": lambda d: _ground(d),
-    "quota rispetto all'avvio missione": lambda d: _mission_z0(d),
+    "height relative to the ground": lambda d: _ground(d),
+    "corrected height": lambda d: _ground(d),
+    "height relative to the mission start": lambda d: _mission_z0(d),
 }
 
 
@@ -247,7 +247,7 @@ def _hover(ax, mat, extent):
     def fmt(x, y):
         c, r = int((x - x0) / cs), int((y - y0) / cs)
         if 0 <= r < ny and 0 <= c < nx:
-            return f"x={x:.2f} y={y:.2f} | riga {r} col {c} | valore {mat[r, c]:.4f}"
+            return f"x={x:.2f} y={y:.2f} | row {r} col {c} | value {mat[r, c]:.4f}"
         return f"x={x:.2f} y={y:.2f}"
     ax.format_coord = fmt
 
@@ -263,7 +263,7 @@ def draw_scan(ax, d, layer_idx, title_prefix="", ctx=None):
         (lox, loy), lcs = d[f"{src}_origin"], float(d.get(f"{src}_cell", d['cell_size']))
         ext = [lox, lox + mat.shape[1] * lcs, loy, loy + mat.shape[0] * lcs]
     if src is not None and src not in d:
-        name += " -- non salvato in questa missione"
+        name += " -- not saved in this mission"
     # height under the body seen later (see HEIGHT UNDER THE BODY)
     hole = None
     if ctx is not None and name in QUOTA_LAYER_REF:
@@ -271,7 +271,7 @@ def draw_scan(ax, d, layer_idx, title_prefix="", ctx=None):
         if hole is not None:
             mat = mat.copy()
             mat[hole] = q[hole] - QUOTA_LAYER_REF[name](d)
-    if name == "quota rispetto all'avvio missione" and ctx is not None:
+    if name == "height relative to the mission start" and ctx is not None:
         # Same scale and colours as the global panel ('t'), fixed for the mission: a
         # fixed scale from -2 to +2 m sent the scans at the top of a climb off scale (white)
         # (29-10 10:57: +2.1 m at the end of the mission).
@@ -286,7 +286,7 @@ def draw_scan(ax, d, layer_idx, title_prefix="", ctx=None):
         ys_c = ext[2] + (np.arange(mat.shape[0]) + 0.5) * cs
         ax.contourf(xs_c, ys_c, hole.astype(float), levels=[0.5, 1.5], colors='none', hatches=['////'])
         ax.add_patch(patches.Rectangle((0, 0), 0, 0, fill=False, hatch='////', edgecolor='k', lw=0,
-                                       label='sotto il corpo: quota vista dopo'))
+                                       label='under the body: height seen later'))
 
     if src == 'no_step' and np.isfinite(mat).any():
         cs_l = (ext[1] - ext[0]) / mat.shape[1]
@@ -325,22 +325,22 @@ def draw_scan(ax, d, layer_idx, title_prefix="", ctx=None):
     path_len = float(d['frontier_path_len']) if 'frontier_path_len' in d else np.nan
     if np.isfinite(sx) and len(poly) >= 2 and float(d['frontier_dist']) > path_len + 1e-6:
         ax.plot([poly[-1][0], sx], [poly[-1][1], sy], ':', color='magenta', lw=2,
-                label=f"prolungamento per il muso ({float(d['frontier_dist']) - path_len:.2f} m)")
+                label=f"extension for the nose ({float(d['frontier_dist']) - path_len:.2f} m)")
     if np.isfinite(sx):
         ax.plot(sx, sy, 'X', color=REASON_COLORS.get(reason, 'k'), ms=13, mec='white',
-                label=f"fine del controllo del fronte: {reason}")
+                label=f"end of the frontier check: {reason}")
     tx, ty = d['decision_target']
     if np.isfinite(tx):
-        ax.plot(tx, ty, '*', color='lime', ms=14, mec='k', label='punto comandato')
+        ax.plot(tx, ty, '*', color='lime', ms=14, mec='k', label='commanded point')
     ax.set_xlim(ext[0], ext[1]); ax.set_ylim(ext[2], ext[3]); ax.set_aspect('equal')
     ax.set_xlabel("X [m] (VISION)"); ax.set_ylabel("Y [m] (VISION)")
     if 'extra_kind' in d:
-        sub = (f"{str(d['extra_kind'])}: scansione fuori dal ciclo, ricostruita dalla vista PRM "
-               f"(niente fronte ne' decisione)")
+        sub = (f"{str(d['extra_kind'])}: scan outside the loop, rebuilt from the PRM view "
+               f"(no frontier or decision)")
     else:
-        sub = (f"fronte {float(d['frontier_dist']):.2f} m ({reason}), avanzamento "
-               f"{float(d['allowed_advance']):.2f} m, decisione: {str(d['decision_kind'])}"
-               + (" [senza ruotare]" if bool(d.get('keep_heading', False)) else ""))
+        sub = (f"frontier {float(d['frontier_dist']):.2f} m ({reason}), advance "
+               f"{float(d['allowed_advance']):.2f} m, decision: {str(d['decision_kind'])}"
+               + (" [without rotating]" if bool(d.get('keep_heading', False)) else ""))
     ax.set_title(f"{title_prefix}{name}\n{sub}", fontsize=9)
     ax.legend(loc='upper left', fontsize=7, framealpha=0.8)
     return im, label
@@ -364,17 +364,17 @@ def draw_vis_bundle(ax, d):
     # stop nodes: only in the missions up to 08-10, before the graph stayed fixed
     stops = np.array([xy[int(i)] for i in _arr(d, 'prm_stop_nodes', ()) if int(i) in xy]).reshape(-1, 2)
     if len(stops):
-        ax.plot(stops[:, 0], stops[:, 1], 'o', color='tab:orange', ms=5, label='nodi di sosta')
+        ax.plot(stops[:, 0], stops[:, 1], 'o', color='tab:orange', ms=5, label='stop nodes')
     cp = d['chosen_path']
     if len(cp):
-        ax.plot(cp[:, 0], cp[:, 1], '-', color='magenta', lw=2.5, label='percorso scelto')
+        ax.plot(cp[:, 0], cp[:, 1], '-', color='magenta', lw=2.5, label='chosen path')
     ax.plot(*d['robot_xy'], 'o', color='blue', ms=10, label='robot')
     if np.all(np.isfinite(d['chosen_point'])):
         ax.plot(*d['chosen_point'], '*', color='green', ms=16, label='obiettivo')
     for (r, c, x, y), st in zip(d['env_cells'], d['env_cell_status']):
         ax.text(x, y, f"{int(r)},{int(c)}", fontsize=7, ha='center')
     ax.set_aspect('equal'); ax.grid(alpha=0.3); ax.autoscale_view()
-    ax.set_title(f"Iterazione {int(d['iteration'])}: {len(segs)} archi PRM, {len(stops)} nodi di sosta",
+    ax.set_title(f"Iteration {int(d['iteration'])}: {len(segs)} PRM edges, {len(stops)} stop nodes",
                  fontsize=10)
     ax.legend(fontsize=7)
 
@@ -389,13 +389,13 @@ MOSAIC_CMAP = ListedColormap(['#ffffff', '#dfe8d8', '#d62728'])   # unknown, fre
 
 
 def _navgraph_folder(folder):
-    """Most recent graph/<mission>/Grafo_*, searched next to MissionMap/ and to this file."""
+    """Most recent graph/<mission>/Graph_* (or Grafo_*), searched next to MissionMap/ and to this file."""
     name = os.path.basename(os.path.normpath(folder))
     bases = {os.path.dirname(os.path.dirname(os.path.abspath(folder))),
              os.path.dirname(os.path.dirname(os.path.abspath(__file__)))}
     cands = []
     for b in bases:
-        cands += [d for d in glob.glob(os.path.join(b, "graph", name, "Grafo_*")) if os.path.isdir(d)]
+        cands += [d for d in glob.glob(os.path.join(b, "graph", name, "Gra[pf][ho]_*")) if os.path.isdir(d)]
     return max(cands, key=lambda d: os.path.basename(d)) if cands else None
 
 
@@ -440,14 +440,14 @@ def load_navgraph(folder):
     """
     gdir = _navgraph_folder(folder)
     if gdir is None:
-        print("[viewer] nav graph: nessuna cartella graph/<missione>/Grafo_* per questa missione.")
+        print("[viewer] nav graph: no graph/<mission>/Graph_* folder for this mission.")
         return None
     try:
         from bosdyn.api.graph_nav import map_pb2
         from bosdyn.api import robot_state_pb2
         from bosdyn.client.frame_helpers import get_a_tform_b
     except Exception:
-        print("[viewer] nav graph: per leggerlo serve l'SDK di Spot (bosdyn-client), qui non c'e'.")
+        print("[viewer] nav graph: reading it needs the Spot SDK (bosdyn-client), not available here.")
         return None
     try:
         g = map_pb2.Graph()
@@ -484,12 +484,12 @@ def load_navgraph(folder):
                 source.append(map_pb2.Edge.EdgeSource.Name(e.annotations.edge_source))
             except Exception:
                 source.append('')
-        print(f"[viewer] nav graph: {len(ids)} waypoint, {len(edges)} archi ({os.path.basename(gdir)}).")
+        print(f"[viewer] nav graph: {len(ids)} waypoints, {len(edges)} edges ({os.path.basename(gdir)}).")
         return {'names': np.array(names), 'xy': np.array(xy, float).reshape(-1, 2),
                 'time': np.array(times, float), 'edges': np.array(edges, int).reshape(-1, 2),
                 'source': np.array(source), 'folder': gdir}
     except Exception as e:
-        print(f"[viewer] nav graph non leggibile ({gdir}): {e}")
+        print(f"[viewer] nav graph not readable ({gdir}): {e}")
         return None
 
 
@@ -602,9 +602,9 @@ def _scan_from_vis(t, name, v, yaw_at=None):
             'robot_xyz': np.array([rx, ry, np.nan]),
             'time': np.array(t),
             'iteration': np.array(int(m.group(1))),
-            'decision_kind': np.array('inizio tentativo' if m.group(2) else 'scansione finale'),
-            'extra_kind': np.array(f"inizio del tentativo sulla cella ({m.group(2)},{m.group(3)})"
-                                   if m.group(2) else "scansione finale della missione"),
+            'decision_kind': np.array('attempt start' if m.group(2) else 'final scan'),
+            'extra_kind': np.array(f"start of the attempt on cell ({m.group(2)},{m.group(3)})"
+                                   if m.group(2) else "final scan of the mission"),
             'polyline': np.zeros((0, 2)),
             'frontier_reason': np.array(''),
             'frontier_stop_xy': np.array([np.nan, np.nan]),
@@ -654,7 +654,7 @@ class MissionContext:
             try:
                 self.vis.append((np.nan, os.path.basename(f), _load(f)))
             except Exception as e:
-                print(f"[viewer] vista PRM non leggibile {os.path.basename(f)}: {e}")
+                print(f"[viewer] PRM view not readable {os.path.basename(f)}: {e}")
         self.vis = _vis_times(self.vis, scans)
         # Scans outside the loop (see SCANS OUTSIDE THE LOOP), among the others in time
         # order: from here on self.scans and self.scan_files include them.
@@ -732,7 +732,7 @@ class MissionContext:
                 vals = np.array([hs[k] / n for k, n in cells.items()], dtype=float)
             return keys, vals, float(g['resolution']), g.get('mission_z0')
         except Exception as e:
-            print(f"[viewer] mappa globale non leggibile ({path}): {e}")
+            print(f"[viewer] global map not readable ({path}): {e}")
             return None
 
     def _raster(self, keys, vals, dtype, fill):
@@ -764,7 +764,7 @@ class MissionContext:
                     return np.array([(float(r['time']), float(r['x']), float(r['y']),
                                       kind.get(modern(r.get('move')), 0.0)) for r in rows]).reshape(-1, 4)
                 except Exception as e:
-                    print(f"[viewer] trajectory.csv non leggibile: {e}")
+                    print(f"[viewer] trajectory.csv not readable: {e}")
         return None
 
     def _window(self, d):
@@ -924,16 +924,16 @@ class MissionContext:
     def events(self):
         """
         Indices of the scans to jump to (keys b, c, v), by kind:
-          'blocco'   -- scans with decision 'blocked'
-          'cella'    -- first scan of every attempt (the iteration changes)
+          'block'    -- scans with decision 'blocked'
+          'cell'     -- first scan of every attempt (the iteration changes)
           'graphnav' -- first scan after a GraphNav move ('graphnav' samples of
                         trajectory.csv) or after an unrecorded leg (older missions)
         """
         if getattr(self, '_events', None) is None:
             kinds = [str(d['decision_kind']) for d in self.scans]
             its = [int(d['iteration']) if 'iteration' in d else -1 for d in self.scans]
-            ev = {'blocco': [i for i, k in enumerate(kinds) if k == 'blocked'],
-                  'cella': [i for i in range(len(its)) if i == 0 or its[i] != its[i - 1]],
+            ev = {'block': [i for i, k in enumerate(kinds) if k == 'blocked'],
+                  'cell': [i for i in range(len(its)) if i == 0 or its[i] != its[i - 1]],
                   'graphnav': []}
             t_sc = np.array([float(d['time']) if 'time' in d else np.nan for d in self.scans])
             if self.traj is not None and len(self.traj) and np.isfinite(t_sc).all():
@@ -1160,7 +1160,7 @@ def overlay_prm_local(ax, ctx, i):
     try:
         _overlay_prm_local(ax, ctx, i)
     except Exception as e:
-        print(f"[viewer] grafo locale non disegnato: {e}")
+        print(f"[viewer] local graph not drawn: {e}")
 
 
 def _overlay_prm_local(ax, ctx, i):
@@ -1246,7 +1246,7 @@ def _prebuild_global_images(ctx):
         try:
             _global_edges_image(ctx, name, vd)
         except Exception as e:
-            print(f"[viewer] immagine archi di {name} non preparata: {e}")
+            print(f"[viewer] edge image of {name} not prepared: {e}")
 
 
 def _traj_runs(tr):
@@ -1334,7 +1334,7 @@ def _draw_zero_level(ax, height, extent):
         art.set_path_effects(stroke)
     ax.plot([], [], '-', color=ZERO_LEVEL_COLOR, lw=1.4,
             path_effects=[patheffects.withStroke(linewidth=3.0, foreground='black')],
-            label="quota 0 (suolo all'avvio missione)")
+            label="height 0 (ground at mission start)")
 
 
 def _mark_zero(cbar):
@@ -1353,7 +1353,7 @@ def _mark_zero(cbar):
 
 def _hover_global(ax, ctx, occ, height, ng=None):
     """Coordinates, cell state, height and nearby waypoint under the mouse in the global panel."""
-    names = {0: 'mai vista', 1: 'libera', 2: 'OSTACOLO'}
+    names = {0: 'never seen', 1: 'free', 2: 'OSTACOLO'}
 
     def fmt(x, y):
         out = _fmt_cell(x, y)
@@ -1372,7 +1372,7 @@ def _hover_global(ax, ctx, occ, height, ng=None):
                 out += f" | {names.get(int(occ[r, c]), '?')}"
             if height is not None:
                 h = height[r, c]
-                out += f" | quota {h:+.3f} m" if np.isfinite(h) else " | quota: nessuna"
+                out += f" | height {h:+.3f} m" if np.isfinite(h) else " | height: none"
         return out
     ax.format_coord = fmt
 
@@ -1395,13 +1395,13 @@ def draw_navgraph(ax, ng, t_now=None):
     auto = shown & ~ours
     if auto.any():
         ax.plot(xy[auto, 0], xy[auto, 1], '.', color='dimgray', ms=3, zorder=3,
-                label='waypoint automatici di GraphNav')
+                label='automatic GraphNav waypoints')
     if ours.any():
         ax.plot(xy[ours, 0], xy[ours, 1], 'o', color='black', mfc='white', ms=3.5, mew=0.8, zorder=3,
-                label='waypoint della missione (briciole, celle)')
+                label='mission waypoints (breadcrumbs, cells)')
     k0 = np.flatnonzero(shown & (names == 'wp_0'))
     if len(k0):
-        ax.plot(*xy[k0[0]], 'P', color='black', mfc='gold', ms=11, zorder=8, label='wp_0 (partenza)')
+        ax.plot(*xy[k0[0]], 'P', color='black', mfc='gold', ms=11, zorder=8, label='wp_0 (start)')
 
 
 def _to_mission_frame(ax, ctx, fmt_vision, extent=None):
@@ -1423,10 +1423,10 @@ def _to_mission_frame(ax, ctx, fmt_vision, extent=None):
 
     def fmt(x, y):
         xv, yv = inv.transform((x, y))
-        return f"missione ({x:.2f}, {y:.2f}) | VISION " + fmt_vision(xv, yv)
+        return f"mission ({x:.2f}, {y:.2f}) | VISION " + fmt_vision(xv, yv)
     ax.format_coord = fmt
-    ax.set_xlabel("laterale [m] (frame missione: origine alla partenza)")
-    ax.set_ylabel("avanti [m]")
+    ax.set_xlabel("lateral [m] (mission frame: origin at the start)")
+    ax.set_ylabel("forward [m]")
 
 
 def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=False, mframe=False):
@@ -1477,7 +1477,7 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=Fals
     try:
         _draw_cells(ax, vd)
     except Exception as e:
-        print(f"[viewer] celle non disegnate: {e}")
+        print(f"[viewer] cells not drawn: {e}")
     if vd is not None:
         xy = {int(k): tuple(p) for k, p in zip(_arr(vd, 'prm_node_ids', ()), _arr(vd, 'prm_node_xy', (2,)))}
         # This panel draws ALL the graph edges (up to ~90 000), as a cached image
@@ -1487,10 +1487,10 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=Fals
             ax.imshow(img, origin='lower', interpolation='nearest', zorder=2, extent=gext)
         stops = np.array([xy[int(k)] for k in _arr(vd, 'prm_stop_nodes', ()) if int(k) in xy]).reshape(-1, 2)
         if len(stops):
-            ax.plot(stops[:, 0], stops[:, 1], '.', color='tab:orange', ms=5, zorder=4, label='nodi di sosta')
+            ax.plot(stops[:, 0], stops[:, 1], '.', color='tab:orange', ms=5, zorder=4, label='stop nodes')
         cp = _arr(vd, 'chosen_point').astype(float).ravel()
         if cp.size == 2 and np.all(np.isfinite(cp)):
-            ax.plot(*cp, '*', color='green', ms=15, mec='k', zorder=6, label='obiettivo cella')
+            ax.plot(*cp, '*', color='green', ms=15, mec='k', zorder=6, label='cell goal')
 
     # real trajectory (trajectory.csv) or, if missing, the positions at the scans
     if ctx.traj is not None and len(ctx.traj):
@@ -1499,27 +1499,27 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=Fals
         halo = [pe.Stroke(linewidth=3.2, foreground='white', alpha=0.8), pe.Normal()]
         labelled = set()
         for r, kind in runs:
-            lab, col = {1: ('percorso reale (GraphNav)', 'darkorange'),
-                        2: ('correzione del ritorno a wp_0 (fiducial)', 'crimson')}.get(
-                kind, ('percorso reale', 'tab:blue'))
+            lab, col = {1: ('real path (GraphNav)', 'darkorange'),
+                        2: ('correction of the return to wp_0 (fiducial)', 'crimson')}.get(
+                kind, ('real path', 'tab:blue'))
             ax.plot(r[:, 0], r[:, 1], '-', color=col, lw=2.5 if kind == 2 else 1.5,
                     zorder=6 if kind == 2 else 5, path_effects=halo, label=None if lab in labelled else lab)
             labelled.add(lab)
         for k, (a, b) in enumerate(gaps):
             # no white border: under a dashed line the continuous border makes it look like a solid line
             ax.plot([a[0], b[0]], [a[1], b[1]], linestyle=(0, (1.5, 2.5)), color='navy', lw=1.3, zorder=5,
-                    label='tratto non registrato (GraphNav o arretramento)' if k == 0 else None)
+                    label='unrecorded leg (GraphNav or back-off)' if k == 0 else None)
     else:
         track = np.array([s['robot_xyz'][:2] for s in ctx.scans[:upto + 1]])
         ax.plot(track[:, 0], track[:, 1], '-', color='tab:blue', lw=1.5, alpha=0.8, zorder=5,
-                label='robot (alle scansioni)')
+                label='robot (at the scans)')
 
     for s in ctx.scans[:upto + 1]:
         if str(s['decision_kind']) == 'blocked':
             ax.plot(*s['frontier_stop_xy'], 's', color='red', ms=11, mfc='none', mew=2, zorder=7)
     if not final:
         pl = d['polyline']
-        ax.plot(pl[:, 0], pl[:, 1], '-', color='magenta', lw=2.5, zorder=6, label='percorso pianificato')
+        ax.plot(pl[:, 0], pl[:, 1], '-', color='magenta', lw=2.5, zorder=6, label='planned path')
         x0, x1, y0, y1 = _extent(d)
         ax.add_patch(patches.Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False, edgecolor='cyan', lw=2, zorder=6))
         reason = modern(str(d['frontier_reason']))
@@ -1531,18 +1531,18 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=Fals
     ax.grid(alpha=0.2)
     n_blk = sum(str(s['decision_kind']) == 'blocked' for s in ctx.scans[:upto + 1])
     if use_final:
-        title = "Fine missione -- mappa globale salvata dal pianificatore ('m': mosaico grezzo)"
+        title = "End of mission -- global map saved by the planner ('m': raw mosaic)"
     else:
-        title = ("Fine missione" if final else f"Mappa globale alla scansione {upto + 1}/{len(ctx.scans)}")
-        title += (" -- mosaico grezzo, l'ultima scansione vince ('m')" if raw
-                  else " -- mappa del robot, ostacoli confermati ('m')")
+        title = ("End of mission" if final else f"Global map at scan {upto + 1}/{len(ctx.scans)}")
+        title += (" -- raw mosaic, the last scan wins ('m')" if raw
+                  else " -- the robot's map, confirmed obstacles ('m')")
     legend = {
-        'ostacoli': "rosso = ostacolo visto, verde chiaro = libero, bianco = mai visto",
-        'terreno': "sfondo: quota del terreno rispetto all'avvio missione; bianco = nessuna quota",
-        'fusione': "sfondo: quota del terreno, rosso = ostacolo, grigio = libero senza quota, bianco = mai visto",
+        'ostacoli': "red = obstacle seen, light green = free, white = never seen",
+        'terreno': "background: terrain height relative to the mission start; white = no height",
+        'fusione': "background: terrain height, red = obstacle, grey = free without height, white = never seen",
     }[bg]
-    ax.set_title(f"{title}\n{legend} ('t'); quadrati rossi = blocchi ({n_blk})"
-                 + (f"\ngrafo: {vis[0]}" if vis else ""), fontsize=8)
+    ax.set_title(f"{title}\n{legend} ('t'); red squares = blocks ({n_blk})"
+                 + (f"\ngraph: {vis[0]}" if vis else ""), fontsize=8)
     ax.set_xlabel("X [m] (VISION)")
     if mframe:
         _to_mission_frame(ax, ctx, ax.format_coord)
@@ -1595,7 +1595,7 @@ def _latest_mission_folder():
         from tkinter import filedialog
         root = tkinter.Tk()
         root.withdraw()
-        return filedialog.askdirectory(title="Cartella della missione (dentro MissionMap)") or None
+        return filedialog.askdirectory(title="Mission folder (inside MissionMap)") or None
     except Exception:
         return None
 
@@ -1607,9 +1607,9 @@ def main():
         found = _latest_mission_folder()
         if not found:
             print(__doc__)
-            print("Nessuna cartella MissionMap/Mission_* trovata accanto a questo file.")
+            print("No MissionMap/Mission_* folder found next to this file.")
             return 1
-        print(f"Nessuna cartella indicata: apro l'ultima missione, {found}")
+        print(f"No folder given: opening the latest mission, {found}")
         args = [found]
     target = args[0]
     # The mission name alone is enough too (e.g. 13-10-2026_12-40-38), as for mission_report.py.
@@ -1624,7 +1624,7 @@ def main():
     if "--background" in sys.argv:
         bg0 = sys.argv[sys.argv.index("--background") + 1]
         if bg0 not in BACKGROUNDS:
-            print(f"--background: uno fra {', '.join(BACKGROUNDS)}")
+            print(f"--background: one of {', '.join(BACKGROUNDS)}")
             return 1
 
     if os.path.isdir(target):
@@ -1635,12 +1635,12 @@ def main():
         vis_files = [target] if target.endswith("_vis.npz") else []
     scans = [_load(f) for f in scan_files]
     n_loop = len(scans)
-    print(f"{len(scans)} scansioni, {len(vis_files)} viste PRM")
+    print(f"{len(scans)} scans, {len(vis_files)} PRM views")
     folder = target if os.path.isdir(target) else os.path.dirname(os.path.dirname(os.path.abspath(target)))
     ctx = MissionContext(folder, scans, scan_files, vis_files) if scans else None
     if ctx is not None:
         scans, scan_files = ctx.scans, ctx.scan_files     # with the scans outside the loop
-        print(f"  piu' {len(scans) - n_loop} scansioni d'inizio tentativo e finale, dalle viste PRM")
+        print(f"  plus {len(scans) - n_loop} start-of-attempt and final scans, from the PRM views")
 
     if PNG_MODE:
         os.makedirs(out_dir, exist_ok=True)
@@ -1656,7 +1656,7 @@ def main():
             png = os.path.basename(f).replace(".npz", ".png")
             m = _VIS_SCAN_NAME.search(os.path.basename(f))
             if m:                                         # scan outside the loop
-                png = (f"scan_it{int(m.group(1)):03d}_cell{m.group(2)}_{m.group(3)}_000_inizio.png"
+                png = (f"scan_it{int(m.group(1)):03d}_cell{m.group(2)}_{m.group(3)}_000_start.png"
                        if m.group(2) else f"scan_it{int(m.group(1)):03d}_finale.png")
             fig.savefig(os.path.join(out_dir, png), dpi=100)
             plt.close(fig)
@@ -1669,11 +1669,11 @@ def main():
             fig, ax = plt.subplots(figsize=(12, 12))
             m = draw_global(ax, ctx, len(scans) - 1, final=True, bg=bg, navgraph=ng0, mframe=mf0)
             if m is not None:
-                _mark_zero(fig.colorbar(m, ax=ax, label="quota rispetto all'avvio missione (m)", shrink=0.7))
+                _mark_zero(fig.colorbar(m, ax=ax, label="height relative to the mission start (m)", shrink=0.7))
             fig.savefig(os.path.join(out_dir, "overview.png" if bg == 'ostacoli' else f"overview_{bg}.png"),
                         dpi=110)
             plt.close(fig)
-        print(f"Figure salvate in {out_dir}")
+        print(f"Figures saved in {out_dir}")
         return 0
 
     if "--overview" in sys.argv or not scans:
@@ -1681,7 +1681,7 @@ def main():
         if scans:
             m = draw_global(ax, ctx, len(scans) - 1, final=True, bg=bg0, navgraph=ng0, mframe=mf0)
             if m is not None:
-                _mark_zero(fig.colorbar(m, ax=ax, label="quota rispetto all'avvio missione (m)", shrink=0.7))
+                _mark_zero(fig.colorbar(m, ax=ax, label="height relative to the mission start (m)", shrink=0.7))
         elif vis_files:
             draw_vis_bundle(ax, _load(vis_files[0]))
         plt.show()
@@ -1711,7 +1711,7 @@ def main():
     # Height bar of the right panel: created only once and hidden with the
     # 'ostacoli' background.
     cbar_g = fig.colorbar(plt.cm.ScalarMappable(norm=ctx.terrain_norm(), cmap=TERRAIN_CMAP), cax=cax_g,
-                          label="quota rispetto all'avvio missione (m)")
+                          label="height relative to the mission start (m)")
     _mark_zero(cbar_g)
 
     def redraw():
@@ -1756,18 +1756,18 @@ def main():
         elif ev.key == 'l':
             state['layer'] = (state['layer'] + 1) % len(LAYERS)
         elif ev.key in ('b', 'B', 'c', 'C', 'v', 'V'):
-            kind = {'b': 'blocco', 'c': 'cella', 'v': 'graphnav'}[ev.key.lower()]
+            kind = {'b': 'block', 'c': 'cell', 'v': 'graphnav'}[ev.key.lower()]
             lst = ctx.events()[kind]
             fwd = ev.key.islower()
             cand = [k for k in lst if (k > state['i'] if fwd else k < state['i'])]
-            nome = {'blocco': 'blocco', 'cella': 'tentativo', 'graphnav': 'spostamento GraphNav'}[kind]
+            what = {'block': 'block', 'cell': 'tentativo', 'graphnav': 'GraphNav move'}[kind]
             if not cand:
-                print(f"[viewer] nessun {nome} {'dopo' if fwd else 'prima di'} questa scansione "
-                      f"({len(lst)} in tutto).")
+                print(f"[viewer] no {what} {'after' if fwd else 'before'} this scan "
+                      f"({len(lst)} in all).")
                 return
             state['i'] = cand[0] if fwd else cand[-1]
             state['overview'] = False
-            print(f"[viewer] {nome} {lst.index(state['i']) + 1}/{len(lst)}: scansione "
+            print(f"[viewer] {what} {lst.index(state['i']) + 1}/{len(lst)}: scan "
                   f"{state['i'] + 1}/{len(scans)}")
         elif ev.key == 'e':
             state['legend'] = not state['legend']
@@ -1789,18 +1789,18 @@ def main():
         redraw()
 
     fig.canvas.mpl_connect('key_press_event', on_key)
-    print("Frecce sinistra/destra: scansione | su/giu': 10 scansioni | 1-9, 0: layer a sinistra | "
-          "o: a destra fine missione / momento della scansione | g: grafo a sinistra si'/no | "
-          "m: a destra mappa del robot / mosaico grezzo | t: sfondo ostacoli / terreno / fusione | "
-          "n: nav graph si'/no | r: frame della missione si'/no | b/c/v (B/C/V): blocco / tentativo / "
-          "GraphNav successivo (precedente) | e: legende si'/no | i, x, l: intensita', no_step, layer dopo | "
-          "valore sotto il mouse in basso a destra")
+    print("Left/right arrows: scan | up/down: 10 scans | 1-9, 0: left layer | "
+          "o: right end of mission / moment of the scan | g: left graph yes/no | "
+          "m: right robot map / raw mosaic | t: background obstacles / terrain / fusion | "
+          "n: nav graph yes/no | r: mission frame yes/no | b/c/v (B/C/V): block / attempt / "
+          "next (previous) GraphNav | e: legends yes/no | i, x, l: intensity, no_step, next layer | "
+          "value under the mouse at the bottom right")
     keys = {v: k for k, v in LAYER_KEYS.items()}
     for k, layer in enumerate(LAYERS):
         print(f"  {keys.get(k, (k + 1) % 10)}: {layer[0]}")
     ev = ctx.events()
-    print(f"  salti: {len(ev['blocco'])} blocchi, {len(ev['cella'])} tentativi, "
-          f"{len(ev['graphnav'])} spostamenti GraphNav")
+    print(f"  jumps: {len(ev['block'])} blocks, {len(ev['cell'])} attempts, "
+          f"{len(ev['graphnav'])} GraphNav moves")
     redraw()
     # The edge images of the global panel are prepared in the background.
     threading.Thread(target=_prebuild_global_images, args=(ctx,), daemon=True).start()

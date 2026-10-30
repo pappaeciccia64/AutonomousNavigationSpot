@@ -44,7 +44,7 @@ MISSION_STATS = {
     'near_threshold_saves': 0,
     'segments_logged': 0,
     'last_tier': None,   # tier of the last segment, read for the CSV row
-    'time_s': {},        # seconds spent per phase, see timing_add / [TEMPO]
+    'time_s': {},        # seconds spent per phase, see timing_add / [TIMING]
     'scan_bundles': 0,
     'frontier_blocks': 0,
     'frontier_aborts': 0,
@@ -135,7 +135,7 @@ _TRAJECTORY_COLUMNS = ['time', 'iteration', 'cell_row', 'cell_col', 'loop_iter',
 
 
 def timing_add(phase, seconds):
-    """Accumulate the time spent in a phase ([TEMPO] summary at the end of the mission)."""
+    """Accumulate the time spent in a phase ([TIMING] summary at the end of the mission)."""
     MISSION_STATS['time_s'][phase] = MISSION_STATS['time_s'].get(phase, 0.0) + float(seconds)
 
 
@@ -146,7 +146,7 @@ def save_npz_async(path, **arrays):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             np.savez_compressed(path, **arrays)
         except Exception as e:
-            print(f"[DATA SAVE] Impossibile salvare {os.path.basename(path)}: {e}")
+            print(f"[DATA SAVE] Could not save {os.path.basename(path)}: {e}")
     VIS_EXECUTOR.submit(_job)
 
 
@@ -162,22 +162,22 @@ def set_mission_z0(robot_state_client, z_body):
     the feet ('gpe' frame); if not available, the body height minus the nominal standing
     height. Prints how much the mission height differs from the power-on one.
     """
-    z0, source = None, "piano del suolo di Spot"
+    z0, source = None, "Spot's ground plane"
     try:
         snap = robot_state_client.get_robot_state().kinematic_state.transforms_snapshot
         z0 = float(get_a_tform_b(snap, VISION_FRAME_NAME, GROUND_PLANE_FRAME_NAME).position.z)
     except Exception as e:
-        print(f"[QUOTE] Piano del suolo non disponibile ({e}): uso la quota del corpo.")
+        print(f"[HEIGHTS] Ground plane not available ({e}): using the body height.")
     if z0 is None or not np.isfinite(z0):
-        z0, source = float(z_body) - 0.5, "quota del corpo - 0.5 m"
+        z0, source = float(z_body) - 0.5, "body height - 0.5 m"
     MISSION_CTX['mission_z0'] = z0
     note = ""
     if abs(z0) > 1.0:
-        note = (" -- il robot e' stato acceso a un'altra quota (scale?). La navigazione non ne "
-                "risente; il valore e' salvato come mission_z0 in ogni file e mission_viewer "
-                "mostra le quote rispetto all'avvio missione")
-    print(f"[QUOTE] Riferimento quote = suolo all'avvio missione: z={z0:.3f} m nel frame VISION "
-          f"({source}), cioe' {z0:+.2f} m rispetto all'accensione{note}.")
+        note = (" -- the robot was powered on at another height (stairs?). Navigation is not "
+                "affected; the value is saved as mission_z0 in every file and mission_viewer "
+                "shows the heights relative to the mission start")
+    print(f"[HEIGHTS] Height reference = ground at mission start: z={z0:.3f} m in the VISION frame "
+          f"({source}), i.e. {z0:+.2f} m relative to power-on{note}.")
     return z0
 
 
@@ -240,9 +240,9 @@ def install_stdout_tee(file_path):
     try:
         if not isinstance(sys.stdout, _TeeStream):
             sys.stdout = _TeeStream(sys.stdout, file_path)
-            print(f"[LOG] Copia completa dell'output su file: {file_path}")
+            print(f"[LOG] Full copy of the output to file: {file_path}")
     except Exception as e:
-        print(f"[LOG] Impossibile attivare la copia dell'output su file: {e}")
+        print(f"[LOG] Could not enable the copy of the output to file: {e}")
 
 
 def remove_stdout_tee():
@@ -371,7 +371,7 @@ class SegmentLog:
                 with open(self._path, 'a', newline='', encoding='utf-8') as f:
                     csv.writer(f).writerow([fmt(row_dict.get(c)) for c in _SEGMENT_COLUMNS])
         except Exception as e:
-            print(f"[LOG] Impossibile scrivere la riga del segmento: {e}")
+            print(f"[LOG] Could not write the segment row: {e}")
 
 
 def append_csv(name, header, rows):
@@ -390,7 +390,7 @@ def append_csv(name, header, rows):
                 for r in rows:
                     w.writerow([f"{v:.4f}" if isinstance(v, (float, np.floating)) else v for v in r])
     except Exception as e:
-        print(f"[LOG] Impossibile scrivere {name}: {e}")
+        print(f"[LOG] Could not write {name}: {e}")
 
 
 def append_trajectory(samples, move, target_xy=(np.nan, np.nan), seg_id=None):
@@ -428,7 +428,7 @@ class TrajectoryLog:
             self._rec.stop()
             append_trajectory(list(self._rec.samples), self._move, self._target)
         except Exception as e:
-            print(f"[LOG] Traiettoria del movimento '{self._move}' non registrata: {e}")
+            print(f"[LOG] Trajectory of the move '{self._move}' not recorded: {e}")
         return False
 
 
@@ -529,5 +529,5 @@ def save_visualization_bundle(save_path, pts, terrain_real, obstacle_mask, robot
             traveled_arcs=np.array(getattr(env, '_traveled_arcs', []), dtype=np.float64).reshape(-1, 4),
         )
     except Exception as e:
-        print(f"[DATA SAVE] Impossibile preparare i dati della figura: {e}")
-    timing_add('dati figure', time.perf_counter() - t0)
+        print(f"[DATA SAVE] Could not prepare the figure data: {e}")
+    timing_add('figure data', time.perf_counter() - t0)

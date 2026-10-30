@@ -700,4 +700,4 @@ def update_clearance_map(global_map, pts, snap, is_valid, unwritten, core, robot
         near = np.hypot(p[:, 0] - robot_xy[0], p[:, 1] - robot_xy[1]) <= CLEARANCE_NEAR_M
         global_map.update_clearance(p, od, usable, near=near)
     except Exception as e:      # never fatal: it is a helper map
-        print(f"[SPAZIO] Mappa dello spazio libero non aggiornata: {e}")
+        print(f"[SPACE] Free-space map not updated: {e}")

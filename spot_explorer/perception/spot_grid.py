@@ -76,7 +76,7 @@ class LocalGrid:
         self.footprint_correction_pending = True
         # Outcome of the last ground height filter (see _cells_above_ground).
         self.last_ground_filter = {'ground_z': None, 'n_above': 0, 'max_above': 0.0,
-                                   'source': 'non ancora eseguito', 'n_ref': 0}
+                                   'source': 'not run yet', 'n_ref': 0}
 
     def create_vtk_no_step_grid(self, proto, robot_state_client):
         """
@@ -216,7 +216,7 @@ class LocalGrid:
         # Determine the data type for the bytes data.
         data_type = self.get_numpy_data_type(local_grid_proto.local_grid)
         if data_type is None:
-            print('[GRID] Formato dei dati della griglia locale non riconosciuto.')
+            print('[GRID] Local grid data format not recognized.')
             return None
         # Decode the local grid.
         if local_grid_proto.local_grid.encoding == local_grid_pb2.LocalGrid.ENCODING_RAW:
@@ -280,15 +280,15 @@ class LocalGrid:
                 # does not turn it off.
                 self._multi_request_fails = getattr(self, '_multi_request_fails', 0) + 1
                 if self._multi_request_fails >= 3:
-                    print(f"[WARNING] Richiesta unica dei layer non riuscita 3 volte di fila ({e}): da ora "
-                          f"li chiedo uno alla volta (con controllo di allineamento).")
+                    print(f"[WARNING] Single request for the layers failed 3 times in a row ({e}): from now on "
+                          f"I ask for them one at a time (with alignment check).")
                     self._multi_request_ok = False
         p = []
         for t in types_of_grid:
             try:
                 p.extend(self.local_grid_client.get_local_grids([t]))
             except Exception as e:
-                print(f"[WARNING] Fallito recupero layer '{t}': {e}")
+                print(f"[WARNING] Failed to fetch layer '{t}': {e}")
         return p
 
     @staticmethod
@@ -407,31 +407,31 @@ class LocalGrid:
             names = [lg.local_grid_type_name for lg in p]
             missing = [t for t in types_of_grid if t not in names]
             if missing:
-                problem = f"layer mancanti {missing}"
+                problem = f"layers missing {missing}"
                 continue
             try:
                 geoms = {lg.local_grid_type_name: self._layer_geometry(lg) for lg in p}
             except Exception as e:
-                problem = f"geometria dei layer non leggibile ({e})"
+                problem = f"layer geometry not readable ({e})"
                 continue
             ref = geoms[types_of_grid[0]]
             bad = [n for n, gm in geoms.items()
                    if gm[3:5] != ref[3:5] or abs(gm[5] - ref[5]) > 1e-6
                    or np.hypot(gm[0] - ref[0], gm[1] - ref[1]) > 0.5 * ref[5]]
             if bad:
-                problem = f"layer non allineati a {types_of_grid[0]}: {bad}"
+                problem = f"layers not aligned with {types_of_grid[0]}: {bad}"
                 continue
             if abs(ref[2]) > 0.5 and not getattr(self, '_warned_grid_yaw', False):
-                print(f"[WARNING] La griglia locale e' ruotata di {ref[2]:.2f} gradi rispetto a VISION: "
-                      f"gli indici di cella assumono rotazione nulla. Da segnalare.")
+                print(f"[WARNING] The local grid is rotated by {ref[2]:.2f} degrees relative to VISION: "
+                      f"the cell indices assume no rotation. To be reported.")
                 self._warned_grid_yaw = True
             problem = None
             break
 
         if problem is not None or not p:
             self.rejected_scans = getattr(self, 'rejected_scans', 0) + 1
-            print(f"[ERROR] Griglie locali non utilizzabili dopo {max_attempts} tentativi: "
-                  f"{problem or 'nessun layer scaricato'} (scansioni scartate finora: {self.rejected_scans}).")
+            print(f"[ERROR] Local grids not usable after {max_attempts} attempts: "
+                  f"{problem or 'no layer downloaded'} (scans discarded so far: {self.rejected_scans}).")
             return None, None, None
 
         grids_data = {}
@@ -636,14 +636,14 @@ class LocalGrid:
         dist = np.hypot((rr - cr) * cell_size, (cc_grid - cc) * cell_size)
         finite = np.isfinite(terrain_2d)
 
-        source = 'sotto il robot'
+        source = 'under the robot'
         ref = trusted_2d & finite & (dist <= GROUND_REF_RADIUS_M)
         if ref.sum() < GROUND_REF_MIN_CELLS:
-            source = 'anello esteso'
+            source = 'extended ring'
             ref = trusted_2d & finite & (dist <= GROUND_REF_FALLBACK_RADIUS_M)
         if ref.sum() < GROUND_REF_MIN_CELLS:
             self.last_ground_filter = {'ground_z': None, 'n_above': 0, 'max_above': 0.0,
-                                       'source': 'non stimabile', 'n_ref': int(ref.sum())}
+                                       'source': 'not estimable', 'n_ref': int(ref.sum())}
             return none
 
         ground_z = float(np.median(terrain_2d[ref]))
@@ -753,7 +753,7 @@ class LocalGrid:
         is_valid = is_valid.ravel()
 
         assert cells_obstacle_dist.shape == rough_values.shape == is_valid.shape, \
-            "Errore: I layer ambientali hanno dimensioni disallineate!"
+            "Error: the environment layers have misaligned sizes!"
 
         # VETO computation applied ONLY to the areas with valid data
         # If an area is NOT valid (blind spot or robot footprint), it must not trigger the obstacle veto
@@ -848,13 +848,13 @@ def log_ground_filter(local_grid, label):
     """
     info = getattr(local_grid, 'last_ground_filter', None) or {}
     if info.get('ground_z') is None:
-        print(f"[GROUND-FILTER] {label}: suolo non stimabile ({info.get('source')}, "
-              f"{info.get('n_ref', 0)} celle di riferimento) -- filtro non applicato")
+        print(f"[GROUND-FILTER] {label}: ground not estimable ({info.get('source')}, "
+              f"{info.get('n_ref', 0)} reference cells) -- filter not applied")
     elif info.get('n_above', 0) > 0:
-        print(f"[GROUND-FILTER] {label}: {info['n_above']} celle scartate, fino a "
-              f"{info['max_above']:.2f} m sopra il suolo (suolo z={info['ground_z']:.3f}, "
-              f"stimato {info['source']} su {info['n_ref']} celle)")
+        print(f"[GROUND-FILTER] {label}: {info['n_above']} cells discarded, up to "
+              f"{info['max_above']:.2f} m above the ground (ground z={info['ground_z']:.3f}, "
+              f"estimated {info['source']} on {info['n_ref']} cells)")
     if info.get('n_unwritten', 0) > 0:
-        print(f"[GROUND-FILTER] {label}: {info['n_unwritten']} celle mai scritte dai sensori "
-              f"({info.get('n_unwritten_below', 0)} sotto il suolo) -> trattate come non viste"
-              + (f", quota {info['quota_unwritten']:+.4f} m" if info.get('quota_unwritten') is not None else ""))
+        print(f"[GROUND-FILTER] {label}: {info['n_unwritten']} cells never written by the sensors "
+              f"({info.get('n_unwritten_below', 0)} below the ground) -> treated as not seen"
+              + (f", height {info['quota_unwritten']:+.4f} m" if info.get('quota_unwritten') is not None else ""))

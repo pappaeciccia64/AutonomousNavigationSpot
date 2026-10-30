@@ -147,15 +147,15 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, loop_cl
                         recordingInterface.create_edge_between_waypoint_objs(by_id[a], by_id[b])
                         added += 1
                     except Exception as e:
-                        print(f"[GRAPHNAV] Scorciatoia {wp_name_by_id(recordingInterface, a)}-"
-                              f"{wp_name_by_id(recordingInterface, b)} rifiutata ({e}).")
+                        print(f"[GRAPHNAV] Shortcut {wp_name_by_id(recordingInterface, a)}-"
+                              f"{wp_name_by_id(recordingInterface, b)} rejected ({e}).")
                 if before is not None and after is not None:
-                    print(f"[GRAPHNAV] {label}: strada verso {wp_name_by_id(recordingInterface, target_wp_id)} "
-                          f"{before:.1f} m -> {after:.1f} m con {len(used)} scorciatoie "
-                          f"(fino a {P.GRAPHNAV_SHORTCUT_MAX_M:.1f} m, viste libere con "
-                          f"{P.GRAPHNAV_SHORTCUT_MARGIN_M:.2f} m di margine).")
+                    print(f"[GRAPHNAV] {label}: path to {wp_name_by_id(recordingInterface, target_wp_id)} "
+                          f"{before:.1f} m -> {after:.1f} m with {len(used)} shortcuts "
+                          f"(up to {P.GRAPHNAV_SHORTCUT_MAX_M:.1f} m, seen free with "
+                          f"{P.GRAPHNAV_SHORTCUT_MARGIN_M:.2f} m of margin).")
         except Exception as e:
-            print(f"[GRAPHNAV] Scorciatoie dalla mappa non aggiunte ({e}).")
+            print(f"[GRAPHNAV] Shortcuts from the map not added ({e}).")
         finally:
             if added:
                 recordingInterface.invalidate_graph_cache()
@@ -166,7 +166,7 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, loop_cl
         # MapModifiedError at the end of processing. Every failed attempt ends up in the log with
         # its duration, and the time reported is the TOTAL (on 26-10 15:36 the failed attempts
         # did not show up and the time was only that of the last one: 65 s reported out of 138).
-        what = 'completa'
+        what = 'full'
         t_all = time.perf_counter()
         write_on_spot = False
         for attempt in range(1, 3):
@@ -183,10 +183,10 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, loop_cl
                 # Edge upload rejected: on the second attempt Spot writes them itself
                 # (never tried on the robot with edges to upload: series 3 found 0).
                 write_on_spot = 'LoopClosureUpload' in type(e).__name__
-                print(f"[GRAPHNAV] Chiusura d'anello di Spot ({what}): tentativo {attempt} non riuscito "
-                      f"dopo {dt:.1f} s ({type(e).__name__}: {e})"
-                      + (("; riprovo facendoli scrivere a Spot." if write_on_spot else "; riprovo.")
-                         if retry else "; proseguo senza."))
+                print(f"[GRAPHNAV] Spot loop closure ({what}): attempt {attempt} failed "
+                      f"after {dt:.1f} s ({type(e).__name__}: {e})"
+                      + (("; retrying with Spot writing them itself." if write_on_spot else "; retrying.")
+                         if retry else "; carrying on without."))
                 if retry:
                     time.sleep(1.0)
                     continue
@@ -197,13 +197,13 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, loop_cl
             MISSION_STATS['sdk_loop_s'] += dt_all
             MISSION_STATS['sdk_loop_edges'] += n_sdk
             MISSION_STATS['sdk_loop_partial'] += int(timed_out)
-            print(f"[GRAPHNAV] Chiusura d'anello di Spot ({what}): {n_sdk} archi in {dt_all:.1f} s "
-                  f"(limite {budget:.0f} s, "
-                  f"{'SCADUTO: risultato parziale' if timed_out else 'finita'}"
-                  + (f", {attempt} tentativi" if attempt > 1 else "") + ").")
+            print(f"[GRAPHNAV] Spot loop closure ({what}): {n_sdk} edges in {dt_all:.1f} s "
+                  f"(limit {budget:.0f} s, "
+                  f"{'TIMED OUT: partial result' if timed_out else 'finished'}"
+                  + (f", {attempt} attempts" if attempt > 1 else "") + ").")
             break
     if added or n_sdk:
         MISSION_STATS['graphnav_shortcuts'] = MISSION_STATS.get('graphnav_shortcuts', 0) + added + n_sdk
-        print(f"[GRAPHNAV] {label}: {added} scorciatoie dalla mappa globale + {n_sdk} da Spot "
-              f"(chiusure d'anello con controllo di collisione).")
+        print(f"[GRAPHNAV] {label}: {added} shortcuts from the global map + {n_sdk} from Spot "
+              f"(loop closures with collision check).")
     return added + n_sdk

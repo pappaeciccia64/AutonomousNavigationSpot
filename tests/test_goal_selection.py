@@ -144,30 +144,30 @@ def replay_goals(name):
         # The refusable new goal is excluded for the mission, as the loop does.
         if _bad(cur['new']):
             with tr._quiet():
-                goal._refuse_goal(env, rr, cc, *cur['new']['xy'], "rigioco")
+                goal._refuse_goal(env, rr, cc, *cur['new']['xy'], "replay")
     # Measures
     out = {}
     for k in ('old', 'new'):
         refused_by_cell = {}
-        n = dict(tentativi=0, senza_obiettivo=0, raggiungibili=0, rifiutabili=0, sul_bordo=0,
-                 riproposti=0)
+        n = dict(attempts=0, no_goal=0, reachable=0, refusable=0, on_border=0,
+                 proposed_again=0)
         for at in attempts:
             g_ = at[k]
-            n['tentativi'] += 1
+            n['attempts'] += 1
             if g_['xy'] is None:
-                n['senza_obiettivo'] += 1
+                n['no_goal'] += 1
                 continue
-            n['raggiungibili'] += bool(g_['reach'])
+            n['reachable'] += bool(g_['reach'])
             bad = _bad(g_)
-            n['rifiutabili'] += bad
+            n['refusable'] += bad
             b = tr.environmentMap.cell_border_distance(env, *at['cell'], *g_['xy'])
-            n['sul_bordo'] += b is not None and b < P.TARGET_CELL_BORDER_M
+            n['on_border'] += b is not None and b < P.TARGET_CELL_BORDER_M
             prev = refused_by_cell.setdefault(at['cell'], [])
-            n['riproposti'] += any(math.dist(g_['xy'], p) < P.RECOVERY_SAME_GOAL_M for p in prev)
+            n['proposed_again'] += any(math.dist(g_['xy'], p) < P.RECOVERY_SAME_GOAL_M for p in prev)
             if bad:
                 prev.append(g_['xy'])
         out[k] = n
-    return dict(misure=out, tentativi=attempts, env=env)
+    return dict(measures=out, attempts=attempts, env=env)
 
 
 class _Map:
@@ -213,7 +213,7 @@ def synthetic_checks():
             e.set_origin(0.0, 0.0, 0.0)
         return e
 
-    print("Controlli sintetici della scelta dell'obiettivo (cella da 2 m centrata in (0, 0)):")
+    print("Synthetic checks of the goal choice (2 m cell centred at (0, 0)):")
     e = _env()
     with tr._quiet():
         e30 = tr.environmentMap.EnvironmentMap(rows=1, cols=1, cell_size=2.0)
@@ -221,32 +221,32 @@ def synthetic_checks():
     check(abs(tr.environmentMap.cell_border_distance(e, 0, 0, 0.0, 0.0) - 1.0) < 1e-9
           and abs(tr.environmentMap.cell_border_distance(e, 0, 0, 0.9, 0.2) - 0.1) < 1e-9
           and abs(tr.environmentMap.cell_border_distance(e, 0, 0, 1.2, 0.0) + 0.2) < 1e-9,
-          "distanza dal bordo: 1.0 al centro, 0.1 a 0.9 m, -0.2 fuori")
+          "distance from the border: 1.0 at the centre, 0.1 at 0.9 m, -0.2 outside")
     p = (0.9 * math.cos(math.radians(30)), 0.9 * math.sin(math.radians(30)))
     check(abs(tr.environmentMap.cell_border_distance(e30, 0, 0, *p) - 0.1) < 1e-9,
-          "distanza dal bordo con la griglia ruotata di 30 gradi")
+          "distance from the border with the grid rotated by 30 degrees")
 
     _, g = pick([])
-    check(g == (0.0, 0.0), f"campo libero: il centro {g}")
+    check(g == (0.0, 0.0), f"open field: the centre {g}")
     _, g = pick([], reachable=lambda x, y: math.hypot(x, y) > 0.5)
     check(g != (0.0, 0.0) and math.hypot(*g) > 0.5,
-          f"centro non raggiungibile: un punto raggiungibile {tuple(round(v, 2) for v in g)}")
+          f"centre not reachable: a reachable point {tuple(round(v, 2) for v in g)}")
     _, g = pick([], reachable=lambda x, y: False)
-    check(g == (0.0, 0.0), "nessun punto raggiungibile: comunque il migliore (il centro)")
+    check(g == (0.0, 0.0), "no reachable point: the best one anyway (the centre)")
     _, g = pick([(0.30, 0.0)])
     check(g != (0.0, 0.0) and math.dist(g, (0.30, 0.0)) >= P.TARGET_CLEARANCE_M,
-          f"centro a 0.30 m da un ostacolo (sotto {P.TARGET_CLEARANCE_M:.2f}): un punto con piu' "
-          f"spazio {tuple(round(v, 2) for v in g)}")
+          f"centre 0.30 m from an obstacle (below {P.TARGET_CLEARANCE_M:.2f}): a point with more "
+          f"space {tuple(round(v, 2) for v in g)}")
     _, g = pick([(0.0, 0.0)])
     b = tr.environmentMap.cell_border_distance(e, 0, 0, *g)
     check(b >= P.TARGET_CELL_BORDER_M,
-          f"centro occupato: il ripiego sta ad almeno {P.TARGET_CELL_BORDER_M:.2f} m dal bordo ({b:.2f})")
+          f"centre occupied: the fallback is at least {P.TARGET_CELL_BORDER_M:.2f} m from the border ({b:.2f})")
     env, g1 = pick([(0.0, 0.0)])
     with tr._quiet():
         goal._refuse_goal(env, 0, 0, *g1, "prova")
     env, g2 = pick([(0.0, 0.0)], env=env)
     check(math.dist(g1, g2) >= P.RECOVERY_SAME_GOAL_M,
-          f"obiettivo rifiutato non riproposto: {tuple(round(v, 2) for v in g1)} -> "
+          f"refused goal not proposed again: {tuple(round(v, 2) for v in g1)} -> "
           f"{tuple(round(v, 2) for v in g2)}")
     env2 = _env()
     with tr._quiet():
@@ -255,7 +255,7 @@ def synthetic_checks():
                 goal._refuse_goal(env2, 0, 0, x, y, "prova")
         goal._refuse_goal(env2, 0, 0, 0.0, 0.0, "prova")
     _, g = pick([], env=env2)
-    check(g[0] is not None, "tutti i punti rifiutati: si riprova il migliore invece di arrendersi")
+    check(g[0] is not None, "all points refused: the best one is retried instead of giving up")
     return fails
 
 
@@ -273,28 +273,28 @@ def main():
     for name in args.missions:
         res = replay_goals(name)
         if res is None:
-            print(f"{name}: scansioni o log non trovati su questo PC, salto.")
+            print(f"{name}: scans or log not found on this PC, skipping.")
             continue
-        o, n = res['misure']['old'], res['misure']['new']
-        print(f"\n=== {name}: {o['tentativi']} inizi di tentativo ===")
-        print(f"  {'':22s}{'missione':>10s}{'oggi':>8s}")
-        for k, label in (('raggiungibili', 'raggiungibili'), ('rifiutabili', 'rifiutabili dal fronte'),
-                         ('riproposti', 'riproposti dopo rifiuto'), ('sul_bordo', 'sul bordo della cella'),
-                         ('senza_obiettivo', 'senza obiettivo')):
+        o, n = res['measures']['old'], res['measures']['new']
+        print(f"\n=== {name}: {o['attempts']} attempt starts ===")
+        print(f"  {'':22s}{'mission':>10s}{'today':>8s}")
+        for k, label in (('reachable', 'reachable'), ('refusable', 'refusable by the frontier'),
+                         ('proposed_again', 'proposed again after refusal'), ('on_border', 'on the cell border'),
+                         ('no_goal', 'without goal')):
             print(f"  {label:22s}{o[k]:10d}{n[k]:8d}")
         if args.detail:
-            for at in res['tentativi']:
+            for at in res['attempts']:
                 def fmt(g_):
                     if g_['xy'] is None:
-                        return "nessuno".ljust(38)
+                        return "none".ljust(38)
                     od = f"{min(g_['od']):.2f}" if g_['od'] else " -- "
                     return (f"({g_['xy'][0]:6.2f},{g_['xy'][1]:7.2f}) "
                             f"{'R' if g_['reach'] else '-'} od_min {od}").ljust(38)
-                print(f"   it{at['it']:3d} cella {at['cell']}: missione {fmt(at['old'])} oggi {fmt(at['new'])}")
-        if (n['raggiungibili'] < o['raggiungibili'] or n['rifiutabili'] > o['rifiutabili']
-                or n['riproposti'] > o['riproposti']):
+                print(f"   it{at['it']:3d} cell {at['cell']}: mission {fmt(at['old'])} today {fmt(at['new'])}")
+        if (n['reachable'] < o['reachable'] or n['refusable'] > o['refusable']
+                or n['proposed_again'] > o['proposed_again']):
             worse = True
-            print("  ATTENZIONE: il codice di oggi fa peggio della missione su almeno una misura.")
+            print("  CAREFUL: today's code does worse than the mission on at least one measure.")
     sys.exit(1 if worse else 0)
 
 

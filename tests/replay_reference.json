@@ -158,12 +158,12 @@
     "path_len_m": 1.78
    }
   ],
-  "ritorno": {
+  "wp0_return": {
    "start": "wp_64",
-   "oggi_m": 18.8,
-   "con_scorciatoie_m": 17.3,
-   "scorciatoie": 7,
-   "linea_aria_m": 14.3
+   "today_m": 18.8,
+   "with_shortcuts_m": 17.3,
+   "shortcuts": 7,
+   "straight_line_m": 14.3
   },
   "gait_tiers": {
    "HARD": 7,
@@ -354,12 +354,12 @@
     "path_len_m": 4.09
    }
   ],
-  "ritorno": {
+  "wp0_return": {
    "start": "wp_61",
-   "oggi_m": 46.7,
-   "con_scorciatoie_m": 18.5,
-   "scorciatoie": 8,
-   "linea_aria_m": 13.1
+   "today_m": 46.7,
+   "with_shortcuts_m": 18.5,
+   "shortcuts": 8,
+   "straight_line_m": 13.1
   },
   "gait_tiers": {
    "HARD": 21,
@@ -471,7 +471,7 @@
     "path_len_m": 5.74
    }
   ],
-  "ritorno": null,
+  "wp0_return": null,
   "gait_tiers": {
    "PLAIN": 21
   },
@@ -550,7 +550,7 @@
     "path_len_m": 5.06
    }
   ],
-  "ritorno": null,
+  "wp0_return": null,
   "gait_tiers": {
    "PLAIN": 17
   },
@@ -661,7 +661,7 @@
     "path_len_m": 5.0
    }
   ],
-  "ritorno": null,
+  "wp0_return": null,
   "gait_tiers": {
    "HARD": 6,
    "MODERATE": 28,
@@ -877,7 +877,7 @@
     "path_len_m": 6.84
    }
   ],
-  "ritorno": null,
+  "wp0_return": null,
   "gait_tiers": {
    "HARD": 6,
    "MODERATE": 30,
@@ -1033,7 +1033,7 @@
     "path_len_m": 5.8
    }
   ],
-  "ritorno": null,
+  "wp0_return": null,
   "gait_tiers": {
    "HARD": 14,
    "MODERATE": 12,
@@ -1136,7 +1136,7 @@
     "path_len_m": 1.0
    }
   ],
-  "ritorno": null,
+  "wp0_return": null,
   "gait_tiers": {
    "PLAIN": 31
   },
@@ -1237,12 +1237,12 @@
     "path_len_m": 4.25
    }
   ],
-  "ritorno": {
+  "wp0_return": {
    "start": "wp_17",
-   "oggi_m": 1.7,
-   "con_scorciatoie_m": 1.6,
-   "scorciatoie": 1,
-   "linea_aria_m": 1.6
+   "today_m": 1.7,
+   "with_shortcuts_m": 1.6,
+   "shortcuts": 1,
+   "straight_line_m": 1.6
   },
   "gait_tiers": {
    "PLAIN": 15
@@ -1412,12 +1412,12 @@
     "path_len_m": 2.18
    }
   ],
-  "ritorno": {
+  "wp0_return": {
    "start": "wp_60",
-   "oggi_m": 18.0,
-   "con_scorciatoie_m": 15.8,
-   "scorciatoie": 7,
-   "linea_aria_m": 14.3
+   "today_m": 18.0,
+   "with_shortcuts_m": 15.8,
+   "shortcuts": 7,
+   "straight_line_m": 14.3
   },
   "gait_tiers": {
    "HARD": 9,

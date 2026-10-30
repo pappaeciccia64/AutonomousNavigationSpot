@@ -21,7 +21,7 @@ class LoopClosureUploadError(Exception):
     """Spot computed the loop-closure edges but uploading them failed."""
 
     def __init__(self, n_edges, cause):
-        super().__init__(f"{n_edges} archi calcolati ma non caricati nella mappa "
+        super().__init__(f"{n_edges} edges computed but not uploaded into the map "
                          f"({type(cause).__name__}: {cause})")
         self.n_edges = n_edges
 
@@ -59,7 +59,7 @@ class RecordingInterface(object):
         without using external floor plans.
         """
         print(f"\n[{'=' * 40}]")
-        print(f"[ANCHORING] Avvio ottimizzazione globale dell'ancoraggio...")
+        print(f"[ANCHORING] Starting global anchoring optimization...")
 
         try:
             from google.protobuf import wrappers_pb2 as wrappers
@@ -76,9 +76,9 @@ class RecordingInterface(object):
                 stream_intermediate_results=False
             )
 
-            print(f"[ANCHORING] ✓ Ottimizzazione completata!")
+            print(f"[ANCHORING] ✓ Optimization completed!")
             print(
-                f"[ANCHORING] Status: {response.status}, Iterazioni: {response.iteration}, Costo finale: {response.cost:.4f}")
+                f"[ANCHORING] Status: {response.status}, Iterations: {response.iteration}, Final cost: {response.cost:.4f}")
             print(f"[{'=' * 40}]\n")
 
             # Invalidate the cache to force the download of the updated map
@@ -86,7 +86,7 @@ class RecordingInterface(object):
             return True
 
         except Exception as e:
-            print(f"[ANCHORING] ✗ Ottimizzazione fallita: {e}")
+            print(f"[ANCHORING] ✗ Optimization failed: {e}")
             print(f"[{'=' * 40}]\n")
             return False
 
@@ -97,7 +97,7 @@ class RecordingInterface(object):
                 do_fiducial_loop_closure=wrappers.BoolValue(value=close_fiducial_loops),
                 do_odometry_loop_closure=wrappers.BoolValue(value=close_odometry_loops)),
             modify_map_on_server=True)
-        print(f'[ANELLI] Creati {len(response.new_subgraph.edges)} archi nuovi.')
+        print(f'[LOOPS] Created {len(response.new_subgraph.edges)} new edges.')
 
 
     def close_loops_checked(self, max_edge_length_m=2.0, robot_radius_m=0.35,
@@ -192,12 +192,12 @@ class RecordingInterface(object):
         self._base_download_filepath = filepath
         self._download_filepath = filepath
         os.makedirs(filepath, exist_ok=True)
-        print(f"[INFO] Cartella per scaricare il grafo: {filepath}")
+        print(f"[INFO] Folder to download the graph to: {filepath}")
 
-    def _generate_unique_map_folder(self, base_name='Grafo'):
+    def _generate_unique_map_folder(self, base_name='Graph'):
         """
         Path of a new folder for the download, like
-        "Grafo_10-02-2026_14-30-00" (day-month-year_hours-minutes-seconds).
+        "Graph_10-02-2026_14-30-00" (Grafo_... in missions before 30-10-2026) (day-month-year_hours-minutes-seconds).
         """
         from datetime import datetime
 
@@ -212,7 +212,7 @@ class RecordingInterface(object):
             full_path = f"{original_path}_{counter}"
             counter += 1
 
-        print(f"[MAP DOWNLOAD] La mappa nuova andra' in: {unique_folder}")
+        print(f"[MAP DOWNLOAD] The new map will go to: {unique_folder}")
         return full_path
 
     def initialize_with_fiducial(self, robot_state_client, fiducial_id=None):
@@ -226,21 +226,21 @@ class RecordingInterface(object):
         import time
 
         print(f"\n[{'=' * 40}]")
-        print(f"[FIDUCIAL INIT] Inizializzazione con il FIDUCIAL...")
+        print(f"[FIDUCIAL INIT] Initialization with the FIDUCIAL...")
 
         try:
             robot_state = robot_state_client.get_robot_state()
             current_odom_tform_body = get_odom_tform_body(
                 robot_state.kinematic_state.transforms_snapshot).to_proto()
         except Exception as e:
-            print(f"[FIDUCIAL INIT] ✗ Stato del robot non leggibile: {e}")
+            print(f"[FIDUCIAL INIT] ✗ Robot state not readable: {e}")
             return False
 
         if fiducial_id is not None:
-            print(f"[FIDUCIAL INIT] Fiducial cercato: ID {fiducial_id}")
+            print(f"[FIDUCIAL INIT] Fiducial searched: ID {fiducial_id}")
             init_type = graph_nav_pb2.SetLocalizationRequest.FIDUCIAL_INIT_SPECIFIC
         else:
-            print(f"[FIDUCIAL INIT] Fiducial cercato: il piu' vicino (qualunque ID)")
+            print(f"[FIDUCIAL INIT] Fiducial searched: the nearest (any ID)")
             init_type = graph_nav_pb2.SetLocalizationRequest.FIDUCIAL_INIT_NEAREST
 
         localization = nav_pb2.Localization()
@@ -259,18 +259,18 @@ class RecordingInterface(object):
 
             # A moment for GraphNav to apply the localization
             time.sleep(0.5)
-            print(f"[FIDUCIAL INIT] ✓ RIUSCITO: robot localizzato sul fiducial, che resta nella mappa.")
+            print(f"[FIDUCIAL INIT] ✓ SUCCEEDED: robot localized on the fiducial, which stays in the map.")
             print(f"[{'=' * 40}]\n")
             return True
 
         except Exception as e:
-            print(f"[FIDUCIAL INIT] ✗ NON RIUSCITO: {e}")
-            print(f"[FIDUCIAL INIT] Possibili cause:")
-            print(f"  1. Il fiducial {fiducial_id if fiducial_id else '(qualunque)'} non e' visibile")
-            print(f"  2. Il robot e' troppo lontano dal fiducial (meglio entro 1-2 m)")
-            print(f"  3. Il fiducial non e' nell'istantanea di wp_0 (non era in vista quando e' stato creato)")
-            print(f"  4. Luce insufficiente")
-            print(f"[FIDUCIAL INIT] Si prosegue senza localizzazione sul fiducial.")
+            print(f"[FIDUCIAL INIT] ✗ FAILED: {e}")
+            print(f"[FIDUCIAL INIT] Possible causes:")
+            print(f"  1. Fiducial {fiducial_id if fiducial_id else '(any)'} is not visible")
+            print(f"  2. The robot is too far from the fiducial (better within 1-2 m)")
+            print(f"  3. The fiducial is not in the snapshot of wp_0 (it was not in view when it was created)")
+            print(f"  4. Not enough light")
+            print(f"[FIDUCIAL INIT] Carrying on without localization on the fiducial.")
             print(f"[{'=' * 40}]\n")
             return False
 
@@ -338,21 +338,21 @@ class RecordingInterface(object):
             }
 
             if is_localized:
-                print(f"\n[LOCALIZATION STATE] ✓ Robot LOCALIZZATO")
+                print(f"\n[LOCALIZATION STATE] ✓ Robot LOCALIZED")
                 print(f"  Waypoint ID: {waypoint_id}")
-                print(f"  Nome del waypoint: {waypoint_name}")
+                print(f"  Waypoint name: {waypoint_name}")
 
                 if localization_state.localization.waypoint_tform_body:
                     pos = localization_state.localization.waypoint_tform_body.position
-                    print(f"  Posizione rispetto al waypoint: ({pos.x:.3f}, {pos.y:.3f}, {pos.z:.3f})")
+                    print(f"  Position relative to the waypoint: ({pos.x:.3f}, {pos.y:.3f}, {pos.z:.3f})")
             else:
-                print(f"\n[LOCALIZATION STATE] ✗ Robot NON LOCALIZZATO")
-                print(f"  Nessun waypoint_id nello stato di localizzazione")
+                print(f"\n[LOCALIZATION STATE] ✗ Robot NOT LOCALIZED")
+                print(f"  No waypoint_id in the localization state")
 
             return result
 
         except Exception as e:
-            print(f"\n[LOCALIZATION STATE] ✗ Stato di localizzazione non leggibile: {e}")
+            print(f"\n[LOCALIZATION STATE] ✗ Localization state not readable: {e}")
             return None
 
     def create_default_waypoint(self, cell_row=None, cell_col=None):
@@ -413,8 +413,8 @@ class RecordingInterface(object):
                 'cell_col': cell_col
             }
 
-            print(f"[WAYPOINT] {new_name} creato in ({x:.2f}, {y:.2f}), imbardata {np.degrees(yaw):.0f} gradi"
-                  + (f", cella ({cell_row},{cell_col})" if cell_row is not None and cell_col is not None else "")
+            print(f"[WAYPOINT] {new_name} created at ({x:.2f}, {y:.2f}), yaw {np.degrees(yaw):.0f} deg"
+                  + (f", cell ({cell_row},{cell_col})" if cell_row is not None and cell_col is not None else "")
                   + ".")
 
             # Name and id of the last waypoint, from the robot's answer: whoever wants them does not
@@ -426,7 +426,7 @@ class RecordingInterface(object):
 
             return resp
         else:
-            print(f"[WAYPOINT] {new_name} NON creato (stato {resp.status}).")
+            print(f"[WAYPOINT] {new_name} NOT created (status {resp.status}).")
             return False
 
     def clear_map(self, *args):
@@ -436,33 +436,33 @@ class RecordingInterface(object):
         should_start_recording = self.should_we_start_recording()
         if not should_start_recording:
             print(
-                'GraphNav non e\' nello stato giusto per registrare: '
-                'svuotare la mappa (clear_map) o localizzare il robot sulla mappa '
-                '(per esempio con graph_nav_command_line).'
+                'GraphNav is not in the right state to record: '
+                'clear the map (clear_map) or localize the robot on the map '
+                '(for example with graph_nav_command_line).'
             )
             return
         try:
             status = self._recording_client.start_recording(recording_environment=self._recording_environment)
             self.invalidate_graph_cache()  # the recording will add waypoints
-            print('[REGISTRAZIONE] Registrazione della mappa avviata.')
+            print('[RECORDING] Map recording started.')
         except Exception as err:
-            print(f'[REGISTRAZIONE] Avvio della registrazione non riuscito: {err}')
+            print(f'[RECORDING] Starting the recording failed: {err}')
 
     def stop_recording(self, *args):
         first_iter = True
         while True:
             try:
                 status = self._recording_client.stop_recording()
-                print('[REGISTRAZIONE] Registrazione della mappa fermata.')
+                print('[RECORDING] Map recording stopped.')
                 break
             except bosdyn.client.recording.NotReadyYetError as err:
                 if first_iter:
-                    print('[REGISTRAZIONE] Attendo che la mappa finisca di elaborare...')
+                    print('[RECORDING] Waiting for the map to finish processing...')
                 first_iter = False
                 time.sleep(0.5)
                 continue
             except Exception as err:
-                print(f'[REGISTRAZIONE] Arresto della registrazione non riuscito: {err}')
+                print(f'[RECORDING] Stopping the recording failed: {err}')
                 break
 
 
@@ -473,7 +473,7 @@ class RecordingInterface(object):
         """
         graph = self._get_graph(force_refresh=True)
         if graph is None:
-            print('[MAP DOWNLOAD] ✗ Grafo non scaricato.')
+            print('[MAP DOWNLOAD] ✗ Graph not downloaded.')
             return None
 
         unique_path = self._generate_unique_map_folder()
@@ -483,16 +483,16 @@ class RecordingInterface(object):
         self._download_filepath = unique_path
 
         try:
-            print(f'\n[MAP DOWNLOAD] Scaricamento in corso...')
-            print(f'[MAP DOWNLOAD] Destinazione: {os.path.basename(unique_path)}')
+            print(f'\n[MAP DOWNLOAD] Downloading...')
+            print(f'[MAP DOWNLOAD] Destination: {os.path.basename(unique_path)}')
 
             self._write_full_graph(graph)
-            print(f'[MAP DOWNLOAD] Grafo scaricato: {len(graph.waypoints)} waypoint e {len(graph.edges)} archi')
+            print(f'[MAP DOWNLOAD] Graph downloaded: {len(graph.waypoints)} waypoints and {len(graph.edges)} edges')
 
             self._download_and_write_waypoint_snapshots(graph.waypoints)
             self._download_and_write_edge_snapshots(graph.edges)
 
-            print(f'[MAP DOWNLOAD] ✓ Mappa salvata in: {unique_path}')
+            print(f'[MAP DOWNLOAD] ✓ Map saved in: {unique_path}')
             return unique_path
 
         finally:
@@ -510,7 +510,7 @@ class RecordingInterface(object):
             try:
                 waypoint_snapshot = self._graph_nav_client.download_waypoint_snapshot(waypoint.snapshot_id)
             except Exception:
-                print(f'[MAP DOWNLOAD] Istantanea del waypoint non scaricata: {waypoint.snapshot_id}')
+                print(f'[MAP DOWNLOAD] Waypoint snapshot not downloaded: {waypoint.snapshot_id}')
                 continue
             self._write_bytes(
                 os.path.join(self._download_filepath, 'waypoint_snapshots'),
@@ -518,7 +518,7 @@ class RecordingInterface(object):
                 waypoint_snapshot.SerializeToString(),
             )
             num_waypoint_snapshots_downloaded += 1
-        print(f'[MAP DOWNLOAD] Istantanee dei waypoint: {num_waypoint_snapshots_downloaded} su {len(waypoints)}.')
+        print(f'[MAP DOWNLOAD] Waypoint snapshots: {num_waypoint_snapshots_downloaded} of {len(waypoints)}.')
 
     def _download_and_write_edge_snapshots(self, edges):
         num_edge_snapshots_downloaded = 0
@@ -530,7 +530,7 @@ class RecordingInterface(object):
             try:
                 edge_snapshot = self._graph_nav_client.download_edge_snapshot(edge.snapshot_id)
             except Exception:
-                print(f'[MAP DOWNLOAD] Istantanea dell\'arco non scaricata: {edge.snapshot_id}')
+                print(f'[MAP DOWNLOAD] Edge snapshot not downloaded: {edge.snapshot_id}')
                 continue
             self._write_bytes(
                 os.path.join(self._download_filepath, 'edge_snapshots'),
@@ -538,7 +538,7 @@ class RecordingInterface(object):
                 edge_snapshot.SerializeToString(),
             )
             num_edge_snapshots_downloaded += 1
-        print(f'[MAP DOWNLOAD] Istantanee degli archi: {num_edge_snapshots_downloaded} su {num_to_download}.')
+        print(f'[MAP DOWNLOAD] Edge snapshots: {num_edge_snapshots_downloaded} of {num_to_download}.')
 
     def _write_bytes(self, filepath, filename, data):
         os.makedirs(filepath, exist_ok=True)
@@ -570,7 +570,7 @@ class RecordingInterface(object):
                     'cell_col': wp_data['cell_col']
                 }
 
-        print(f"[WAYPOINTS] {len(waypoints_by_cell)} waypoint manuali con la cella")
+        print(f"[WAYPOINTS] {len(waypoints_by_cell)} manual waypoints with their cell")
         return waypoints_by_cell
 
     def get_manual_waypoint_by_cell(self, cell_row, cell_col):
@@ -612,7 +612,7 @@ class RecordingInterface(object):
                 adjacent_with_waypoint.append(adj_cell)
 
         if adjacent_with_waypoint:
-            print(f"[NEAREST_WP] Waypoint in una cella confinante: {adjacent_with_waypoint[0]}")
+            print(f"[NEAREST_WP] Waypoint in a neighbouring cell: {adjacent_with_waypoint[0]}")
             return adjacent_with_waypoint[0]
 
         # No adjacent one: the nearest among all
@@ -632,7 +632,7 @@ class RecordingInterface(object):
                 nearest_cell = cell
 
         if nearest_cell:
-            print(f"[NEAREST_WP] Waypoint piu' vicino nella cella {nearest_cell} (distanza: {min_distance})")
+            print(f"[NEAREST_WP] Nearest waypoint in cell {nearest_cell} (distance: {min_distance})")
 
         return nearest_cell
 
@@ -673,7 +673,7 @@ def graphnav_drop_breadcrumb(env, recordingInterface, robot_state_client, prm_no
     try:
         x, y, _, _ = spotUtils.getPosition(robot_state_client)
     except Exception as e:
-        print(f"[BRICIOLA] Posizione non leggibile: {e}")
+        print(f"[BREADCRUMB] Position not readable: {e}")
         return None
     if not force and trail:
         last = trail[-1]
@@ -692,17 +692,17 @@ def graphnav_drop_breadcrumb(env, recordingInterface, robot_state_client, prm_no
             wp_id = loc.get('waypoint_id') if isinstance(loc, dict) else None
             wp_name = loc.get('waypoint_name') if isinstance(loc, dict) else None
     except Exception as e:
-        print(f"[BRICIOLA] Waypoint non creato: {e}")
+        print(f"[BREADCRUMB] Waypoint not created: {e}")
         return None
     if not wp_id:
-        print("[BRICIOLA] Waypoint creato ma non localizzato: non lo metto nella traccia "
-              "(un waypoint senza id non si puo' raggiungere).")
+        print("[BREADCRUMB] Waypoint created but not localized: I do not put it in the trail "
+              "(a waypoint without an id cannot be reached).")
         return None
     crumb = {'wp_id': wp_id, 'wp_name': wp_name, 'x': float(x), 'y': float(y),
              'prm_node': prm_node_id, 'cell': (cell_row, cell_col)}
     trail.append(crumb)
-    print(f"[BRICIOLA] Waypoint {wp_name} in ({x:.2f}, {y:.2f}), nodo PRM {prm_node_id} "
-          f"(traccia: {len(trail)} waypoint).")
+    print(f"[BREADCRUMB] Waypoint {wp_name} at ({x:.2f}, {y:.2f}), PRM node {prm_node_id} "
+          f"(trail: {len(trail)} waypoints).")
     # GraphNav localizer state, printed only when it changes.
-    graphnav_log_localization(env, recordingInterface, robot_state_client, f"briciola {wp_name}")
+    graphnav_log_localization(env, recordingInterface, robot_state_client, f"breadcrumb {wp_name}")
     return crumb

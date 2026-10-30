@@ -109,8 +109,8 @@ class Mission:
         if uv is not None and cell != uv:
             border = environmentMap.cell_border_distance(self.env, uv[0], uv[1], x, y)
             if border is not None and -border <= P.ARRIVAL_OUTSIDE_CELL_M:
-                print(f"[CELLA] Il robot e' nella cella {cell}, ma {-border:.2f} m fuori dalla "
-                      f"{uv} appena visitata: cerco le confinanti dalla {uv}.")
+                print(f"[CELL] The robot is in cell {cell}, but {-border:.2f} m outside the "
+                      f"just visited {uv}: I look for the neighbours from {uv}.")
                 return uv
         return cell
 
@@ -141,9 +141,9 @@ class Mission:
             cands.append((float(np.hypot(wx - x, wy - y)), (r, c)))
         if cands:
             d, cell = min(cands)
-            print(f"[NEAREST_WP] Cella ({row},{col}): mi avvicino dalla confinante {cell}, lato non "
-                  f"ancora provato, a {d:.1f} m dal robot"
-                  + (f" ({len(cands)} lati liberi)" if len(cands) > 1 else "") + ".")
+            print(f"[NEAREST_WP] Cell ({row},{col}): approaching from the neighbour {cell}, side not "
+                  f"tried yet, {d:.1f} m from the robot"
+                  + (f" ({len(cands)} free sides)" if len(cands) > 1 else "") + ".")
             return cell
         return ri.find_nearest_waypoint_cell_to_target((row, col), waypoints_by_cell, env)
 
@@ -171,8 +171,8 @@ class Mission:
             self._log_progress()
             if cell_attempt._battery_return_due():
                 MISSION_STATS['battery_return_cells_left'] = len(self.frontier)
-                print(f"[BATTERIA] Fine dell'esplorazione per batteria bassa: restano "
-                      f"{len(self.frontier)} celle in frontiera {[(f[0], f[1]) for f in self.frontier]}.")
+                print(f"[BATTERY] End of exploration for low battery: "
+                      f"{len(self.frontier)} cells left in the frontier {[(f[0], f[1]) for f in self.frontier]}.")
                 break
             robot_row, robot_col = self._robot_cell()
 
@@ -195,31 +195,31 @@ class Mission:
                         removed = self.frontier[0]
                         self.frontier.remove(removed)
                         self._dropped_cells.append((int(removed[0]), int(removed[1])))
-                        print(f"[FRONTIERA] Cella ({removed[0]},{removed[1]}) tolta dalla frontiera: in "
-                              f"questo giro nessuna candidata ha un lato ancora da provare.")
+                        print(f"[CELL FRONTIER] Cell ({removed[0]},{removed[1]}) removed from the frontier: in "
+                              f"this round no candidate has a side left to try.")
 
             if len(self.frontier) == 0:
                 break
         self._explain_end()
-        self._log_progress(finale=True)
+        self._log_progress(final=True)
 
     def _explain_end(self):
-        """If exploration ends with cells not closed, a [FINE] line saying why (28-10 14:17:
+        """If exploration ends with cells not closed, an [END] line saying why (28-10 14:17:
         start in the middle of tall grass, no reachable cell, and in the log only
         "Frontiera vuota")."""
         closed, visited, blocked, total = self._cell_counts()
         if closed >= total or cell_attempt._battery_low():
             return
         if visited <= 1:
-            print(f"[FINE] Nessuna cella raggiungibile dalla partenza: {self._attempt_count} tentativi "
-                  f"sulle celle confinanti, tutti falliti senza una strada nel grafo o con il passo "
-                  f"rifiutato (ostacoli tutto intorno: vedi GRAFO DISCONNESSO e [ARRIVO] sopra). "
-                  f"Spostare il robot su terreno libero e riprovare.")
+            print(f"[END] No cell reachable from the start: {self._attempt_count} attempts "
+                  f"on the neighbouring cells, all failed without a way in the graph or with the step "
+                  f"refused (obstacles all around: see GRAPH DISCONNECTED and [ARRIVAL] above). "
+                  f"Move the robot onto free terrain and try again.")
             return
-        print(f"[FINE] Esplorazione finita con {total - closed} celle non chiuse"
-              + (f"; tolte dalla frontiera senza lati ancora da provare: "
+        print(f"[END] Exploration finished with {total - closed} cells not closed"
+              + (f"; removed from the frontier with no sides left to try: "
                  f"{', '.join(f'({r},{c})' for r, c in self._dropped_cells)}" if self._dropped_cells else "")
-              + ". Le altre non sono mai state raggiungibili da una cella visitata.")
+              + ". The others were never reachable from a visited cell.")
 
     # --- Progress ------------------------------------------------------------------------
 
@@ -252,7 +252,7 @@ class Mission:
         keys = np.floor(self._area_points / res).astype(int)
         return sum(1 for gx, gy in keys if (gx, gy) in gm.grid) / len(keys)
 
-    def _log_progress(self, finale=False):
+    def _log_progress(self, final=False):
         """
         Where the mission stands: a [PROGRESSO] line when the closed cells change (visited
         or blocked), and one at the end. Closed cells over the total (the main number),
@@ -261,7 +261,7 @@ class Mission:
         (report, mission_summary.json): no decision depends on it.
         """
         closed, visited, blocked, total = self._cell_counts()
-        if not finale and closed == self._closed_logged:
+        if not final and closed == self._closed_logged:
             return
         self._closed_logged = closed
         try:
@@ -274,25 +274,25 @@ class Mission:
         # The last charge read by the battery monitor (battery.py), without an extra reading.
         battery = MISSION_STATS.get('battery_last_pct')
         pct = 100.0 * closed / total
-        area_txt = f"area vista {100.0 * area:.0f}%" if area is not None else "area vista ?"
-        bat_txt = f"batteria {battery:.0f}%" if battery is not None else "batteria ?"
-        if finale:
-            tempo = (f"{minutes:.1f} min di esplorazione"
-                     + (f" ({per_cell:.2f} min a cella)" if per_cell else "")
-                     + (f", {total - closed} celle mai raggiunte" if total > closed else ""))
+        area_txt = f"area seen {100.0 * area:.0f}%" if area is not None else "area seen ?"
+        bat_txt = f"battery {battery:.0f}%" if battery is not None else "battery ?"
+        if final:
+            time_txt = (f"{minutes:.1f} min of exploration"
+                     + (f" ({per_cell:.2f} min per cell)" if per_cell else "")
+                     + (f", {total - closed} cells never reached" if total > closed else ""))
         else:
-            tempo = (f"{minutes:.1f} min trascorsi"
-                     + (f", ~{(total - closed) * per_cell:.0f} min alla fine ({per_cell:.2f} min a cella)"
+            time_txt = (f"{minutes:.1f} min elapsed"
+                     + (f", ~{(total - closed) * per_cell:.0f} min to the end ({per_cell:.2f} min per cell)"
                         if per_cell else ""))
-        print(f"[PROGRESSO] {'Fine esplorazione: ' if finale else ''}{closed}/{total} celle chiuse "
-              f"({pct:.0f}%): {visited} visitate, {blocked} bloccate, {total - closed} da fare | "
-              f"{area_txt}\n            {tempo} | {bat_txt}")
-        MISSION_STATS['progresso'] = {
-            'celle_chiuse': closed, 'celle_totali': total, 'percentuale': round(pct, 1),
-            'visitate': visited, 'bloccate': blocked,
-            'area_vista': None if area is None else round(100.0 * area, 1),
-            'minuti': round(minutes, 1), 'minuti_a_cella': None if per_cell is None else round(per_cell, 2),
-            'batteria': battery, 'finale': bool(finale)}
+        print(f"[PROGRESS] {'End of exploration: ' if final else ''}{closed}/{total} cells closed "
+              f"({pct:.0f}%): {visited} visited, {blocked} blocked, {total - closed} to do | "
+              f"{area_txt}\n            {time_txt} | {bat_txt}")
+        MISSION_STATS['progress'] = {
+            'closed_cells': closed, 'total_cells': total, 'percent': round(pct, 1),
+            'visited': visited, 'blocked': blocked,
+            'seen_area': None if area is None else round(100.0 * area, 1),
+            'minutes': round(minutes, 1), 'minutes_per_cell': None if per_cell is None else round(per_cell, 2),
+            'battery': battery, 'final': bool(final)}
 
     def _attempt_adjacent_cell(self, selected_border, robot_row, robot_col):
         """Attempt on a frontier cell bordering the robot's cell."""
@@ -355,12 +355,12 @@ class Mission:
             )
         else:
             print(
-                "[RECOVERY ERROR] Impossibile recuperare il layer obstacle_distance per il ricalcolo.")
+                "[RECOVERY ERROR] Could not fetch the obstacle_distance layer for the recomputation.")
             target_x, target_y = None, None
 
         if target_x is None or target_y is None:
             print(
-                "[SKIP] Nessun punto obiettivo valido nella cella. Continuo con l'esplorazione normale.")
+                "[SKIP] No valid goal point in the cell. Carrying on with normal exploration.")
             if not self._mark_side_failed(row, col, origin_row, origin_col):
                 self.frontier.append(selected_border)
             return
@@ -368,10 +368,10 @@ class Mission:
         mission_graph.restrict_planning_to_explored_cells(prm, self.env, row, col, (x_curr, y_curr))
         start_id = prm.add_stop_node(
             x_curr, y_curr, global_map,
-            geometry.PRM_EDGE_SAFETY_MARGIN_M, label="verifica recupero (robot)")
+            geometry.PRM_EDGE_SAFETY_MARGIN_M, label="recovery check (robot)")
         goal_id = prm.add_stop_node(
             target_x, target_y, global_map,
-            geometry.PRM_EDGE_SAFETY_MARGIN_M, label="verifica recupero (obiettivo)",
+            geometry.PRM_EDGE_SAFETY_MARGIN_M, label="recovery check (goal)",
             is_robot=False)
         prm.set_robot_node(start_id)
 
@@ -388,19 +388,19 @@ class Mission:
         same_goal = (last_goal is not None and float(np.hypot(
             target_x - last_goal[0], target_y - last_goal[1])) <= P.RECOVERY_SAME_GOAL_M)
         if same_goal and path_ids is not None:
-            print(f"[RECOVERY] L'obiettivo ({target_x:.2f}, {target_y:.2f}) e' "
-                  f"quello del tentativo appena fallito: non riprovo subito, la "
-                  f"cella torna in coda.")
+            print(f"[RECOVERY] The goal ({target_x:.2f}, {target_y:.2f}) is "
+                  f"that of the attempt that just failed: I do not retry at once, the "
+                  f"cell goes back in the queue.")
             path_ids = None
         if path_ids is None or (len(path_ids) - 1) > MAX_RETRY_EDGES:
             print(
-                f"[SKIP] Nessun percorso alternativo valido o costo superiore a {MAX_RETRY_EDGES}. Continuo l'algoritmo normale.")
+                f"[SKIP] No valid alternative path or cost above {MAX_RETRY_EDGES}. Carrying on with the normal algorithm.")
             if not self._mark_side_failed(row, col, origin_row, origin_col):
                 self.frontier.append(selected_border)
             return
 
         print(
-            f"[RECOVERY] Trovato percorso alternativo con costo {len(path_ids) - 1} <= {MAX_RETRY_EDGES}. Riprovo l'ingresso...")
+            f"[RECOVERY] Found an alternative path with cost {len(path_ids) - 1} <= {MAX_RETRY_EDGES}. Retrying the entry...")
         if self._attempt(row, col):
             x_final, y_final, _, _ = spotUtils.getPosition(self.robot_state_client)
             self._on_visited(row, col, x_final, y_final)
@@ -408,7 +408,7 @@ class Mission:
             self.frontier.append(selected_border)
         else:
             print(
-                "[FAIL] Anche il percorso alternativo ha fallito. Abbandono la cella e continuo l'algoritmo normale.")
+                "[FAIL] The alternative path failed too. Leaving the cell and carrying on with the normal algorithm.")
             if not self._mark_side_failed(row, col, origin_row, origin_col):
                 self.frontier.append(selected_border)
 
@@ -434,17 +434,17 @@ class Mission:
                     recordingInterface.get_manual_waypoint_by_cell(*candidate_nearest_cell) is None:
                 # No visited cell with a waypoint to start from: move on to the candidate
                 # next.
-                print(f"[SKIP-ROUND] Cella ({candidate_row},{candidate_col}): nessun waypoint "
-                      f"GraphNav da cui avvicinarsi. Provo la successiva.")
+                print(f"[SKIP-ROUND] Cell ({candidate_row},{candidate_col}): no GraphNav waypoint "
+                      f"to approach from. Trying the next one.")
                 already_skipped_this_round.add((candidate_row, candidate_col))
                 continue
             candidate_side_bit = env.get_side_bit_facing_origin(candidate_nearest_cell[0],
                                                                 candidate_nearest_cell[1],
                                                                 candidate_row, candidate_col)
             if env.get_cell_sides_status(candidate_row, candidate_col) & candidate_side_bit:
-                print(f"[SKIP-ROUND] Cella ({candidate_row},{candidate_col}): ci arriverei dallo "
-                      f"stesso lato gia' provato senza successo. Per questo giro provo la "
-                      f"candidata successiva.")
+                print(f"[SKIP-ROUND] Cell ({candidate_row},{candidate_col}): I would get there from the "
+                      f"same side already tried without success. For this round I try the "
+                      f"next candidate.")
                 already_skipped_this_round.add((candidate_row, candidate_col))
                 continue
             # Before leaving with GraphNav: does the graph reach the cell from that waypoint? If
@@ -458,10 +458,10 @@ class Mission:
                          if wp_xy[0] is not None else None)
                 if reach is False:
                     MISSION_STATS['graphnav_trips_avoided'] += 1
-                    print(f"[PRECHECK] Cella ({candidate_row},{candidate_col}): dal waypoint "
-                          f"della cella {candidate_nearest_cell} il grafo non arriva a nessun "
-                          f"nodo della cella (ostacoli gia' in mappa). Segno il lato come "
-                          f"provato senza spostarmi.")
+                    print(f"[PRECHECK] Cell ({candidate_row},{candidate_col}): from the waypoint "
+                          f"of cell {candidate_nearest_cell} the graph does not reach any "
+                          f"node of the cell (obstacles already in the map). I mark the side as "
+                          f"tried without moving.")
                     env.mark_cell_side_explored(candidate_row, candidate_col, candidate_side_bit)
                     recovery.finalize_or_defer_blocked_cell(env, candidate_row, candidate_col,
                                                    self.sampler, self.global_grid.global_occupancy_map)
@@ -479,13 +479,13 @@ class Mission:
         x_current, y_current, _, _ = spotUtils.getPosition(self.robot_state_client)
 
         nearest_wp = recordingInterface.get_manual_waypoint_by_cell(nearest_cell[0], nearest_cell[1])
-        map_shortcuts.graphnav_add_shortcuts(recordingInterface, "prima dello spostamento fra celle",
+        map_shortcuts.graphnav_add_shortcuts(recordingInterface, "before the move between cells",
                                              map_edges=True, target_wp_id=nearest_wp['id'],
                                              robot_xy=(x_current, y_current))
         recordingInterface.stop_recording()
         navigation_success = navigation.graphnav_navigate_to(
             recordingInterface, nearest_wp['id'], self.robot_state_client, self.command_client,
-            f"verso il waypoint della cella {nearest_cell} per la cella ({target_row},{target_col})",
+            f"to the waypoint of cell {nearest_cell} for cell ({target_row},{target_col})",
             face_xy=self.env.get_world_position_from_cell(target_row, target_col))
 
         # GraphNav does not record the legs travelled: the old ones no longer describe the way
@@ -493,10 +493,10 @@ class Mission:
         self.env._traveled_arcs = []
         if movements.check_and_recover_fall(self.robot_state_client, self.command_client,
                                             self.global_grid.global_occupancy_map,
-                                            "durante lo spostamento con GraphNav") is not None:
+                                            "during the move with GraphNav") is not None:
             recordingInterface.start_recording()
-            print(f"[CADUTA] Rialzato dopo lo spostamento con GraphNav: segno il lato della "
-                  f"cella ({target_row},{target_col}) come provato, per non ripetere la stessa strada.")
+            print(f"[FALL] Got up after the move with GraphNav: I mark the side of "
+                  f"cell ({target_row},{target_col}) as tried, so as not to repeat the same way.")
             if self._mark_side_failed(target_row, target_col, nearest_cell[0], nearest_cell[1]):
                 self.frontier.remove((target_row, target_col, rank))
             return 'caduta'
@@ -504,7 +504,7 @@ class Mission:
         recordingInterface.start_recording()
         # The trip may have been long: if the battery dropped below the threshold the cell
         # is not attempted, the robot returns (the cell stays in the frontier).
-        if cell_attempt._battery_return_due("dopo lo spostamento GraphNav"):
+        if cell_attempt._battery_return_due("after the GraphNav move"):
             return None
         # If GraphNav did not even reach the starting waypoint it counts as a failed
         # attempt. Side marked as tried; the cell leaves the frontier only if it was
@@ -521,14 +521,14 @@ class Mission:
 
     def final_scan(self):
         """The area around the last position, before going back: it goes into the global maps."""
-        print("[FINAL SCAN] Ultima scansione attorno al robot prima di tornare alla partenza...")
+        print("[FINAL SCAN] Last scan around the robot before going back to the start...")
         x_final, y_final, z_final, quat_final = spotUtils.getPosition(self.robot_state_client)
         final_yaw = np.arctan2(2.0 * (quat_final.w * quat_final.z + quat_final.x * quat_final.y),
                                1.0 - 2.0 * (quat_final.y ** 2 + quat_final.z ** 2))
 
         scan = self.local_grid.fetch_scan(self.robot_state_client)
         if scan is None:
-            print("[FINAL SCAN] ATTENZIONE: griglia locale non ricevuta, proseguo senza scansione finale.")
+            print("[FINAL SCAN] CAREFUL: local grid not received, carrying on without the final scan.")
             return
         self.local_grid.process_scan(scan, x_final, y_final, final_yaw, ground_label="scan-finale")
         # The last scan goes into the global maps too, like all the others
@@ -551,4 +551,4 @@ class Mission:
             grad_values=scan.grad, rough_values=scan.rough
         )
         self.visualization_counter += 1
-        print("[FINAL SCAN] Fatto: l'ultima scansione e' nelle mappe globali.")
+        print("[FINAL SCAN] Done: the last scan is in the global maps.")

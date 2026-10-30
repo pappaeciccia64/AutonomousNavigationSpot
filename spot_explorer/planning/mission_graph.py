@@ -31,7 +31,7 @@ WHY RECTANGULAR AND NOT TRIANGULAR
 
 SPACING
   The requested spacing is ALWAYS rounded to cell_size/n with n integer: it is the
-  condition that makes every cell centre a lattice node. The [GRAFO] line of the log gives
+  condition that makes every cell centre a lattice node. The [GRAPH] line of the log gives
   the actual spacing. Mission default: P.MISSION_LATTICE_SPACING_M = 0.5 m (= 4/8); without
   it, 0.25 m (DEFAULT_LATTICE_SPACING_M).
   The spacing can be shorter than min_edge_length: neighbours that are too close are simply
@@ -88,7 +88,7 @@ RANDOM NODES (P.MISSION_GRAPH_SAMPLING = 'random')
   The edges link every pair of nodes between min_edge_length and
   min(max_edge_length, connection_radius) apart; spacing and rings do not count.
   SEED: a fixed P.MISSION_RANDOM_SEED repeats the same graph bit for bit; None = a seed drawn
-  at random. In both cases the seed used goes into the log ([GRAFO] Nodi casuali line) and into
+  at random. In both cases the seed used goes into the log ([GRAPH] Random nodes line) and into
   mission_summary.json, so the mission can be repeated and test_replay replays it with
   the same graph.
   The coverage (maximum distance between a point of the area and the nearest node) has no
@@ -400,9 +400,9 @@ def _random_points(distribution, density_per_m2, box, fixed_xy, rng, min_dist=No
         r = float(min_dist) if min_dist else poisson_min_dist(density_per_m2)
         xy = _poisson_points(n, box, fixed_xy, r, rng)
         note = ("" if len(xy) >= n else
-                f"area satura a {len(xy)} nodi su {n} chiesti con distanza minima {r:.3f} m")
+                f"area saturated at {len(xy)} nodes out of {n} requested with minimum distance {r:.3f} m")
         return xy, note
-    raise ValueError(f"distribuzione sconosciuta {distribution!r}: una di {RANDOM_DISTRIBUTIONS}")
+    raise ValueError(f"unknown distribution {distribution!r}: one of {RANDOM_DISTRIBUTIONS}")
 
 
 def _radius_pairs(xy, min_edge_m, reach_m):
@@ -576,14 +576,14 @@ class MissionGraph:
 
     def describe(self):
         """The node method in a dict, for mission_summary.json and to replay the mission."""
-        out = dict(metodo=self.sampling, nodi=self.n_nodes, coppie=self.n_edges,
-                   arco_min_m=self.min_edge_m, arco_max_m=round(self.reach_m, 6),
-                   copertura_m=round(self.covering_m, 4))
+        out = dict(method=self.sampling, nodes=self.n_nodes, pairs=self.n_edges,
+                   edge_min_m=self.min_edge_m, edge_max_m=round(self.reach_m, 6),
+                   coverage_m=round(self.covering_m, 4))
         if self.is_random:
-            out.update(distribuzione=self.distribution, densita_nodi_m2=self.density_per_m2,
-                       seme=self.seed)
+            out.update(distribution=self.distribution, node_density_m2=self.density_per_m2,
+                       seed=self.seed)
         else:
-            out.update(passo_m=self.spacing_m, anelli=self.rings)
+            out.update(spacing_m=self.spacing_m, rings=self.rings)
         return out
 
     def node_ids(self):
@@ -702,16 +702,16 @@ class MissionGraph:
             prm.special_seen = _special_pairs(prm)
         prm.built = True
         if hasattr(prm, 'flush_slope_log'):
-            prm.flush_slope_log("costruzione")
+            prm.flush_slope_log("build")
         if verbose and dirty is not None:
-            print(f"[GRAFO] Aggiornamento locale: rivalutate {len(todo)} coppie su {len(todo_all)} "
-                  f"(vicine alle zone con dati nuovi), {added} ammesse; le altre restano come erano.")
+            print(f"[GRAPH] Local update: re-evaluated {len(todo)} pairs out of {len(todo_all)} "
+                  f"(near the areas with new data), {added} allowed; the others stay as they were.")
         elif verbose:
-            where = (f"nodi casuali {self.distribution}" if self.is_random
-                     else f"passo {self.spacing_m:.4f} m")
-            print(f"[GRAFO] {added} archi ammessi su {self.n_edges} coppie del "
-                  f"{'grafo' if self.is_random else 'reticolo'} ({self.n_nodes} nodi, {where}); "
-                  f"{n_fast} in zona senza dati, con il solo costo geometrico")
+            where = (f"random nodes {self.distribution}" if self.is_random
+                     else f"spacing {self.spacing_m:.4f} m")
+            print(f"[GRAPH] {added} edges allowed out of {self.n_edges} pairs of the "
+                  f"{'graph' if self.is_random else 'lattice'} ({self.n_nodes} nodes, {where}); "
+                  f"{n_fast} in an area without data, with the geometric cost only")
         return added
 
     def _dirty_pairs(self, prm, global_map, todo):
@@ -795,63 +795,63 @@ class MissionGraph:
         rings = ", ".join(f"{v:.2f}" for v in uniq[:6]) + (" ..." if len(uniq) > 6 else "")
         if self.is_random:
             head = [
-                f"[GRAFO] Missione {self.rows}x{self.cols} celle da {self.cell_size_m:.1f} m "
-                f"= {self.area_m2:.0f} m2; nodi CASUALI, archi fra {self.min_edge_m:.2f} e "
+                f"[GRAPH] Mission {self.rows}x{self.cols} cells of {self.cell_size_m:.1f} m "
+                f"= {self.area_m2:.0f} m2; RANDOM nodes, edges between {self.min_edge_m:.2f} and "
                 f"{self.reach_m:.2f} m",
                 # test_replay reads distribution, density and seed from this line.
-                f"[GRAFO] Nodi casuali: distribuzione {self.distribution}, densita' "
-                f"{self.density_per_m2:.2f} nodi/m2, seme {self.seed} "
-                f"(per ripetere: --graph random --distribution {self.distribution} "
+                f"[GRAPH] Random nodes: distribution {self.distribution}, density "
+                f"{self.density_per_m2:.2f} nodes/m2, seed {self.seed} "
+                f"(to repeat: --graph random --distribution {self.distribution} "
                 f"--density {self.density_per_m2:g} --seed {self.seed})",
             ]
             if self.sampling_note:
-                head.append(f"[GRAFO] ATTENZIONE: {self.sampling_note}")
+                head.append(f"[GRAPH] CAREFUL: {self.sampling_note}")
             density = self.n_nodes / self.area_m2
-            cover = (f"[GRAFO] Copertura misurata {self.covering[0]:.2f} m (95% dell'area entro "
-                     f"{self.covering[1]:.2f} m; un corridoio utile al fronte e' largo almeno "
-                     f"{2 * _frontier_clearance():.2f} m)")
+            cover = (f"[GRAPH] Measured coverage {self.covering[0]:.2f} m (95% of the area within "
+                     f"{self.covering[1]:.2f} m; a corridor usable by the frontier is at least "
+                     f"{2 * _frontier_clearance():.2f} m wide)")
         else:
             n_div = int(round(self.cell_size_m / self.spacing_m))
             head = [
-                f"[GRAFO] Missione {self.rows}x{self.cols} celle da {self.cell_size_m:.1f} m "
-                f"= {self.area_m2:.0f} m2; reticolo rettangolare, passo {self.spacing_m:.4f} m "
-                f"(= {self.cell_size_m:.1f}/{n_div}), anelli "
-                f"{'tutti entro %.2f m' % self.reach_m if self.rings is None else self.rings}",
+                f"[GRAPH] Mission {self.rows}x{self.cols} cells of {self.cell_size_m:.1f} m "
+                f"= {self.area_m2:.0f} m2; rectangular lattice, spacing {self.spacing_m:.4f} m "
+                f"(= {self.cell_size_m:.1f}/{n_div}), rings "
+                f"{'all within %.2f m' % self.reach_m if self.rings is None else self.rings}",
             ]
             density = node_density(self.spacing_m)
-            cover = (f"[GRAFO] Copertura {self.covering_m:.2f} m (un corridoio utile al fronte e' "
-                     f"largo almeno {2 * _frontier_clearance():.2f} m)")
+            cover = (f"[GRAPH] Coverage {self.covering_m:.2f} m (a corridor usable by the frontier is "
+                     f"at least {2 * _frontier_clearance():.2f} m wide)")
         out = head + [
-            f"[GRAFO] {self.n_nodes} nodi, {density:.2f} nodi/m2, "
-            f"{self.n_edges} archi, grado medio {self.degrees.mean():.1f} "
+            f"[GRAPH] {self.n_nodes} nodes, {density:.2f} nodes/m2, "
+            f"{self.n_edges} edges, mean degree {self.degrees.mean():.1f} "
             f"(min {int(self.degrees.min()) if self.n_nodes else 0}, "
             f"max {int(self.degrees.max()) if self.n_nodes else 0})",
-            f"[GRAFO] Lunghezze degli archi {lo:.2f}-{hi:.2f} m"
+            f"[GRAPH] Edge lengths {lo:.2f}-{hi:.2f} m"
             f"{'' if self.is_random else ' [%s]' % rings}, "
             f"min_edge_length={self.min_edge_m:.2f} m, "
-            f"{self.n_short_pairs} coppie di vicini troppo vicini, non collegate",
+            f"{self.n_short_pairs} pairs of neighbours too close, not linked",
             cover,
-            f"[GRAFO] Obiettivi di cella: {len(self.cell_center_ids)} su "
-            f"{self.rows * self.cols}, tutti nel centro geometrico esatto",
-            f"[GRAFO] Connessione geometrica: "
-            + ("UNICA componente, nessun nodo isolato"
+            f"[GRAPH] Cell goals: {len(self.cell_center_ids)} out of "
+            f"{self.rows * self.cols}, all at the exact geometric centre",
+            f"[GRAPH] Geometric connectivity: "
+            + ("SINGLE component, no isolated node"
                if self.is_connected and self.n_isolated == 0 else
-               f"{self.n_components} componenti, la piu' grande con {self.biggest_component} "
-               f"nodi su {self.n_nodes}, {self.n_isolated} isolati"),
+               f"{self.n_components} components, the largest with {self.biggest_component} "
+               f"nodes out of {self.n_nodes}, {self.n_isolated} isolated"),
         ]
         if self.origin_node_id is not None:
-            out.append(f"[GRAFO] Accensione = centro della cella di partenza = nodo "
-                       f"{self.origin_node_id} (nessun nodo di boot da aggiungere)")
+            out.append(f"[GRAPH] Power-on = centre of the starting cell = node "
+                       f"{self.origin_node_id} (no boot node to add)")
         if not self.is_connected or self.n_isolated:
             if self.is_random:
-                out.append(f"[GRAFO] ATTENZIONE: il grafo casuale non e' connesso con questi "
-                           f"parametri (densita' {self.density_per_m2:g} nodi/m2, archi "
-                           f"{self.min_edge_m:.2f}-{self.reach_m:.2f} m): aumenta la densita' "
-                           f"o la lunghezza massima degli archi.")
+                out.append(f"[GRAPH] CAREFUL: the random graph is not connected with these "
+                           f"parameters (density {self.density_per_m2:g} nodes/m2, edges "
+                           f"{self.min_edge_m:.2f}-{self.reach_m:.2f} m): increase the density "
+                           f"or the maximum edge length.")
             else:
-                out.append(f"[GRAFO] ATTENZIONE: il reticolo non e' connesso con questi parametri "
-                           f"(passo {self.spacing_m:.4f} m, archi {self.min_edge_m:.2f}-"
-                           f"{self.reach_m:.2f} m): aumenta gli anelli.")
+                out.append(f"[GRAPH] CAREFUL: the lattice is not connected with these parameters "
+                           f"(spacing {self.spacing_m:.4f} m, edges {self.min_edge_m:.2f}-"
+                           f"{self.reach_m:.2f} m): increase the rings.")
         return "\n".join(out)
 
     def preview_png(self, path, show_cells=True, zoom=None):
@@ -885,15 +885,15 @@ class MissionGraph:
         if highlight is not None:
             mine = [s for s, (a, b) in zip(segs, self.pairs) if highlight in (a, b)]
             ax.add_collection(LineCollection(mine, colors='tab:blue', linewidths=0.8, alpha=0.7,
-                                             zorder=2, label=f"archi del nodo {highlight}"))
+                                             zorder=2, label=f"edges of node {highlight}"))
         ax.plot(self.xy_local[:, 0], self.xy_local[:, 1], 'k.', ms=2.6, zorder=3)
         ids = sorted(set(self.cell_center_ids.values()))
         if ids:
             ax.plot(self.xy_local[ids, 0], self.xy_local[ids, 1], 'o', ms=7, mfc='none',
-                    mec='tab:orange', mew=1.4, zorder=4, label='obiettivo di cella')
+                    mec='tab:orange', mew=1.4, zorder=4, label='cell goal')
         if self.origin_node_id is not None:
             ax.plot(self.xy_local[self.origin_node_id, 0], self.xy_local[self.origin_node_id, 1],
-                    'bo', ms=9, zorder=5, label='accensione / centro cella di partenza')
+                    'bo', ms=9, zorder=5, label='power-on / starting cell centre')
         if show_cells:
             half = self.cell_size_m / 2.0
             for r in range(self.rows):
@@ -911,14 +911,14 @@ class MissionGraph:
         else:
             ax.autoscale_view()
         ax.set_aspect('equal', 'box')
-        ax.set_xlabel('x griglia [m] -- colonne, davanti al robot')
-        ax.set_ylabel('y griglia [m] -- righe, a sinistra del robot')
-        what = (f"casuale {self.distribution}, {self.density_per_m2:.3g} nodi/m2, seme {self.seed}"
+        ax.set_xlabel('grid x [m] -- columns, ahead of the robot')
+        ax.set_ylabel('grid y [m] -- rows, to the left of the robot')
+        what = (f"random {self.distribution}, {self.density_per_m2:.3g} nodes/m2, seed {self.seed}"
                 if self.is_random else
-                f"passo {self.spacing_m:.4f} m, anelli "
-                f"{self.rings if self.rings is not None else 'tutti'}")
-        ax.set_title(f"{what}\n{self.n_nodes} nodi, {self.n_edges} archi, "
-                     f"copertura {self.covering_m:.2f} m", fontsize=title_size)
+                f"spacing {self.spacing_m:.4f} m, rings "
+                f"{self.rings if self.rings is not None else 'all'}")
+        ax.set_title(f"{what}\n{self.n_nodes} nodes, {self.n_edges} edges, "
+                     f"coverage {self.covering_m:.2f} m", fontsize=title_size)
         if legend:
             ax.legend(loc='upper right', fontsize=8)
 
@@ -988,10 +988,10 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
     if spacing_m is _FROM_SETTINGS:
         spacing_m = chosen_spacing
     if rows < 1 or cols < 1 or cell_size_m <= 0:
-        raise ValueError("dimensione della missione non valida")
+        raise ValueError("invalid mission size")
     sampling = P.MISSION_GRAPH_SAMPLING if sampling is None else sampling
     if sampling not in GRAPH_SAMPLINGS:
-        raise ValueError(f"metodo dei nodi sconosciuto {sampling!r}: uno di {GRAPH_SAMPLINGS}")
+        raise ValueError(f"unknown node method {sampling!r}: one of {GRAPH_SAMPLINGS}")
     if sampling == 'random':
         return _build_random_graph(
             rows, cols, cell_size_m, start_cell, origin_xy, origin_yaw,
@@ -1005,13 +1005,13 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
     if spacing_m is None:
         spacing_m = suggested_spacing(cell_size_m, min_edge_length)
     if float(spacing_m) <= 0:
-        raise ValueError("la spaziatura deve essere positiva")
+        raise ValueError("the spacing must be positive")
     requested = float(spacing_m)
     spacing_m, n_div = align_spacing(requested, cell_size_m)
     if abs(spacing_m - requested) > 1e-12 and verbose:
-        print(f"[GRAFO] Passo allineato al lato cella: {requested:.3f} -> {spacing_m:.4f} m "
-              f"(= {cell_size_m:.1f}/{n_div}); e' la condizione per cui ogni centro cella "
-              f"e' un nodo del reticolo.")
+        print(f"[GRAPH] Spacing aligned to the cell side: {requested:.3f} -> {spacing_m:.4f} m "
+              f"(= {cell_size_m:.1f}/{n_div}); it is the condition for every cell centre "
+              f"to be a lattice node.")
 
     prm_reach = min(float(connection_radius), float(max_edge_length))
     if rings is None:
@@ -1019,25 +1019,25 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
     else:
         rings = int(rings)
         if rings < 1:
-            raise ValueError("rings deve essere almeno 1")
+            raise ValueError("rings must be at least 1")
         ring_reach = rings * spacing_m * math.sqrt(2.0)      # diagonal of ring k
         if ring_reach > prm_reach + 1e-9 and verbose:
-            print(f"[GRAFO] {rings} anelli arriverebbero a {ring_reach:.2f} m, oltre la "
-                  f"portata del PRM {prm_reach:.2f} m: mi fermo li'.")
+            print(f"[GRAPH] {rings} rings would reach {ring_reach:.2f} m, beyond the "
+                  f"PRM reach {prm_reach:.2f} m: I stop there.")
         # Relative tolerance (1e-6): the lattice distances are irrational multiples of the
         # spacing, and without tolerance the ring diagonal could fall outside by one ulp.
         reach_m = min(ring_reach, prm_reach) * (1.0 + 1e-6)
         if reach_m < float(min_edge_length):
             raise ValueError(
-                f"con passo {spacing_m:.4f} m e {rings} anelli gli archi arrivano a "
-                f"{reach_m:.2f} m, sotto min_edge_length {float(min_edge_length):.2f} m: "
-                f"nessun arco sarebbe ammesso. Aumenta gli anelli o il passo.")
+                f"with spacing {spacing_m:.4f} m and {rings} rings the edges reach "
+                f"{reach_m:.2f} m, below min_edge_length {float(min_edge_length):.2f} m: "
+                f"no edge would be allowed. Increase the rings or the spacing.")
 
     extent = _mission_extent(rows, cols, cell_size_m, start_cell)
     ij, xy_local = _lattice_points(spacing_m, extent, float(border_margin_m))
     if len(xy_local) == 0:
-        raise ValueError("nessun nodo nel rettangolo di missione: passo troppo grande "
-                         "o margine di bordo troppo largo")
+        raise ValueError("no node in the mission rectangle: spacing too large "
+                         "or border margin too wide")
     pairs, lengths, n_short = _lattice_pairs(spacing_m, ij, xy_local,
                                              float(min_edge_length), reach_m)
 
@@ -1056,12 +1056,12 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
             if abs(xy_local[k, 0] - (c - start_cell[1]) * cell_size_m) > tol or \
                     abs(xy_local[k, 1] - (r - start_cell[0]) * cell_size_m) > tol:
                 raise AssertionError(
-                    f"il nodo {k} dovrebbe essere il centro della cella ({r},{c}) ma non lo "
-                    f"e': passo {spacing_m} non allineato a cell_size {cell_size_m}")
+                    f"node {k} should be the centre of cell ({r},{c}) but it is "
+                    f"not: spacing {spacing_m} not aligned with cell_size {cell_size_m}")
             cell_center_ids[(r, c)] = k
     if verbose and len(cell_center_ids) < rows * cols:
-        print(f"[GRAFO] {rows * cols - len(cell_center_ids)} centri cella fuori dal reticolo "
-              f"(margine di bordo {border_margin_m:.2f} m): quelle celle non hanno obiettivo.")
+        print(f"[GRAPH] {rows * cols - len(cell_center_ids)} cell centres outside the lattice "
+              f"(border margin {border_margin_m:.2f} m): those cells have no goal.")
 
     # Node at the origin: it is there by construction (the lattice is anchored there, and the origin is
     # also the centre of the starting cell), but we look for it instead of assuming it.
@@ -1095,12 +1095,12 @@ def _build_random_graph(rows, cols, cell_size_m, start_cell, origin_xy, origin_y
     rows and columns, then the nodes of the distribution. Same seed, same graph.
     """
     if distribution not in RANDOM_DISTRIBUTIONS:
-        raise ValueError(f"distribuzione sconosciuta {distribution!r}: una di {RANDOM_DISTRIBUTIONS}")
+        raise ValueError(f"unknown distribution {distribution!r}: one of {RANDOM_DISTRIBUTIONS}")
     if density_per_m2 is None or float(density_per_m2) <= 0:
-        raise ValueError("la densita' dei nodi deve essere positiva")
+        raise ValueError("the node density must be positive")
     if reach_m < min_edge_m:
-        raise ValueError(f"lunghezza massima degli archi {reach_m:.2f} m sotto la minima "
-                         f"{min_edge_m:.2f} m: nessun arco sarebbe ammesso")
+        raise ValueError(f"maximum edge length {reach_m:.2f} m below the minimum "
+                         f"{min_edge_m:.2f} m: no edge would be allowed")
     seed = draw_seed() if seed is None else int(seed)
     rng = np.random.default_rng(seed)
 
@@ -1108,7 +1108,7 @@ def _build_random_graph(rows, cols, cell_size_m, start_cell, origin_xy, origin_y
     box = (x_min + border_margin_m, x_max - border_margin_m,
            y_min + border_margin_m, y_max - border_margin_m)
     if box[1] <= box[0] or box[3] <= box[2]:
-        raise ValueError("margine di bordo troppo largo: nessuna area per i nodi")
+        raise ValueError("border margin too wide: no area for the nodes")
 
     # Cell centres: fixed nodes, the exploration goals. The centre of the starting cell
     # is the origin, i.e. the power-on point.
@@ -1125,8 +1125,8 @@ def _build_random_graph(rows, cols, cell_size_m, start_cell, origin_xy, origin_y
     xy_local = np.vstack((centers, rand_xy))
     cell_center_ids = {key: k for k, key in enumerate(keys)}
     if verbose and len(cell_center_ids) < rows * cols:
-        print(f"[GRAFO] {rows * cols - len(cell_center_ids)} centri cella fuori dall'area "
-              f"(margine di bordo {border_margin_m:.2f} m): quelle celle non hanno obiettivo.")
+        print(f"[GRAPH] {rows * cols - len(cell_center_ids)} cell centres outside the area "
+              f"(border margin {border_margin_m:.2f} m): those cells have no goal.")
     d0 = np.hypot(xy_local[:, 0], xy_local[:, 1])
     origin_node_id = int(np.argmin(d0)) if len(d0) and d0.min() < 1e-9 else None
 
@@ -1179,10 +1179,10 @@ def compare(rows=DEFAULT_MISSION_ROWS, cols=DEFAULT_MISSION_COLS,
     Table of nodes/edges/coverage as the spacing (as cell_size/n) and the rings vary:
     serves to choose the flags by looking at the numbers.
     """
-    print(f"Missione {rows}x{cols} celle da {cell_size_m:.1f} m "
+    print(f"Mission {rows}x{cols} cells of {cell_size_m:.1f} m "
           f"= {rows * cols * cell_size_m ** 2:.0f} m2")
-    print(f"{'passo':>8}{'(n)':>5}{'anelli':>8}{'nodi':>7}{'archi':>8}{'grado':>7}"
-          f"{'lung.min':>10}{'lung.max':>10}{'copert.':>9}{'conn.':>7}{'corti':>7}")
+    print(f"{'spacing':>8}{'(n)':>5}{'rings':>8}{'nodes':>7}{'edges':>8}{'degree':>7}"
+          f"{'len.min':>10}{'len.max':>10}{'cover.':>9}{'conn.':>7}{'short':>7}")
     out = []
     for n in divisors:
         s = cell_size_m / n
@@ -1191,7 +1191,7 @@ def compare(rows=DEFAULT_MISSION_ROWS, cols=DEFAULT_MISSION_COLS,
                 mg = build_mission_graph(rows=rows, cols=cols, cell_size_m=cell_size_m,
                                          spacing_m=s, rings=rg, verbose=False, **kw)
             except ValueError as e:
-                print(f"{s:>8.4f}{n:>5}{str(rg):>8}  non costruibile: {e}")
+                print(f"{s:>8.4f}{n:>5}{str(rg):>8}  cannot be built: {e}")
                 continue
             lo = float(mg.lengths.min()) if mg.n_edges else float('nan')
             hi = float(mg.lengths.max()) if mg.n_edges else float('nan')
@@ -1200,7 +1200,7 @@ def compare(rows=DEFAULT_MISSION_ROWS, cols=DEFAULT_MISSION_COLS,
                             covering=mg.covering_m, connected=mg.is_connected))
             print(f"{mg.spacing_m:>8.4f}{n:>5}{str(rg):>8}{mg.n_nodes:>7}{mg.n_edges:>8}"
                   f"{mg.degrees.mean():>7.1f}{lo:>10.2f}{hi:>10.2f}{mg.covering_m:>9.2f}"
-                  f"{('si' if mg.is_connected else 'NO'):>7}{mg.n_short_pairs:>7}")
+                  f"{('yes' if mg.is_connected else 'NO'):>7}{mg.n_short_pairs:>7}")
     return out
 
 
@@ -1256,7 +1256,7 @@ def compare_methods_png(path, zoom=(-2.0, 2.0, -2.0, 2.0), seed=None,
     with the same parameters (mission, edges, density) and the same seed, to see the
     difference at a glance. At the end the table: nodes, edges, mean degree, maximum and
     95% coverage. zoom None = the whole area. Seed None = drawn at random, written in the
-    title. verbose: also print the [GRAFO] summary of every graph.
+    title. verbose: also print the [GRAPH] summary of every graph.
     density_per_m2 None = the density that gives the same number of nodes as the lattice
     (lattice_matched_density).
     Returns (path, graphs).
@@ -1313,9 +1313,9 @@ def compare_methods_png(path, zoom=(-2.0, 2.0, -2.0, 2.0), seed=None,
         rows.append([name, f"{mg.n_nodes}", f"{per_cell.min():.0f}-{per_cell.max():.0f}",
                      f"{mg.n_edges}", f"{mg.degrees.mean():.1f}",
                      f"{cov[0]:.2f}", f"{cov[1]:.2f}"])
-    tab = ax.table(cellText=rows, colLabels=['metodo', 'nodi', 'per cella\n(min-max)', 'archi',
-                                             'grado\nmedio', 'copertura\nmassima [m]',
-                                             '95% area\nentro [m]'],
+    tab = ax.table(cellText=rows, colLabels=['method', 'nodes', 'per cell\n(min-max)', 'edges',
+                                             'mean\ndegree', 'coverage\nmaximum [m]',
+                                             '95% of area\nwithin [m]'],
                    loc='center', cellLoc='center')
     tab.auto_set_font_size(False)
     tab.set_fontsize(10)
@@ -1324,11 +1324,11 @@ def compare_methods_png(path, zoom=(-2.0, 2.0, -2.0, 2.0), seed=None,
     g0 = graphs[0]
     rnd = [g for g in graphs if g.is_random]
     lat = [g for g in graphs if not g.is_random]
-    fig.suptitle(f"Missione {g0.rows}x{g0.cols} celle da {g0.cell_size_m:g} m, archi "
+    fig.suptitle(f"Mission {g0.rows}x{g0.cols} cells of {g0.cell_size_m:g} m, edges "
                  f"{g0.min_edge_m:g}-{g0.reach_m:g} m"
-                 + (f", reticolo passo {lat[0].spacing_m:g} m" if lat else "")
-                 + (f", casuali {rnd[0].density_per_m2:.2f} nodi/m2, seme {seed}" if rnd else "")
-                 + (f" -- riquadro x {zoom[0]:g}..{zoom[1]:g}, y {zoom[2]:g}..{zoom[3]:g} m"
+                 + (f", lattice spacing {lat[0].spacing_m:g} m" if lat else "")
+                 + (f", random {rnd[0].density_per_m2:.2f} nodes/m2, seed {seed}" if rnd else "")
+                 + (f" -- region x {zoom[0]:g}..{zoom[1]:g}, y {zoom[2]:g}..{zoom[3]:g} m"
                     if zoom else ""), fontsize=12)
     fig.tight_layout(rect=(0, 0, 1, 0.96), h_pad=3.0)
     fig.savefig(path, dpi=110)
@@ -1349,54 +1349,54 @@ def timing(path=None, **kw):
     t0 = time.perf_counter()
     mg2 = load_npz(path, origin_xy=(1.0, 2.0), origin_yaw=0.7)
     t_load = time.perf_counter() - t0
-    print(f"[TEMPI] {mg.n_nodes} nodi, {mg.n_edges} archi")
-    print(f"[TEMPI] costruzione da zero : {t_build * 1000:8.1f} ms")
-    print(f"[TEMPI] ricarica da file    : {t_load * 1000:8.1f} ms  "
-          f"({os.path.getsize(path) / 1024:.0f} KB su disco)")
-    print(f"[TEMPI] file: {path}")
+    print(f"[TIMES] {mg.n_nodes} nodes, {mg.n_edges} edges")
+    print(f"[TIMES] build from scratch : {t_build * 1000:8.1f} ms")
+    print(f"[TIMES] reload from file   : {t_load * 1000:8.1f} ms  "
+          f"({os.path.getsize(path) / 1024:.0f} KB on disk)")
+    print(f"[TIMES] file: {path}")
     return t_build, t_load, mg2
 
 
 def _main():
     import argparse
-    p = argparse.ArgumentParser(description="Grafo di missione regolare per Spot")
+    p = argparse.ArgumentParser(description="Regular mission graph for Spot")
     s_rows, s_cols, s_cell, s_spacing = mission_settings()
     p.add_argument('--rows', type=int, default=s_rows,
-                   help=f"righe di celle, a sinistra del robot (default {s_rows})")
+                   help=f"rows of cells, to the robot's left (default {s_rows})")
     p.add_argument('--cols', type=int, default=s_cols,
-                   help=f"colonne di celle, davanti al robot (default {s_cols})")
+                   help=f"columns of cells, ahead of the robot (default {s_cols})")
     p.add_argument('--cell', type=float, default=s_cell,
-                   help=f"lato della cella in m (default {s_cell:g})")
+                   help=f"cell side in m (default {s_cell:g})")
     p.add_argument('--spacing', type=float, default=s_spacing,
-                   help=f"passo fra i nodi in m, arrotondato a cell/n (default "
+                   help=f"spacing between nodes in m, rounded to cell/n (default "
                         f"{s_spacing:g}; 0 = suggested_spacing)")
     p.add_argument('--rings', default=str(P.MISSION_LATTICE_RINGS),
-                   help="anelli di vicini collegati (k = entro la diagonale dell'anello k), "
-                        "o 'tutti' (default: tutti, come in missione)")
+                   help="rings of linked neighbours (k = within the diagonal of ring k), "
+                        "or 'all' (default: all, as in the mission)")
     p.add_argument('--graph', choices=GRAPH_SAMPLINGS, default=P.MISSION_GRAPH_SAMPLING,
-                   help=f"come si generano i nodi (default {P.MISSION_GRAPH_SAMPLING})")
+                   help=f"how the nodes are generated (default {P.MISSION_GRAPH_SAMPLING})")
     p.add_argument('--distribution', choices=RANDOM_DISTRIBUTIONS, default=P.MISSION_RANDOM_DISTRIBUTION,
-                   help=f"nodi casuali: distribuzione (default {P.MISSION_RANDOM_DISTRIBUTION})")
+                   help=f"random nodes: distribution (default {P.MISSION_RANDOM_DISTRIBUTION})")
     p.add_argument('--density', type=float, default=P.MISSION_RANDOM_DENSITY,
-                   help=f"nodi casuali: nodi per m2 (default {P.MISSION_RANDOM_DENSITY:g})")
+                   help=f"random nodes: nodes per m2 (default {P.MISSION_RANDOM_DENSITY:g})")
     p.add_argument('--seed', type=int, default=P.MISSION_RANDOM_SEED,
-                   help="nodi casuali: seme (default: estratto a caso e scritto nel riepilogo)")
+                   help="random nodes: seed (default: drawn at random and written in the summary)")
     p.add_argument('--min-dist', type=float, default=P.MISSION_POISSON_MIN_DIST_M,
-                   help="nodi poisson: distanza minima fra i nodi in m (default 0.75/sqrt(densita'))")
+                   help="poisson nodes: minimum distance between nodes in m (default 0.75/sqrt(density))")
     p.add_argument('--min-edge', type=float, default=P.PRM_MIN_EDGE_M)
     p.add_argument('--max-edge', type=float, default=P.PRM_MAX_EDGE_M)
     p.add_argument('--radius', type=float, default=P.PRM_CONNECTION_RADIUS_M)
-    p.add_argument('--margin', type=float, default=0.0, help="margine dal bordo in m")
-    p.add_argument('--preview', metavar='PNG', help="salva un disegno del reticolo")
+    p.add_argument('--margin', type=float, default=0.0, help="margin from the border in m")
+    p.add_argument('--preview', metavar='PNG', help="save a drawing of the lattice")
     p.add_argument('--zoom', type=float, nargs=4, metavar=('XMIN', 'XMAX', 'YMIN', 'YMAX'),
-                   help="riquadro del disegno, in coordinate griglia")
-    p.add_argument('--save', metavar='NPZ', help="salva il reticolo (si ricarica con load_npz)")
-    p.add_argument('--compare', action='store_true', help="tabella passo x anelli")
+                   help="region of the drawing, in grid coordinates")
+    p.add_argument('--save', metavar='NPZ', help="save the lattice (reload it with load_npz)")
+    p.add_argument('--compare', action='store_true', help="spacing x rings table")
     p.add_argument('--compare-methods', metavar='PNG',
-                   help="reticolo e le quattro distribuzioni casuali affiancati in un PNG "
-                        "(stessi parametri e seme; riquadro --zoom, default -2 2 -2 2)")
+                   help="lattice and the four random distributions side by side in a PNG "
+                        "(same parameters and seed; region --zoom, default -2 2 -2 2)")
     p.add_argument('--timings', nargs='?', const=True, metavar='NPZ',
-                   help="misura costruzione da zero contro ricarica da file")
+                   help="measure building from scratch against reloading from file")
     a = p.parse_args()
 
     rings = None if str(a.rings).lower() in ('none', 'tutti', 'all', '-1') else int(a.rings)
@@ -1411,7 +1411,7 @@ def _main():
         common.pop('sampling')
         common.pop('distribution')
         common.pop('seed')
-        print(f"[GRAFO] confronto salvato in "
+        print(f"[GRAPH] comparison saved in "
               f"{compare_methods_png(a.compare_methods, zoom=tuple(a.zoom) if a.zoom else (-2.0, 2.0, -2.0, 2.0), seed=a.seed, spacing_m=a.spacing, rings=rings, **common)[0]}")
         return
     if a.comparison:
@@ -1426,10 +1426,10 @@ def _main():
 
     mg = build_mission_graph(spacing_m=a.spacing, rings=rings, **common)
     if a.preview:
-        print(f"[GRAFO] disegno salvato in "
+        print(f"[GRAPH] drawing saved in "
               f"{mg.preview_png(a.preview, zoom=tuple(a.zoom) if a.zoom else None)}")
     if a.save:
-        print(f"[GRAFO] reticolo salvato in {mg.save_npz(a.save)}")
+        print(f"[GRAPH] lattice saved in {mg.save_npz(a.save)}")
 
 
 # =========================================================================================
@@ -1488,8 +1488,8 @@ def graph_reaches_cell(prm, env, from_xy, row, col, global_map=None):
     reach at least one node of cell (row, col)? Same rules as the attempt: with
     PLAN_ONLY_EXPLORED_CELLS it passes only through the visited cells, the starting cell and
     the goal cell; edges and nodes as they are now (a node with infinite penalty does not
-    count). It is a NECESSARY condition: if False the attempt would surely fail with "GRAFO
-    DISCONNESSO"; if True the attempt decides (goal point, detour cap, frontier).
+    count). It is a NECESSARY condition: if False the attempt would surely fail with "GRAPH
+    DISCONNECTED"; if True the attempt decides (goal point, detour cap, frontier).
     Breadth-first search, no effect on the graph. None if the graph has no nodes.
     """
     start = prm.anchor_node(float(from_xy[0]), float(from_xy[1]), global_map,
@@ -1535,9 +1535,9 @@ def restrict_planning_to_explored_cells(prm, env, target_row, target_col, robot_
     cells.add(tuple(int(v) for v in env.get_cell_from_world(robot_xy[0], robot_xy[1])))
     allowed = [nid for nid, cell in node_cells(prm, env).items() if cell in cells]
     prm.set_allowed_nodes(allowed)
-    print(f"[PIANO] Percorsi ammessi solo nelle celle {sorted(cells)}: {len(allowed)} nodi su "
-          f"{len(prm.nodes)}. Se serve passare da una cella non visitata, rinuncio a questo "
-          f"lato e passo a un'altra cella.")
+    print(f"[PLAN] Paths allowed only in cells {sorted(cells)}: {len(allowed)} nodes out of "
+          f"{len(prm.nodes)}. If a non-visited cell must be crossed, I give up this "
+          f"side and move to another cell.")
 
 
 def robot_on_node(prm, node_id, x, y):

@@ -667,10 +667,10 @@ class PRM:
         """
         p = self._slope_pending()
         if p['long'] or p['lat'] or p['flip']:
-            print(f"[PENDENZE] {where}: archi vetati per pendenza -- longitudinale {p['long']} "
-                  f"(max {p['max_long']:.2f}), laterale {p['lat']} (max {p['max_lat']:.2f}), "
-                  f"{p['new']} mai vetati prima; {p['flip']} cambi di verdetto vicino soglia "
-                  f"(soglia {slopes.SLOPE_THRESHOLD:.2f}).")
+            print(f"[SLOPES] {where}: edges vetoed for slope -- longitudinal {p['long']} "
+                  f"(max {p['max_long']:.2f}), lateral {p['lat']} (max {p['max_lat']:.2f}), "
+                  f"{p['new']} never vetoed before; {p['flip']} verdict changes near the threshold "
+                  f"(threshold {slopes.SLOPE_THRESHOLD:.2f}).")
         self._slope_log_pending = None
 
     def _record_occupancy_veto(self, key):
@@ -712,22 +712,22 @@ class PRM:
         """
         total_sources = sum(self.slope_source_counts.values())
         print("\n================ [PRM MISSION SUMMARY] ================")
-        print(f"Fonte pendenza usata nel costo degli archi (totale {total_sources} query):")
+        print(f"Slope source used in the edge cost (total {total_sources} queries):")
         for src, count in self.slope_source_counts.items():
             pct = (100.0 * count / total_sources) if total_sources > 0 else 0.0
             print(f"  {src:15s}: {count:6d}  ({pct:5.1f}%)")
-        print("Veti -- archi DISTINTI (e, tra parentesi, valutazioni totali, che contano lo stesso arco "
-              "a ogni refresh):")
-        print(f"  longitudinale: {len(self.vetoed_arcs_longitudinal)} ({self.veto_count_longitudinal})  "
-              f"laterale: {len(self.vetoed_arcs_lateral)} ({self.veto_count_lateral})  "
-              f"occupazione: {len(self.vetoed_arcs_occupancy)} ({self.veto_count_occupancy})")
-        print(f"Pendenza massima misurata su un arco -- longitudinale: {self.max_slope_seen['long']:.3f}, "
-              f"laterale: {self.max_slope_seen['lat']:.3f} (soglia veto {slopes.SLOPE_THRESHOLD:.3f})")
-        print(f"Geometria del profilo d'arco -- base {slopes.SLOPE_BASELINE_M:.2f} m, "
-              f"fetta laterale +/-{slopes.LATERAL_SLICE_HALF_WIDTH_M:.2f} m")
-        print(f"Pesi del costo -- alpha={self.alpha}, beta(long)={self.beta}, "
+        print("Vetoes -- DISTINCT edges (and, in brackets, total evaluations, which count the same edge "
+              "at every refresh):")
+        print(f"  longitudinal: {len(self.vetoed_arcs_longitudinal)} ({self.veto_count_longitudinal})  "
+              f"lateral: {len(self.vetoed_arcs_lateral)} ({self.veto_count_lateral})  "
+              f"occupancy: {len(self.vetoed_arcs_occupancy)} ({self.veto_count_occupancy})")
+        print(f"Maximum slope measured on an edge -- longitudinal: {self.max_slope_seen['long']:.3f}, "
+              f"lateral: {self.max_slope_seen['lat']:.3f} (veto threshold {slopes.SLOPE_THRESHOLD:.3f})")
+        print(f"Edge profile geometry -- base {slopes.SLOPE_BASELINE_M:.2f} m, "
+              f"lateral slice +/-{slopes.LATERAL_SLICE_HALF_WIDTH_M:.2f} m")
+        print(f"Cost weights -- alpha={self.alpha}, beta(long)={self.beta}, "
               f"beta_lateral={self.beta_lateral}, gamma={self.gamma}")
-        print(f"Flip del veto pendenza vicino soglia (possibile oscillazione): {self.slope_flip_count}")
+        print(f"Slope veto flips near the threshold (possible oscillation): {self.slope_flip_count}")
         print("=========================================================\n")
 
     def _compute_edge_weight(self, idx1: int, idx2: int, dist: float,
@@ -1155,7 +1155,7 @@ class PRM:
         return int(ids[order[0]])
 
     def add_stop_node(self, x: float, y: float, global_map=None, edge_safety_margin: float = 0.0,
-                      label: str = "sosta", is_robot: bool = True) -> int:
+                      label: str = "stop", is_robot: bool = True) -> int:
         """
         The EXISTING node to attach the position (x, y) to (see anchor_node): the graph does
         not grow during the mission. If is_robot, it also becomes the robot node.
@@ -1163,12 +1163,12 @@ class PRM:
         nid = self.anchor_node(x, y, global_map, edge_safety_margin,
                                ignore_near_m=(ANCHOR_IGNORE_NEAR_M if is_robot else 0.0))
         if nid is None:
-            raise RuntimeError("add_stop_node: il grafo non ha nodi")
+            raise RuntimeError("add_stop_node: the graph has no nodes")
         if is_robot:
             self.set_robot_node(nid)
         nx, ny = self.nodes[nid]
-        print(f"[NODO] {label}: agganciato al nodo {nid} in ({nx:.2f}, {ny:.2f}), a "
-              f"{float(np.hypot(nx - x, ny - y)):.2f} m da ({x:.2f}, {y:.2f}) -- nessun nodo nuovo")
+        print(f"[NODE] {label}: attached to node {nid} at ({nx:.2f}, {ny:.2f}), "
+              f"{float(np.hypot(nx - x, ny - y)):.2f} m from ({x:.2f}, {y:.2f}) -- no new node")
         return nid
 
     def mark_edge_invalid(self, idx1: int, idx2: int):
@@ -1290,8 +1290,8 @@ class PRM:
             limit = self.max_detour_ratio * float(np.hypot(gx - sx, gy - sy)) + self.detour_slack_m
             plen = self.path_length(new_path)
             if plen > limit:
-                print(f"[DEVIAZIONE] Percorso {start_idx}->{goal_idx} lungo {plen:.1f} m, oltre "
-                      f"il tetto di {limit:.1f} m: lo considero impraticabile.")
+                print(f"[DETOUR] Path {start_idx}->{goal_idx} {plen:.1f} m long, beyond "
+                      f"the cap of {limit:.1f} m: I consider it impracticable.")
                 new_path = None
 
         # --- Without stability check ---

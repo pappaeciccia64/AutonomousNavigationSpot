@@ -94,7 +94,7 @@ class BatteryMonitor:
         self._printed_pct = None  # last whole charge printed in the log
         self._failed_reads = 0
 
-    # --- Consumi ---------------------------------------------------------------------
+    # --- Consumption ------------------------------------------------------------------
 
     def consumption(self):
         """(percent per minute, percent per metre) from the first reading to the last, positive
@@ -136,13 +136,13 @@ class BatteryMonitor:
                 self._failed_reads += 1
                 MISSION_STATS['battery_reads_failed'] = self._failed_reads
                 if self._failed_reads == 1:
-                    print("[BATTERIA] Carica non disponibile nello stato del robot: niente "
-                          "rientro a batteria bassa finche' non si legge.")
+                    print("[BATTERY] Charge not available in the robot state: no "
+                          "low-battery return until it can be read.")
                 return self.return_due
-            self._record(now, b, x, y, where or 'ciclo')
+            self._record(now, b, x, y, where or 'loop')
             return self.return_due
         except Exception as e:
-            print(f"[BATTERIA] Lettura non riuscita ({type(e).__name__}: {e}).")
+            print(f"[BATTERY] Reading failed ({type(e).__name__}: {e}).")
             return self.return_due
 
     def _record(self, now, b, x, y, where):
@@ -171,47 +171,47 @@ class BatteryMonitor:
 
         # In the log only when the charge drops by a whole point, or with a label.
         pct_int = int(np.floor(c))
-        if where != 'ciclo' or self._printed_pct is None or pct_int < self._printed_pct:
+        if where != 'loop' or self._printed_pct is None or pct_int < self._printed_pct:
             self._printed_pct = pct_int
-            print(f"[BATTERIA] {where}: {self.describe(b)}")
+            print(f"[BATTERY] {where}: {self.describe(b)}")
 
         if below and not self.return_due and self._below_count >= self.confirmations:
             self.return_due = True
-            self.reason_txt = (f"carica {c:.0f}% <= soglia {self.threshold_pct:.0f}% "
-                           f"({self._below_count} letture di fila)")
+            self.reason_txt = (f"charge {c:.0f}% <= threshold {self.threshold_pct:.0f}% "
+                           f"({self._below_count} readings in a row)")
             MISSION_STATS['battery_return'] = True
             MISSION_STATS['battery_return_pct'] = c
             MISSION_STATS['battery_return_min'] = round(t_s / 60.0, 1)
-            print(f"[BATTERIA] RIENTRO: {self.reason_txt}. Smetto di esplorare e chiudo la missione "
-                  f"come a fine esplorazione: scansione finale, salvataggi, ritorno a wp_0 con "
+            print(f"[BATTERY] RETURN: {self.reason_txt}. I stop exploring and close the mission "
+                  f"as at the end of exploration: final scan, saving, return to wp_0 with "
                   f"GraphNav.")
 
     def describe(self, b=None):
         """One readable line: charge, consumption, runtime estimated by Spot, minutes to the threshold."""
         if not self._samples:
-            return "nessuna lettura"
+            return "no reading"
         c = self._samples[-1][1]
         per_min, per_m = self.consumption()
-        parts = [f"carica {c:.0f}%"]
+        parts = [f"charge {c:.0f}%"]
         if per_min is not None:
             parts.append(f"{per_min:.2f} %/min")
         if per_m is not None:
-            parts.append(f"{per_m:.3f} %/m su {self._dist_m:.0f} m")
+            parts.append(f"{per_m:.3f} %/m over {self._dist_m:.0f} m")
         if b is not None and b.get('spot_runtime_min') is not None:
-            parts.append(f"autonomia stimata da Spot {b['spot_runtime_min']:.0f} min")
+            parts.append(f"runtime estimated by Spot {b['spot_runtime_min']:.0f} min")
         m = self.minutes_to_threshold()
         if m is not None and not self.return_due:
-            parts.append(f"~{m:.0f} min alla soglia del {self.threshold_pct:.0f}%")
+            parts.append(f"~{m:.0f} min to the {self.threshold_pct:.0f}% threshold")
         return ", ".join(parts)
 
     def summary(self):
         """The end-of-mission summary line."""
         if not self._samples:
-            return "Batteria: carica mai letta" + (
-                f" ({self._failed_reads} letture fallite)" if self._failed_reads else "")
+            return "Battery: charge never read" + (
+                f" ({self._failed_reads} failed readings)" if self._failed_reads else "")
         c0, c1 = self._samples[0][1], self._samples[-1][1]
-        line = (f"Batteria: da {c0:.0f}% a {c1:.0f}% in {self._samples[-1][0] / 60.0:.1f} min e "
+        line = (f"Battery: from {c0:.0f}% to {c1:.0f}% in {self._samples[-1][0] / 60.0:.1f} min and "
                 f"{self._dist_m:.0f} m; {self.describe()}")
         if self.return_due:
-            line += f" | RIENTRO ANTICIPATO: {self.reason_txt}"
-        return line + " (dettaglio in battery.csv)"
+            line += f" | EARLY RETURN: {self.reason_txt}"
+        return line + " (details in battery.csv)"

@@ -35,8 +35,8 @@ def _refuse_goal(env, row, col, x, y, why):
         return
     lst.append((float(x), float(y)))
     MISSION_STATS['goals_refused'] = MISSION_STATS.get('goals_refused', 0) + 1
-    print(f"[TARGET] Obiettivo ({x:.2f}, {y:.2f}) della cella ({row},{col}) escluso per il "
-          f"resto della missione: {why}.")
+    print(f"[TARGET] Goal ({x:.2f}, {y:.2f}) of cell ({row},{col}) excluded for the "
+          f"rest of the mission: {why}.")
 
 
 def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cells_obstacle_dist,
@@ -130,11 +130,11 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
         is_center = p is center
         if _near(p, exclude):
             blocked.append(p)
-            center_reason = center_reason or ("gia' scartato dal vivo" if is_center else None)
+            center_reason = center_reason or ("already discarded live" if is_center else None)
             continue
         if global_map.is_occupied(px, py, safety_margin=safety_margin):
             blocked.append(p)
-            center_reason = center_reason or ("occupato nella mappa" if is_center else None)
+            center_reason = center_reason or ("occupied in the map" if is_center else None)
             continue
         c_live = _live_clearance(px, py)
         # For the centre only the live scan counts: the learned free space, which also
@@ -145,7 +145,7 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
         if known_c and min(known_c) < min_clear:
             blocked.append(p)
             if is_center:
-                center_reason = f"a {min(known_c):.2f} m da un ostacolo nella scansione dal vivo"
+                center_reason = f"{min(known_c):.2f} m from an obstacle in the live scan"
             continue
         tight = (global_map.is_occupied(px, py, safety_margin=pref_margin)
                  or (bool(known_c) and min(known_c) < P.TARGET_CLEARANCE_M))
@@ -160,9 +160,9 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
 
     valid = [r['p'] for r in rows]
     if not rows:
-        print(f"[TARGET] Cella ({cell_row},{cell_col}): centro {center_reason or 'scartato'} e "
-              f"nessun punto della cella ad almeno {min_clear:.2f} m dagli ostacoli. "
-              f"Nessun obiettivo valido.")
+        print(f"[TARGET] Cell ({cell_row},{cell_col}): centre {center_reason or 'discarded'} and "
+              f"no point of the cell at least {min_clear:.2f} m from obstacles. "
+              f"No valid goal.")
         return None, None, [], blocked
 
     step = 0.25
@@ -180,39 +180,39 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
                 break
         if chosen is None:
             chosen = pool[0]
-            reach_note = "; NESSUN punto della cella e' raggiungibile dal robot nel grafo"
+            reach_note = "; NO point of the cell is reachable from the robot in the graph"
             MISSION_STATS['goals_unreachable'] = MISSION_STATS.get('goals_unreachable', 0) + 1
     if not fresh:
-        reach_note += "; tutti i punti erano gia' stati rifiutati dal fronte, riprovo il migliore"
+        reach_note += "; all points had already been refused by the frontier, retrying the best one"
 
     bx, by = chosen['p']
     flags = []
     if chosen['tight']:
-        flags.append(f"meno di {P.TARGET_CLEARANCE_M:.2f} m di spazio libero")
+        flags.append(f"less than {P.TARGET_CLEARANCE_M:.2f} m of free space")
     if chosen['edge']:
-        flags.append(f"a meno di {P.TARGET_CELL_BORDER_M:.2f} m dal bordo della cella")
+        flags.append(f"less than {P.TARGET_CELL_BORDER_M:.2f} m from the cell border")
     flag_txt = f" -- {', '.join(flags)}" if flags else ""
     if chosen['center']:
-        state = "libero" if chosen['seen'] else "ignoto"
-        print(f"[TARGET] Cella ({cell_row},{cell_col}): uso il centro geometrico "
+        state = "libero" if chosen['seen'] else "unknown"
+        print(f"[TARGET] Cell ({cell_row},{cell_col}): using the geometric centre "
               f"({bx:.2f}, {by:.2f}), {state}{flag_txt}{reach_note}.")
         return bx, by, valid, blocked
 
     if center_reason is None:
         crow = next((r for r in rows if r['center']), None)
         if crow is None:
-            center_reason = "scartato"
+            center_reason = "discarded"
         elif crow['refused']:
-            center_reason = "rifiutato dal fronte in questa missione"
+            center_reason = "refused by the frontier in this mission"
         elif crow['tight'] and not chosen['tight']:
-            center_reason = (f"con solo {crow['clear']:.2f} m di spazio libero"
-                             if crow['clear'] is not None else "troppo vicino a un ostacolo nella mappa")
+            center_reason = (f"with only {crow['clear']:.2f} m of free space"
+                             if crow['clear'] is not None else "too close to an obstacle in the map")
         else:
-            center_reason = "non raggiungibile dal robot nel grafo"
+            center_reason = "not reachable from the robot in the graph"
     n_seen = sum(1 for r in rows if r['seen'])
-    print(f"[TARGET] Cella ({cell_row},{cell_col}): centro {center_reason}, uso il punto "
-          f"{'libero' if chosen['seen'] else 'ignoto'} ({bx:.2f}, {by:.2f}), a {chosen['dc']:.2f} m "
-          f"dal centro{flag_txt}{reach_note}  [liberi={n_seen} ignoti={len(rows) - n_seen} "
-          f"scartati={len(blocked)} stretti={sum(r['tight'] for r in rows)} "
-          f"sul bordo={sum(r['edge'] for r in rows)} rifiutati={sum(r['refused'] for r in rows)}]")
+    print(f"[TARGET] Cell ({cell_row},{cell_col}): centre {center_reason}, using the "
+          f"{'free' if chosen['seen'] else 'unknown'} point ({bx:.2f}, {by:.2f}), {chosen['dc']:.2f} m "
+          f"from the centre{flag_txt}{reach_note}  [free={n_seen} unknown={len(rows) - n_seen} "
+          f"discarded={len(blocked)} tight={sum(r['tight'] for r in rows)} "
+          f"on_border={sum(r['edge'] for r in rows)} refused={sum(r['refused'] for r in rows)}]")
     return bx, by, valid, blocked

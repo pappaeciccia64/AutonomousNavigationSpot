@@ -138,17 +138,17 @@ def mission_setup(name):
     log = open(log_path, errors='replace').read()
     ox, oy = map(float, re.search(r'(?:Origin set at world coordinates|Origine fissata alle coordinate) \(([-\d.]+), ([-\d.]+)\)', log).groups())
     yaw = float(re.search(r'(?:Initial orientation|Orientamento iniziale): ([-\d.]+)', log).group(1))
-    g = re.search(r'Griglia di missione: (\d+) x (\d+) celle da ([\d.]+) m', log)
+    g = re.search(r'(?:Griglia di missione|Mission grid): (\d+) x (\d+) (?:celle da|cells of) ([\d.]+) m', log)
     rows, cols, cell = (int(g.group(1)), int(g.group(2)), float(g.group(3))) if g else (2, 4, 5.0)
-    s = re.search(r'Reticolo: passo richiesto ([\d.]+) m', log)
+    s = re.search(r'(?:Reticolo: passo richiesto|Lattice: requested spacing) ([\d.]+) m', log)
     spacing = float(s.group(1)) if s else 0.25
     # Since 22-10: node method and edge length; for random nodes distribution,
     # density and actual seed. The earlier missions are all lattice, edges 0.5-1.25.
-    gr = re.search(r'\[CONFIG\] Grafo: nodi (\w+).*; archi da ([\d.]+) a ([\d.]+) m', log)
+    gr = re.search(r'\[CONFIG\] (?:Grafo: nodi|Graph: nodes) (\w+).*; (?:archi da|edges from) ([\d.]+) (?:a|to) ([\d.]+) m', log)
     sampling, min_edge, max_edge = ((modern(gr.group(1)), float(gr.group(2)), float(gr.group(3)))
                                     if gr else ('lattice', 0.5, 1.25))
-    rnd = re.search(r"\[GRAFO\] Nodi casuali: distribuzione (\w+), densita' ([\d.]+) nodi/m2, "
-                    r"seme (\d+)", log)
+    rnd = re.search(r"\[(?:GRAFO|GRAPH)\] (?:Nodi casuali: distribuzione|Random nodes: distribution) (\w+), (?:densita'|density) ([\d.]+) (?:nodi|nodes)/m2, "
+                    r"(?:seme|seed) (\d+)", log)
     graph = dict(sampling=sampling, min_edge=min_edge, max_edge=max_edge,
                  distribution=modern(rnd.group(1)) if rnd else None,
                  density=float(rnd.group(2)) if rnd else None,
@@ -207,7 +207,7 @@ def replay_mission(job):
         return name, None
     t_start = time.perf_counter()
     rng = np.random.default_rng(0)
-    out = dict(cell_starts=[], invariants={}, notes=[], tempo_grafo_s=0.0)
+    out = dict(cell_starts=[], invariants={}, notes=[], graph_time_s=0.0)
     with _quiet():
         env = environmentMap.EnvironmentMap(rows=m['rows'], cols=m['cols'], cell_size=m['cell'])
         env.set_origin(m['origin'][0], m['origin'][1], math.radians(m['yaw_deg']))
@@ -225,7 +225,7 @@ def replay_mission(job):
         for k, v in (override or {}).items():
             setattr(P, k, v)
         prm, _sampler, mg = mission_graph.build_mission_prm(env, verbose=False)
-        out['grafo'] = mg.describe()
+        out['graph'] = mg.describe()
         gm = global_maps.GlobalGrid()
         tm = global_maps.GlobalTerrainGrid()
         tm.update_rects = []
@@ -272,7 +272,7 @@ def replay_mission(job):
                 twin = copy.deepcopy((prm, gm)) if do_full and prev_it is not None else None
                 t_g = time.perf_counter()
                 mission_graph.rebuild_prm_edges(prm, gm)
-                out['tempo_grafo_s'] += time.perf_counter() - t_g
+                out['graph_time_s'] += time.perf_counter() - t_g
                 if prev_it is not None:
                     local_expected += 1
                     local_used += bool(mg.last_update and mg.last_update[2])
@@ -309,7 +309,7 @@ def replay_mission(job):
             else:
                 t_g = time.perf_counter()
                 prm.refresh_local_edge_weights(global_map=gm, edge_safety_margin=geometry.PRM_EDGE_SAFETY_MARGIN_M)
-                out['tempo_grafo_s'] += time.perf_counter() - t_g
+                out['graph_time_s'] += time.perf_counter() - t_g
         # --- invariant 2: global map against live, on random edges in the window --
         span = a['nx'] * a['cs']
         usable = spot_grid.slope_usable_mask(a['valid'].ravel(), a['od_raw'].ravel(), (a['ny'], a['nx']))
@@ -329,12 +329,12 @@ def replay_mission(job):
             glob_ = single.compute_arc_slope_profile(*p, *q)
             gl_total += 1
             gl_same += bool(glob_[2] and abs(glob_[0] - live[0]) < 0.02 and abs(glob_[1] - live[1]) < 0.02)
-    out['invariants']['grafo_locale_uguale_al_completo'] = [full_same, full_checks]
-    out['invariants']['aggiornamento_locale_usato'] = [local_used, local_expected]
-    out['invariants']['mappa_globale_uguale_al_vivo'] = [gl_same, gl_total]
-    out['invariants']['percorso_a_ogni_inizio_cella'] = [
+    out['invariants']['local_graph_equals_full'] = [full_same, full_checks]
+    out['invariants']['local_update_used'] = [local_used, local_expected]
+    out['invariants']['global_map_equals_live'] = [gl_same, gl_total]
+    out['invariants']['path_at_every_cell_start'] = [
         sum(c['path_found'] for c in out['cell_starts']), len(out['cell_starts'])]
-    out['ritorno'] = return_route_check(name, gm)
+    out['wp0_return'] = return_route_check(name, gm)
     out['gait'] = gait_check(m)
     out['seconds'] = round(time.perf_counter() - t_start, 1)
     return name, out
@@ -342,7 +342,7 @@ def replay_mission(job):
 
 def return_route_check(name, gm):
     """Return path to wp_0 on the downloaded GraphNav graph, today and with the shortcuts."""
-    gdirs = glob.glob(os.path.join(ROOT, 'graph', f'Mission_{name}', 'Grafo_*'))
+    gdirs = glob.glob(os.path.join(ROOT, 'graph', f'Mission_{name}', 'Gra[pf][ho]_*'))
     log_path = os.path.join(ROOT, 'MissionLogs', f'Mission_{name}', 'mission_log.txt')
     if not gdirs:
         return None
@@ -368,7 +368,7 @@ def return_route_check(name, gm):
              math.sqrt(e.from_tform_to.position.x ** 2 + e.from_tform_to.position.y ** 2
                        + e.from_tform_to.position.z ** 2)) for e in g.edges]
     log = open(log_path, errors='replace').read() if os.path.exists(log_path) else ''
-    found = re.findall(r"prima di 'ritorno a wp_0': localizzato su (\S+)", log)
+    found = re.findall(r"(?:prima di 'ritorno a wp_0'|before 'return to wp_0'): (?:localizzato su|localized on) (\S+)", log)
     start = by_name.get(found[-1]) if found else None
     goal = by_name.get('wp_0')
     if start is None or goal is None or goal not in xy and start not in xy:
@@ -379,8 +379,8 @@ def return_route_check(name, gm):
         return None
     sx = xy.get(start)
     straight = math.dist(sx, xy[goal]) if sx and goal in xy else None
-    return dict(start=names[start], oggi_m=round(before, 1), con_scorciatoie_m=round(after, 1),
-                scorciatoie=len(used), linea_aria_m=round(straight, 1) if straight else None)
+    return dict(start=names[start], today_m=round(before, 1), with_shortcuts_m=round(after, 1),
+                shortcuts=len(used), straight_line_m=round(straight, 1) if straight else None)
 
 
 def gait_check(m):
@@ -418,130 +418,130 @@ def summary_for_reference(out):
     tiers = {}
     for r in out['gait'] or []:
         tiers[r['tier']] = tiers.get(r['tier'], 0) + 1
-    return dict(cell_starts=out['cell_starts'], ritorno=out.get('ritorno'), gait_tiers=dict(sorted(tiers.items())),
+    return dict(cell_starts=out['cell_starts'], wp0_return=out.get('wp0_return'), gait_tiers=dict(sorted(tiers.items())),
                 gait_by_segment=[f"{r['time']} {r['tier']}" for r in out['gait'] or []])
 
 
 def check_invariants(name, out):
     fails = []
-    a, b = out['invariants']['grafo_locale_uguale_al_completo']
-    print(f"  [{'OK ' if a == b else 'FAIL'}] aggiornamento locale del grafo identico al completo: {a}/{b}")
+    a, b = out['invariants']['local_graph_equals_full']
+    print(f"  [{'OK ' if a == b else 'FAIL'}] local graph update identical to the full one: {a}/{b}")
     if a != b:
-        fails.append(f"{name}: grafo locale diverso dal completo ({a}/{b})")
-    a, b = out['invariants']['aggiornamento_locale_usato']
-    print(f"  [{'OK ' if a == b else 'FAIL'}] aggiornamento locale usato davvero: {a}/{b}")
+        fails.append(f"{name}: local graph different from the full one ({a}/{b})")
+    a, b = out['invariants']['local_update_used']
+    print(f"  [{'OK ' if a == b else 'FAIL'}] local update really used: {a}/{b}")
     if a != b:
-        fails.append(f"{name}: costruzione completa al posto dell'aggiornamento locale ({b - a} volte su {b})")
-    a, b = out['invariants']['mappa_globale_uguale_al_vivo']
+        fails.append(f"{name}: full build instead of the local update ({b - a} times out of {b})")
+    a, b = out['invariants']['global_map_equals_live']
     ok = b > 0 and a / b >= GLOBAL_LIVE_MIN_MATCH
-    print(f"  [{'OK ' if ok else 'FAIL'}] pendenza della mappa globale uguale al vivo: {a}/{b} "
-          f"({100 * a / max(b, 1):.1f}%, minimo {100 * GLOBAL_LIVE_MIN_MATCH:.1f}%)")
+    print(f"  [{'OK ' if ok else 'FAIL'}] global map slope equal to the live one: {a}/{b} "
+          f"({100 * a / max(b, 1):.1f}%, minimum {100 * GLOBAL_LIVE_MIN_MATCH:.1f}%)")
     if not ok:
-        fails.append(f"{name}: mappa globale diversa dal vivo ({a}/{b})")
+        fails.append(f"{name}: global map different from the live one ({a}/{b})")
     if out['gait'] is not None:
         big = [r for r in out['gait'] if r['pitch'] > HARD_PITCH_DEG]
         hard = [r for r in big if r['tier'] == 'HARD']
         ok = len(hard) == len(big)
-        print(f"  [{'OK ' if ok else 'FAIL'}] tratti con beccheggio oltre {HARD_PITCH_DEG:.0f} gradi in HARD: "
-              f"{len(hard)}/{len(big)} (tratti rigiocati {len(out['gait'])})")
+        print(f"  [{'OK ' if ok else 'FAIL'}] legs with pitch above {HARD_PITCH_DEG:.0f} degrees in HARD: "
+              f"{len(hard)}/{len(big)} (legs replayed {len(out['gait'])})")
         if not ok:
-            fails.append(f"{name}: tratti ripidi non HARD: "
-                         + ", ".join(f"{r['time']} {r['tier']} {r['pitch']:.0f} gradi" for r in big if r['tier'] != 'HARD'))
+            fails.append(f"{name}: steep legs not HARD: "
+                         + ", ".join(f"{r['time']} {r['tier']} {r['pitch']:.0f} deg" for r in big if r['tier'] != 'HARD'))
     else:
-        print("  [-- ] andatura: segments.csv mancante, controllo saltato")
-    r = out.get('ritorno')
+        print("  [-- ] gait: segments.csv missing, check skipped")
+    r = out.get('wp0_return')
     if r is None:
-        print("  [-- ] ritorno a wp_0: grafo GraphNav scaricato non presente, controllo saltato")
+        print("  [-- ] return to wp_0: downloaded GraphNav graph not present, check skipped")
     else:
-        limit = 1.5 * r['linea_aria_m'] + 2.0 if r['linea_aria_m'] else float('inf')
-        ok = r['con_scorciatoie_m'] <= r['oggi_m'] + 1e-6 and r['con_scorciatoie_m'] <= limit
-        print(f"  [{'OK ' if ok else 'FAIL'}] ritorno a wp_0 da {r['start']}: {r['oggi_m']} m nel grafo della missione "
-              f"-> {r['con_scorciatoie_m']} m con {r['scorciatoie']} scorciatoie (linea d'aria {r['linea_aria_m']} m)")
+        limit = 1.5 * r['straight_line_m'] + 2.0 if r['straight_line_m'] else float('inf')
+        ok = r['with_shortcuts_m'] <= r['today_m'] + 1e-6 and r['with_shortcuts_m'] <= limit
+        print(f"  [{'OK ' if ok else 'FAIL'}] return to wp_0 from {r['start']}: {r['today_m']} m in the mission graph "
+              f"-> {r['with_shortcuts_m']} m with {r['shortcuts']} shortcuts (straight line {r['straight_line_m']} m)")
         if not ok:
-            fails.append(f"{name}: ritorno a wp_0 {r['con_scorciatoie_m']} m (oggi {r['oggi_m']}, limite {limit:.1f})")
-    a, b = out['invariants']['percorso_a_ogni_inizio_cella']
-    print(f"  [{'OK ' if a == b else 'FAIL'}] percorso trovato a ogni inizio di cella: {a}/{b}")
+            fails.append(f"{name}: return to wp_0 {r['with_shortcuts_m']} m (today {r['today_m']}, limit {limit:.1f})")
+    a, b = out['invariants']['path_at_every_cell_start']
+    print(f"  [{'OK ' if a == b else 'FAIL'}] path found at every cell start: {a}/{b}")
     if a != b:
-        fails.append(f"{name}: nessun percorso in {b - a} inizi di cella")
+        fails.append(f"{name}: no path in {b - a} cell starts")
     return fails
 
 
 def compare_reference(name, now, ref):
     """List the behaviour differences from the reference."""
     if ref is None:
-        print("  [-- ] nessun riferimento salvato per questa missione")
+        print("  [-- ] no reference saved for this mission")
         return []
     diffs = []
     rc, nc = ref['cell_starts'], now['cell_starts']
     if len(rc) != len(nc):
-        diffs.append(f"inizi di cella {len(rc)} -> {len(nc)}")
+        diffs.append(f"cell starts {len(rc)} -> {len(nc)}")
     for r, n in zip(rc, nc):
         for k in ('valid_arcs', 'discarded_arcs', 'path_found', 'path_arcs', 'path_len_m'):
             if r.get(k) != n.get(k):
-                diffs.append(f"tentativo {n['attempt']} cella {tuple(n['cell'])}: {k} {r.get(k)} -> {n.get(k)}")
-    if ref.get('ritorno') != now.get('ritorno'):
-        diffs.append(f"ritorno a wp_0 {ref.get('ritorno')} -> {now.get('ritorno')}")
+                diffs.append(f"attempt {n['attempt']} cell {tuple(n['cell'])}: {k} {r.get(k)} -> {n.get(k)}")
+    if ref.get('wp0_return') != now.get('wp0_return'):
+        diffs.append(f"return to wp_0 {ref.get('wp0_return')} -> {now.get('wp0_return')}")
     if ref['gait_tiers'] != now['gait_tiers']:
-        diffs.append(f"andature {ref['gait_tiers']} -> {now['gait_tiers']}")
+        diffs.append(f"gaits {ref['gait_tiers']} -> {now['gait_tiers']}")
     rs, ns = dict(s.split(' ', 1) for s in ref['gait_by_segment']), dict(s.split(' ', 1) for s in now['gait_by_segment'])
     for t in sorted(set(rs) | set(ns)):
         if rs.get(t) != ns.get(t):
-            diffs.append(f"tratto delle {t}: andatura {rs.get(t)} -> {ns.get(t)}")
+            diffs.append(f"leg of {t}: gait {rs.get(t)} -> {ns.get(t)}")
     if diffs:
-        print(f"  [DIFF] comportamento diverso dal riferimento ({len(diffs)} differenze):")
+        print(f"  [DIFF] behaviour different from the reference ({len(diffs)} differences):")
         for line in diffs[:25]:
             print(f"         {line}")
         if len(diffs) > 25:
-            print(f"         ... e altre {len(diffs) - 25}")
+            print(f"         ... and {len(diffs) - 25} more")
     else:
-        print("  [OK ] comportamento identico al riferimento")
+        print("  [OK ] behaviour identical to the reference")
     return diffs
 
 
 def graph_table(names, results):
     """One line per mission: the graph used, the paths at cell start and the graph time."""
     print("\n" + "=" * 70)
-    print(f"{'missione':22s}{'nodi':>7}{'coppie':>8}{'percorsi':>10}{'lungh.media':>13}"
-          f"{'archi medi':>12}{'tempo grafo':>13}")
+    print(f"{'mission':22s}{'nodes':>7}{'pairs':>8}{'paths':>10}{'mean len.':>13}"
+          f"{'mean edges':>12}{'graph time':>13}")
     tot_t, lens, arcs = 0.0, [], []
     for name in names:
         out = results.get(name)
         if out is None:
             continue
         cs = [c for c in out['cell_starts'] if c['path_found']]
-        g = out.get('grafo', {})
+        g = out.get('graph', {})
         ml = np.mean([c['path_len_m'] for c in cs]) if cs else float('nan')
         ma = np.mean([c['path_arcs'] for c in cs]) if cs else float('nan')
         lens += [c['path_len_m'] for c in cs]
         arcs += [c['path_arcs'] for c in cs]
-        tot_t += out['tempo_grafo_s']
-        print(f"{name:22s}{g.get('nodi', 0):>7}{g.get('coppie', 0):>8}"
+        tot_t += out['graph_time_s']
+        print(f"{name:22s}{g.get('nodes', 0):>7}{g.get('pairs', 0):>8}"
               f"{len(cs):>6}/{len(out['cell_starts']):<3}{ml:>11.2f} m{ma:>12.1f}"
-              f"{out['tempo_grafo_s']:>11.1f} s")
+              f"{out['graph_time_s']:>11.1f} s")
     if lens:
-        print(f"{'TOTALE':22s}{'':>15}{len(lens):>10}{np.mean(lens):>11.2f} m"
+        print(f"{'TOTAL':22s}{'':>15}{len(lens):>10}{np.mean(lens):>11.2f} m"
               f"{np.mean(arcs):>12.1f}{tot_t:>11.1f} s")
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Rigioco delle missioni salvate (vedi docstring)")
+    ap = argparse.ArgumentParser(description="Replay of the saved missions (see docstring)")
     ap.add_argument('--missions', nargs='+', default=DEFAULT_MISSIONS,
-                    help="nomi come 13-10-2026_12-40-38 (default: le missioni di riferimento)")
+                    help="names like 13-10-2026_12-40-38 (default: the reference missions)")
     ap.add_argument('--all', action='store_true',
-                    help=f"tutte le {len(ALL_MISSIONS)} missioni rigiocabili (circa 5 minuti)")
+                    help=f"all {len(ALL_MISSIONS)} replayable missions (about 5 minutes)")
     ap.add_argument('--fast', action='store_true',
-                    help=f"confronto col grafo completo solo su {FAST_FULL_CHECKS} inizi di cella sparsi")
+                    help=f"comparison with the full graph only on {FAST_FULL_CHECKS} scattered cell starts")
     ap.add_argument('--update-reference', action='store_true',
-                    help="salva il comportamento di adesso come nuovo riferimento")
+                    help="save the current behaviour as the new reference")
     from spot_explorer.planning import mission_graph
     ap.add_argument('--graph', choices=mission_graph.GRAPH_SAMPLINGS,
-                    help="rigioca con questo metodo dei nodi (vedi CONFRONTO FRA GRAFI)")
+                    help="replay with this node method (see GRAPH COMPARISON)")
     ap.add_argument('--distribution', choices=mission_graph.RANDOM_DISTRIBUTIONS)
-    ap.add_argument('--density', type=float, help="nodi casuali per m2")
-    ap.add_argument('--spacing', type=float, help="passo del reticolo in m")
-    ap.add_argument('--seed', type=int, help="seme dei nodi casuali (default: estratto a caso)")
-    ap.add_argument('--min-edge', type=float, help="lunghezza minima degli archi in m")
-    ap.add_argument('--max-edge', type=float, help="lunghezza massima degli archi in m")
+    ap.add_argument('--density', type=float, help="random nodes per m2")
+    ap.add_argument('--spacing', type=float, help="lattice spacing in m")
+    ap.add_argument('--seed', type=int, help="seed of the random nodes (default: drawn at random)")
+    ap.add_argument('--min-edge', type=float, help="minimum edge length in m")
+    ap.add_argument('--max-edge', type=float, help="maximum edge length in m")
     args = ap.parse_args()
 
     override = {}
@@ -562,14 +562,14 @@ def main():
         override['MISSION_RANDOM_SEED'] = (args.seed if args.seed is not None
                                            else mission_graph.draw_seed())
     if override and args.update_reference:
-        ap.error("--update-reference non si usa con un grafo diverso da quello della missione")
+        ap.error("--update-reference is not used with a graph different from the mission's")
 
     if args.all:
         args.missions = ALL_MISSIONS
     t0 = time.perf_counter()
-    print(f"Rigioco di {len(args.missions)} missioni{' (veloce)' if args.fast else ''}, in parallelo...")
+    print(f"Replay of {len(args.missions)} missions{' (fast)' if args.fast else ''}, in parallel...")
     if override:
-        print("Grafo diverso da quello delle missioni: " +
+        print("Graph different from the missions' one: " +
               ", ".join(f"{k}={v}" for k, v in override.items()))
     with Pool(min(len(args.missions), os.cpu_count() or 1)) as pool:
         results = dict(pool.map(replay_mission, [(n, args.fast, override) for n in args.missions]))
@@ -580,13 +580,13 @@ def main():
         out = results[name]
         print(f"\n== {name}")
         if out is None:
-            print("  [-- ] scansioni o log non presenti su questo PC: missione saltata")
+            print("  [-- ] scans or log not present on this PC: mission skipped")
             continue
-        print(f"  rigiocata in {out['seconds']:.0f} s: {len(out['cell_starts'])} inizi di cella")
+        print(f"  replayed in {out['seconds']:.0f} s: {len(out['cell_starts'])} cell starts")
         fails += check_invariants(name, out)
         now = summary_for_reference(out)
         if override:
-            print("  [-- ] grafo diverso da quello della missione: confronto col riferimento saltato")
+            print("  [-- ] graph different from the mission's: comparison with the reference skipped")
         else:
             diffs += [f"{name}: {x}" for x in compare_reference(name, now, ref_all.get(name))]
         new_ref[name] = now
@@ -596,19 +596,19 @@ def main():
     print("\n" + "=" * 70)
     if args.update_reference and not fails:
         json.dump(new_ref, open(REFERENCE_FILE, 'w'), indent=1, ensure_ascii=False)
-        print(f"Riferimento aggiornato: {os.path.basename(REFERENCE_FILE)} (va nel commit con la modifica).")
+        print(f"Reference updated: {os.path.basename(REFERENCE_FILE)} (it goes in the commit with the change).")
         diffs = []
     elif args.update_reference:
-        print("Riferimento NON aggiornato: prima vanno risolti gli invarianti falliti.")
+        print("Reference NOT updated: the failed invariants must be fixed first.")
     if fails:
-        print(f"INVARIANTI FALLITI ({len(fails)}):")
+        print(f"INVARIANTS FAILED ({len(fails)}):")
         for x in fails:
             print(f"  - {x}")
     if diffs:
-        print(f"COMPORTAMENTO CAMBIATO rispetto al riferimento ({len(diffs)} differenze). Se e' voluto: "
-              f"python3 test_replay.py --update-reference")
+        print(f"BEHAVIOUR CHANGED compared with the reference ({len(diffs)} differences). If intended: "
+              f"python3 tests/test_replay.py --update-reference")
     if not fails and not diffs:
-        print("TUTTO OK")
+        print("ALL OK")
     print(f"({time.perf_counter() - t0:.0f} s)")
     sys.exit(1 if (fails or diffs) else 0)
 

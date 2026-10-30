@@ -48,29 +48,29 @@ import matplotlib.patches as patches
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # project folder
 sys.path.insert(0, HERE)                                     # the spot_explorer package
-from spot_explorer.legacy import modern                      # noqa: E402
+from spot_explorer.legacy import modern, modern_log_line     # noqa: E402
 MOSAIC_RES = 0.10           # side of the mosaic cells, m
 REFRESH_S = 1.0             # how often to re-read, live
-LOG_TAGS = ('[PROGRESSO]', '[TARGET]', '[ATTEMPT]', '[VISITED]', '[BLOCKED]', '[BLOCCO]',
-            '[SUBITO]', '[REPLAN]', '[REPLAN FALLITO]', '[ARRIVO]', '[OBIETTIVO]', '[STOP]',
-            '[GRAPHNAV]', '[BATTERIA]', '[FINE]', '[FRONTIERA]', '[STALLO]', '[EMERGENZA]',
-            '[QUASI]', '[PASSO FINALE]', '[RITORNO]', '[MULTINODO]', '[DEFER]', '[PRECHECK]', '[WP0]')
+LOG_TAGS = ('[PROGRESS]', '[TARGET]', '[ATTEMPT]', '[VISITED]', '[BLOCKED]', '[BLOCK]',
+            '[EARLY]', '[REPLAN]', '[REPLAN FAILED]', '[ARRIVAL]', '[GOAL]', '[STOP]',
+            '[GRAPHNAV]', '[BATTERY]', '[END]', '[CELL FRONTIER]', '[STALL]', '[EMERGENCY]',
+            '[ALMOST]', '[FINAL STEP]', '[RETURN]', '[MULTINODE]', '[DEFER]', '[PRECHECK]', '[WP0]')
 N_LOG_LINES = 12
 REASON_COLORS = {'obstacle': 'red', 'roughness': 'darkorange', 'slope': 'darkorange',
                  'end_of_data': 'purple', 'end_of_path': 'green'}
 
 
-def _folders(nome):
+def _folders(name):
     """(MissionMap folder, MissionLogs folder) of the mission; the latest if name is None."""
-    if nome is None:
+    if name is None:
         cands = [d for d in glob.glob(os.path.join(HERE, "MissionMap", "Mission_*")) if os.path.isdir(d)]
         if not cands:
-            sys.exit("Nessuna missione in MissionMap/.")
+            sys.exit("No mission in MissionMap/.")
         mm = max(cands, key=os.path.getmtime)
-    elif os.path.isdir(nome):
-        mm = os.path.abspath(nome)
+    elif os.path.isdir(name):
+        mm = os.path.abspath(name)
     else:
-        mm = os.path.join(HERE, "MissionMap", nome if nome.startswith("Mission_") else f"Mission_{nome}")
+        mm = os.path.join(HERE, "MissionMap", name if name.startswith("Mission_") else f"Mission_{name}")
     ml = os.path.join(HERE, "MissionLogs", os.path.basename(mm))
     return mm, ml
 
@@ -182,11 +182,11 @@ class LiveState:
             f.seek(self.log_pos)
             while True:
                 pos = f.tell()
-                riga = f.readline()
-                if not riga or not riga.endswith('\n'):
+                line = f.readline()
+                if not line or not line.endswith('\n'):
                     f.seek(pos)               # half-written line: re-read next turn
                     break
-                m = re.match(r'(\d\d:\d\d:\d\d\.\d+) (.*)', riga.rstrip('\n'))
+                m = re.match(r'(\d\d:\d\d:\d\d\.\d+) (.*)', line.rstrip('\n'))
                 if m and limit is not None and _hms(m.group(1)) > limit:
                     f.seek(pos)
                     break
@@ -195,48 +195,49 @@ class LiveState:
             self.log_pos = f.tell()
         return self.log_pos != before
 
-    def _read_line(self, ora, text):
+    def _read_line(self, clock, text):
         s = self.log_state
-        if text.startswith('[PROGRESSO]'):
-            s['progresso'] = text[len('[PROGRESSO] '):]
-        elif text.lstrip().startswith(('min trascorsi', '0.', '1', '2', '3', '4', '5', '6', '7', '8', '9')) \
-                and 'min trascorsi' in text:
-            s['tempo'] = text.strip()
+        shown = text
+        text = modern_log_line(text)          # old missions: Italian tags and phrases
+        if text.startswith('[PROGRESS]'):
+            s['progress'] = text[len('[PROGRESS] '):]
+        elif text.lstrip()[:1].isdigit() and 'min elapsed' in text:
+            s['time'] = text.strip()
         elif text.startswith('[ATTEMPT]'):
-            s['tentativo'] = text[len('[ATTEMPT] '):]
-        elif text.startswith('[BATTERIA]'):
+            s['attempt'] = text[len('[ATTEMPT] '):]
+        elif text.startswith('[BATTERY]'):
             m = re.search(r'(\d+(?:\.\d+)?)\s*%', text)
             if m:
-                s['batteria'] = m.group(1) + '%'
+                s['battery'] = m.group(1) + '%'
         elif text.startswith('[GRAPHNAV]'):
-            s['graphnav'] = f"{ora} {text[len('[GRAPHNAV] '):]}"
+            s['graphnav'] = f"{clock} {text[len('[GRAPHNAV] '):]}"
         # Mission phase, from the last line that states it.
         if text.startswith('[ATTEMPT]'):
-            m = re.search(r'cella \((\d+),(\d+)\)', text)
-            s['fase'] = f"esplorazione, tentativo sulla cella ({m.group(1)},{m.group(2)})" if m else "esplorazione"
-        elif text.startswith('[GRAPHNAV]') and ': avvio' in text:
-            s['fase'] = "viaggio con GraphNav: " + text[len('[GRAPHNAV] '):].split(':')[0]
-        elif text.startswith('[GRAPHNAV] prima del ritorno a wp_0'):
-            s['fase'] = "fine esplorazione: chiusura della mappa e ritorno a wp_0"
-        elif text.startswith('[WP0] CORREZIONE'):
-            s['fase'] = "CORREZIONE del ritorno a wp_0 con il fiducial"
-        elif text.startswith('[EMERGENZA]'):
-            s['fase'] = "EMERGENZA: " + text[len('[EMERGENZA] '):]
-        elif text.startswith('[TEMPO] Chiusura della missione'):
-            s['fase'] = "missione finita"
+            m = re.search(r'cell \((\d+),(\d+)\)', text)
+            s['phase'] = f"exploration, attempt on cell ({m.group(1)},{m.group(2)})" if m else "exploration"
+        elif text.startswith('[GRAPHNAV]') and ': start (at most' in text:
+            s['phase'] = "trip with GraphNav: " + text[len('[GRAPHNAV] '):].split(':')[0]
+        elif text.startswith('[GRAPHNAV] before the return to wp_0'):
+            s['phase'] = "end of exploration: map closure and return to wp_0"
+        elif text.startswith('[WP0] CORRECTION'):
+            s['phase'] = "CORRECTION of the return to wp_0 with the fiducial"
+        elif text.startswith('[EMERGENCY]'):
+            s['phase'] = "EMERGENCY: " + text[len('[EMERGENCY] '):]
+        elif text.startswith('[TIMING] Mission closure'):
+            s['phase'] = "mission finished"
         # Return to wp_0: arrival, offset from the tag, corrections.
-        if 'ritorno a wp_0: arrivato' in text:
-            s['wp0'] = "arrivato secondo GraphNav"
-        elif 'Ritorno a wp_0 NON riuscito' in text:
-            s['wp0'] = text.split('] ', 1)[-1][:80]
-        m = re.search(r"\[WP0\] Secondo il tag il robot e' a ([\d.]+) m", text)
+        if 'return to wp_0: arrived' in text:
+            s['wp0'] = "arrived according to GraphNav"
+        elif 'Return to wp_0 NOT successful' in text:
+            s['wp0'] = shown.split('] ', 1)[-1][:80]
+        m = re.search(r"\[WP0\] According to the tag the robot is ([\d.]+) m", text)
         if m:
-            s['wp0'] = f"{s.get('wp0', 'arrivato')}; secondo il tag a {m.group(1)} m dalla partenza"
-        m = re.search(r"\[WP0\] Dopo la correzione (\d+): a ([\d.]+) m dalla partenza \(prima ([\d.]+) m\)", text)
+            s['wp0'] = f"{s.get('wp0', 'arrived')}; according to the tag {m.group(1)} m from the start"
+        m = re.search(r"\[WP0\] After correction (\d+): (?:a )?([\d.]+) m from the start \(before ([\d.]+) m\)", text)
         if m:
-            s['wp0'] = f"CORRETTO con il fiducial ({m.group(1)}): da {m.group(3)} a {m.group(2)} m dalla partenza"
+            s['wp0'] = f"CORRECTED with the fiducial ({m.group(1)}): from {m.group(3)} to {m.group(2)} m from the start"
         if text.startswith(LOG_TAGS):
-            self.log_lines.append(f"{ora} {text}")
+            self.log_lines.append(f"{clock} {shown}")
             del self.log_lines[:-N_LOG_LINES]
 
     def trajectory(self, until=None):
@@ -347,8 +348,8 @@ def draw(fig, ax_map, ax_txt, st, follow, until=None):
         ax_map.plot(tr[0, 1], tr[0, 2], '^', color='black', mfc='white', ms=10, mew=1.5, zorder=9)
 
     lines = []
-    if 'fase' in st.log_state:
-        lines.append(f"FASE             {st.log_state['fase']}")
+    if 'phase' in st.log_state:
+        lines.append(f"PHASE            {st.log_state['phase']}")
     if d is not None:
         rx, ry, _ = (float(v) for v in d['robot_xyz'])
         yaw = float(d['robot_yaw'])
@@ -379,60 +380,60 @@ def draw(fig, ax_map, ax_txt, st, follow, until=None):
             ax_map.set_ylim(ry - 6, ry + 6)
         eta = time.time() - float(d['time']) if until is None else until - float(d['time'])
         lines += [
-            f"Cella obiettivo  ({cell[0]},{cell[1]})   giro {int(d['loop_iter'])}, tentativo {int(d['iteration'])}",
-            f"Decisione        {str(d['decision_kind'])}",
-            f"Fronte           {reason}: {float(d['frontier_dist']):.2f} m confermati su "
-            f"{float(d['frontier_path_len']):.2f} m, avanzo {adv:.2f} m",
-            f"Robot            ({rx:.2f}, {ry:.2f})  muso {np.degrees(yaw):.0f} gradi"
-            + (f"   fermo da {int(float(d['no_progress']))} scansioni" if float(d['no_progress']) > 0 else ""),
-            f"Obiettivo        ({gx:.2f}, {gy:.2f}), a {np.hypot(gx - rx, gy - ry):.2f} m in linea d'aria",
-            f"Ultima scansione {eta:.0f} s fa",
+            f"Goal cell        ({cell[0]},{cell[1]})   turn {int(d['loop_iter'])}, attempt {int(d['iteration'])}",
+            f"Decision         {str(d['decision_kind'])}",
+            f"Frontier         {reason}: {float(d['frontier_dist']):.2f} m confirmed out of "
+            f"{float(d['frontier_path_len']):.2f} m, advancing {adv:.2f} m",
+            f"Robot            ({rx:.2f}, {ry:.2f})  nose {np.degrees(yaw):.0f} deg"
+            + (f"   still for {int(float(d['no_progress']))} scans" if float(d['no_progress']) > 0 else ""),
+            f"Goal             ({gx:.2f}, {gy:.2f}), {np.hypot(gx - rx, gy - ry):.2f} m in a straight line",
+            f"Last scan        {eta:.0f} s ago",
         ]
     s = st.log_state
-    if 'progresso' in s:
-        lines.append(f"Avanzamento      {s['progresso']}")
-    if 'tempo' in s:
-        lines.append(f"                 {s['tempo']}")
-    if 'batteria' in s:
-        lines.append(f"Batteria         {s['batteria']}")
+    if 'progress' in s:
+        lines.append(f"Progress         {s['progress']}")
+    if 'time' in s:
+        lines.append(f"                 {s['time']}")
+    if 'battery' in s:
+        lines.append(f"Battery          {s['battery']}")
     if 'graphnav' in s:
-        lines.append(f"Ultimo GraphNav  {s['graphnav'][:90]}")
+        lines.append(f"Last GraphNav    {s['graphnav'][:90]}")
     if 'wp0' in s:
-        lines.append(f"Ritorno a wp_0   {s['wp0']}")
+        lines.append(f"Return to wp_0   {s['wp0']}")
     lines = [w for r in lines for w in (textwrap.wrap(r, 66, subsequent_indent=' ' * 17) or [''])]
     ax_txt.text(0.0, 1.0, "\n".join(lines), va='top', ha='left', family='monospace', fontsize=9,
                 transform=ax_txt.transAxes)
     log = "\n".join(w for r in st.log_lines for w in textwrap.wrap(r, 92, subsequent_indent='    '))
-    ax_txt.text(0.0, 0.52, "Ultime righe del log\n" + log, va='top', ha='left', family='monospace',
+    ax_txt.text(0.0, 0.52, "Last log lines\n" + log, va='top', ha='left', family='monospace',
                 fontsize=7.5, transform=ax_txt.transAxes, color='0.15')
     ax_map.set_aspect('equal')
     if not follow and st.mosaic:
         ax_map.autoscale()
     from matplotlib.lines import Line2D
-    leg = [Line2D([], [], color='royalblue', lw=1.4, label='strada fatta'),
+    leg = [Line2D([], [], color='royalblue', lw=1.4, label='path taken'),
            Line2D([], [], color='royalblue', lw=1.4, ls='--', label='GraphNav'),
-           Line2D([], [], color='crimson', lw=2.6, label='correzione wp_0'),
-           Line2D([], [], color='darkorange', lw=2, marker='o', ms=3, label='percorso pianificato'),
-           Line2D([], [], color='gold', marker='*', mec='k', ms=11, ls='', label='obiettivo'),
-           Line2D([], [], color='k', marker='x', ms=8, mew=2, ls='', label='fine del fronte'),
-           Line2D([], [], color='black', marker='^', mfc='white', ms=8, ls='', label='partenza')]
+           Line2D([], [], color='crimson', lw=2.6, label='wp_0 correction'),
+           Line2D([], [], color='darkorange', lw=2, marker='o', ms=3, label='planned path'),
+           Line2D([], [], color='gold', marker='*', mec='k', ms=11, ls='', label='goal'),
+           Line2D([], [], color='k', marker='x', ms=8, mew=2, ls='', label='end of the frontier'),
+           Line2D([], [], color='black', marker='^', mfc='white', ms=8, ls='', label='start')]
     ax_map.legend(handles=leg, loc='upper center', bbox_to_anchor=(0.5, -0.035), ncol=4, fontsize=7.5,
                   frameon=False)
-    nome = os.path.basename(st.mm).replace('Mission_', '')
+    name = os.path.basename(st.mm).replace('Mission_', '')
     when = time.strftime('%H:%M:%S', time.localtime(until if until is not None else time.time()))
-    ax_map.set_title(f"Missione {nome} -- {when}" + ("   (segue il robot: f)" if follow else "   (tutta: f)"),
+    ax_map.set_title(f"Mission {name} -- {when}" + ("   (following the robot: f)" if follow else "   (whole: f)"),
                      fontsize=10)
     fig.canvas.draw_idle()
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Visualizzatore dal vivo della missione.")
-    ap.add_argument('mission', nargs='?', help="nome (es. 28-10-2026_14-23-50) o cartella; default l'ultima")
-    ap.add_argument('--replay', action='store_true', help="rigioca una missione finita nel suo tempo")
-    ap.add_argument('--speed', type=float, default=20.0, help="velocita' del rigioco (default 20x)")
-    ap.add_argument('--png', help="salva una figura e esce (con --until: a quell'ora)")
-    ap.add_argument('--until', help="HH:MM:SS, con --png")
-    ap.add_argument('--whole', action='store_true', help="parte mostrando tutta la missione invece di seguire il robot")
+    ap = argparse.ArgumentParser(description="Live mission viewer.")
+    ap.add_argument('mission', nargs='?', help="name (e.g. 28-10-2026_14-23-50) or folder; default the latest")
+    ap.add_argument('--replay', action='store_true', help="replay a finished mission in its own time")
+    ap.add_argument('--speed', type=float, default=20.0, help="replay speed (default 20x)")
+    ap.add_argument('--png', help="save one figure and exit (with --until: at that time)")
+    ap.add_argument('--until', help="HH:MM:SS, with --png")
+    ap.add_argument('--whole', action='store_true', help="start showing the whole mission instead of following the robot")
     args = ap.parse_args()
 
     if args.png:
@@ -441,23 +442,23 @@ def main():
 
     mm, ml = _folders(args.mission)
     if not os.path.isdir(mm):
-        sys.exit(f"Cartella non trovata: {mm}")
+        sys.exit(f"Folder not found: {mm}")
     st = LiveState(mm, ml)
     fig = plt.figure(figsize=(15, 8.5))
     ax_map = fig.add_axes([0.04, 0.11, 0.55, 0.85])
     ax_txt = fig.add_axes([0.61, 0.03, 0.38, 0.94])
-    state = {'segui': not args.whole, 'pausa': False, 'esci': False, 'ridisegna': True}
+    state = {'follow': not args.whole, 'pause': False, 'quit': False, 'redraw': True}
 
     def on_key(ev):
-        state['ridisegna'] = True
+        state['redraw'] = True
         if ev.key == 'f':
-            state['segui'] = not state['segui']
+            state['follow'] = not state['follow']
         elif ev.key == ' ':
-            state['pausa'] = not state['pausa']
+            state['pause'] = not state['pause']
         elif ev.key in ('q', 'escape'):
-            state['esci'] = True
+            state['quit'] = True
     fig.canvas.mpl_connect('key_press_event', on_key)
-    fig.canvas.mpl_connect('close_event', lambda ev: state.update(esci=True))
+    fig.canvas.mpl_connect('close_event', lambda ev: state.update(quit=True))
 
     # Start instant for replay and --until: the first scan of the mission.
     scans = st._scans()
@@ -478,19 +479,19 @@ def main():
         st.update_scans(until)
         st.update_vis(until)
         st.update_log(until)
-        draw(fig, ax_map, ax_txt, st, state['segui'], until)
+        draw(fig, ax_map, ax_txt, st, state['follow'], until)
         fig.savefig(args.png, dpi=110)
-        print(f"Salvata {args.png}")
+        print(f"Saved {args.png}")
         return
 
     if args.replay and t_start is None:
-        sys.exit("Nessuna scansione da rigiocare.")
+        sys.exit("No scan to replay.")
     t_rig, t_wall = t_start, time.time()
-    print(f"Missione {os.path.basename(mm)}: " + ("rigioco" if args.replay else "dal vivo") +
-          ". Tasti: f segui/tutta, spazio pausa, q esci.")
-    while not state['esci']:
+    print(f"Mission {os.path.basename(mm)}: " + ("replay" if args.replay else "live") +
+          ". Keys: f follow/whole, space pause, q quit.")
+    while not state['quit']:
         now = time.time()
-        if not state['pausa']:
+        if not state['pause']:
             until = None
             if args.replay:
                 t_rig += (now - t_wall) * args.speed
@@ -500,9 +501,9 @@ def main():
             changed = st.update_scans(until) > 0
             changed = st.update_vis(until) or changed
             changed = st.update_log(until) or changed
-            if changed or state['ridisegna'] or args.replay:
-                draw(fig, ax_map, ax_txt, st, state['segui'], until)
-                state['ridisegna'] = False
+            if changed or state['redraw'] or args.replay:
+                draw(fig, ax_map, ax_txt, st, state['follow'], until)
+                state['redraw'] = False
         t_wall = now
         plt.pause(REFRESH_S)
         if not plt.fignum_exists(fig.number):

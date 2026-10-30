@@ -167,7 +167,7 @@ CONE_MIN_GAIN_M = 0.20         # a direction counts only if it gets closer to th
 # path. If that point is behind, no direction of the cone gets closer, and it moves on
 # to the back-off -- which is the right move.
 CONE_PATH_LOOKAHEAD_M = 1.5
-# During the rotation in place a shorter "fine dati" frontier does not interrupt the move:
+# During the rotation in place a shorter "end of data" frontier does not interrupt the move:
 # while rotating the seen area shifts and the data edge gets a few centimetres shorter without
 # any obstacle. It holds until
 # the robot has moved by at least this much; a frontier shortened by an OBSTACLE always
@@ -248,7 +248,7 @@ RECOVERY_SAME_GOAL_M = 0.30
 TARGET_CLEARANCE_M = 0.33
 # TARGET_CELL_BORDER_M: the goal is preferably chosen at least this distance from the
 # cell border. A goal on the border leaves the robot, stopped within the arrival
-# tolerance, outside the cell ("Mancano 0.06 m ... ancora fuori dalla cella", 44 times on
+# tolerance, outside the cell ("0.06 m to go ... still outside cell", 44 times on
 # 22-10 16:04).
 TARGET_CELL_BORDER_M = 0.30
 # Arrival by tolerance with the robot just OUTSIDE the cell: it counts if the centre is outside by
@@ -390,7 +390,7 @@ GRAPHNAV_RELOC_MAX_WP_DIST_M = 3.0     # beyond this distance from the nearest w
 # Before moving with GraphNav to the waypoint from which to attempt a cell, the graph is checked
 # to reach the cell from there (see graph_reaches_cell). In the test of 22-10
 # 15:24, three moves out of six ended in an attempt failed in less than a second with
-# "GRAFO DISCONNESSO", which the graph already knew before leaving: ~25 s out of 3 minutes.
+# "GRAPH DISCONNECTED", which the graph already knew before leaving: ~25 s out of 3 minutes.
 # False = it leaves anyway and the attempt decides.
 GRAPHNAV_PRECHECK = True
 

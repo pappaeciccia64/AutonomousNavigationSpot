@@ -78,16 +78,16 @@ def _trap_backtrack(trap_state, block_arc, env, prm_graph, goal_id, recordingInt
         if a != b:
             key = (min(a, b), max(a, b))
             prm_graph.edge_penalty_persistent[key] = prm_graph._ATTEMPT_MARK
-            print(f"[RITORNO] Arco {a}->{b} fuori dal piano per il resto del tentativo "
-                  f"(ritorno {trap_state['n']}/{P.MAX_BACKTRACKS_PER_ATTEMPT}).")
+            print(f"[RETURN] Edge {a}->{b} out of the plan for the rest of the attempt "
+                  f"(return {trap_state['n']}/{P.MAX_BACKTRACKS_PER_ATTEMPT}).")
     esc = escape_by_backtracking(
         env, prm_graph, goal_id, recordingInterface, robot_state_client, command_client,
         global_map, mobility_kwargs, pts, obstacle_mask, label=label, **kwargs)
     if trap_state['n'] >= P.MAX_BACKTRACKS_PER_ATTEMPT and esc.get('ok'):
         MISSION_STATS['backtrack_giveups'] = MISSION_STATS.get('backtrack_giveups', 0) + 1
-        print(f"[RITORNO] {trap_state['n']} ritorni in questo tentativo: sono tornato "
-              f"indietro, ma non riprovo. Rimando la cella e la provo da un altro lato.")
-        esc = dict(esc, ok=False, how='rinuncia dopo ritorni ripetuti')
+        print(f"[RETURN] {trap_state['n']} returns in this attempt: I went "
+              f"back, but I do not retry. I defer the cell and try it from another side.")
+        esc = dict(esc, ok=False, how='gave up after repeated returns')
     return esc
 
 
@@ -114,11 +114,11 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
     # in a trap or after a physical failure going back also serves to free it.
     if skip_if_graph_cannot_help and backtracking_cannot_help(
             env, prm_graph, goal_id, robot_state_client, max_hops):
-        print(f"[RITORNO] {label}: dai nodi delle prossime {max_hops} briciole il grafo non "
-              f"arriva comunque all'obiettivo (non dipende da dove sono io). Non torno "
-              f"indietro: rimando subito la cella.")
+        print(f"[RETURN] {label}: from the nodes of the next {max_hops} breadcrumbs the graph does not "
+              f"reach the goal anyway (it does not depend on where I am). I do not go "
+              f"back: I defer the cell at once.")
         MISSION_STATS['backtracks_skipped'] = MISSION_STATS.get('backtracks_skipped', 0) + 1
-        return {'ok': False, 'ids': None, 'robot_node': None, 'how': 'cella rimandata'}
+        return {'ok': False, 'ids': None, 'robot_node': None, 'how': 'cell deferred'}
 
     for hop in range(1, int(max_hops) + 1):
         # Arrive facing the attempt's goal: from there replan towards it.
@@ -126,16 +126,16 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
                                                      face_xy=prm_graph.get_node_position(goal_id))
         if not ok:
             if crumb is None:
-                print(f"[RITORNO] {label}: nessuna briciola GraphNav disponibile.")
+                print(f"[RETURN] {label}: no GraphNav breadcrumb available.")
             else:
-                print(f"[RITORNO] {label}: GraphNav non e' riuscito a tornare a "
+                print(f"[RETURN] {label}: GraphNav could not go back to "
                       f"{crumb['wp_name']}.")
             MISSION_STATS['graphnav_backtrack_fail'] += 1
-            print("[RITORNO] Ripiego sulla ritirata a zampe sui tratti percorsi.")
+            print("[RETURN] Falling back on the walked retreat along the travelled legs.")
             retreat_along_traveled_path(env, robot_state_client, command_client,
                                         mobility_kwargs=mobility_kwargs,
                                         pts=pts, obstacle_mask=obstacle_mask)
-            return {'ok': False, 'ids': None, 'robot_node': None, 'how': 'ritirata a zampe'}
+            return {'ok': False, 'ids': None, 'robot_node': None, 'how': 'walked retreat'}
 
         if not crumb.get('in_place'):
             MISSION_STATS['graphnav_backtracks'] += 1
@@ -149,23 +149,23 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
             ax, ay = crumb['x'], crumb['y']
         new_node = prm_graph.add_stop_node(
             ax, ay, global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M,
-            label=f"sosta (ritorno GraphNav a {crumb['wp_name']})")
+            label=f"stop (GraphNav return to {crumb['wp_name']})")
         # No global-map exemption around this node: see the comment at the
         # caller of set_robot_node in the main loop.
         prm_graph.set_robot_node(new_node, 0.0)
 
         ids = prm_graph.find_path_dijkstra(new_node, goal_id)
         if ids is not None and len(ids) > 1:
-            print(f"[RITORNO] {label}: tornato a {crumb['wp_name']} ({hop}/{max_hops}) e da qui "
-                  f"c'e' un percorso con {len(ids) - 1} tratti. Riprendo.")
-            return {'ok': True, 'ids': ids, 'robot_node': new_node, 'how': 'ripianificato'}
-        print(f"[RITORNO] {label}: tornato a {crumb['wp_name']} ({hop}/{max_hops}) ma da qui il "
-              f"grafo non offre percorsi verso l'obiettivo.")
+            print(f"[RETURN] {label}: back at {crumb['wp_name']} ({hop}/{max_hops}) and from here "
+                  f"there is a path with {len(ids) - 1} legs. Resuming.")
+            return {'ok': True, 'ids': ids, 'robot_node': new_node, 'how': 'replanned'}
+        print(f"[RETURN] {label}: back at {crumb['wp_name']} ({hop}/{max_hops}) but from here the "
+              f"graph offers no path to the goal.")
         if crumb.get('in_place'):
             break           # there are no farther breadcrumbs: more rounds would be the same
 
-    print(f"[RITORNO] {label}: {hop} ritorni senza trovare un percorso. Rimando la cella.")
-    return {'ok': False, 'ids': None, 'robot_node': None, 'how': 'cella rimandata'}
+    print(f"[RETURN] {label}: {hop} returns without finding a path. I defer the cell.")
+    return {'ok': False, 'ids': None, 'robot_node': None, 'how': 'cell deferred'}
 
 
 
@@ -204,14 +204,14 @@ def retreat_along_traveled_path(env, robot_state_client, command_client,
     mobility_kwargs = mobility_kwargs or {}
     traveled = getattr(env, '_traveled_arcs', None)
     if not traveled:
-        print("[RITIRATA] Nessun tratto percorso registrato: non so da dove sono arrivato, "
-              "non arretro.")
+        print("[RETREAT] No travelled leg recorded: I do not know where I came from, "
+              "I do not back up.")
         return 0, 0.0
 
     done, total = 0, 0.0
     for _ in range(max_segments):
         if not traveled:
-            print("[RITIRATA] Esauriti i tratti percorsi registrati.")
+            print("[RETREAT] Recorded travelled legs exhausted.")
             break
 
         from_x, from_y, to_x, to_y = traveled[-1]
@@ -220,13 +220,13 @@ def retreat_along_traveled_path(env, robot_state_client, command_client,
 
         gap = float(np.hypot(to_x - robot_x, to_y - robot_y))
         if gap > P.RETREAT_CONTINUITY_M:
-            print(f"[RITIRATA] Non sono dove finiva l'ultimo tratto registrato (distanza {gap:.2f} m, "
-                  f"es. dopo uno spostamento con GraphNav): non arretro alla cieca.")
+            print(f"[RETREAT] I am not where the last recorded leg ended (distance {gap:.2f} m, "
+                  f"e.g. after a move with GraphNav): I do not back up blind.")
             del traveled[:]
             break
         if seg_len > P.RETREAT_MAX_SEGMENT_M:
-            print(f"[RITIRATA] Il tratto di rientro e' lungo {seg_len:.2f} m (oltre "
-                  f"{P.RETREAT_MAX_SEGMENT_M:.1f} m): non lo ripercorro all'indietro.")
+            print(f"[RETREAT] The way-back leg is {seg_len:.2f} m long (beyond "
+                  f"{P.RETREAT_MAX_SEGMENT_M:.1f} m): I do not retrace it backwards.")
             break
 
         if seg_len < P.RETREAT_MIN_SEGMENT_M:
@@ -240,15 +240,15 @@ def retreat_along_traveled_path(env, robot_state_client, command_client,
                     status = safe_frontier.verify_arc_safety(robot_x, robot_y, from_x, from_y,
                                                                pts, obstacle_mask)
                     if status == 'blocked':
-                        print(f"[RITIRATA] Il tratto di rientro verso ({from_x:.2f}, {from_y:.2f}) "
-                              f"risulta ostruito nella scansione corrente. Mi fermo qui.")
+                        print(f"[RETREAT] The way-back leg towards ({from_x:.2f}, {from_y:.2f}) "
+                              f"is obstructed in the current scan. I stop here.")
                         break
             except Exception as e:
-                print(f"[RITIRATA] Controllo del tratto di rientro non riuscito ({e}); "
-                      f"procedo comunque, e' la via da cui sono venuto.")
+                print(f"[RETREAT] Check of the way-back leg failed ({e}); "
+                      f"carrying on anyway, it is the way I came from.")
 
-        print(f"[RITIRATA] Tratto {done + 1}/{max_segments}: rientro verso "
-              f"({from_x:.2f}, {from_y:.2f}), {seg_len:.2f} m all'indietro.")
+        print(f"[RETREAT] Leg {done + 1}/{max_segments}: going back towards "
+              f"({from_x:.2f}, {from_y:.2f}), {seg_len:.2f} m backwards.")
         with TrajectoryLog(robot_state_client, 'retreat', (from_x, from_y)):
             success, dist = movements.move_to_world_point_without_turning(
                 from_x, from_y, "vision", command_client, robot_state_client, **mobility_kwargs)
@@ -256,15 +256,15 @@ def retreat_along_traveled_path(env, robot_state_client, command_client,
         traveled.pop()
 
         if not success:
-            print(f"[RITIRATA] Il rientro si e' fermato dopo {dist:.2f} m. "
-                  f"Interrompo la ritirata.")
+            print(f"[RETREAT] The way back stopped after {dist:.2f} m. "
+                  f"Interrupting the retreat.")
             break
         done += 1
 
     if done:
-        print(f"[RITIRATA] Completata: {done} tratti, {total:.2f} m percorsi all'indietro.")
+        print(f"[RETREAT] Completed: {done} legs, {total:.2f} m travelled backwards.")
     else:
-        print("[RITIRATA] Nessun tratto percorso.")
+        print("[RETREAT] No leg travelled.")
     return done, total
 
 
@@ -336,21 +336,21 @@ def finalize_or_defer_blocked_cell(env, row, col, sampler=None, global_map=None)
         # 0.5 m) or hundreds (at 0.25 m), so a high "occupied" does NOT mean the cell is unreachable;
         # it means much of the cell is inside an obstacle. The immediate block below
         # triggers only in the extreme case where NOT a single free or unknown point is left.
-        print(f"[CELLA] ({row},{col}) dopo il tentativo fallito: dei punti candidati, "
-              f"{free} visti liberi, {unknown} mai visti, {occupied} dentro un ostacolo "
-              f"nella mappa globale.")
+        print(f"[CELL] ({row},{col}) after the failed attempt: of the candidate points, "
+              f"{free} seen free, {unknown} never seen, {occupied} inside an obstacle "
+              f"in the global map.")
         if not ok:
             env.mark_cell_blocked(row, col)
-            print(f"[BLOCKED] Cella ({row},{col}) bloccata subito: tutti i {occupied} punti "
-                  f"candidati risultano dentro un ostacolo nella mappa globale (nessuno libero, "
-                  f"nessuno ignoto). Non c'e' un lato da cui entrare: l'obiettivo e' nel muro.")
+            print(f"[BLOCKED] Cell ({row},{col}) blocked at once: all {occupied} candidate points "
+                  f"are inside an obstacle in the global map (none free, "
+                  f"none unknown). There is no side to enter from: the goal is in the wall.")
             return
     if env.all_sides_explored(row, col):
         env.mark_cell_blocked(row, col)
-        print(f"[BLOCKED] Cella ({row},{col}) bloccata per sempre: ogni lato raggiungibile "
-              f"e' stato provato senza successo.")
+        print(f"[BLOCKED] Cell ({row},{col}) blocked forever: every reachable side "
+              f"has been tried without success.")
     else:
-        print(f"[DEFER] Cella ({row},{col}) non ancora provata da tutti i lati (lati provati: "
-              f"{bin(env.get_cell_sides_status(row, col))}): resta candidata della "
-              f"frontiera e si ritentera' piu' avanti, nell'ordine normale, "
-              f"da un lato non ancora provato.")
+        print(f"[DEFER] Cell ({row},{col}) not yet tried from all sides (sides tried: "
+              f"{bin(env.get_cell_sides_status(row, col))}): it stays a candidate of the "
+              f"frontier and will be retried later, in the normal order, "
+              f"from a side not yet tried.")

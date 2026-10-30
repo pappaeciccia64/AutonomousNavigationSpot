@@ -58,30 +58,30 @@ DEFAULT_GRAPH_3 = 'graph/Mission_26-10-2026_15-11-21/Grafo_26-10-2026_15-39-18'
 # (name, close_loops_checked parameters). For A, without a limit on Spot's side, the RPC
 # waits up to 300 s.
 CONFIGS_1 = [
-    ("A. come giovedi', senza limite", dict(timeout_s=None)),
-    ("B. limite 4 s", dict(timeout_s=4.0)),
-    ("C. limite 4 s, strada <= 20 m", dict(timeout_s=4.0, max_path_m=20.0)),
-    ("D. limite 4 s, senza collisioni", dict(timeout_s=4.0, check_collision=False)),
-    ("E. limite 20 s (ritorno a wp_0)", dict(timeout_s=20.0)),
+    ("A. as on Thursday, no limit", dict(timeout_s=None)),
+    ("B. limit 4 s", dict(timeout_s=4.0)),
+    ("C. limit 4 s, path <= 20 m", dict(timeout_s=4.0, max_path_m=20.0)),
+    ("D. limit 4 s, no collisions", dict(timeout_s=4.0, check_collision=False)),
+    ("E. limit 20 s (return to wp_0)", dict(timeout_s=20.0)),
 ]
 REPEAT_CALLS = 8
 
 # --- Series 2 -------------------------------------------------------------------------
 STAGES = [100, 200, None]          # waypoints of the rebuilt graph; None = all
 CONFIGS_BEFORE = [
-    ("limite 2 s", dict(timeout_s=2.0)),
-    ("limite 4 s", dict(timeout_s=4.0)),
-    ("limite 4 s, senza ICP", dict(timeout_s=4.0, icp_iters=0)),
-    ("limite 4 s, senza feature matching", dict(timeout_s=4.0, feature_matching=False)),
-    ("limite 4 s, senza ICP ne' feature", dict(timeout_s=4.0, icp_iters=0, feature_matching=False)),
-    ("limite 4 s, solo anelli oltre 8 m", dict(timeout_s=4.0, min_path_m=8.0)),
-    ("limite 60 s (finisce?)", dict(timeout_s=60.0)),
+    ("limit 2 s", dict(timeout_s=2.0)),
+    ("limit 4 s", dict(timeout_s=4.0)),
+    ("limit 4 s, no ICP", dict(timeout_s=4.0, icp_iters=0)),
+    ("limit 4 s, no feature matching", dict(timeout_s=4.0, feature_matching=False)),
+    ("limit 4 s, no ICP or features", dict(timeout_s=4.0, icp_iters=0, feature_matching=False)),
+    ("limit 4 s, only loops beyond 8 m", dict(timeout_s=4.0, min_path_m=8.0)),
+    ("limit 60 s (does it finish?)", dict(timeout_s=60.0)),
 ]
 CONFIGS_FINAL = [
-    ("fine missione, limite 45 s", dict(timeout_s=45.0)),
-    ("fine missione, limite 60 s", dict(timeout_s=60.0)),
-    ("fine missione, limite 90 s", dict(timeout_s=90.0)),
-    ("fine missione, limite 120 s", dict(timeout_s=120.0)),
+    ("end of mission, limit 45 s", dict(timeout_s=45.0)),
+    ("end of mission, limit 60 s", dict(timeout_s=60.0)),
+    ("end of mission, limit 90 s", dict(timeout_s=90.0)),
+    ("end of mission, limit 120 s", dict(timeout_s=120.0)),
 ]
 
 
@@ -119,7 +119,7 @@ def upload(gn, gdir, graph, fh, done_wp=None, done_edges=None):
         try:
             gn.upload_graph(graph=graph, generate_new_anchoring=False)
         except Exception as e:
-            log(fh, f"[ANELLI-BANCO] aggiunta al grafo rifiutata ({type(e).__name__}): svuoto e ricarico tutto")
+            log(fh, f"[LOOPS-BENCH] adding to the graph rejected ({type(e).__name__}): clearing and uploading everything")
             gn.clear_graph()
             done_wp, done_edges = set(), set()
     if not done_wp:
@@ -135,7 +135,7 @@ def upload(gn, gdir, graph, fh, done_wp=None, done_edges=None):
         gn.upload_waypoint_snapshot(snap)
         n += 1
         if n % 50 == 0:
-            log(fh, f"[ANELLI-BANCO] istantanee dei waypoint: {n} ({time.perf_counter() - t0:.0f} s)")
+            log(fh, f"[LOOPS-BENCH] waypoint snapshots: {n} ({time.perf_counter() - t0:.0f} s)")
     for e in graph.edges:
         key = (e.id.from_waypoint, e.id.to_waypoint)
         if not e.snapshot_id or key in done_edges:
@@ -168,82 +168,82 @@ def measure(ri, fh, name, kw, n_wp, rows):
         else:
             n, partial = ri.close_loops_checked(max_edge_length_m=2.0, modify_map_on_server=False, **kw)
         dt = time.perf_counter() - t
-        row = dict(waypoint=n_wp, prova=name, secondi=round(dt, 1), archi=n, parziale=partial)
-        log(fh, f"[ANELLI-BANCO] {n_wp:4d} wp  {name:38s} {dt:6.1f} s  {n:3d} archi  "
-                f"{'PARZIALE (limite scaduto)' if partial else 'FINITA'}")
+        row = dict(waypoint=n_wp, run=name, seconds=round(dt, 1), edges=n, partial=partial)
+        log(fh, f"[LOOPS-BENCH] {n_wp:4d} wp  {name:38s} {dt:6.1f} s  {n:3d} edges  "
+                f"{'PARTIAL (limit expired)' if partial else 'FINISHED'}")
     except Exception as e:
         dt = time.perf_counter() - t
-        row = dict(waypoint=n_wp, prova=name, secondi=round(dt, 1), errore=f"{type(e).__name__}: {e}")
-        log(fh, f"[ANELLI-BANCO] {n_wp:4d} wp  {name:38s} {dt:6.1f} s  ERRORE {type(e).__name__}: {e}")
+        row = dict(waypoint=n_wp, run=name, seconds=round(dt, 1), error=f"{type(e).__name__}: {e}")
+        log(fh, f"[LOOPS-BENCH] {n_wp:4d} wp  {name:38s} {dt:6.1f} s  ERROR {type(e).__name__}: {e}")
     rows.append(row)
 
 
 def series_1(ri, gn, gdir, graph, fh, results):
     dt, _, _ = upload(gn, gdir, graph, fh)
-    results['caricamento_s'] = round(dt, 1)
-    log(fh, f"[ANELLI-BANCO] Caricato in {dt:.0f} s\n")
-    results['prove'] = []
+    results['upload_s'] = round(dt, 1)
+    log(fh, f"[LOOPS-BENCH] Uploaded in {dt:.0f} s\n")
+    results['runs'] = []
     for name, kw in CONFIGS_1:
-        measure(ri, fh, name, kw, len(graph.waypoints), results['prove'])
-    log(fh, f"\n[ANELLI-BANCO] F. limite 4 s ripetuto {REPEAT_CALLS} volte, la mappa si modifica:")
+        measure(ri, fh, name, kw, len(graph.waypoints), results['runs'])
+    log(fh, f"\n[LOOPS-BENCH] F. limit 4 s repeated {REPEAT_CALLS} times, the map changes:")
     rep = []
     for k in range(1, REPEAT_CALLS + 1):
         t = time.perf_counter()
         try:
             n, partial = ri.close_loops_checked(max_edge_length_m=2.0, timeout_s=4.0)
             dt = time.perf_counter() - t
-            rep.append(dict(chiamata=k, secondi=round(dt, 1), archi=n, parziale=partial))
-            log(fh, f"[ANELLI-BANCO]   chiamata {k}: {dt:5.1f} s  {n:3d} archi  "
-                    f"{'parziale' if partial else 'completa'}")
+            rep.append(dict(call=k, seconds=round(dt, 1), edges=n, partial=partial))
+            log(fh, f"[LOOPS-BENCH]   call {k}: {dt:5.1f} s  {n:3d} edges  "
+                    f"{'partial' if partial else 'complete'}")
             if not partial:
                 break
         except Exception as e:
-            rep.append(dict(chiamata=k, errore=f"{type(e).__name__}: {e}"))
-            log(fh, f"[ANELLI-BANCO]   chiamata {k}: ERRORE {type(e).__name__}: {e}")
+            rep.append(dict(call=k, error=f"{type(e).__name__}: {e}"))
+            log(fh, f"[LOOPS-BENCH]   call {k}: ERROR {type(e).__name__}: {e}")
             break
     results['ripetute'] = rep
-    log(fh, f"[ANELLI-BANCO]   archi nel grafo dopo F: {len(gn.download_graph().edges)} "
-            f"(prima {len(graph.edges)})")
+    log(fh, f"[LOOPS-BENCH]   edges in the graph after F: {len(gn.download_graph().edges)} "
+            f"(before {len(graph.edges)})")
 
 
 def series_2(ri, gn, gdir, graph, fh, results):
-    results['prove'] = []
-    results['caricamenti_s'] = []
+    results['runs'] = []
+    results['uploads_s'] = []
     done_wp, done_edges = None, None
     for stage in STAGES:
         g = subgraph(graph, stage)
-        log(fh, f"\n[ANELLI-BANCO] --- grafo con {len(g.waypoints)} waypoint e {len(g.edges)} archi ---")
+        log(fh, f"\n[LOOPS-BENCH] --- graph with {len(g.waypoints)} waypoints and {len(g.edges)} edges ---")
         dt, done_wp, done_edges = upload(gn, gdir, g, fh, done_wp, done_edges)
-        results['caricamenti_s'].append(round(dt, 1))
+        results['uploads_s'].append(round(dt, 1))
         on_robot = len(gn.download_graph().waypoints)
-        log(fh, f"[ANELLI-BANCO] caricato in {dt:.0f} s; sul robot {on_robot} waypoint")
+        log(fh, f"[LOOPS-BENCH] uploaded in {dt:.0f} s; {on_robot} waypoints on the robot")
         if on_robot != len(g.waypoints):
-            log(fh, "[ANELLI-BANCO] il grafo sul robot non e' quello atteso: svuoto e ricarico tutto")
+            log(fh, "[LOOPS-BENCH] the graph on the robot is not the expected one: clearing and uploading everything")
             dt, done_wp, done_edges = upload(gn, gdir, g, fh)
         for name, kw in CONFIGS_BEFORE:
-            measure(ri, fh, name, kw, len(g.waypoints), results['prove'])
+            measure(ri, fh, name, kw, len(g.waypoints), results['runs'])
     log(fh, "")
     for name, kw in CONFIGS_FINAL:
-        measure(ri, fh, name, kw, len(graph.waypoints), results['prove'])
+        measure(ri, fh, name, kw, len(graph.waypoints), results['runs'])
 
 
 CONFIGS_3 = [
-    ("completa 45 s, come il 26-10", dict(timeout_s=45.0)),
-    ("completa 45 s, senza prune", dict(timeout_s=45.0, prune_edges=False)),
-    ("completa 90 s, senza prune", dict(timeout_s=90.0, prune_edges=False)),
+    ("full 45 s, as on 26-10", dict(timeout_s=45.0)),
+    ("full 45 s, no prune", dict(timeout_s=45.0, prune_edges=False)),
+    ("full 90 s, no prune", dict(timeout_s=90.0, prune_edges=False)),
 ]
 
 
 def series_3(ri, gn, gdir, graph, fh, results):
     dt, _, _ = upload(gn, gdir, graph, fh)
-    results['caricamento_s'] = round(dt, 1)
+    results['upload_s'] = round(dt, 1)
     src = {}
     for e in graph.edges:
         src[e.annotations.edge_source] = src.get(e.annotations.edge_source, 0) + 1
-    log(fh, f"[ANELLI-BANCO] Caricato in {dt:.0f} s; archi per origine: {src}\n")
-    results['prove'] = []
+    log(fh, f"[LOOPS-BENCH] Uploaded in {dt:.0f} s; edges by source: {src}\n")
+    results['runs'] = []
     for name, kw in CONFIGS_3:
-        measure(ri, fh, name, kw, len(graph.waypoints), results['prove'])
+        measure(ri, fh, name, kw, len(graph.waypoints), results['runs'])
     # The mission mode: compute without writing + upload_graph of the edges found.
     log(fh, "")
     before = len(gn.download_graph().edges)
@@ -253,14 +253,14 @@ def series_3(ri, gn, gdir, graph, fh, results):
                                             prune_edges=False)
         dt = time.perf_counter() - t
         after = len(gn.download_graph().edges)
-        row = dict(prova="caricamento con upload_graph (45 s, senza prune)", secondi=round(dt, 1),
-                   archi=n, parziale=partial, archi_mappa_prima=before, archi_mappa_dopo=after)
-        log(fh, f"[ANELLI-BANCO] caricamento con upload_graph: {n} archi calcolati in {dt:.1f} s; archi "
-                f"nella mappa {before} -> {after} ({'OK' if after - before == n else 'NON TORNA'})")
+        row = dict(run="upload with upload_graph (45 s, no prune)", seconds=round(dt, 1),
+                   edges=n, partial=partial, map_edges_before=before, map_edges_after=after)
+        log(fh, f"[LOOPS-BENCH] upload with upload_graph: {n} edges computed in {dt:.1f} s; edges "
+                f"in the map {before} -> {after} ({'OK' if after - before == n else 'DOES NOT ADD UP'})")
     except Exception as e:
-        row = dict(prova="caricamento con upload_graph", errore=f"{type(e).__name__}: {e}")
-        log(fh, f"[ANELLI-BANCO] caricamento con upload_graph: ERRORE {type(e).__name__}: {e}")
-    results['prove'].append(row)
+        row = dict(run="upload with upload_graph", error=f"{type(e).__name__}: {e}")
+        log(fh, f"[LOOPS-BENCH] upload with upload_graph: ERROR {type(e).__name__}: {e}")
+    results['runs'].append(row)
 
 
 def main():
@@ -274,7 +274,7 @@ def main():
 
     from bosdyn.api.graph_nav import map_pb2
     import bosdyn.client.lease
-    from spot_explorer.robot import connection as spotLogInUtils
+    from spot_explorer.robot import connection
     from spot_explorer.graphnav import map_recording
 
     gdir = args.graph if os.path.isabs(args.graph) else os.path.join(HERE, args.graph)
@@ -284,15 +284,15 @@ def main():
     stamp = datetime.datetime.now().strftime('%d-%m-%Y_%H-%M-%S')
     out_txt = os.path.join(HERE, 'MissionLogs', f'prova_anelli_{stamp}.txt')
     fh = open(out_txt, 'w')
-    log(fh, f"[ANELLI-BANCO] Serie {args.series}. Grafo {gdir}: {len(graph.waypoints)} waypoint, "
-            f"{len(graph.edges)} archi")
+    log(fh, f"[LOOPS-BENCH] Series {args.series}. Graph {gdir}: {len(graph.waypoints)} waypoints, "
+            f"{len(graph.edges)} edges")
 
     options = SimpleNamespace(name="provaAnelli", hostname=args.hostname, verbose=False,
                               recording_user_name="", recording_session_name="")
-    robot, lease_client, _rsc, client_metadata = spotLogInUtils.setLogInfo(options)
+    robot, lease_client, _rsc, client_metadata = connection.setLogInfo(options)
     ri = map_recording.RecordingInterface(robot, HERE, client_metadata)
     gn = ri._graph_nav_client
-    results = dict(serie=args.series, grafo=gdir, waypoint=len(graph.waypoints), archi=len(graph.edges))
+    results = dict(series=args.series, graph=gdir, waypoint=len(graph.waypoints), edges=len(graph.edges))
 
     with bosdyn.client.lease.LeaseKeepAlive(lease_client, must_acquire=True, return_at_exit=True):
         try:
@@ -303,11 +303,11 @@ def main():
             {1: series_1, 2: series_2, 3: series_3}[args.series](ri, gn, gdir, graph, fh, results)
         finally:
             gn.clear_graph()
-            log(fh, "[ANELLI-BANCO] Mappa del robot svuotata.")
+            log(fh, "[LOOPS-BENCH] Robot map cleared.")
 
     with open(out_txt.replace('.txt', '.json'), 'w') as f:
         json.dump(results, f, indent=1)
-    log(fh, f"[ANELLI-BANCO] Risultati in {out_txt} e .json")
+    log(fh, f"[LOOPS-BENCH] Results in {out_txt} and .json")
     fh.close()
 
 
