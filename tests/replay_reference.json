@@ -1,0 +1,1474 @@
+{
+ "13-10-2026_12-14-30": {
+  "cell_starts": [
+   {
+    "attempt": 0,
+    "cell": [
+     0,
+     1
+    ],
+    "valid_arcs": 100863,
+    "discarded_arcs": 4387,
+    "path_found": true,
+    "path_arcs": 4,
+    "path_len_m": 4.09
+   },
+   {
+    "attempt": 1,
+    "cell": [
+     0,
+     2
+    ],
+    "valid_arcs": 101206,
+    "discarded_arcs": 4044,
+    "path_found": true,
+    "path_arcs": 2,
+    "path_len_m": 2.04
+   },
+   {
+    "attempt": 2,
+    "cell": [
+     0,
+     3
+    ],
+    "valid_arcs": 101206,
+    "discarded_arcs": 4044,
+    "path_found": true,
+    "path_arcs": 6,
+    "path_len_m": 6.03
+   },
+   {
+    "attempt": 3,
+    "cell": [
+     1,
+     3
+    ],
+    "valid_arcs": 101202,
+    "discarded_arcs": 4048,
+    "path_found": true,
+    "path_arcs": 4,
+    "path_len_m": 4.06
+   },
+   {
+    "attempt": 4,
+    "cell": [
+     1,
+     2
+    ],
+    "valid_arcs": 101205,
+    "discarded_arcs": 4045,
+    "path_found": true,
+    "path_arcs": 6,
+    "path_len_m": 4.85
+   },
+   {
+    "attempt": 5,
+    "cell": [
+     1,
+     1
+    ],
+    "valid_arcs": 100179,
+    "discarded_arcs": 5071,
+    "path_found": true,
+    "path_arcs": 2,
+    "path_len_m": 2.31
+   },
+   {
+    "attempt": 6,
+    "cell": [
+     1,
+     0
+    ],
+    "valid_arcs": 100182,
+    "discarded_arcs": 5068,
+    "path_found": true,
+    "path_arcs": 6,
+    "path_len_m": 5.91
+   },
+   {
+    "attempt": 7,
+    "cell": [
+     2,
+     0
+    ],
+    "valid_arcs": 95221,
+    "discarded_arcs": 10029,
+    "path_found": true,
+    "path_arcs": 2,
+    "path_len_m": 2.0
+   },
+   {
+    "attempt": 8,
+    "cell": [
+     2,
+     1
+    ],
+    "valid_arcs": 93907,
+    "discarded_arcs": 11343,
+    "path_found": true,
+    "path_arcs": 4,
+    "path_len_m": 4.24
+   },
+   {
+    "attempt": 9,
+    "cell": [
+     2,
+     2
+    ],
+    "valid_arcs": 94131,
+    "discarded_arcs": 11119,
+    "path_found": true,
+    "path_arcs": 2,
+    "path_len_m": 2.5
+   },
+   {
+    "attempt": 10,
+    "cell": [
+     2,
+     2
+    ],
+    "valid_arcs": 94131,
+    "discarded_arcs": 11119,
+    "path_found": true,
+    "path_arcs": 2,
+    "path_len_m": 1.79
+   },
+   {
+    "attempt": 11,
+    "cell": [
+     2,
+     3
+    ],
+    "valid_arcs": 92730,
+    "discarded_arcs": 12520,
+    "path_found": true,
+    "path_arcs": 5,
+    "path_len_m": 4.77
+   },
+   {
+    "attempt": 12,
+    "cell": [
+     2,
+     3
+    ],
+    "valid_arcs": 92369,
+    "discarded_arcs": 12881,
+    "path_found": true,
+    "path_arcs": 2,
+    "path_len_m": 1.78
+   }
+  ],
+  "wp0_return": {
+   "start": "wp_64",
+   "today_m": 18.8,
+   "with_shortcuts_m": 17.3,
+   "shortcuts": 7,
+   "straight_line_m": 14.3
+  },
+  "gait_tiers": {
+   "HARD": 7,
+   "MODERATE": 12,
+   "PLAIN": 27
+  },
+  "gait_by_segment": [
+   "12:14:46 PLAIN",
+   "12:14:52 PLAIN",
+   "12:14:59 PLAIN",
+   "12:15:06 PLAIN",
+   "12:15:20 PLAIN",
+   "12:15:29 PLAIN",
+   "12:15:45 PLAIN",
+   "12:15:52 PLAIN",
+   "12:16:01 PLAIN",
+   "12:16:10 PLAIN",
+   "12:16:19 MODERATE",
+   "12:16:42 PLAIN",
+   "12:16:48 PLAIN",
+   "12:16:55 PLAIN",
+   "12:17:02 PLAIN",
+   "12:17:25 PLAIN",
+   "12:17:32 PLAIN",
+   "12:17:39 PLAIN",
+   "12:17:51 PLAIN",
+   "12:17:56 PLAIN",
+   "12:18:03 PLAIN",
+   "12:18:10 PLAIN",
+   "12:18:33 MODERATE",
+   "12:18:44 MODERATE",
+   "12:19:06 MODERATE",
+   "12:19:16 MODERATE",
+   "12:19:27 MODERATE",
+   "12:19:36 PLAIN",
+   "12:19:43 PLAIN",
+   "12:20:06 PLAIN",
+   "12:20:13 PLAIN",
+   "12:20:33 HARD",
+   "12:20:42 MODERATE",
+   "12:20:50 MODERATE",
+   "12:21:00 MODERATE",
+   "12:21:23 MODERATE",
+   "12:21:32 MODERATE",
+   "12:22:05 HARD",
+   "12:22:16 HARD",
+   "12:22:33 HARD",
+   "12:22:43 HARD",
+   "12:22:55 HARD",
+   "12:23:05 HARD",
+   "12:23:14 PLAIN",
+   "12:23:48 MODERATE",
+   "12:23:55 PLAIN"
+  ]
+ },
+ "13-10-2026_12-40-38": {
+  "cell_starts": [
+   {
+    "attempt": 0,
+    "cell": [
+     0,
+     1
+    ],
+    "valid_arcs": 101192,
+    "discarded_arcs": 4058,
+    "path_found": true,
+    "path_arcs": 4,
+    "path_len_m": 4.09
+   },
+   {
+    "attempt": 1,
+    "cell": [
+     0,
+     2
+    ],
+    "valid_arcs": 100981,
+    "discarded_arcs": 4269,
+    "path_found": true,
+    "path_arcs": 2,
+    "path_len_m": 2.06
+   },
+   {
+    "attempt": 2,
+    "cell": [
+     0,
+     3
+    ],
+    "valid_arcs": 100982,
+    "discarded_arcs": 4268,
+    "path_found": true,
+    "path_arcs": 6,
+    "path_len_m": 6.06
+   },
+   {
+    "attempt": 3,
+    "cell": [
+     1,
+     3
+    ],
+    "valid_arcs": 99731,
+    "discarded_arcs": 5519,
+    "path_found": true,
+    "path_arcs": 4,
+    "path_len_m": 4.06
+   },
+   {
+    "attempt": 4,
+    "cell": [
+     1,
+     2
+    ],
+    "valid_arcs": 96953,
+    "discarded_arcs": 8297,
+    "path_found": true,
+    "path_arcs": 5,
+    "path_len_m": 4.37
+   },
+   {
+    "attempt": 5,
+    "cell": [
+     1,
+     1
+    ],
+    "valid_arcs": 93168,
+    "discarded_arcs": 12082,
+    "path_found": true,
+    "path_arcs": 4,
+    "path_len_m": 3.95
+   },
+   {
+    "attempt": 6,
+    "cell": [
+     1,
+     0
+    ],
+    "valid_arcs": 93220,
+    "discarded_arcs": 12030,
+    "path_found": true,
+    "path_arcs": 3,
+    "path_len_m": 3.0
+   },
+   {
+    "attempt": 7,
+    "cell": [
+     2,
+     0
+    ],
+    "valid_arcs": 91849,
+    "discarded_arcs": 13401,
+    "path_found": true,
+    "path_arcs": 6,
+    "path_len_m": 6.3
+   },
+   {
+    "attempt": 8,
+    "cell": [
+     2,
+     1
+    ],
+    "valid_arcs": 83681,
+    "discarded_arcs": 21569,
+    "path_found": true,
+    "path_arcs": 3,
+    "path_len_m": 2.71
+   },
+   {
+    "attempt": 9,
+    "cell": [
+     2,
+     2
+    ],
+    "valid_arcs": 78852,
+    "discarded_arcs": 26398,
+    "path_found": true,
+    "path_arcs": 6,
+    "path_len_m": 5.84
+   },
+   {
+    "attempt": 10,
+    "cell": [
+     2,
+     3
+    ],
+    "valid_arcs": 73679,
+    "discarded_arcs": 31571,
+    "path_found": true,
+    "path_arcs": 4,
+    "path_len_m": 4.09
+   }
+  ],
+  "wp0_return": {
+   "start": "wp_61",
+   "today_m": 46.7,
+   "with_shortcuts_m": 18.5,
+   "shortcuts": 8,
+   "straight_line_m": 13.1
+  },
+  "gait_tiers": {
+   "HARD": 21,
+   "MODERATE": 15,
+   "PLAIN": 15
+  },
+  "gait_by_segment": [
+   "12:40:56 HARD",
+   "12:41:04 HARD",
+   "12:41:11 MODERATE",
+   "12:41:22 MODERATE",
+   "12:41:36 MODERATE",
+   "12:41:44 HARD",
+   "12:41:54 HARD",
+   "12:42:13 HARD",
+   "12:42:25 HARD",
+   "12:42:39 HARD",
+   "12:42:52 HARD",
+   "12:43:06 HARD",
+   "12:43:26 PLAIN",
+   "12:43:37 MODERATE",
+   "12:43:47 MODERATE",
+   "12:44:01 MODERATE",
+   "12:44:23 MODERATE",
+   "12:44:30 MODERATE",
+   "12:44:58 HARD",
+   "12:45:06 MODERATE",
+   "12:45:26 MODERATE",
+   "12:45:37 MODERATE",
+   "12:45:48 MODERATE",
+   "12:46:09 HARD",
+   "12:46:18 HARD",
+   "12:46:30 HARD",
+   "12:46:37 MODERATE",
+   "12:46:58 HARD",
+   "12:47:05 MODERATE",
+   "12:47:20 HARD",
+   "12:47:29 HARD",
+   "12:47:38 PLAIN",
+   "12:47:59 PLAIN",
+   "12:48:07 PLAIN",
+   "12:48:12 PLAIN",
+   "12:48:21 PLAIN",
+   "12:48:23 PLAIN",
+   "12:48:30 PLAIN",
+   "12:48:45 PLAIN",
+   "12:48:51 PLAIN",
+   "12:48:59 PLAIN",
+   "12:49:16 HARD",
+   "12:49:29 HARD",
+   "12:49:39 MODERATE",
+   "12:49:47 PLAIN",
+   "12:50:06 HARD",
+   "12:50:15 PLAIN",
+   "12:50:33 PLAIN",
+   "12:50:40 PLAIN",
+   "12:50:53 HARD",
+   "12:51:04 HARD"
+  ]
+ },
+ "12-10-2026_14-10-32": {
+  "cell_starts": [
+   {
+    "attempt": 0,
+    "cell": [
+     0,
+     1
+    ],
+    "valid_arcs": 104450,
+    "discarded_arcs": 5024,
+    "path_found": true,
+    "path_arcs": 5,
+    "path_len_m": 5.0
+   },
+   {
+    "attempt": 1,
+    "cell": [
+     0,
+     2
+    ],
+    "valid_arcs": 92838,
+    "discarded_arcs": 16636,
+    "path_found": true,
+    "path_arcs": 5,
+    "path_len_m": 5.0
+   },
+   {
+    "attempt": 2,
+    "cell": [
+     1,
+     1
+    ],
+    "valid_arcs": 86199,
+    "discarded_arcs": 23275,
+    "path_found": true,
+    "path_arcs": 7,
+    "path_len_m": 6.92
+   },
+   {
+    "attempt": 3,
+    "cell": [
+     1,
+     0
+    ],
+    "valid_arcs": 81770,
+    "discarded_arcs": 27704,
+    "path_found": true,
+    "path_arcs": 6,
+    "path_len_m": 5.74
+   }
+  ],
+  "wp0_return": null,
+  "gait_tiers": {
+   "PLAIN": 21
+  },
+  "gait_by_segment": [
+   "14:10:51 PLAIN",
+   "14:10:57 PLAIN",
+   "14:11:05 PLAIN",
+   "14:11:12 PLAIN",
+   "14:11:17 PLAIN",
+   "14:11:24 PLAIN",
+   "14:11:33 PLAIN",
+   "14:11:38 PLAIN",
+   "14:11:42 PLAIN",
+   "14:11:48 PLAIN",
+   "14:12:13 PLAIN",
+   "14:12:17 PLAIN",
+   "14:12:24 PLAIN",
+   "14:12:32 PLAIN",
+   "14:12:59 PLAIN",
+   "14:13:04 PLAIN",
+   "14:13:13 PLAIN",
+   "14:13:20 PLAIN",
+   "14:13:27 PLAIN",
+   "14:13:43 PLAIN",
+   "14:13:48 PLAIN"
+  ]
+ },
+ "12-10-2026_14-23-28": {
+  "cell_starts": [
+   {
+    "attempt": 0,
+    "cell": [
+     0,
+     1
+    ],
+    "valid_arcs": 103958,
+    "discarded_arcs": 5516,
+    "path_found": true,
+    "path_arcs": 5,
+    "path_len_m": 5.0
+   },
+   {
+    "attempt": 1,
+    "cell": [
+     0,
+     2
+    ],
+    "valid_arcs": 93799,
+    "discarded_arcs": 15675,
+    "path_found": true,
+    "path_arcs": 5,
+    "path_len_m": 5.0
+   },
+   {
+    "attempt": 2,
+    "cell": [
+     0,
+     3
+    ],
+    "valid_arcs": 85873,
+    "discarded_arcs": 23601,
+    "path_found": true,
+    "path_arcs": 15,
+    "path_len_m": 11.62
+   },
+   {
+    "attempt": 5,
+    "cell": [
+     1,
+     0
+    ],
+    "valid_arcs": 80783,
+    "discarded_arcs": 28691,
+    "path_found": true,
+    "path_arcs": 5,
+    "path_len_m": 5.06
+   }
+  ],
+  "wp0_return": null,
+  "gait_tiers": {
+   "PLAIN": 17
+  },
+  "gait_by_segment": [
+   "14:23:47 PLAIN",
+   "14:23:53 PLAIN",
+   "14:23:58 PLAIN",
+   "14:24:05 PLAIN",
+   "14:24:12 PLAIN",
+   "14:24:20 PLAIN",
+   "14:24:26 PLAIN",
+   "14:24:30 PLAIN",
+   "14:24:36 PLAIN",
+   "14:24:53 PLAIN",
+   "14:24:54 PLAIN",
+   "14:25:03 PLAIN",
+   "14:25:10 PLAIN",
+   "14:25:15 PLAIN",
+   "14:25:22 PLAIN",
+   "14:26:23 PLAIN",
+   "14:26:30 PLAIN"
+  ]
+ },
+ "12-10-2026_14-47-06": {
+  "cell_starts": [
+   {
+    "attempt": 0,
+    "cell": [
+     0,
+     1
+    ],
+    "valid_arcs": 104863,
+    "discarded_arcs": 4611,
+    "path_found": true,
+    "path_arcs": 5,
+    "path_len_m": 5.0
+   },
+   {
+    "attempt": 1,
+    "cell": [
+     0,
+     2
+    ],
+    "valid_arcs": 107523,
+    "discarded_arcs": 1951,
+    "path_found": true,
+    "path_arcs": 5,
+    "path_len_m": 5.06
+   },
+   {
+    "attempt": 2,
+    "cell": [
+     0,
+     3
+    ],
+    "valid_arcs": 107054,
+    "discarded_arcs": 2420,
+    "path_found": true,
+    "path_arcs": 5,
+    "path_len_m": 5.12
+   },
+   {
+    "attempt": 3,
+    "cell": [
+     1,
+     3
+    ],
+    "valid_arcs": 106027,
+    "discarded_arcs": 3447,
+    "path_found": true,
+    "path_arcs": 5,
+    "path_len_m": 5.07
+   },
+   {
+    "attempt": 4,
+    "cell": [
+     1,
+     2
+    ],
+    "valid_arcs": 105664,
+    "discarded_arcs": 3810,
+    "path_found": true,
+    "path_arcs": 5,
+    "path_len_m": 5.0
+   },
+   {
+    "attempt": 5,
+    "cell": [
+     1,
+     1
+    ],
+    "valid_arcs": 100997,
+    "discarded_arcs": 8477,
+    "path_found": true,
+    "path_arcs": 8,
+    "path_len_m": 6.65
+   },
+   {
+    "attempt": 6,
+    "cell": [
+     1,
+     0
+    ],
+    "valid_arcs": 98948,
+    "discarded_arcs": 10526,
+    "path_found": true,
+    "path_arcs": 5,
+    "path_len_m": 5.0
+   }
+  ],
+  "wp0_return": null,
+  "gait_tiers": {
+   "HARD": 6,
+   "MODERATE": 28,
+   "PLAIN": 14
+  },
+  "gait_by_segment": [
+   "14:47:29 MODERATE",
+   "14:47:38 MODERATE",
+   "14:47:49 MODERATE",
+   "14:47:58 PLAIN",
+   "14:48:07 PLAIN",
+   "14:48:28 MODERATE",
+   "14:48:42 MODERATE",
+   "14:48:53 MODERATE",
+   "14:49:04 MODERATE",
+   "14:49:21 MODERATE",
+   "14:49:43 PLAIN",
+   "14:49:54 PLAIN",
+   "14:50:05 PLAIN",
+   "14:50:16 PLAIN",
+   "14:50:27 PLAIN",
+   "14:50:39 PLAIN",
+   "14:51:01 PLAIN",
+   "14:51:11 PLAIN",
+   "14:51:21 MODERATE",
+   "14:51:32 MODERATE",
+   "14:51:44 PLAIN",
+   "14:52:08 PLAIN",
+   "14:52:18 PLAIN",
+   "14:52:29 PLAIN",
+   "14:52:37 MODERATE",
+   "14:52:48 MODERATE",
+   "14:52:56 MODERATE",
+   "14:53:17 MODERATE",
+   "14:53:47 MODERATE",
+   "14:53:58 MODERATE",
+   "14:54:37 MODERATE",
+   "14:54:47 MODERATE",
+   "14:55:12 MODERATE",
+   "14:55:20 MODERATE",
+   "14:55:32 MODERATE",
+   "14:55:41 MODERATE",
+   "14:55:48 MODERATE",
+   "14:56:04 HARD",
+   "14:56:17 MODERATE",
+   "14:56:28 HARD",
+   "14:56:38 MODERATE",
+   "14:56:52 MODERATE",
+   "14:57:21 MODERATE",
+   "14:57:36 HARD",
+   "14:57:51 HARD",
+   "14:58:00 HARD",
+   "14:58:09 MODERATE",
+   "14:58:27 HARD"
+  ]
+ },
+ "12-10-2026_17-16-06": {
+  "cell_starts": [
+   {
+    "attempt": 0,
+    "cell": [
+     0,
+     1
+    ],
+    "valid_arcs": 127710,
+    "discarded_arcs": 4420,
+    "path_found": true,
+    "path_arcs": 4,
+    "path_len_m": 4.09
+   },
+   {
+    "attempt": 1,
+    "cell": [
+     0,
+     2
+    ],
+    "valid_arcs": 129124,
+    "discarded_arcs": 3006,
+    "path_found": true,
+    "path_arcs": 3,
+    "path_len_m": 2.19
+   },
+   {
+    "attempt": 2,
+    "cell": [
+     0,
+     3
+    ],
+    "valid_arcs": 129127,
+    "discarded_arcs": 3003,
+    "path_found": true,
+    "path_arcs": 6,
+    "path_len_m": 6.22
+   },
+   {
+    "attempt": 3,
+    "cell": [
+     0,
+     4
+    ],
+    "valid_arcs": 128096,
+    "discarded_arcs": 4034,
+    "path_found": true,
+    "path_arcs": 2,
+    "path_len_m": 2.0
+   },
+   {
+    "attempt": 4,
+    "cell": [
+     1,
+     4
+    ],
+    "valid_arcs": 128096,
+    "discarded_arcs": 4034,
+    "path_found": true,
+    "path_arcs": 5,
+    "path_len_m": 4.51
+   },
+   {
+    "attempt": 5,
+    "cell": [
+     1,
+     3
+    ],
+    "valid_arcs": 127282,
+    "discarded_arcs": 4848,
+    "path_found": true,
+    "path_arcs": 3,
+    "path_len_m": 3.31
+   },
+   {
+    "attempt": 6,
+    "cell": [
+     1,
+     2
+    ],
+    "valid_arcs": 127282,
+    "discarded_arcs": 4848,
+    "path_found": true,
+    "path_arcs": 6,
+    "path_len_m": 5.08
+   },
+   {
+    "attempt": 7,
+    "cell": [
+     1,
+     1
+    ],
+    "valid_arcs": 127282,
+    "discarded_arcs": 4848,
+    "path_found": true,
+    "path_arcs": 3,
+    "path_len_m": 2.56
+   },
+   {
+    "attempt": 8,
+    "cell": [
+     1,
+     0
+    ],
+    "valid_arcs": 127282,
+    "discarded_arcs": 4848,
+    "path_found": true,
+    "path_arcs": 6,
+    "path_len_m": 5.98
+   },
+   {
+    "attempt": 9,
+    "cell": [
+     2,
+     0
+    ],
+    "valid_arcs": 124049,
+    "discarded_arcs": 8081,
+    "path_found": true,
+    "path_arcs": 2,
+    "path_len_m": 2.5
+   },
+   {
+    "attempt": 10,
+    "cell": [
+     2,
+     1
+    ],
+    "valid_arcs": 122903,
+    "discarded_arcs": 9227,
+    "path_found": true,
+    "path_arcs": 6,
+    "path_len_m": 5.48
+   },
+   {
+    "attempt": 11,
+    "cell": [
+     2,
+     2
+    ],
+    "valid_arcs": 118453,
+    "discarded_arcs": 13677,
+    "path_found": true,
+    "path_arcs": 2,
+    "path_len_m": 1.82
+   },
+   {
+    "attempt": 12,
+    "cell": [
+     2,
+     3
+    ],
+    "valid_arcs": 117188,
+    "discarded_arcs": 14942,
+    "path_found": true,
+    "path_arcs": 8,
+    "path_len_m": 6.84
+   }
+  ],
+  "wp0_return": null,
+  "gait_tiers": {
+   "HARD": 6,
+   "MODERATE": 30,
+   "PLAIN": 12
+  },
+  "gait_by_segment": [
+   "17:16:26 PLAIN",
+   "17:16:35 PLAIN",
+   "17:16:42 PLAIN",
+   "17:16:52 MODERATE",
+   "17:17:10 MODERATE",
+   "17:17:20 MODERATE",
+   "17:17:39 MODERATE",
+   "17:17:48 MODERATE",
+   "17:17:55 PLAIN",
+   "17:18:02 PLAIN",
+   "17:18:09 PLAIN",
+   "17:18:16 PLAIN",
+   "17:18:38 PLAIN",
+   "17:18:47 MODERATE",
+   "17:19:04 PLAIN",
+   "17:19:10 PLAIN",
+   "17:19:19 PLAIN",
+   "17:19:31 PLAIN",
+   "17:19:56 MODERATE",
+   "17:20:03 MODERATE",
+   "17:20:15 MODERATE",
+   "17:20:35 MODERATE",
+   "17:20:46 MODERATE",
+   "17:20:56 MODERATE",
+   "17:21:07 MODERATE",
+   "17:21:16 MODERATE",
+   "17:21:44 MODERATE",
+   "17:21:54 MODERATE",
+   "17:22:15 MODERATE",
+   "17:22:23 MODERATE",
+   "17:22:31 MODERATE",
+   "17:22:43 MODERATE",
+   "17:22:53 MODERATE",
+   "17:23:06 HARD",
+   "17:23:32 HARD",
+   "17:23:47 HARD",
+   "17:24:07 HARD",
+   "17:24:17 HARD",
+   "17:24:24 MODERATE",
+   "17:24:32 MODERATE",
+   "17:24:43 HARD",
+   "17:25:06 MODERATE",
+   "17:25:30 MODERATE",
+   "17:25:38 MODERATE",
+   "17:25:59 MODERATE",
+   "17:26:08 MODERATE",
+   "17:26:27 MODERATE",
+   "17:26:42 MODERATE"
+  ]
+ },
+ "12-10-2026_17-32-39": {
+  "cell_starts": [
+   {
+    "attempt": 0,
+    "cell": [
+     0,
+     1
+    ],
+    "valid_arcs": 74716,
+    "discarded_arcs": 3654,
+    "path_found": true,
+    "path_arcs": 3,
+    "path_len_m": 2.94
+   },
+   {
+    "attempt": 1,
+    "cell": [
+     0,
+     2
+    ],
+    "valid_arcs": 74010,
+    "discarded_arcs": 4360,
+    "path_found": true,
+    "path_arcs": 7,
+    "path_len_m": 6.01
+   },
+   {
+    "attempt": 2,
+    "cell": [
+     1,
+     2
+    ],
+    "valid_arcs": 73237,
+    "discarded_arcs": 5133,
+    "path_found": true,
+    "path_arcs": 3,
+    "path_len_m": 3.08
+   },
+   {
+    "attempt": 3,
+    "cell": [
+     1,
+     1
+    ],
+    "valid_arcs": 71870,
+    "discarded_arcs": 6500,
+    "path_found": true,
+    "path_arcs": 3,
+    "path_len_m": 3.15
+   },
+   {
+    "attempt": 4,
+    "cell": [
+     1,
+     0
+    ],
+    "valid_arcs": 68937,
+    "discarded_arcs": 9433,
+    "path_found": true,
+    "path_arcs": 5,
+    "path_len_m": 4.29
+   },
+   {
+    "attempt": 5,
+    "cell": [
+     2,
+     0
+    ],
+    "valid_arcs": 64771,
+    "discarded_arcs": 13599,
+    "path_found": true,
+    "path_arcs": 5,
+    "path_len_m": 5.03
+   },
+   {
+    "attempt": 6,
+    "cell": [
+     2,
+     1
+    ],
+    "valid_arcs": 64134,
+    "discarded_arcs": 14236,
+    "path_found": true,
+    "path_arcs": 2,
+    "path_len_m": 2.5
+   },
+   {
+    "attempt": 7,
+    "cell": [
+     2,
+     2
+    ],
+    "valid_arcs": 61645,
+    "discarded_arcs": 16725,
+    "path_found": true,
+    "path_arcs": 6,
+    "path_len_m": 5.8
+   }
+  ],
+  "wp0_return": null,
+  "gait_tiers": {
+   "HARD": 14,
+   "MODERATE": 12,
+   "PLAIN": 5
+  },
+  "gait_by_segment": [
+   "17:33:00 HARD",
+   "17:33:12 HARD",
+   "17:33:29 HARD",
+   "17:33:40 MODERATE",
+   "17:33:51 MODERATE",
+   "17:34:03 MODERATE",
+   "17:34:12 MODERATE",
+   "17:34:23 HARD",
+   "17:34:46 MODERATE",
+   "17:34:58 MODERATE",
+   "17:35:19 MODERATE",
+   "17:35:29 MODERATE",
+   "17:35:39 HARD",
+   "17:36:01 HARD",
+   "17:36:13 HARD",
+   "17:36:24 HARD",
+   "17:36:34 MODERATE",
+   "17:36:54 MODERATE",
+   "17:37:04 HARD",
+   "17:37:12 HARD",
+   "17:37:20 PLAIN",
+   "17:37:29 PLAIN",
+   "17:37:48 PLAIN",
+   "17:37:55 MODERATE",
+   "17:38:13 MODERATE",
+   "17:38:20 PLAIN",
+   "17:38:27 HARD",
+   "17:38:35 HARD",
+   "17:38:46 HARD",
+   "17:39:02 HARD",
+   "17:39:14 PLAIN"
+  ]
+ },
+ "13-10-2026_11-22-40": {
+  "cell_starts": [
+   {
+    "attempt": 0,
+    "cell": [
+     0,
+     1
+    ],
+    "valid_arcs": 100282,
+    "discarded_arcs": 4968,
+    "path_found": true,
+    "path_arcs": 4,
+    "path_len_m": 4.0
+   },
+   {
+    "attempt": 1,
+    "cell": [
+     0,
+     2
+    ],
+    "valid_arcs": 93534,
+    "discarded_arcs": 11716,
+    "path_found": true,
+    "path_arcs": 4,
+    "path_len_m": 4.0
+   },
+   {
+    "attempt": 2,
+    "cell": [
+     0,
+     3
+    ],
+    "valid_arcs": 85376,
+    "discarded_arcs": 19874,
+    "path_found": true,
+    "path_arcs": 6,
+    "path_len_m": 4.82
+   },
+   {
+    "attempt": 3,
+    "cell": [
+     1,
+     2
+    ],
+    "valid_arcs": 83837,
+    "discarded_arcs": 21413,
+    "path_found": true,
+    "path_arcs": 6,
+    "path_len_m": 5.43
+   },
+   {
+    "attempt": 4,
+    "cell": [
+     1,
+     2
+    ],
+    "valid_arcs": 80922,
+    "discarded_arcs": 24328,
+    "path_found": true,
+    "path_arcs": 2,
+    "path_len_m": 1.0
+   }
+  ],
+  "wp0_return": null,
+  "gait_tiers": {
+   "PLAIN": 31
+  },
+  "gait_by_segment": [
+   "11:22:58 PLAIN",
+   "11:23:03 PLAIN",
+   "11:23:08 PLAIN",
+   "11:23:13 PLAIN",
+   "11:23:16 PLAIN",
+   "11:23:25 PLAIN",
+   "11:23:30 PLAIN",
+   "11:23:35 PLAIN",
+   "11:23:41 PLAIN",
+   "11:23:52 PLAIN",
+   "11:24:11 PLAIN",
+   "11:24:19 PLAIN",
+   "11:24:28 PLAIN",
+   "11:24:44 PLAIN",
+   "11:24:49 PLAIN",
+   "11:24:54 PLAIN",
+   "11:25:01 PLAIN",
+   "11:25:13 PLAIN",
+   "11:25:20 PLAIN",
+   "11:25:33 PLAIN",
+   "11:25:38 PLAIN",
+   "11:25:58 PLAIN",
+   "11:26:12 PLAIN",
+   "11:26:26 PLAIN",
+   "11:26:32 PLAIN",
+   "11:26:45 PLAIN",
+   "11:26:51 PLAIN",
+   "11:27:05 PLAIN",
+   "11:27:11 PLAIN",
+   "11:27:25 PLAIN",
+   "11:27:31 PLAIN"
+  ]
+ },
+ "13-10-2026_11-56-15": {
+  "cell_starts": [
+   {
+    "attempt": 0,
+    "cell": [
+     0,
+     1
+    ],
+    "valid_arcs": 100472,
+    "discarded_arcs": 4778,
+    "path_found": true,
+    "path_arcs": 4,
+    "path_len_m": 4.0
+   },
+   {
+    "attempt": 1,
+    "cell": [
+     0,
+     2
+    ],
+    "valid_arcs": 92083,
+    "discarded_arcs": 13167,
+    "path_found": true,
+    "path_arcs": 4,
+    "path_len_m": 3.41
+   },
+   {
+    "attempt": 2,
+    "cell": [
+     0,
+     3
+    ],
+    "valid_arcs": 86805,
+    "discarded_arcs": 18445,
+    "path_found": true,
+    "path_arcs": 6,
+    "path_len_m": 5.57
+   },
+   {
+    "attempt": 3,
+    "cell": [
+     1,
+     2
+    ],
+    "valid_arcs": 83123,
+    "discarded_arcs": 22127,
+    "path_found": true,
+    "path_arcs": 6,
+    "path_len_m": 5.65
+   },
+   {
+    "attempt": 5,
+    "cell": [
+     1,
+     0
+    ],
+    "valid_arcs": 81127,
+    "discarded_arcs": 24123,
+    "path_found": true,
+    "path_arcs": 4,
+    "path_len_m": 4.25
+   }
+  ],
+  "wp0_return": {
+   "start": "wp_17",
+   "today_m": 1.7,
+   "with_shortcuts_m": 1.6,
+   "shortcuts": 1,
+   "straight_line_m": 1.6
+  },
+  "gait_tiers": {
+   "PLAIN": 15
+  },
+  "gait_by_segment": [
+   "11:56:34 PLAIN",
+   "11:56:39 PLAIN",
+   "11:56:46 PLAIN",
+   "11:56:52 PLAIN",
+   "11:56:57 PLAIN",
+   "11:57:08 PLAIN",
+   "11:57:15 PLAIN",
+   "11:57:21 PLAIN",
+   "11:57:35 PLAIN",
+   "11:57:42 PLAIN",
+   "11:58:11 PLAIN",
+   "11:58:16 PLAIN",
+   "11:58:23 PLAIN",
+   "12:00:01 PLAIN",
+   "12:00:11 PLAIN"
+  ]
+ },
+ "13-10-2026_12-27-12": {
+  "cell_starts": [
+   {
+    "attempt": 0,
+    "cell": [
+     0,
+     1
+    ],
+    "valid_arcs": 100818,
+    "discarded_arcs": 4432,
+    "path_found": true,
+    "path_arcs": 4,
+    "path_len_m": 4.09
+   },
+   {
+    "attempt": 1,
+    "cell": [
+     0,
+     2
+    ],
+    "valid_arcs": 102199,
+    "discarded_arcs": 3051,
+    "path_found": true,
+    "path_arcs": 2,
+    "path_len_m": 2.15
+   },
+   {
+    "attempt": 2,
+    "cell": [
+     0,
+     3
+    ],
+    "valid_arcs": 102199,
+    "discarded_arcs": 3051,
+    "path_found": true,
+    "path_arcs": 6,
+    "path_len_m": 6.06
+   },
+   {
+    "attempt": 3,
+    "cell": [
+     1,
+     3
+    ],
+    "valid_arcs": 101201,
+    "discarded_arcs": 4049,
+    "path_found": true,
+    "path_arcs": 4,
+    "path_len_m": 4.0
+   },
+   {
+    "attempt": 4,
+    "cell": [
+     1,
+     2
+    ],
+    "valid_arcs": 100459,
+    "discarded_arcs": 4791,
+    "path_found": true,
+    "path_arcs": 5,
+    "path_len_m": 4.77
+   },
+   {
+    "attempt": 5,
+    "cell": [
+     1,
+     1
+    ],
+    "valid_arcs": 99681,
+    "discarded_arcs": 5569,
+    "path_found": true,
+    "path_arcs": 5,
+    "path_len_m": 4.31
+   },
+   {
+    "attempt": 6,
+    "cell": [
+     1,
+     0
+    ],
+    "valid_arcs": 99572,
+    "discarded_arcs": 5678,
+    "path_found": true,
+    "path_arcs": 2,
+    "path_len_m": 2.31
+   },
+   {
+    "attempt": 7,
+    "cell": [
+     2,
+     0
+    ],
+    "valid_arcs": 98222,
+    "discarded_arcs": 7028,
+    "path_found": true,
+    "path_arcs": 2,
+    "path_len_m": 2.28
+   },
+   {
+    "attempt": 8,
+    "cell": [
+     2,
+     1
+    ],
+    "valid_arcs": 94676,
+    "discarded_arcs": 10574,
+    "path_found": true,
+    "path_arcs": 5,
+    "path_len_m": 3.6
+   },
+   {
+    "attempt": 9,
+    "cell": [
+     2,
+     2
+    ],
+    "valid_arcs": 92850,
+    "discarded_arcs": 12400,
+    "path_found": true,
+    "path_arcs": 6,
+    "path_len_m": 5.3
+   },
+   {
+    "attempt": 10,
+    "cell": [
+     2,
+     3
+    ],
+    "valid_arcs": 87503,
+    "discarded_arcs": 17747,
+    "path_found": true,
+    "path_arcs": 5,
+    "path_len_m": 4.87
+   },
+   {
+    "attempt": 11,
+    "cell": [
+     2,
+     3
+    ],
+    "valid_arcs": 87287,
+    "discarded_arcs": 17963,
+    "path_found": true,
+    "path_arcs": 2,
+    "path_len_m": 2.18
+   }
+  ],
+  "wp0_return": {
+   "start": "wp_60",
+   "today_m": 18.0,
+   "with_shortcuts_m": 15.8,
+   "shortcuts": 7,
+   "straight_line_m": 14.3
+  },
+  "gait_tiers": {
+   "HARD": 9,
+   "MODERATE": 24,
+   "PLAIN": 11
+  },
+  "gait_by_segment": [
+   "12:27:29 PLAIN",
+   "12:27:38 PLAIN",
+   "12:27:45 PLAIN",
+   "12:27:55 MODERATE",
+   "12:28:09 MODERATE",
+   "12:28:19 MODERATE",
+   "12:28:36 MODERATE",
+   "12:28:44 PLAIN",
+   "12:28:51 MODERATE",
+   "12:28:59 MODERATE",
+   "12:29:09 PLAIN",
+   "12:29:16 PLAIN",
+   "12:29:40 PLAIN",
+   "12:29:47 PLAIN",
+   "12:29:55 MODERATE",
+   "12:30:04 MODERATE",
+   "12:30:23 MODERATE",
+   "12:30:41 MODERATE",
+   "12:30:56 HARD",
+   "12:31:07 HARD",
+   "12:31:32 MODERATE",
+   "12:31:42 MODERATE",
+   "12:31:53 MODERATE",
+   "12:32:02 MODERATE",
+   "12:32:25 MODERATE",
+   "12:32:35 MODERATE",
+   "12:32:57 HARD",
+   "12:33:12 HARD",
+   "12:33:21 PLAIN",
+   "12:33:43 HARD",
+   "12:33:51 HARD",
+   "12:34:04 HARD",
+   "12:34:24 HARD",
+   "12:34:38 MODERATE",
+   "12:34:49 MODERATE",
+   "12:35:01 MODERATE",
+   "12:35:31 MODERATE",
+   "12:35:42 MODERATE",
+   "12:35:49 HARD",
+   "12:36:01 MODERATE",
+   "12:36:12 MODERATE",
+   "12:36:20 PLAIN",
+   "12:36:50 PLAIN",
+   "12:37:01 MODERATE"
+  ]
+ }
+}

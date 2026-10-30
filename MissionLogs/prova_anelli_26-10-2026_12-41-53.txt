@@ -1,0 +1,25 @@
+[ANELLI-BANCO] Grafo /home/andrea/spotSDK/v2/AutonomousNavigationSpot/graph/Mission_22-10-2026_16-04-22/Grafo_22-10-2026_16-48-11: 388 waypoint, 416 archi
+[ANELLI-BANCO] istantanee dei waypoint: 50 (32 s)
+[ANELLI-BANCO] istantanee dei waypoint: 100 (58 s)
+[ANELLI-BANCO] istantanee dei waypoint: 150 (85 s)
+[ANELLI-BANCO] istantanee dei waypoint: 200 (109 s)
+[ANELLI-BANCO] istantanee dei waypoint: 250 (133 s)
+[ANELLI-BANCO] istantanee dei waypoint: 300 (151 s)
+[ANELLI-BANCO] istantanee dei waypoint: 350 (177 s)
+[ANELLI-BANCO] Caricato in 200 s (388 istantanee dei waypoint)
+
+[ANELLI-BANCO] A. come giovedi', senza limite         32.0 s   15 archi  PARZIALE (limite scaduto)
+[ANELLI-BANCO] B. limite 4 s                           6.0 s    3 archi  PARZIALE (limite scaduto)
+[ANELLI-BANCO] C. limite 4 s, strada <= 20 m           4.4 s    3 archi  PARZIALE (limite scaduto)
+[ANELLI-BANCO] D. limite 4 s, senza collisioni         5.6 s    3 archi  PARZIALE (limite scaduto)
+[ANELLI-BANCO] E. limite 20 s (ritorno a wp_0)        22.0 s   12 archi  PARZIALE (limite scaduto)
+
+[ANELLI-BANCO] F. limite 4 s ripetuto 8 volte, la mappa si modifica:
+[ANELLI-BANCO]   chiamata 1:   5.2 s    3 archi  parziale
+[ANELLI-BANCO]   chiamata 2:   7.0 s    1 archi  parziale
+[ANELLI-BANCO]   chiamata 3:   7.3 s    1 archi  parziale
+[ANELLI-BANCO]   chiamata 4:  12.3 s    1 archi  parziale
+[ANELLI-BANCO]   chiamata 5: ERRORE TimedOutError: TimedOutError: The remote procedure call did not terminate within the allotted time.
+[ANELLI-BANCO]   archi nel grafo dopo F: 422 (prima 416)
+[ANELLI-BANCO] Mappa del robot svuotata.
+[ANELLI-BANCO] Risultati in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionLogs/prova_anelli_26-10-2026_12-41-53.txt e .json

@@ -1,0 +1,114 @@
+{
+  "prm": {
+    "slope_source_counts": {
+      "live": 4669,
+      "global_map": 992,
+      "fallback_nodes": 28872
+    },
+    "veto_evaluations": {
+      "longitudinal": 0,
+      "lateral": 0,
+      "occupancy": 20298
+    },
+    "veto_distinct_arcs": {
+      "longitudinal": 0,
+      "lateral": 0,
+      "occupancy": 1640
+    },
+    "max_slope_seen": {
+      "long": 0.08832537979929643,
+      "lat": 0.27500006059805554
+    },
+    "slope_flip_count": 0,
+    "slope_threshold": 0.6,
+    "slope_baseline_m": 0.25,
+    "lateral_slice_half_width_m": 0.3,
+    "beta": 2.0,
+    "beta_lateral": 2.0,
+    "gamma": 0.0,
+    "alpha": 1.0
+  },
+  "mission_stats": {
+    "gait_tier_counts": {
+      "PLAIN": 14,
+      "MODERATE": 0,
+      "HARD": 0
+    },
+    "replan_count": 3,
+    "near_threshold_saves": 0,
+    "segments_logged": 14,
+    "last_tier": "PLAIN",
+    "time_s": {
+      "costruzione grafo": 2.6700503759930143,
+      "dati figure": 0.34885373499128036,
+      "scansione": 2.055198851005116,
+      "elaborazione griglia": 0.13447457100846805,
+      "mappe globali": 0.7531725659864605,
+      "PRM e ripianificazione": 2.3478271319982014,
+      "fronte e decisione": 0.051084320002701133,
+      "movimento": 71.7509138584137,
+      "GraphNav": 46.58640819800348
+    },
+    "scan_bundles": 25,
+    "frontier_blocks": 0,
+    "frontier_aborts": 0,
+    "rotation_refusals": 1,
+    "straight_retreats": 0,
+    "goal_repicks": 1,
+    "cone_moves": 1,
+    "retreats_suppressed": 0,
+    "early_replans": 1,
+    "traps_detected": 0,
+    "arrival_refusals": 3,
+    "graphnav_backtracks": 0,
+    "graphnav_backtrack_fail": 0,
+    "nodes_pruned": 27,
+    "idle_loops": 0,
+    "multinode_cut": 0,
+    "multinode_moves": 0,
+    "multinode_nodes": 0,
+    "prm_refresh": 25,
+    "prm_refresh_skipped": 0,
+    "rotation_maneuvers": 0,
+    "shortcuts": 0,
+    "falls": 0,
+    "self_rights": 0,
+    "graphnav_ok": 5,
+    "graphnav_fail": 0,
+    "live_arc_vetoes": 5450,
+    "graphnav_shortcuts": 2
+  },
+  "lateral_slope_cost_multiplier": 1.0,
+  "slope_threshold": 0.6,
+  "near_threshold_margin_fraction": 0.15,
+  "slope_baseline_m": 0.25,
+  "lateral_slice_half_width_m": 0.3,
+  "min_arc_sample_fraction": 0.5,
+  "terrain_valid_min": 0.5,
+  "goal_reached_tolerance_m": 0.65,
+  "interruttori": {
+    "easy_walk.MISSION_GRAPH_SAMPLING": "casuale",
+    "easy_walk.INCREMENTAL_GRAPH_UPDATE": true,
+    "mission_graph.BATCH_SLOPES": true,
+    "prm_graph.REFRESH_BATCH_SLOPES": true,
+    "spotGrid.CLEARANCE_MAP_DECIDES": false,
+    "easy_walk.PLAN_ONLY_EXPLORED_CELLS": true,
+    "easy_walk.GRAPHNAV_SHORTCUTS": true,
+    "easy_walk.GRAPHNAV_SDK_LOOP_CLOSURE": true,
+    "easy_walk.SAVE_SCAN_BUNDLES": true,
+    "movements.DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT": true,
+    "spotGrid.ARC_BODY_EXTENSION_M": 0.55,
+    "spotGrid.ROBOT_CLEARANCE_AIR_M": 0.0
+  },
+  "grafo": {
+    "metodo": "casuale",
+    "nodi": 2100,
+    "coppie": 20767,
+    "arco_min_m": 0.5,
+    "arco_max_m": 1.25,
+    "copertura_m": 0.4452,
+    "distribuzione": "poisson",
+    "densita_nodi_m2": 5.0,
+    "seme": 1533503888
+  }
+}

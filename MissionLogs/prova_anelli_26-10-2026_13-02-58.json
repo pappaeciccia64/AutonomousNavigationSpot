@@ -1,0 +1,187 @@
+{
+ "serie": 2,
+ "grafo": "/home/andrea/spotSDK/v2/AutonomousNavigationSpot/graph/Mission_22-10-2026_16-04-22/Grafo_22-10-2026_16-48-11",
+ "waypoint": 388,
+ "archi": 416,
+ "prove": [
+  {
+   "waypoint": 100,
+   "prova": "limite 2 s",
+   "secondi": 4.9,
+   "archi": 4,
+   "parziale": true
+  },
+  {
+   "waypoint": 100,
+   "prova": "limite 4 s",
+   "secondi": 5.0,
+   "archi": 4,
+   "parziale": true
+  },
+  {
+   "waypoint": 100,
+   "prova": "limite 4 s, senza ICP",
+   "secondi": 1.0,
+   "archi": 6,
+   "parziale": false
+  },
+  {
+   "waypoint": 100,
+   "prova": "limite 4 s, senza feature matching",
+   "secondi": 4.4,
+   "archi": 3,
+   "parziale": true
+  },
+  {
+   "waypoint": 100,
+   "prova": "limite 4 s, senza ICP ne' feature",
+   "secondi": 0.4,
+   "archi": 6,
+   "parziale": false
+  },
+  {
+   "waypoint": 100,
+   "prova": "limite 4 s, solo anelli oltre 8 m",
+   "secondi": 3.1,
+   "archi": 3,
+   "parziale": false
+  },
+  {
+   "waypoint": 100,
+   "prova": "limite 60 s (finisce?)",
+   "secondi": 25.9,
+   "archi": 5,
+   "parziale": false
+  },
+  {
+   "waypoint": 200,
+   "prova": "limite 2 s",
+   "secondi": 8.0,
+   "archi": 1,
+   "parziale": true
+  },
+  {
+   "waypoint": 200,
+   "prova": "limite 4 s",
+   "secondi": 8.2,
+   "archi": 1,
+   "parziale": true
+  },
+  {
+   "waypoint": 200,
+   "prova": "limite 4 s, senza ICP",
+   "secondi": 5.7,
+   "archi": 11,
+   "parziale": true
+  },
+  {
+   "waypoint": 200,
+   "prova": "limite 4 s, senza feature matching",
+   "secondi": 5.0,
+   "archi": 1,
+   "parziale": true
+  },
+  {
+   "waypoint": 200,
+   "prova": "limite 4 s, senza ICP ne' feature",
+   "secondi": 2.0,
+   "archi": 12,
+   "parziale": false
+  },
+  {
+   "waypoint": 200,
+   "prova": "limite 4 s, solo anelli oltre 8 m",
+   "secondi": 5.7,
+   "archi": 1,
+   "parziale": true
+  },
+  {
+   "waypoint": 200,
+   "prova": "limite 60 s (finisce?)",
+   "secondi": 120.0,
+   "errore": "TimedOutError: TimedOutError: The remote procedure call did not terminate within the allotted time."
+  },
+  {
+   "waypoint": 388,
+   "prova": "limite 2 s",
+   "secondi": 3.0,
+   "archi": 0,
+   "parziale": true
+  },
+  {
+   "waypoint": 388,
+   "prova": "limite 4 s",
+   "secondi": 6.0,
+   "archi": 3,
+   "parziale": true
+  },
+  {
+   "waypoint": 388,
+   "prova": "limite 4 s, senza ICP",
+   "secondi": 4.6,
+   "archi": 13,
+   "parziale": true
+  },
+  {
+   "waypoint": 388,
+   "prova": "limite 4 s, senza feature matching",
+   "secondi": 5.4,
+   "archi": 2,
+   "parziale": true
+  },
+  {
+   "waypoint": 388,
+   "prova": "limite 4 s, senza ICP ne' feature",
+   "secondi": 4.0,
+   "archi": 24,
+   "parziale": false
+  },
+  {
+   "waypoint": 388,
+   "prova": "limite 4 s, solo anelli oltre 8 m",
+   "secondi": 9.0,
+   "archi": 2,
+   "parziale": true
+  },
+  {
+   "waypoint": 388,
+   "prova": "limite 60 s (finisce?)",
+   "secondi": 71.7,
+   "archi": 19,
+   "parziale": true
+  },
+  {
+   "waypoint": 388,
+   "prova": "fine missione, limite 45 s",
+   "secondi": 59.3,
+   "archi": 17,
+   "parziale": true
+  },
+  {
+   "waypoint": 388,
+   "prova": "fine missione, limite 60 s",
+   "secondi": 71.7,
+   "archi": 18,
+   "parziale": true
+  },
+  {
+   "waypoint": 388,
+   "prova": "fine missione, limite 90 s",
+   "secondi": 90.1,
+   "archi": 21,
+   "parziale": true
+  },
+  {
+   "waypoint": 388,
+   "prova": "fine missione, limite 120 s",
+   "secondi": 151.6,
+   "archi": 23,
+   "parziale": true
+  }
+ ],
+ "caricamenti_s": [
+  45.0,
+  45.2,
+  73.2
+ ]
+}

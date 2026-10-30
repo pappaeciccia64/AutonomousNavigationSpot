@@ -1,0 +1,2505 @@
+12:14:30.837 [LOG] Copia completa dell'output su file: /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionLogs/Mission_13-10-2026_12-14-30/mission_log.txt
+12:14:30.837 [LOG] Cartella log: /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionLogs/Mission_13-10-2026_12-14-30  |  dati e immagini: /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30
+12:14:30.837 [CONFIG] SLOPE_THRESHOLD=0.6  LATERAL_SLOPE_COST_MULTIPLIER=1.0  OBSTACLE_THRESHOLD=0.15  ROUGH_THRESHOLD=0.15  NEAR_THRESHOLD_MARGIN_FRACTION=0.15
+12:14:30.837 [CONFIG] PROFILO ARCO: base=0.25m  fetta_laterale=+/-0.3m  copertura_minima=50%
+12:14:30.837 [CONFIG] GAIT: plain<0.15/0.05  moderate<0.25/0.1  mu=0.8/0.6/0.4
+12:14:30.838 [CONFIG] TERRENO: terrain_valid >= 0.5 (era > 0.0, dipendeva dal segno di un residuo numerico)  celle mai scritte: plateau >= 100 celle, almeno 80% marcate non valide da Spot
+12:14:30.838 [CONFIG] ROTAZIONE: prefiltro 0.604 m (aria 0.00 m, separata dai 0.05 m dell'avanzamento), poi controllo sul settore spazzato a passi di 5 gradi (tolleranza 0.15 m sul rumore); MARCIA DI TRAVERSO DISATTIVATA
+12:14:30.838 [CONFIG] SE NON PUO' RUOTARE: 1) ventaglio nel cono +/-90 gradi a passi di 10, si va nella direzione piu' libera fra quelle che avvicinano di almeno 0.20 m; 2) arretramento dritto fino a 0.60 m SOLO se da li' la rotazione diventa possibile, max 2 consecutivi; 3) si scarta il tratto
+12:14:30.838 [CONFIG] TRAPPOLA: ventaglio a 360 gradi a passi di 15 (24 direzioni); una direzione vale se concede 0.30 m E il robot puo' girarsi per puntarla. Zero direzioni -> si ripercorre il tratto da cui si e' venuti SUBITO, senza scartare archi. Controllo sulla posa d'arrivo per i passi sotto 0.40 m o con obstacle_distance sotto 0.50 m, max 3 rifiuti. Scarto da [SUBITO] e da [ARRIVO]: NON permanente
+12:14:30.838 [CONFIG] RITORNI: briciola GraphNav ogni 0.75 m, ritorno con GraphNav fino a 3 waypoint indietro riprovando la pianificazione a ogni tappa, poi si rimanda la cella; ritirata a zampe solo come ultima rete. Nodi PRM scartati sotto 0.30 m di spazio libero, solo dove visti. Deroga di 0.70 m alla mappa globale attorno al robot: ora solo dopo una caduta
+12:14:30.838 [CONFIG] OSTACOLI: mediana su 3 scansioni + isteresi 0.04 m attorno a 0.30 m (rumore misurato 1.5 cm tipici, 7.3 di punta); celle-ostacolo escluse dal campionamento della pendenza d'arco
+12:14:30.838 [CONFIG] OBIETTIVO: tolleranza d'arrivo 0.65 m (= meta' corpo + margine del fronte), riscelta del punto fino a 3 volte se risulta irraggiungibile; ripianificazione alla PRIMA cella bloccante, fino a 4 volte per tentativo
+12:14:37.095 [GRAPH_CACHE] Downloading fresh graph from robot...
+12:14:37.180 [GRAPH_CACHE] Cache invalidated
+12:14:37.180 Successfully started recording a map.
+12:14:37.180 
+12:14:37.180 [========================================]
+12:14:37.180 [FIDUCIAL INIT] Starting initialization via FIDUCIAL...
+12:14:37.188 [FIDUCIAL INIT] Target: Fiducial ID 549
+12:14:37.259 [FIDUCIAL INIT] ✗ FAILED: bosdyn.api.graph_nav.SetLocalizationResponse (ResponseError): Code: 8 (STATUS_NO_MATCHING_FIDUCIAL)
+12:14:37.259 [FIDUCIAL INIT] Possible reasons:
+12:14:37.259   1. Fiducial 549 is not visible
+12:14:37.259   2. Robot is too far from fiducial (should be ~1m)
+12:14:37.259   3. Robot is not facing the fiducial
+12:14:37.259   4. Lighting conditions are poor
+12:14:37.259   5. Map not cleared before initialization (call clear_map() first)
+12:14:37.259 [FIDUCIAL INIT] The system can continue without fiducial - first waypoint will be origin.
+12:14:37.259 [========================================]
+12:14:37.259 
+12:14:37.266 [GRAPH_CACHE] Downloading fresh graph from robot...
+12:14:37.275 
+12:14:37.275 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:14:37.275   Name: wp_0 (manual waypoint format)
+12:14:37.275   Number: 0
+12:14:37.275   Position: (82.217, -36.107, -16.483)
+12:14:37.275   Orientation (yaw): 7.1°
+12:14:37.275   Cell: (0, 0)
+12:14:37.382 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:14:37.382   Name: wp_0
+12:14:37.382   ID: bratty-rhino-yFyPJjq41O+SGkcyRDp0+Q==
+12:14:37.383   Pose saved for future realignment
+12:14:37.383   Cell saved: (0, 0)
+12:14:37.383   Status: 1
+12:14:37.383 
+12:14:37.383 [GRAPH_CACHE] Cache invalidated
+12:14:37.383 [CONFIG] Griglia di missione: 3 x 4 celle da 4.0 m (12 m a sinistra x 16 m davanti; fonte: mission_graph.MISSION_*)
+12:14:37.383 [CONFIG] Reticolo: passo richiesto 0.250 m, anelli tutti
+12:14:37.391 [OK] Origin set at world coordinates (82.22, -36.11)
+12:14:37.392 [OK] Initial orientation: 7.1°
+12:14:37.392 [OK] Starting cell (0, 0) marked as visited
+12:14:37.399 [QUOTE] Riferimento quote = suolo all'avvio missione: z=-17.000 m nel frame VISION (piano del suolo di Spot), cioe' -17.00 m rispetto all'accensione -- il robot e' stato acceso a un'altra quota (scale?). La navigazione non ne risente; il valore e' salvato come mission_z0 in ogni file e mission_viewer mostra le quote rispetto all'avvio missione.
+12:14:38.250 [GRAFO] Missione 3x4 celle da 4.0 m = 192 m2; reticolo rettangolare, passo 0.2500 m (= 4.0/16), anelli tutti entro 1.25 m
+12:14:38.250 [GRAFO] 3185 nodi, 16.00 nodi/m2, 105250 archi, grado medio 66.1 (min 22, max 72)
+12:14:38.250 [GRAFO] Lunghezze degli archi 0.50-1.25 m [0.50, 0.56, 0.71, 0.75, 0.79, 0.90 ...], min_edge_length=0.50 m, 12400 coppie di vicini troppo vicini, non collegate
+12:14:38.250 [GRAFO] Copertura 0.18 m (un corridoio utile al fronte e' largo almeno 0.60 m)
+12:14:38.250 [GRAFO] Obiettivi di cella: 12 su 12, tutti nel centro geometrico esatto
+12:14:38.250 [GRAFO] Connessione geometrica: UNICA componente, nessun nodo isolato
+12:14:38.250 [GRAFO] Accensione = centro della cella di partenza = nodo 528 (nessun nodo di boot da aggiungere)
+12:14:38.261 ArcVerificationTracker (fronte sicuro) avviato in background.
+12:14:38.261 [INFO] Graph download path set to: /home/andrea/spotSDK/v2/AutonomousNavigationSpot/graph/Mission_13-10-2026_12-14-30
+12:14:38.271 
+12:14:38.271 [ADJACENT] Searching for adjacent unexplored neighbors from cell (0,0)
+12:14:38.271   ✓ Neighbor south: (1,0) with rank=7
+12:14:38.271   ✓ Neighbor east: (0,1) with rank=1
+12:14:38.271 [ADJACENT] ✓ Found 2 unexplored neighbors
+12:14:38.271 [ADJACENT] Neighbor with lowest rank: (0,1) rank=1
+12:14:38.271 [(0, 1, 1), (1, 0, 7)]
+12:14:38.282 
+12:14:38.282 [ADJACENT] Searching for adjacent unexplored neighbors from cell (0,0)
+12:14:38.282   ✓ Neighbor south: (1,0) with rank=7
+12:14:38.282   ✓ Neighbor east: (0,1) with rank=1
+12:14:38.282 [ADJACENT] ✓ Found 2 unexplored neighbors
+12:14:38.282 [ADJACENT] Neighbor with lowest rank: (0,1) rank=1
+12:14:38.282 
+12:14:38.282 [ATTEMPT] Trying to enter cell (0,1) from current position...
+12:14:38.361 [MAP] Inizializzata nuova mappa di occupazione globale persistente.
+12:14:38.361 [MAP] Inizializzata nuova mappa globale persistente del terreno (altezza).
+12:14:38.363 [GROUND-FILTER] scan-iniziale: 106 celle scartate, fino a 1.33 m sopra il suolo (suolo z=-16.985, stimato sotto il robot su 897 celle)
+12:14:38.363 [GROUND-FILTER] scan-iniziale: 3307 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0010 m
+12:14:38.365 [FOOTPRINT-DIAG] scan-cella: celle sotto il corpo marcate ostacolo: 0/799 (0.0%)
+12:14:38.395 [MAP] Mappa globale salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_occupancy_map.pkl
+12:14:38.436 [MAP] Mappa globale del terreno salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_terrain_map.pkl
+12:14:38.436 [MAP] Dimensione mappe globali -- occupazione: 12569 celle, terreno: 12024 celle
+12:14:38.436 [DATA SAVE] Matrici .npy salvate per cella (0,1)
+12:14:41.218 [GRAFO] 101006 archi ammessi su 105250 coppie del reticolo (3185 nodi, passo 0.2500 m); 94206 in zona senza dati, con il solo costo geometrico
+12:14:41.220 [TEMPO] costruzione completa del grafo: 2.78 s
+12:14:41.220 [ARCHI] 4244 archi scartati subito dalla scansione dal vivo (passano a meno di 0.20 m da un ostacolo appena visto), prima della pendenza.
+12:14:41.223 [TARGET] Cella (0,1): uso il centro geometrico (86.19, -35.61)  [liberi=0 ignoti=256 occupati=0]
+12:14:41.227 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1)]: 544 nodi su 3185. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+12:14:41.229 [NODO] partenza tentativo: agganciato al nodo 528 in (82.22, -36.11), a 0.00 m da (82.22, -36.11) -- nessun nodo nuovo
+12:14:41.248 
+12:14:41.248 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:14:41.248   Name: wp_1 (manual waypoint format)
+12:14:41.248   Number: 1
+12:14:41.248   Position: (82.215, -36.110, -16.485)
+12:14:41.248   Orientation (yaw): 7.1°
+12:14:41.248   Cell: (0, 1)
+12:14:41.364 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:14:41.364   Name: wp_1
+12:14:41.364   ID: shaved-manx-dUgn12Ie6YO8nqm0BGw.Qg==
+12:14:41.364   Pose saved for future realignment
+12:14:41.364   Cell saved: (0, 1)
+12:14:41.364   Status: 1
+12:14:41.364 
+12:14:41.364 [GRAPH_CACHE] Cache invalidated
+12:14:41.364 [BRICIOLA] Waypoint wp_1 in (82.22, -36.11), nodo PRM 528 (traccia: 1 waypoint).
+12:14:41.383 [LOCALIZZAZIONE] briciola wp_1: localizzato su wp_1 | localizzazioni accettate 4203, rifiutate 236 (0 dall'ultima accettata, 0.0 m fatti cosi'), archi cattivi di fila 0 | ultimo passo None, beccheggio -0.2 gradi.
+12:14:41.384 [NODO] obiettivo cella (0,1): agganciato al nodo 544 in (86.19, -35.61), a 0.00 m da (86.19, -35.61) -- nessun nodo nuovo
+12:14:41.535 [GROUND-FILTER] scan-passo: 89 celle scartate, fino a 1.34 m sopra il suolo (suolo z=-16.992, stimato sotto il robot su 1633 celle)
+12:14:41.535 [GROUND-FILTER] scan-passo: 3288 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0005 m
+12:14:41.537 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+12:14:42.360 [ARCHI] 1541 archi fuori dal grafo per la scansione dal vivo (1462 rivalutati, 79 oltre il raggio di refresh), prima della pendenza.
+12:14:42.363 [NODI] 5 nodi scartati: meno di 0.30 m di spazio libero dove li vediamo (primi: [142, 267, 795, 858, 988]).
+12:14:42.363 [SPAZIO] Archi su cui i due criteri non concordano: 35 su 3239 (1.1%) -- 35 bloccati solo dalla mappa binaria, 0 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 12854.
+12:14:42.380 [REPLAN STABILE] Percorso invariato da 528 a 544 (73 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:14:42.382 [FRONTE] 1.88 m confermati su 4.00 m di percorso, avanzamento consentito 1.23 m -- si ferma sul bordo dei dati in (84.08, -35.88): avanzo e riguardo
+12:14:42.382 [TEMPO] scansione 0.08 s | elaborazione 0.00 | mappe 0.03 | PRM 0.82 | fronte 0.00 | decisione: move
+12:14:42.383 [OK] Tratto 528->532 confermato libero dal fronte. Eseguo movimento...
+12:14:42.384 [SLOPE-SOURCE] Arco 528->532: LIVE (long=0.128, lat=0.123)
+12:14:42.389 [SLOPE-CHECK] Arco 528->532: in uso long=0.128 lat=0.123 | interpolata long=0.230 lat=0.165 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:14:42.389 [GAIT] Terrain tier: PLAIN (gradient=0.128, roughness=0.008) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:14:42.401 [INFO] Step 1: Rotating to face target...
+12:14:43.315 [MOVIMENTO] Rotazione completata: +0 gradi su +0 richiesti (il centro del corpo si e' spostato di 0.00 m girando).
+12:14:43.315 [INFO] Step 2: Moving forward 1.00m...
+12:14:46.961 [MOVIMENTO] Arrivato: percorsi 1.08 m su 1.00 richiesti.
+12:14:46.970 [TILT] Arco 528->532: picco roll=0.6 deg, pitch=2.2 deg (23 campioni) | stimato long=0.128 (~7.3 deg), lat=0.123 (~7.0 deg) | tier=PLAIN, 4.6s
+12:14:46.970 [INFO] Spostamento completato con successo su (83.21, -35.98)
+12:14:46.985 
+12:14:46.985 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:14:46.985   Name: wp_2 (manual waypoint format)
+12:14:46.985   Number: 2
+12:14:46.985   Position: (83.283, -35.976, -16.469)
+12:14:46.985   Orientation (yaw): 7.1°
+12:14:46.985   Cell: (0, 1)
+12:14:48.047 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:14:48.047   Name: wp_2
+12:14:48.047   ID: least-lapdog-77Mdn2LFxlnDPKnateRCSQ==
+12:14:48.047   Pose saved for future realignment
+12:14:48.047   Cell saved: (0, 1)
+12:14:48.047   Status: 1
+12:14:48.047 
+12:14:48.047 [GRAPH_CACHE] Cache invalidated
+12:14:48.047 [BRICIOLA] Waypoint wp_2 in (83.28, -35.98), nodo PRM 532 (traccia: 2 waypoint).
+12:14:48.168 [GROUND-FILTER] scan-passo: 41 celle scartate, fino a 1.32 m sopra il suolo (suolo z=-16.953, stimato sotto il robot su 1696 celle)
+12:14:48.168 [GROUND-FILTER] scan-passo: 306 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0008 m
+12:14:48.170 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/799 (0.0%)
+12:14:49.369 [ARCHI] 887 archi fuori dal grafo per la scansione dal vivo (700 rivalutati, 187 oltre il raggio di refresh), prima della pendenza.
+12:14:49.371 [NODI] 2 nodi scartati: meno di 0.30 m di spazio libero dove li vediamo (primi: [210, 276]).
+12:14:49.371 [SPAZIO] Archi su cui i due criteri non concordano: 87 su 3265 (2.7%) -- 80 bloccati solo dalla mappa binaria, 7 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 17725.
+12:14:49.387 [REPLAN STABILE] Percorso invariato da 532 a 544 (73 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:14:49.389 [FRONTE] 1.87 m confermati su 2.92 m di percorso, avanzamento consentito 1.22 m -- si ferma sul bordo dei dati in (85.15, -35.74): avanzo e riguardo
+12:14:49.389 [TEMPO] scansione 0.10 s | elaborazione 0.01 | mappe 0.03 | PRM 1.18 | fronte 0.00 | decisione: move
+12:14:49.389 [OK] Tratto 532->536 confermato libero dal fronte. Eseguo movimento...
+12:14:49.390 [SLOPE-SOURCE] Arco 532->536: LIVE (long=0.074, lat=0.065)
+12:14:49.395 [SLOPE-CHECK] Arco 532->536: in uso long=0.074 lat=0.065 | interpolata long=0.134 lat=0.205 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:14:49.395 [GAIT] Terrain tier: PLAIN (gradient=0.074, roughness=0.008) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:14:49.414 [INFO] Step 1: Rotating to face target...
+12:14:49.458 [MOVIMENTO] Rotazione completata: +0 gradi su -0 richiesti (il centro del corpo si e' spostato di 0.00 m girando).
+12:14:49.458 [INFO] Step 2: Moving forward 0.92m...
+12:14:52.901 [MOVIMENTO] Arrivato: percorsi 0.97 m su 0.92 richiesti.
+12:14:52.916 [TILT] Arco 532->536: picco roll=0.6 deg, pitch=4.3 deg (18 campioni) | stimato long=0.074 (~4.2 deg), lat=0.065 (~3.7 deg) | tier=PLAIN, 3.5s
+12:14:52.916 [INFO] Spostamento completato con successo su (84.20, -35.86)
+12:14:52.938 
+12:14:52.938 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:14:52.938   Name: wp_3 (manual waypoint format)
+12:14:52.938   Number: 3
+12:14:52.938   Position: (84.258, -35.852, -16.505)
+12:14:52.938   Orientation (yaw): 7.0°
+12:14:52.938   Cell: (0, 1)
+12:14:54.093 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:14:54.093   Name: wp_3
+12:14:54.093   ID: raring-husky-PJu5184txXsUahqi+JkFow==
+12:14:54.093   Pose saved for future realignment
+12:14:54.093   Cell saved: (0, 1)
+12:14:54.093   Status: 1
+12:14:54.093 
+12:14:54.093 [GRAPH_CACHE] Cache invalidated
+12:14:54.093 [BRICIOLA] Waypoint wp_3 in (84.26, -35.85), nodo PRM 536 (traccia: 3 waypoint).
+12:14:54.322 [GROUND-FILTER] scan-passo: 34 celle scartate, fino a 1.29 m sopra il suolo (suolo z=-16.989, stimato sotto il robot su 1696 celle)
+12:14:54.322 [GROUND-FILTER] scan-passo: 128 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0010 m
+12:14:54.324 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/801 (0.0%)
+12:14:55.572 [ARCHI] 817 archi fuori dal grafo per la scansione dal vivo (695 rivalutati, 122 oltre il raggio di refresh), prima della pendenza.
+12:14:55.575 [NODI] 4 nodi scartati: meno di 0.30 m di spazio libero dove li vediamo (primi: [77, 145, 341, 991]).
+12:14:55.575 [SPAZIO] Archi su cui i due criteri non concordano: 68 su 3234 (2.1%) -- 12 bloccati solo dalla mappa binaria, 56 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 22212.
+12:14:55.585 [REPLAN] Percorso aggiornato (72 nodi locali rivalutati): 2 waypoint rimanenti.
+12:14:55.640 [FRONTE] 1.88 m confermati su 1.94 m di percorso, avanzamento consentito 1.23 m -- si ferma sul bordo dei dati in (86.13, -35.62): avanzo e riguardo
+12:14:55.641 [TEMPO] scansione 0.22 s | elaborazione 0.01 | mappe 0.04 | PRM 1.27 | fronte 0.00 | decisione: move
+12:14:55.641 [OK] Tratto 536->541 confermato libero dal fronte. Eseguo movimento...
+12:14:55.642 [SLOPE-SOURCE] Arco 536->541: LIVE (long=0.092, lat=0.084)
+12:14:55.649 [SLOPE-CHECK] Arco 536->541: in uso long=0.092 lat=0.084 | interpolata long=0.165 lat=0.159 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:14:55.649 [GAIT] Terrain tier: PLAIN (gradient=0.092, roughness=0.008) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:14:55.681 [INFO] Step 1: Rotating to face target...
+12:14:55.888 [MOVIMENTO] Rotazione completata: +0 gradi su +0 richiesti (il centro del corpo si e' spostato di 0.00 m girando).
+12:14:55.888 [INFO] Step 2: Moving forward 1.19m...
+12:14:59.835 [MOVIMENTO] Arrivato: percorsi 1.23 m su 1.19 richiesti.
+12:14:59.867 [TILT] Arco 536->541: picco roll=0.5 deg, pitch=4.8 deg (19 campioni) | stimato long=0.092 (~5.2 deg), lat=0.084 (~4.8 deg) | tier=PLAIN, 4.2s
+12:14:59.868 [INFO] Spostamento completato con successo su (85.44, -35.71)
+12:15:00.062 
+12:15:00.062 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:15:00.062   Name: wp_4 (manual waypoint format)
+12:15:00.062   Number: 4
+12:15:00.062   Position: (85.491, -35.719, -16.573)
+12:15:00.062   Orientation (yaw): 7.0°
+12:15:00.062   Cell: (0, 1)
+12:15:01.441 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:15:01.441   Name: wp_4
+12:15:01.441   ID: brute-clam-gFHANtoS5m1qAg85wHbCdQ==
+12:15:01.441   Pose saved for future realignment
+12:15:01.441   Cell saved: (0, 1)
+12:15:01.441   Status: 1
+12:15:01.441 
+12:15:01.441 [GRAPH_CACHE] Cache invalidated
+12:15:01.441 [BRICIOLA] Waypoint wp_4 in (85.49, -35.72), nodo PRM 541 (traccia: 4 waypoint).
+12:15:01.699 [GROUND-FILTER] scan-passo: 95 celle scartate, fino a 1.36 m sopra il suolo (suolo z=-17.066, stimato sotto il robot su 1696 celle)
+12:15:01.702 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/798 (0.0%)
+12:15:03.287 [ARCHI] 134 archi fuori dal grafo per la scansione dal vivo (125 rivalutati, 9 oltre il raggio di refresh), prima della pendenza.
+12:15:03.289 [NODI] 3 nodi scartati: meno di 0.30 m di spazio libero dove li vediamo (primi: [80, 146, 1055]).
+12:15:03.289 [SPAZIO] Archi su cui i due criteri non concordano: 5 su 3284 (0.2%) -- 4 bloccati solo dalla mappa binaria, 1 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 28010.
+12:15:03.292 [REPLAN STABILE] Percorso invariato da 541 a 544 (73 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:15:03.293 [FRONTE] 1.25 m confermati su 0.70 m di percorso, avanzamento consentito 0.70 m -- percorso libero fino all'obiettivo
+12:15:03.294 [TEMPO] scansione 0.23 s | elaborazione 0.01 | mappe 0.05 | PRM 1.55 | fronte 0.00 | decisione: move
+12:15:03.294 [OK] Tratto 541->544 confermato libero dal fronte. Eseguo movimento...
+12:15:03.295 [SLOPE-SOURCE] Arco 541->544: LIVE (long=0.093, lat=0.098)
+12:15:03.299 [SLOPE-CHECK] Arco 541->544: in uso long=0.093 lat=0.098 | interpolata long=0.233 lat=0.192 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:15:03.299 [GAIT] Terrain tier: PLAIN (gradient=0.098, roughness=0.008) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:15:03.324 [INFO] Step 1: Rotating to face target...
+12:15:03.368 [MOVIMENTO] Rotazione completata: -0 gradi su +2 richiesti (il centro del corpo si e' spostato di 0.00 m girando).
+12:15:03.368 [INFO] Step 2: Moving forward 0.70m...
+12:15:06.191 [MOVIMENTO] Arrivato: percorsi 0.74 m su 0.70 richiesti.
+12:15:06.221 [TILT] Arco 541->544: picco roll=1.0 deg, pitch=5.1 deg (15 campioni) | stimato long=0.093 (~5.3 deg), lat=0.098 (~5.6 deg) | tier=PLAIN, 2.9s
+12:15:06.221 [INFO] Spostamento completato con successo su (86.19, -35.61)
+12:15:06.262 [CHECK] Point (86.23,-35.65) IS inside cell (0,1)
+12:15:06.273 [MAP] Cell (0, 1) marked as visited (robot center inside)
+12:15:06.302 
+12:15:06.302 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:15:06.302   Name: wp_5 (manual waypoint format)
+12:15:06.302   Number: 5
+12:15:06.302   Position: (86.234, -35.646, -16.636)
+12:15:06.302   Orientation (yaw): 7.0°
+12:15:06.302   Cell: (0, 1)
+12:15:07.515 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:15:07.515   Name: wp_5
+12:15:07.515   ID: impish-germ-8jureirTQTNC3Jh4czlLjw==
+12:15:07.515   Pose saved for future realignment
+12:15:07.515   Cell saved: (0, 1)
+12:15:07.516   Status: 1
+12:15:07.516 
+12:15:07.516 [GRAPH_CACHE] Cache invalidated
+12:15:07.516 [WAYPOINT] Registered waypoint #1 at (86.233, -35.647)
+12:15:07.516 [VISITED] Cell (0,1) marked as visited (value=1)
+12:15:07.516 
+12:15:07.516 [ADJACENT] Searching for adjacent unexplored neighbors from cell (0,1)
+12:15:07.516   ✓ Neighbor south: (1,1) with rank=6
+12:15:07.516   ✓ Neighbor east: (0,2) with rank=2
+12:15:07.516 [ADJACENT] ✓ Found 2 unexplored neighbors
+12:15:07.516 [ADJACENT] Neighbor with lowest rank: (0,2) rank=2
+12:15:07.516 [(1, 0, 7), (0, 2, 2), (1, 1, 6)]
+12:15:07.539 
+12:15:07.539 [ADJACENT] Searching for adjacent unexplored neighbors from cell (0,1)
+12:15:07.539   ✓ Neighbor south: (1,1) with rank=6
+12:15:07.539   ✓ Neighbor east: (0,2) with rank=2
+12:15:07.539 [ADJACENT] ✓ Found 2 unexplored neighbors
+12:15:07.539 [ADJACENT] Neighbor with lowest rank: (0,2) rank=2
+12:15:07.539 
+12:15:07.539 [ATTEMPT] Trying to enter cell (0,2) from current position...
+12:15:07.629 [FOOTPRINT-DIAG] scan-cella: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+12:15:07.688 [MAP] Mappa globale salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_occupancy_map.pkl
+12:15:07.805 [MAP] Mappa globale del terreno salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_terrain_map.pkl
+12:15:07.805 [MAP] Dimensione mappe globali -- occupazione: 31472 celle, terreno: 31472 celle
+12:15:07.806 [DATA SAVE] Matrici .npy salvate per cella (0,2)
+12:15:13.807 [GRAFO] 99715 archi ammessi su 105250 coppie del reticolo (3185 nodi, passo 0.2500 m); 85423 in zona senza dati, con il solo costo geometrico
+12:15:13.811 [TEMPO] costruzione completa del grafo: 6.00 s
+12:15:13.813 [TARGET] Cella (0,2): centro geometrico non utilizzabile, ripiego sul punto libero piu' vicino al centro (88.14, -35.12), a 2.02 m da esso  [liberi=5 ignoti=285 occupati=0]
+12:15:13.814 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1), (0, 2)]: 833 nodi su 3185. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+12:15:13.815 [NODO] partenza tentativo: agganciato al nodo 544 in (86.19, -35.61), a 0.06 m da (86.24, -35.64) -- nessun nodo nuovo
+12:15:13.836 
+12:15:13.836 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:15:13.836   Name: wp_6 (manual waypoint format)
+12:15:13.836   Number: 6
+12:15:13.836   Position: (86.237, -35.637, -16.636)
+12:15:13.836   Orientation (yaw): 7.0°
+12:15:13.836   Cell: (0, 2)
+12:15:13.935 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:15:13.935   Name: wp_6
+12:15:13.935   ID: swart-dove-g2ktzDKzad9yU8KqvH.xTA==
+12:15:13.935   Pose saved for future realignment
+12:15:13.935   Cell saved: (0, 2)
+12:15:13.935   Status: 1
+12:15:13.935 
+12:15:13.935 [GRAPH_CACHE] Cache invalidated
+12:15:13.935 [BRICIOLA] Waypoint wp_6 in (86.24, -35.64), nodo PRM 544 (traccia: 5 waypoint).
+12:15:13.955 [NODO] obiettivo cella (0,2): agganciato al nodo 617 in (88.14, -35.12), a 0.00 m da (88.14, -35.12) -- nessun nodo nuovo
+12:15:14.148 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/799 (0.0%)
+12:15:15.582 [SPAZIO] Archi su cui i due criteri non concordano: 1 su 3231 (0.0%) -- 1 bloccati solo dalla mappa binaria, 0 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 31488.
+12:15:15.600 [REPLAN STABILE] Percorso invariato da 544 a 617 (72 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:15:15.603 [FRONTE] 2.01 m confermati su 1.98 m di percorso, avanzamento consentito 1.36 m -- si ferma sul bordo dei dati in (88.17, -35.11): avanzo e riguardo
+12:15:15.603 [TEMPO] scansione 0.08 s | elaborazione 0.00 | mappe 0.03 | PRM 1.42 | fronte 0.00 | decisione: move
+12:15:15.603 [OK] Tratto 544->548 confermato libero dal fronte. Eseguo movimento...
+12:15:15.604 [SLOPE-SOURCE] Arco 544->548: LIVE (long=0.119, lat=0.106)
+12:15:15.608 [SLOPE-CHECK] Arco 544->548: in uso long=0.119 lat=0.106 | interpolata long=0.235 lat=0.192 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:15:15.609 [GAIT] Terrain tier: PLAIN (gradient=0.119, roughness=0.009) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:15:15.628 [INFO] Step 1: Rotating to face target...
+12:15:15.679 [MOVIMENTO] Rotazione completata: -0 gradi su +2 richiesti (il centro del corpo si e' spostato di 0.00 m girando).
+12:15:15.679 [INFO] Step 2: Moving forward 0.95m...
+12:15:20.446 [MOVIMENTO] Arrivato: percorsi 0.99 m su 0.95 richiesti.
+12:15:20.456 [TILT] Arco 544->548: picco roll=1.4 deg, pitch=5.4 deg (24 campioni) | stimato long=0.119 (~6.8 deg), lat=0.106 (~6.1 deg) | tier=PLAIN, 4.8s
+12:15:20.456 [INFO] Spostamento completato con successo su (87.18, -35.49)
+12:15:20.475 
+12:15:20.475 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:15:20.476   Name: wp_7 (manual waypoint format)
+12:15:20.476   Number: 7
+12:15:20.476   Position: (87.220, -35.539, -16.728)
+12:15:20.476   Orientation (yaw): 7.1°
+12:15:20.476   Cell: (0, 2)
+12:15:21.874 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:15:21.875   Name: wp_7
+12:15:21.875   ID: bantam-cod-FHkhgjYh4e.drF3Dypr7cQ==
+12:15:21.875   Pose saved for future realignment
+12:15:21.875   Cell saved: (0, 2)
+12:15:21.875   Status: 1
+12:15:21.875 
+12:15:21.875 [GRAPH_CACHE] Cache invalidated
+12:15:21.875 [BRICIOLA] Waypoint wp_7 in (87.22, -35.54), nodo PRM 548 (traccia: 6 waypoint).
+12:15:22.021 [GROUND-FILTER] scan-passo: 112 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0010 m
+12:15:22.024 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/797 (0.0%)
+12:15:23.693 [REPLAN STABILE] Percorso invariato da 548 a 617 (72 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:15:23.694 [FRONTE] 1.56 m confermati su 1.01 m di percorso, avanzamento consentito 1.01 m -- percorso libero fino all'obiettivo
+12:15:23.695 [TEMPO] scansione 0.08 s | elaborazione 0.01 | mappe 0.05 | PRM 1.62 | fronte 0.00 | decisione: move
+12:15:23.695 [OK] Tratto 548->617 confermato libero dal fronte. Eseguo movimento...
+12:15:23.696 [SLOPE-SOURCE] Arco 548->617: LIVE (long=0.063, lat=0.105)
+12:15:23.702 [SLOPE-CHECK] Arco 548->617: in uso long=0.063 lat=0.105 | interpolata long=0.156 lat=0.242 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:15:23.702 [GAIT] Terrain tier: PLAIN (gradient=0.105, roughness=0.008) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:15:23.772 [INFO] Step 1: Rotating to face target...
+12:15:25.527 [MOVIMENTO] Rotazione completata: +17 gradi su +18 richiesti (il centro del corpo si e' spostato di 0.01 m girando).
+12:15:25.537 [INFO] Step 2: Moving forward 1.01m...
+12:15:29.035 [MOVIMENTO] Arrivato: percorsi 1.01 m su 1.01 richiesti.
+12:15:29.217 [TILT] Arco 548->617: picco roll=0.3 deg, pitch=3.9 deg (18 campioni) | stimato long=0.063 (~3.6 deg), lat=0.105 (~6.0 deg) | tier=PLAIN, 5.5s
+12:15:29.217 [INFO] Spostamento completato con successo su (88.14, -35.12)
+12:15:29.417 
+12:15:29.417 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:15:29.417   Name: wp_8 (manual waypoint format)
+12:15:29.417   Number: 8
+12:15:29.417   Position: (88.169, -35.132, -16.772)
+12:15:29.417   Orientation (yaw): 24.5°
+12:15:29.417   Cell: (0, 2)
+12:15:30.577 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:15:30.577   Name: wp_8
+12:15:30.577   ID: fewer-raven-H66W5zYtKDu2ePaFW51w0g==
+12:15:30.577   Pose saved for future realignment
+12:15:30.577   Cell saved: (0, 2)
+12:15:30.577   Status: 1
+12:15:30.577 
+12:15:30.577 [GRAPH_CACHE] Cache invalidated
+12:15:30.577 [BRICIOLA] Waypoint wp_8 in (88.17, -35.13), nodo PRM 617 (traccia: 7 waypoint).
+12:15:30.628 [CHECK] Point (88.17,-35.13) IS inside cell (0,2)
+12:15:30.660 [MAP] Cell (0, 2) marked as visited (robot center inside)
+12:15:30.683 
+12:15:30.683 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:15:30.683   Name: wp_9 (manual waypoint format)
+12:15:30.683   Number: 9
+12:15:30.683   Position: (88.169, -35.131, -16.771)
+12:15:30.683   Orientation (yaw): 24.5°
+12:15:30.683   Cell: (0, 2)
+12:15:30.785 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:15:30.785   Name: wp_9
+12:15:30.786   ID: tilled-beagle-kWeV7qR16pQWfdryUlyxrA==
+12:15:30.786   Pose saved for future realignment
+12:15:30.786   Cell saved: (0, 2)
+12:15:30.786   Status: 1
+12:15:30.786 
+12:15:30.786 [GRAPH_CACHE] Cache invalidated
+12:15:30.786 [WAYPOINT] Registered waypoint #2 at (88.169, -35.131)
+12:15:30.786 [VISITED] Cell (0,2) marked as visited (value=1)
+12:15:30.786 
+12:15:30.786 [ADJACENT] Searching for adjacent unexplored neighbors from cell (0,2)
+12:15:30.786   ✓ Neighbor south: (1,2) with rank=5
+12:15:30.786   ✓ Neighbor east: (0,3) with rank=3
+12:15:30.786 [ADJACENT] ✓ Found 2 unexplored neighbors
+12:15:30.786 [ADJACENT] Neighbor with lowest rank: (0,3) rank=3
+12:15:30.786 [(1, 0, 7), (1, 1, 6), (0, 3, 3), (1, 2, 5)]
+12:15:30.814 
+12:15:30.814 [ADJACENT] Searching for adjacent unexplored neighbors from cell (0,2)
+12:15:30.814   ✓ Neighbor south: (1,2) with rank=5
+12:15:30.814   ✓ Neighbor east: (0,3) with rank=3
+12:15:30.814 [ADJACENT] ✓ Found 2 unexplored neighbors
+12:15:30.814 [ADJACENT] Neighbor with lowest rank: (0,3) rank=3
+12:15:30.815 
+12:15:30.815 [ATTEMPT] Trying to enter cell (0,3) from current position...
+12:15:30.964 [GROUND-FILTER] scan-iniziale: 147 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota +0.0000 m
+12:15:30.967 [FOOTPRINT-DIAG] scan-cella: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+12:15:31.042 [MAP] Mappa globale salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_occupancy_map.pkl
+12:15:31.185 [MAP] Mappa globale del terreno salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_terrain_map.pkl
+12:15:31.185 [MAP] Dimensione mappe globali -- occupazione: 40980 celle, terreno: 40980 celle
+12:15:31.185 [DATA SAVE] Matrici .npy salvate per cella (0,3)
+12:15:38.248 [GRAFO] 99715 archi ammessi su 105250 coppie del reticolo (3185 nodi, passo 0.2500 m); 80381 in zona senza dati, con il solo costo geometrico
+12:15:38.252 [TEMPO] costruzione completa del grafo: 7.07 s
+12:15:38.254 [TARGET] Cella (0,3): uso il centro geometrico (94.12, -34.63)  [liberi=0 ignoti=273 occupati=0]
+12:15:38.255 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1), (0, 2), (0, 3)]: 1105 nodi su 3185. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+12:15:38.256 [NODO] partenza tentativo: agganciato al nodo 617 in (88.14, -35.12), a 0.03 m da (88.17, -35.13) -- nessun nodo nuovo
+12:15:38.320 
+12:15:38.320 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:15:38.320   Name: wp_10 (manual waypoint format)
+12:15:38.320   Number: 10
+12:15:38.320   Position: (88.169, -35.131, -16.771)
+12:15:38.320   Orientation (yaw): 24.4°
+12:15:38.320   Cell: (0, 3)
+12:15:38.412 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:15:38.413   Name: wp_10
+12:15:38.413   ID: fueled-wasp-9VLlVD++CsAwv4DUiGOoTQ==
+12:15:38.413   Pose saved for future realignment
+12:15:38.413   Cell saved: (0, 3)
+12:15:38.413   Status: 1
+12:15:38.413 
+12:15:38.413 [GRAPH_CACHE] Cache invalidated
+12:15:38.413 [BRICIOLA] Waypoint wp_10 in (88.17, -35.13), nodo PRM 617 (traccia: 8 waypoint).
+12:15:38.429 [NODO] obiettivo cella (0,3): agganciato al nodo 576 in (94.12, -34.63), a 0.00 m da (94.12, -34.63) -- nessun nodo nuovo
+12:15:38.669 [GROUND-FILTER] scan-passo: 128 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0010 m
+12:15:38.671 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/801 (0.0%)
+12:15:40.172 [REPLAN STABILE] Percorso invariato da 617 a 576 (72 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:15:40.175 [FRONTE] 1.92 m confermati su 6.00 m di percorso, avanzamento consentito 1.27 m -- si ferma sul bordo dei dati in (90.08, -34.88): avanzo e riguardo
+12:15:40.175 [TEMPO] scansione 0.08 s | elaborazione 0.00 | mappe 0.04 | PRM 1.47 | fronte 0.00 | decisione: move
+12:15:40.175 [OK] Tratto 617->622 confermato libero dal fronte. Eseguo movimento...
+12:15:40.176 [SLOPE-SOURCE] Arco 617->622: LIVE (long=0.053, lat=0.086)
+12:15:40.183 [SLOPE-CHECK] Arco 617->622: in uso long=0.053 lat=0.086 | interpolata long=0.211 lat=0.277 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:15:40.183 [GAIT] Terrain tier: PLAIN (gradient=0.086, roughness=0.010) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:15:40.203 [INFO] Step 1: Rotating to face target...
+12:15:41.823 [MOVIMENTO] Rotazione completata: -16 gradi su -17 richiesti (il centro del corpo si e' spostato di 0.05 m girando).
+12:15:41.823 [INFO] Step 2: Moving forward 1.22m...
+12:15:45.764 [MOVIMENTO] Arrivato: percorsi 1.27 m su 1.22 richiesti.
+12:15:45.821 [TILT] Arco 617->622: picco roll=0.8 deg, pitch=4.2 deg (26 campioni) | stimato long=0.053 (~3.0 deg), lat=0.086 (~4.9 deg) | tier=PLAIN, 5.6s
+12:15:45.821 [INFO] Spostamento completato con successo su (89.38, -34.96)
+12:15:45.840 
+12:15:45.840 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:15:45.840   Name: wp_11 (manual waypoint format)
+12:15:45.840   Number: 11
+12:15:45.840   Position: (89.481, -34.997, -16.790)
+12:15:45.840   Orientation (yaw): 8.1°
+12:15:45.840   Cell: (0, 3)
+12:15:47.264 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:15:47.264   Name: wp_11
+12:15:47.265   ID: drafty-jackal-cfnirBfciVESN3KHBhegiQ==
+12:15:47.265   Pose saved for future realignment
+12:15:47.265   Cell saved: (0, 3)
+12:15:47.265   Status: 1
+12:15:47.265 
+12:15:47.265 [GRAPH_CACHE] Cache invalidated
+12:15:47.265 [BRICIOLA] Waypoint wp_11 in (89.48, -35.00), nodo PRM 622 (traccia: 9 waypoint).
+12:15:47.401 [GROUND-FILTER] scan-passo: 103 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0008 m
+12:15:47.403 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/799 (0.0%)
+12:15:49.070 [REPLAN STABILE] Percorso invariato da 622 a 576 (72 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:15:49.072 [SCORCIATOIA] Tratto diretto confermato libero verso il nodo 627: salto 1 nodi intermedi [624].
+12:15:49.073 [FRONTE] 1.92 m confermati su 4.68 m di percorso, avanzamento consentito 1.27 m -- si ferma sul bordo dei dati in (91.38, -34.90): avanzo e riguardo
+12:15:49.073 [TEMPO] scansione 0.12 s | elaborazione 0.01 | mappe 0.04 | PRM 1.63 | fronte 0.00 | decisione: move
+12:15:49.073 [OK] Tratto 622->627 confermato libero dal fronte. Eseguo movimento...
+12:15:49.074 [SLOPE-SOURCE] Arco 622->627: LIVE (long=0.043, lat=0.126)
+12:15:49.080 [SLOPE-CHECK] Arco 622->627: in uso long=0.043 lat=0.126 | interpolata long=0.346 lat=0.262 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:15:49.080 [GAIT] Terrain tier: PLAIN (gradient=0.126, roughness=0.014) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:15:49.107 [INFO] Step 1: Rotating to face target...
+12:15:49.151 [MOVIMENTO] Rotazione completata: -0 gradi su +1 richiesti (il centro del corpo si e' spostato di 0.00 m girando).
+12:15:49.151 [INFO] Step 2: Moving forward 1.15m...
+12:15:52.617 [MOVIMENTO] Arrivato: percorsi 1.17 m su 1.15 richiesti.
+12:15:52.631 [TILT] Arco 622->627: picco roll=0.7 deg, pitch=1.9 deg (17 campioni) | stimato long=0.043 (~2.5 deg), lat=0.126 (~7.2 deg) | tier=PLAIN, 3.5s
+12:15:52.631 [INFO] Spostamento completato con successo su (90.62, -34.81)
+12:15:52.656 
+12:15:52.656 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:15:52.656   Name: wp_12 (manual waypoint format)
+12:15:52.656   Number: 12
+12:15:52.656   Position: (90.642, -34.841, -16.796)
+12:15:52.656   Orientation (yaw): 8.1°
+12:15:52.656   Cell: (0, 3)
+12:15:53.883 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:15:53.883   Name: wp_12
+12:15:53.883   ID: mid-eland-ix1H4zt9ZlvNr.hq1Bx41A==
+12:15:53.883   Pose saved for future realignment
+12:15:53.883   Cell saved: (0, 3)
+12:15:53.883   Status: 1
+12:15:53.883 
+12:15:53.883 [GRAPH_CACHE] Cache invalidated
+12:15:53.883 [BRICIOLA] Waypoint wp_12 in (90.64, -34.84), nodo PRM 627 (traccia: 10 waypoint).
+12:15:54.111 [GROUND-FILTER] scan-passo: 145 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0010 m
+12:15:54.114 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/803 (0.0%)
+12:15:55.743 [REPLAN STABILE] Percorso invariato da 627 a 576 (72 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:15:55.745 [FRONTE] 1.75 m confermati su 3.50 m di percorso, avanzamento consentito 1.10 m -- si ferma sul bordo dei dati in (92.38, -34.84): avanzo e riguardo
+12:15:55.745 [TEMPO] scansione 0.21 s | elaborazione 0.01 | mappe 0.07 | PRM 1.56 | fronte 0.00 | decisione: move
+12:15:55.746 [OK] Tratto 627->566 confermato libero dal fronte. Eseguo movimento...
+12:15:55.746 [SLOPE-SOURCE] Arco 627->566: LIVE (long=0.020, lat=0.103)
+12:15:55.752 [SLOPE-CHECK] Arco 627->566: in uso long=0.020 lat=0.103 | interpolata long=0.108 lat=0.281 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:15:55.752 [GAIT] Terrain tier: PLAIN (gradient=0.103, roughness=0.010) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:15:55.909 [INFO] Step 1: Rotating to face target...
+12:15:57.775 [MOVIMENTO] Rotazione completata: -14 gradi su -14 richiesti (il centro del corpo si e' spostato di 0.05 m girando).
+12:15:57.775 [INFO] Step 2: Moving forward 1.00m...
+12:16:01.241 [MOVIMENTO] Arrivato: percorsi 1.05 m su 1.00 richiesti.
+12:16:01.250 [TILT] Arco 627->566: picco roll=0.7 deg, pitch=2.1 deg (22 campioni) | stimato long=0.020 (~1.2 deg), lat=0.103 (~5.9 deg) | tier=PLAIN, 5.5s
+12:16:01.250 [INFO] Spostamento completato con successo su (91.64, -34.93)
+12:16:01.264 
+12:16:01.264 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:16:01.264   Name: wp_13 (manual waypoint format)
+12:16:01.264   Number: 13
+12:16:01.264   Position: (91.722, -34.977, -16.783)
+12:16:01.264   Orientation (yaw): -5.6°
+12:16:01.264   Cell: (0, 3)
+12:16:02.680 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:16:02.680   Name: wp_13
+12:16:02.680   ID: pearly-egg-dUF2NWvui4W8k96iYub0Mg==
+12:16:02.680   Pose saved for future realignment
+12:16:02.680   Cell saved: (0, 3)
+12:16:02.680   Status: 1
+12:16:02.680 
+12:16:02.680 [GRAPH_CACHE] Cache invalidated
+12:16:02.680 [BRICIOLA] Waypoint wp_13 in (91.72, -34.98), nodo PRM 566 (traccia: 11 waypoint).
+12:16:02.793 [GROUND-FILTER] scan-passo: 125 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0010 m
+12:16:02.796 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/801 (0.0%)
+12:16:04.642 [REPLAN STABILE] Percorso invariato da 566 a 576 (74 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:16:04.645 [FRONTE] 1.95 m confermati su 2.42 m di percorso, avanzamento consentito 1.30 m -- si ferma sul bordo dei dati in (93.65, -34.68): avanzo e riguardo
+12:16:04.645 [TEMPO] scansione 0.07 s | elaborazione 0.01 | mappe 0.05 | PRM 1.80 | fronte 0.00 | decisione: move
+12:16:04.645 [OK] Tratto 566->571 confermato libero dal fronte. Eseguo movimento...
+12:16:04.646 [SLOPE-SOURCE] Arco 566->571: LIVE (long=0.039, lat=0.075)
+12:16:04.653 [SLOPE-CHECK] Arco 566->571: in uso long=0.039 lat=0.075 | interpolata long=0.136 lat=0.260 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:16:04.653 [GAIT] Terrain tier: PLAIN (gradient=0.075, roughness=0.014) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:16:04.661 [INFO] Step 1: Rotating to face target...
+12:16:06.757 [MOVIMENTO] Rotazione completata: +15 gradi su +15 richiesti (il centro del corpo si e' spostato di 0.05 m girando).
+12:16:06.757 [INFO] Step 2: Moving forward 1.17m...
+12:16:10.211 [MOVIMENTO] Arrivato: percorsi 1.19 m su 1.17 richiesti.
+12:16:10.224 [TILT] Arco 566->571: picco roll=0.6 deg, pitch=5.1 deg (24 campioni) | stimato long=0.039 (~2.2 deg), lat=0.075 (~4.3 deg) | tier=PLAIN, 5.6s
+12:16:10.224 [INFO] Spostamento completato con successo su (92.88, -34.78)
+12:16:10.243 
+12:16:10.243 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:16:10.243   Name: wp_14 (manual waypoint format)
+12:16:10.243   Number: 14
+12:16:10.243   Position: (92.928, -34.815, -16.799)
+12:16:10.243   Orientation (yaw): 9.4°
+12:16:10.243   Cell: (0, 3)
+12:16:11.826 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:16:11.826   Name: wp_14
+12:16:11.826   ID: dirty-bat-me0WUVyHG7oHwfOH9.bfvw==
+12:16:11.826   Pose saved for future realignment
+12:16:11.826   Cell saved: (0, 3)
+12:16:11.826   Status: 1
+12:16:11.826 
+12:16:11.826 [GRAPH_CACHE] Cache invalidated
+12:16:11.826 [BRICIOLA] Waypoint wp_14 in (92.93, -34.82), nodo PRM 571 (traccia: 12 waypoint).
+12:16:13.024 [GROUND-FILTER] scan-passo: 103 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota +0.0000 m
+12:16:13.026 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/803 (0.0%)
+12:16:14.605 [REPLAN STABILE] Percorso invariato da 571 a 576 (71 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:16:14.606 [FRONTE] 1.76 m confermati su 1.21 m di percorso, avanzamento consentito 1.21 m -- percorso libero fino all'obiettivo
+12:16:14.606 [TEMPO] scansione 1.13 s | elaborazione 0.00 | mappe 0.04 | PRM 1.54 | fronte 0.00 | decisione: move
+12:16:14.606 [OK] Tratto 571->576 confermato libero dal fronte. Eseguo movimento...
+12:16:14.607 [SLOPE-SOURCE] Arco 571->576: LIVE (long=0.167, lat=0.104)
+12:16:14.614 [SLOPE-CHECK] Arco 571->576: in uso long=0.167 lat=0.104 | interpolata long=0.336 lat=0.356 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:16:14.615 [GAIT] Terrain tier: MODERATE (gradient=0.167, roughness=0.017) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.6, vel_max=0.35 m/s, rot_max=0.50 rad/s
+12:16:14.648 [INFO] Step 1: Rotating to face target...
+12:16:14.774 [MOVIMENTO] Rotazione completata: -0 gradi su -1 richiesti (il centro del corpo si e' spostato di 0.00 m girando).
+12:16:14.774 [INFO] Step 2: Moving forward 1.21m...
+12:16:19.843 [MOVIMENTO] Arrivato: percorsi 1.20 m su 1.21 richiesti.
+12:16:19.868 [TILT] Arco 571->576: picco roll=1.7 deg, pitch=6.5 deg (22 campioni) | stimato long=0.167 (~9.5 deg), lat=0.104 (~5.9 deg) | tier=MODERATE, 5.2s
+12:16:19.873 [INFO] Spostamento completato con successo su (94.12, -34.63)
+12:16:19.919 
+12:16:19.919 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:16:19.919   Name: wp_15 (manual waypoint format)
+12:16:19.919   Number: 15
+12:16:19.919   Position: (94.114, -34.625, -16.893)
+12:16:19.919   Orientation (yaw): 9.3°
+12:16:19.919   Cell: (0, 3)
+12:16:21.460 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:16:21.460   Name: wp_15
+12:16:21.460   ID: logy-hippo-+Uo3IxqsTSf9h1qgxw6yow==
+12:16:21.460   Pose saved for future realignment
+12:16:21.460   Cell saved: (0, 3)
+12:16:21.460   Status: 1
+12:16:21.461 
+12:16:21.461 [GRAPH_CACHE] Cache invalidated
+12:16:21.461 [BRICIOLA] Waypoint wp_15 in (94.11, -34.63), nodo PRM 576 (traccia: 13 waypoint).
+12:16:21.524 [CHECK] Point (94.12,-34.62) IS inside cell (0,3)
+12:16:21.533 [MAP] Cell (0, 3) marked as visited (robot center inside)
+12:16:21.549 
+12:16:21.549 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:16:21.549   Name: wp_16 (manual waypoint format)
+12:16:21.549   Number: 16
+12:16:21.549   Position: (94.116, -34.621, -16.892)
+12:16:21.549   Orientation (yaw): 9.3°
+12:16:21.549   Cell: (0, 3)
+12:16:21.635 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:16:21.635   Name: wp_16
+12:16:21.635   ID: myriad-equid-MU7wn52rW621g4s.8FD+PQ==
+12:16:21.635   Pose saved for future realignment
+12:16:21.635   Cell saved: (0, 3)
+12:16:21.635   Status: 1
+12:16:21.635 
+12:16:21.635 [GRAPH_CACHE] Cache invalidated
+12:16:21.635 [WAYPOINT] Registered waypoint #3 at (94.116, -34.621)
+12:16:21.635 [VISITED] Cell (0,3) marked as visited (value=1)
+12:16:21.635 
+12:16:21.635 [ADJACENT] Searching for adjacent unexplored neighbors from cell (0,3)
+12:16:21.635   ✓ Neighbor south: (1,3) with rank=4
+12:16:21.635 [ADJACENT] ✓ Found 1 unexplored neighbors
+12:16:21.636 [ADJACENT] Neighbor with lowest rank: (1,3) rank=4
+12:16:21.636 [(1, 0, 7), (1, 1, 6), (1, 2, 5), (1, 3, 4)]
+12:16:21.647 
+12:16:21.648 [ADJACENT] Searching for adjacent unexplored neighbors from cell (0,3)
+12:16:21.648   ✓ Neighbor south: (1,3) with rank=4
+12:16:21.648 [ADJACENT] ✓ Found 1 unexplored neighbors
+12:16:21.648 [ADJACENT] Neighbor with lowest rank: (1,3) rank=4
+12:16:21.648 
+12:16:21.648 [ATTEMPT] Trying to enter cell (1,3) from current position...
+12:16:21.737 [FOOTPRINT-DIAG] scan-cella: celle sotto il corpo marcate ostacolo: 0/801 (0.0%)
+12:16:21.817 [MAP] Mappa globale salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_occupancy_map.pkl
+12:16:22.076 [MAP] Mappa globale del terreno salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_terrain_map.pkl
+12:16:22.076 [MAP] Dimensione mappe globali -- occupazione: 68044 celle, terreno: 68044 celle
+12:16:22.077 [DATA SAVE] Matrici .npy salvate per cella (1,3)
+12:16:32.719 [PENDENZE] costruzione: archi vetati per pendenza -- longitudinale 3 (max 0.66), laterale 0 (max 0.00), 3 mai vetati prima; 0 cambi di verdetto vicino soglia (soglia 0.60).
+12:16:32.719 [GRAFO] 99712 archi ammessi su 105250 coppie del reticolo (3185 nodi, passo 0.2500 m); 69076 in zona senza dati, con il solo costo geometrico
+12:16:32.724 [TEMPO] costruzione completa del grafo: 10.65 s
+12:16:32.726 [TARGET] Cella (1,3): uso il centro geometrico (93.63, -30.66)  [liberi=0 ignoti=241 occupati=0]
+12:16:32.727 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1), (0, 2), (0, 3), (1, 3)]: 1345 nodi su 3185. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+12:16:32.728 [NODO] partenza tentativo: agganciato al nodo 576 in (94.12, -34.63), a 0.01 m da (94.12, -34.62) -- nessun nodo nuovo
+12:16:32.780 
+12:16:32.780 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:16:32.780   Name: wp_17 (manual waypoint format)
+12:16:32.780   Number: 17
+12:16:32.780   Position: (94.115, -34.621, -16.893)
+12:16:32.780   Orientation (yaw): 9.4°
+12:16:32.780   Cell: (1, 3)
+12:16:32.877 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:16:32.877   Name: wp_17
+12:16:32.877   ID: briny-fawn-zeRIRizcujehkujxHT7RPg==
+12:16:32.877   Pose saved for future realignment
+12:16:32.877   Cell saved: (1, 3)
+12:16:32.877   Status: 1
+12:16:32.877 
+12:16:32.877 [GRAPH_CACHE] Cache invalidated
+12:16:32.877 [BRICIOLA] Waypoint wp_17 in (94.12, -34.62), nodo PRM 576 (traccia: 14 waypoint).
+12:16:32.904 [NODO] obiettivo cella (1,3): agganciato al nodo 1616 in (93.63, -30.66), a 0.00 m da (93.63, -30.66) -- nessun nodo nuovo
+12:16:33.183 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/803 (0.0%)
+12:16:34.650 [PENDENZE] refresh: archi vetati per pendenza -- longitudinale 2 (max 0.64), laterale 0 (max 0.00), 0 mai vetati prima; 0 cambi di verdetto vicino soglia (soglia 0.60).
+12:16:34.687 [REPLAN STABILE] Percorso invariato da 576 a 1616 (73 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:16:34.689 [FRONTE] 1.92 m confermati su 3.99 m di percorso, avanzamento consentito 1.27 m -- si ferma sul bordo dei dati in (93.89, -32.71): avanzo e riguardo
+12:16:34.690 [TEMPO] scansione 0.12 s | elaborazione 0.00 | mappe 0.04 | PRM 1.47 | fronte 0.00 | decisione: move
+12:16:34.690 [OK] Tratto 576->901 confermato libero dal fronte. Eseguo movimento...
+12:16:34.691 [SLOPE-SOURCE] Arco 576->901: LIVE (long=0.064, lat=0.137)
+12:16:34.698 [SLOPE-CHECK] Arco 576->901: in uso long=0.064 lat=0.137 | interpolata long=0.241 lat=0.279 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:16:34.698 [GAIT] Terrain tier: PLAIN (gradient=0.137, roughness=0.011) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:16:34.720 [INFO] Step 1: Rotating to face target...
+12:16:38.632 [MOVIMENTO] Rotazione completata: +87 gradi su +87 richiesti (il centro del corpo si e' spostato di 0.04 m girando).
+12:16:38.632 [INFO] Step 2: Moving forward 1.24m...
+12:16:42.644 [MOVIMENTO] Arrivato: percorsi 1.29 m su 1.24 richiesti.
+12:16:42.656 [TILT] Arco 576->901: picco roll=0.6 deg, pitch=4.8 deg (38 campioni) | stimato long=0.064 (~3.7 deg), lat=0.137 (~7.8 deg) | tier=PLAIN, 8.0s
+12:16:42.656 [INFO] Spostamento completato con successo su (93.97, -33.39)
+12:16:42.673 
+12:16:42.673 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:16:42.680   Name: wp_18 (manual waypoint format)
+12:16:42.680   Number: 18
+12:16:42.680   Position: (93.987, -33.296, -16.840)
+12:16:42.681   Orientation (yaw): 96.4°
+12:16:42.681   Cell: (1, 3)
+12:16:43.342 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:16:43.342   Name: wp_18
+12:16:43.342   ID: etched-ocelot-OOmt6tGd7ZvDns01UZNH9w==
+12:16:43.342   Pose saved for future realignment
+12:16:43.342   Cell saved: (1, 3)
+12:16:43.342   Status: 1
+12:16:43.342 
+12:16:43.342 [GRAPH_CACHE] Cache invalidated
+12:16:43.343 [BRICIOLA] Waypoint wp_18 in (93.99, -33.30), nodo PRM 901 (traccia: 15 waypoint).
+12:16:43.490 [GROUND-FILTER] scan-passo: 157 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0003 m
+12:16:43.492 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/802 (0.0%)
+12:16:45.208 [PENDENZE] refresh: archi vetati per pendenza -- longitudinale 5 (max 0.71), laterale 0 (max 0.00), 5 mai vetati prima; 5 cambi di verdetto vicino soglia (soglia 0.60).
+12:16:45.234 [REPLAN STABILE] Percorso invariato da 901 a 1616 (72 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:16:45.236 [FRONTE] 1.89 m confermati su 2.66 m di percorso, avanzamento consentito 1.24 m -- si ferma sul bordo dei dati in (93.73, -31.42): avanzo e riguardo
+12:16:45.236 [TEMPO] scansione 0.10 s | elaborazione 0.01 | mappe 0.05 | PRM 1.69 | fronte 0.00 | decisione: move
+12:16:45.236 [OK] Tratto 901->1161 confermato libero dal fronte. Eseguo movimento...
+12:16:45.237 [SLOPE-SOURCE] Arco 901->1161: LIVE (long=0.132, lat=0.096)
+12:16:45.242 [SLOPE-CHECK] Arco 901->1161: in uso long=0.132 lat=0.096 | interpolata long=0.293 lat=0.398 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:16:45.242 [GAIT] Terrain tier: PLAIN (gradient=0.132, roughness=0.020) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:16:45.250 [INFO] Step 1: Rotating to face target...
+12:16:45.291 [MOVIMENTO] Rotazione completata: -0 gradi su +3 richiesti (il centro del corpo si e' spostato di 0.00 m girando).
+12:16:45.291 [INFO] Step 2: Moving forward 0.91m...
+12:16:48.619 [MOVIMENTO] Arrivato: percorsi 0.95 m su 0.91 richiesti.
+12:16:48.632 [TILT] Arco 901->1161: picco roll=0.9 deg, pitch=9.1 deg (17 campioni) | stimato long=0.132 (~7.5 deg), lat=0.096 (~5.5 deg) | tier=PLAIN, 3.4s
+12:16:48.632 [INFO] Spostamento completato con successo su (93.85, -32.39)
+12:16:48.651 
+12:16:48.652 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:16:48.652   Name: wp_19 (manual waypoint format)
+12:16:48.652   Number: 19
+12:16:48.652   Position: (93.888, -32.345, -16.711)
+12:16:48.652   Orientation (yaw): 96.4°
+12:16:48.652   Cell: (1, 3)
+12:16:49.708 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:16:49.708   Name: wp_19
+12:16:49.708   ID: framed-locust-lsInp9.xe7e7ar+u.PxGjg==
+12:16:49.708   Pose saved for future realignment
+12:16:49.708   Cell saved: (1, 3)
+12:16:49.708   Status: 1
+12:16:49.708 
+12:16:49.708 [GRAPH_CACHE] Cache invalidated
+12:16:49.709 [BRICIOLA] Waypoint wp_19 in (93.89, -32.35), nodo PRM 1161 (traccia: 16 waypoint).
+12:16:49.839 [GROUND-FILTER] scan-passo: 114 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0005 m
+12:16:49.841 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/799 (0.0%)
+12:16:51.533 [ARCHI] 392 archi fuori dal grafo per la scansione dal vivo (62 rivalutati, 330 oltre il raggio di refresh), prima della pendenza.
+12:16:51.536 [NODI] 5 nodi scartati: meno di 0.30 m di spazio libero dove li vediamo (primi: [776, 777, 840, 905, 907]).
+12:16:51.549 [REPLAN STABILE] Percorso invariato da 1161 a 1616 (74 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:16:51.565 [FRONTE] 1.94 m confermati su 1.71 m di percorso, avanzamento consentito 1.29 m -- si ferma sul bordo dei dati in (93.60, -30.43): avanzo e riguardo
+12:16:51.565 [TEMPO] scansione 0.12 s | elaborazione 0.01 | mappe 0.04 | PRM 1.67 | fronte 0.02 | decisione: move
+12:16:51.565 [OK] Tratto 1161->1291 confermato libero dal fronte. Eseguo movimento...
+12:16:51.566 [SLOPE-SOURCE] Arco 1161->1291: LIVE (long=0.130, lat=0.050)
+12:16:51.568 [SLOPE-CHECK] Arco 1161->1291: in uso long=0.130 lat=0.050 | interpolata long=0.267 lat=0.234 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:16:51.568 [GAIT] Terrain tier: PLAIN (gradient=0.130, roughness=0.015) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:16:51.583 [INFO] Step 1: Rotating to face target...
+12:16:52.760 [MOVIMENTO] Rotazione completata: +5 gradi su +6 richiesti (il centro del corpo si e' spostato di 0.00 m girando).
+12:16:52.763 [INFO] Step 2: Moving forward 0.46m...
+12:16:55.109 [MOVIMENTO] Arrivato: percorsi 0.50 m su 0.46 richiesti.
+12:16:55.276 [TILT] Arco 1161->1291: picco roll=0.5 deg, pitch=7.1 deg (17 campioni) | stimato long=0.130 (~7.4 deg), lat=0.050 (~2.8 deg) | tier=PLAIN, 3.7s
+12:16:55.276 [INFO] Spostamento completato con successo su (93.78, -31.90)
+12:16:55.568 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/799 (0.0%)
+12:16:57.231 [REPLAN STABILE] Percorso invariato da 1291 a 1616 (74 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:16:57.232 [FRONTE] 1.76 m confermati su 1.21 m di percorso, avanzamento consentito 1.21 m -- percorso libero fino all'obiettivo
+12:16:57.232 [TEMPO] scansione 0.28 s | elaborazione 0.01 | mappe 0.06 | PRM 1.61 | fronte 0.00 | decisione: move
+12:16:57.233 [OK] Tratto 1291->1616 confermato libero dal fronte. Eseguo movimento...
+12:16:57.234 [SLOPE-SOURCE] Arco 1291->1616: LIVE (long=0.071, lat=0.060)
+12:16:57.241 [SLOPE-CHECK] Arco 1291->1616: in uso long=0.071 lat=0.060 | interpolata long=0.230 lat=0.242 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:16:57.241 [GAIT] Terrain tier: PLAIN (gradient=0.071, roughness=0.011) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:16:57.351 [INFO] Step 1: Rotating to face target...
+12:16:58.586 [MOVIMENTO] Rotazione completata: -4 gradi su -5 richiesti (il centro del corpo si e' spostato di 0.00 m girando).
+12:16:58.587 [INFO] Step 2: Moving forward 1.21m...
+12:17:02.325 [MOVIMENTO] Arrivato: percorsi 1.25 m su 1.21 richiesti.
+12:17:02.340 [TILT] Arco 1291->1616: picco roll=0.4 deg, pitch=3.1 deg (21 campioni) | stimato long=0.071 (~4.1 deg), lat=0.060 (~3.5 deg) | tier=PLAIN, 5.1s
+12:17:02.340 [INFO] Spostamento completato con successo su (93.63, -30.66)
+12:17:02.357 
+12:17:02.357 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:17:02.357   Name: wp_20 (manual waypoint format)
+12:17:02.357   Number: 20
+12:17:02.357   Position: (93.629, -30.608, -16.621)
+12:17:02.357   Orientation (yaw): 97.3°
+12:17:02.357   Cell: (1, 3)
+12:17:04.250 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:17:04.250   Name: wp_20
+12:17:04.250   ID: utile-germ-nb2CzB6jpuvdl9hDh4IpFg==
+12:17:04.251   Pose saved for future realignment
+12:17:04.251   Cell saved: (1, 3)
+12:17:04.251   Status: 1
+12:17:04.251 
+12:17:04.251 [GRAPH_CACHE] Cache invalidated
+12:17:04.251 [BRICIOLA] Waypoint wp_20 in (93.63, -30.61), nodo PRM 1616 (traccia: 17 waypoint).
+12:17:04.286 [CHECK] Point (93.62,-30.60) IS inside cell (1,3)
+12:17:04.294 [MAP] Cell (1, 3) marked as visited (robot center inside)
+12:17:04.305 
+12:17:04.305 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:17:04.305   Name: wp_21 (manual waypoint format)
+12:17:04.305   Number: 21
+12:17:04.305   Position: (93.624, -30.599, -16.620)
+12:17:04.305   Orientation (yaw): 97.3°
+12:17:04.305   Cell: (1, 3)
+12:17:04.413 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:17:04.413   Name: wp_21
+12:17:04.413   ID: rouged-medusa-OgWo.EpRFcvD5.FkvTJpjA==
+12:17:04.413   Pose saved for future realignment
+12:17:04.413   Cell saved: (1, 3)
+12:17:04.413   Status: 1
+12:17:04.413 
+12:17:04.413 [GRAPH_CACHE] Cache invalidated
+12:17:04.413 [WAYPOINT] Registered waypoint #4 at (93.624, -30.599)
+12:17:04.413 [VISITED] Cell (1,3) marked as visited (value=1)
+12:17:04.413 
+12:17:04.413 [ADJACENT] Searching for adjacent unexplored neighbors from cell (1,3)
+12:17:04.413   ✓ Neighbor south: (2,3) with rank=11
+12:17:04.413   ✓ Neighbor west: (1,2) with rank=5
+12:17:04.413 [ADJACENT] ✓ Found 2 unexplored neighbors
+12:17:04.413 [ADJACENT] Neighbor with lowest rank: (1,2) rank=5
+12:17:04.413 [(1, 0, 7), (1, 1, 6), (1, 2, 5), (2, 3, 11)]
+12:17:04.425 
+12:17:04.425 [ADJACENT] Searching for adjacent unexplored neighbors from cell (1,3)
+12:17:04.425   ✓ Neighbor south: (2,3) with rank=11
+12:17:04.425   ✓ Neighbor west: (1,2) with rank=5
+12:17:04.426 [ADJACENT] ✓ Found 2 unexplored neighbors
+12:17:04.426 [ADJACENT] Neighbor with lowest rank: (1,2) rank=5
+12:17:04.426 
+12:17:04.426 [ATTEMPT] Trying to enter cell (1,2) from current position...
+12:17:04.511 [FOOTPRINT-DIAG] scan-cella: celle sotto il corpo marcate ostacolo: 0/803 (0.0%)
+12:17:04.627 [MAP] Mappa globale salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_occupancy_map.pkl
+12:17:04.985 [MAP] Mappa globale del terreno salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_terrain_map.pkl
+12:17:04.985 [MAP] Dimensione mappe globali -- occupazione: 85907 celle, terreno: 85907 celle
+12:17:04.985 [DATA SAVE] Matrici .npy salvate per cella (1,2)
+12:17:14.884 [GRAFO] 99715 archi ammessi su 105250 coppie del reticolo (3185 nodi, passo 0.2500 m); 59068 in zona senza dati, con il solo costo geometrico
+12:17:14.889 [TEMPO] costruzione completa del grafo: 9.90 s
+12:17:14.891 [TARGET] Cella (1,2): centro geometrico non utilizzabile, ripiego sul punto libero piu' vicino al centro (89.38, -32.95), a 1.82 m da esso  [liberi=10 ignoti=246 occupati=0]
+12:17:14.892 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1), (0, 2), (0, 3), (1, 2), (1, 3)]: 1600 nodi su 3185. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+12:17:14.893 [NODO] partenza tentativo: agganciato al nodo 1616 in (93.63, -30.66), a 0.06 m da (93.62, -30.60) -- nessun nodo nuovo
+12:17:14.926 
+12:17:14.926 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:17:14.926   Name: wp_22 (manual waypoint format)
+12:17:14.926   Number: 22
+12:17:14.926   Position: (93.624, -30.600, -16.620)
+12:17:14.926   Orientation (yaw): 97.4°
+12:17:14.926   Cell: (1, 2)
+12:17:15.019 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:17:15.019   Name: wp_22
+12:17:15.020   ID: versed-toad-QafmE7eccsMLhLACnzvRtQ==
+12:17:15.020   Pose saved for future realignment
+12:17:15.020   Cell saved: (1, 2)
+12:17:15.020   Status: 1
+12:17:15.020 
+12:17:15.020 [GRAPH_CACHE] Cache invalidated
+12:17:15.020 [BRICIOLA] Waypoint wp_22 in (93.62, -30.60), nodo PRM 1616 (traccia: 18 waypoint).
+12:17:15.044 [NODO] obiettivo cella (1,2): agganciato al nodo 1143 in (89.38, -32.95), a 0.00 m da (89.38, -32.95) -- nessun nodo nuovo
+12:17:15.294 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/801 (0.0%)
+12:17:17.010 [REPLAN STABILE] Percorso invariato da 1616 a 1143 (74 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:17:17.012 [FRONTE] 2.43 m confermati su 4.90 m di percorso, avanzamento consentito 1.78 m -- si ferma sul bordo dei dati in (91.67, -32.03): avanzo e riguardo
+12:17:17.012 [TEMPO] scansione 0.06 s | elaborazione 0.00 | mappe 0.04 | PRM 1.68 | fronte 0.00 | decisione: move
+12:17:17.013 [OK] Tratto 1616->1482 confermato libero dal fronte. Eseguo movimento...
+12:17:17.014 [SLOPE-SOURCE] Arco 1616->1482: LIVE (long=0.070, lat=0.086)
+12:17:17.020 [SLOPE-CHECK] Arco 1616->1482: in uso long=0.070 lat=0.086 | interpolata long=0.180 lat=0.238 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:17:17.021 [GAIT] Terrain tier: PLAIN (gradient=0.086, roughness=0.011) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:17:17.031 [INFO] Step 1: Rotating to face target...
+12:17:21.886 [MOVIMENTO] Rotazione completata: +119 gradi su +119 richiesti (il centro del corpo si e' spostato di 0.05 m girando).
+12:17:21.887 [INFO] Step 2: Moving forward 1.14m...
+12:17:25.735 [MOVIMENTO] Arrivato: percorsi 1.19 m su 1.14 richiesti.
+12:17:25.911 [TILT] Arco 1616->1482: picco roll=0.5 deg, pitch=3.7 deg (40 campioni) | stimato long=0.070 (~4.0 deg), lat=0.086 (~4.9 deg) | tier=PLAIN, 8.9s
+12:17:25.911 [INFO] Spostamento completato con successo su (92.70, -31.28)
+12:17:25.949 
+12:17:25.949 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:17:25.949   Name: wp_23 (manual waypoint format)
+12:17:25.949   Number: 23
+12:17:25.949   Position: (92.657, -31.345, -16.677)
+12:17:25.949   Orientation (yaw): -144.0°
+12:17:25.949   Cell: (1, 2)
+12:17:26.727 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:17:26.727   Name: wp_23
+12:17:26.727   ID: uppish-hyrax-AxLvAxRZmHxK8yOAsJ0gcQ==
+12:17:26.727   Pose saved for future realignment
+12:17:26.727   Cell saved: (1, 2)
+12:17:26.727   Status: 1
+12:17:26.727 
+12:17:26.727 [GRAPH_CACHE] Cache invalidated
+12:17:26.727 [BRICIOLA] Waypoint wp_23 in (92.66, -31.34), nodo PRM 1482 (traccia: 19 waypoint).
+12:17:27.397 [GROUND-FILTER] scan-passo: 143 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0003 m
+12:17:27.400 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+12:17:29.201 [REPLAN STABILE] Percorso invariato da 1482 a 1143 (76 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:17:29.203 [SCORCIATOIA] Tratto diretto confermato libero verso il nodo 1281: salto 1 nodi intermedi [1349].
+12:17:29.205 [FRONTE] 2.25 m confermati su 3.66 m di percorso, avanzamento consentito 1.60 m -- si ferma sul bordo dei dati in (90.70, -32.44): avanzo e riguardo
+12:17:29.205 [TEMPO] scansione 0.44 s | elaborazione 0.01 | mappe 0.06 | PRM 1.74 | fronte 0.00 | decisione: move
+12:17:29.205 [OK] Tratto 1482->1281 confermato libero dal fronte. Eseguo movimento...
+12:17:29.206 [SLOPE-SOURCE] Arco 1482->1281: LIVE (long=0.095, lat=0.087)
+12:17:29.218 [SLOPE-CHECK] Arco 1482->1281: in uso long=0.095 lat=0.087 | interpolata long=0.243 lat=0.266 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:17:29.218 [GAIT] Terrain tier: PLAIN (gradient=0.095, roughness=0.012) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:17:29.227 [INFO] Step 1: Rotating to face target...
+12:17:30.276 [MOVIMENTO] Rotazione completata: -3 gradi su -3 richiesti (il centro del corpo si e' spostato di 0.00 m girando).
+12:17:30.276 [INFO] Step 2: Moving forward 1.60m...
+12:17:32.469 [STOP] Movimento interrotto: richiesta del chiamante dopo 0.93m
+12:17:32.491 [TILT] Arco 1482->1281: picco roll=0.2 deg, pitch=2.9 deg (15 campioni) | stimato long=0.095 (~5.4 deg), lat=0.087 (~5.0 deg) | tier=PLAIN, 3.3s
+12:17:32.491 [STOP] Movimento verso (91.30, -32.21) interrotto dopo 0.93m: il fronte si e' accorciato (ostacolo in (90.89, -32.36)): raggiungibili 0.78 m su 0.99 m mancanti.
+12:17:32.512 [NODO] sosta (arresto): agganciato al nodo 1348 in (91.77, -31.90), a 0.11 m da (91.88, -31.91) -- nessun nodo nuovo
+12:17:32.619 [GROUND-FILTER] scan-passo: 5 celle scartate, fino a 1.27 m sopra il suolo (suolo z=-17.197, stimato sotto il robot su 1696 celle)
+12:17:32.619 [GROUND-FILTER] scan-passo: 235 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota +0.0000 m
+12:17:32.622 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+12:17:34.244 [ARCHI] 892 archi fuori dal grafo per la scansione dal vivo (448 rivalutati, 444 oltre il raggio di refresh), prima della pendenza.
+12:17:34.247 [NODI] 2 nodi scartati: meno di 0.30 m di spazio libero dove li vediamo (primi: [1149, 1408]).
+12:17:34.247 [SPAZIO] Archi su cui i due criteri non concordano: 408 su 3443 (11.9%) -- 0 bloccati solo dalla mappa binaria, 408 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 91888.
+12:17:34.287 [REPLAN] Percorso aggiornato (75 nodi locali rivalutati): 5 waypoint rimanenti.
+12:17:34.411 [FRONTE] 1.20 m confermati su 3.08 m di percorso, avanzamento consentito 0.55 m -- ostacolo a 0.28 m dalla linea centrale in (90.72, -31.77) (minimo 0.30 m)
+12:17:34.411 [TEMPO] scansione 0.10 s | elaborazione 0.00 | mappe 0.05 | PRM 1.73 | fronte 0.01 | decisione: move
+12:17:34.411 [PASSO PARZIALE] Verso il nodo 1411: avanzo di 0.55 m su 0.67 fino a (91.36, -31.75), poi riguardo con una scansione fresca.
+12:17:34.412 [SLOPE-SOURCE] Arco 1348->1411: LIVE (long=0.014, lat=0.076)
+12:17:34.414 [SLOPE-CHECK] Arco 1348->1411: in uso long=0.014 lat=0.076 | interpolata long=0.204 lat=0.225 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:17:34.414 [GAIT] Terrain tier: PLAIN (gradient=0.076, roughness=0.010) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:17:34.431 [INFO] Step 1: Rotating to face target...
+12:17:37.530 [MOVIMENTO] Rotazione completata: -51 gradi su -51 richiesti (il centro del corpo si e' spostato di 0.03 m girando).
+12:17:37.530 [INFO] Step 2: Moving forward 0.55m...
+12:17:39.780 [MOVIMENTO] Arrivato: percorsi 0.56 m su 0.55 richiesti.
+12:17:39.794 [TILT] Arco 1348->1411: picco roll=0.9 deg, pitch=2.9 deg (26 campioni) | stimato long=0.014 (~0.8 deg), lat=0.076 (~4.3 deg) | tier=PLAIN, 5.4s
+12:17:39.794 [INFO] Spostamento completato con successo su (91.36, -31.75)
+12:17:39.831 [NODO] sosta (passo parziale): agganciato al nodo 1346 in (91.27, -31.96), a 0.12 m da (91.32, -31.85) -- nessun nodo nuovo
+12:17:39.864 
+12:17:39.864 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:17:39.864   Name: wp_24 (manual waypoint format)
+12:17:39.864   Number: 24
+12:17:39.864   Position: (91.317, -31.849, -16.701)
+12:17:39.864   Orientation (yaw): 162.8°
+12:17:39.864   Cell: (1, 2)
+12:17:40.612 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:17:40.612   Name: wp_24
+12:17:40.612   ID: sudden-gaur-VnGE+wwMFtPhcC9qOdRJRQ==
+12:17:40.612   Pose saved for future realignment
+12:17:40.612   Cell saved: (1, 2)
+12:17:40.612   Status: 1
+12:17:40.612 
+12:17:40.612 [GRAPH_CACHE] Cache invalidated
+12:17:40.612 [BRICIOLA] Waypoint wp_24 in (91.32, -31.85), nodo PRM 1346 (traccia: 20 waypoint).
+12:17:40.804 [GROUND-FILTER] scan-passo: 1 celle scartate, fino a 1.21 m sopra il suolo (suolo z=-17.190, stimato sotto il robot su 1696 celle)
+12:17:40.806 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/799 (0.0%)
+12:17:42.240 [ARCHI] 719 archi fuori dal grafo per la scansione dal vivo (719 rivalutati, 0 oltre il raggio di refresh), prima della pendenza.
+12:17:42.242 [SPAZIO] Archi su cui i due criteri non concordano: 47 su 3445 (1.4%) -- 38 bloccati solo dalla mappa binaria, 9 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 93971.
+12:17:42.270 [REPLAN STABILE] Percorso invariato da 1346 a 1143 (75 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:17:42.272 [FRONTE] 0.68 m confermati su 2.57 m di percorso, avanzamento consentito 0.03 m -- ostacolo a 0.30 m dalla linea centrale in (90.72, -31.77) (minimo 0.30 m; qui decide l'isteresi, che tiene bloccante la cella fino a 0.34 m)
+12:17:42.272 [TEMPO] scansione 0.14 s | elaborazione 0.01 | mappe 0.05 | PRM 1.41 | fronte 0.00 | decisione: wait
+12:17:42.324 [SUBITO] ostacolo in (90.72, -31.77) sul tratto 1409->1407: lo scarto adesso e cerco un altro percorso, senza aspettare la conferma da fermo (1/4). Direzioni utilizzabili da qui: 19/24.
+12:17:42.354 [SUBITO] Percorso alternativo con 3 waypoint, dal punto in cui sono.
+12:17:42.487 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/799 (0.0%)
+12:17:43.908 [ARCHI] 745 archi fuori dal grafo per la scansione dal vivo (745 rivalutati, 0 oltre il raggio di refresh), prima della pendenza.
+12:17:43.910 [SPAZIO] Archi su cui i due criteri non concordano: 48 su 3445 (1.4%) -- 38 bloccati solo dalla mappa binaria, 10 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 94003.
+12:17:43.938 [REPLAN STABILE] Percorso invariato da 1346 a 1143 (75 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:17:43.940 [FRONTE] 1.53 m confermati su 2.77 m di percorso, avanzamento consentito 0.88 m -- ostacolo a 0.31 m dalla linea centrale in (90.61, -33.05) (minimo 0.30 m; qui decide l'isteresi, che tiene bloccante la cella fino a 0.34 m)
+12:17:43.940 [TEMPO] scansione 0.13 s | elaborazione 0.00 | mappe 0.04 | PRM 1.41 | fronte 0.00 | decisione: move
+12:17:43.984 [PASSO PARZIALE] Verso il nodo 1084: avanzo di 0.88 m su 1.24 fino a (91.02, -32.68), poi riguardo con una scansione fresca.
+12:17:43.985 [SLOPE-SOURCE] Arco 1346->1084: LIVE (long=0.070, lat=0.102)
+12:17:43.989 [SLOPE-CHECK] Arco 1346->1084: in uso long=0.070 lat=0.102 | interpolata long=0.302 lat=0.341 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:17:43.989 [GAIT] Terrain tier: PLAIN (gradient=0.102, roughness=0.011) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:17:44.018 [INFO] Step 1: Rotating to face target...
+12:17:47.670 [MOVIMENTO] Rotazione completata: +87 gradi su +88 richiesti (il centro del corpo si e' spostato di 0.06 m girando).
+12:17:47.678 [INFO] Step 2: Moving forward 0.88m...
+12:17:51.061 [MOVIMENTO] Arrivato: percorsi 0.94 m su 0.88 richiesti.
+12:17:51.072 [TILT] Arco 1346->1084: picco roll=0.6 deg, pitch=1.8 deg (32 campioni) | stimato long=0.070 (~4.0 deg), lat=0.102 (~5.9 deg) | tier=PLAIN, 7.1s
+12:17:51.072 [INFO] Spostamento completato con successo su (91.02, -32.68)
+12:17:51.098 [NODO] sosta (passo parziale): agganciato al nodo 1149 in (90.87, -32.76), a 0.10 m da (90.97, -32.78) -- nessun nodo nuovo
+12:17:51.130 
+12:17:51.130 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:17:51.130   Name: wp_25 (manual waypoint format)
+12:17:51.130   Number: 25
+12:17:51.130   Position: (90.971, -32.781, -16.706)
+12:17:51.130   Orientation (yaw): -109.9°
+12:17:51.130   Cell: (1, 2)
+12:17:51.627 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:17:51.627   Name: wp_25
+12:17:51.627   ID: rose-cub-0F4tfj3MngiV08RFH7aZjw==
+12:17:51.627   Pose saved for future realignment
+12:17:51.627   Cell saved: (1, 2)
+12:17:51.627   Status: 1
+12:17:51.627 
+12:17:51.627 [GRAPH_CACHE] Cache invalidated
+12:17:51.627 [BRICIOLA] Waypoint wp_25 in (90.97, -32.78), nodo PRM 1149 (traccia: 21 waypoint).
+12:17:51.772 [GROUND-FILTER] scan-passo: 131 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0003 m
+12:17:51.775 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 53/799 (6.6%)
+12:17:51.775                  perche': prossimita'=47  rugosita'=0  entrambi=6   (celle non valide sotto il corpo: 0)
+12:17:51.775                  dove: nucleo=20/500  corona esterna=33/299
+12:17:53.176 [ARCHI] 714 archi fuori dal grafo per la scansione dal vivo (713 rivalutati, 1 oltre il raggio di refresh), prima della pendenza.
+12:17:53.178 [NODI] 1 nodi scartati: meno di 0.30 m di spazio libero dove li vediamo (primi: [1407]).
+12:17:53.178 [SPAZIO] Archi su cui i due criteri non concordano: 6 su 3356 (0.2%) -- 0 bloccati solo dalla mappa binaria, 6 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 94804.
+12:17:53.179 [REPLAN STABILE] Percorso invariato da 1149 a 1143 (74 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:17:53.180 [FRONTE] 2.12 m confermati su 1.77 m di percorso, avanzamento consentito 1.47 m -- si ferma sul bordo dei dati in (89.04, -32.91): avanzo e riguardo
+12:17:53.180 [TEMPO] scansione 0.12 s | elaborazione 0.01 | mappe 0.05 | PRM 1.36 | fronte 0.00 | decisione: move
+12:17:53.229 [MULTINODO] Il fronte conferma 1.47 m: percorro 2 tratti di fila [1084, 1082] senza fermarmi a riscansionare.
+12:17:53.229 [OK] Tratto 1149->1084 confermato libero dal fronte. Eseguo movimento...
+12:17:53.230 [SLOPE-SOURCE] Arco 1149->1084: LIVE (long=0.028, lat=0.056)
+12:17:53.231 [SLOPE-CHECK] Arco 1149->1084: in uso long=0.028 lat=0.056 | interpolata long=0.090 lat=0.220 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:17:53.231 [GAIT] Terrain tier: PLAIN (gradient=0.056, roughness=0.007) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:17:53.313 [INFO] Step 1: Rotating to face target...
+12:17:54.224 [MOVIMENTO] Rotazione completata: +3 gradi su +3 richiesti (il centro del corpo si e' spostato di 0.00 m girando).
+12:17:54.224 [INFO] Step 2: Moving forward 0.24m...
+12:17:56.543 [MOVIMENTO] Arrivato: percorsi 0.29 m su 0.24 richiesti.
+12:17:56.552 [TILT] Arco 1149->1084: picco roll=0.8 deg, pitch=1.8 deg (14 campioni) | stimato long=0.028 (~1.6 deg), lat=0.056 (~3.2 deg) | tier=PLAIN, 3.3s
+12:17:56.552 [INFO] Spostamento completato con successo su (90.90, -33.01)
+12:17:56.802 [OK] Tratto 1084->1082 confermato libero dal fronte. Eseguo movimento...
+12:17:56.803 [SLOPE-SOURCE] Arco 1084->1082: LIVE (long=0.070, lat=0.077)
+12:17:56.804 [SLOPE-CHECK] Arco 1084->1082: in uso long=0.070 lat=0.077 | interpolata long=0.224 lat=0.237 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:17:56.804 [GAIT] Terrain tier: PLAIN (gradient=0.077, roughness=0.008) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:17:56.940 [INFO] Step 1: Rotating to face target...
+12:18:00.526 [MOVIMENTO] Rotazione completata: -70 gradi su -72 richiesti (il centro del corpo si e' spostato di 0.04 m girando).
+12:18:00.526 [INFO] Step 2: Moving forward 0.48m...
+12:18:03.277 [MOVIMENTO] Arrivato: percorsi 0.52 m su 0.48 richiesti.
+12:18:03.296 [TILT] Arco 1084->1082: picco roll=1.5 deg, pitch=4.5 deg (24 campioni) | stimato long=0.070 (~4.0 deg), lat=0.077 (~4.4 deg) | tier=PLAIN, 6.5s
+12:18:03.296 [INFO] Spostamento completato con successo su (90.40, -33.07)
+12:18:03.488 [GROUND-FILTER] scan-passo: 102 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0008 m
+12:18:03.492 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 35/801 (4.4%)
+12:18:03.492                  perche': prossimita'=31  rugosita'=0  entrambi=4   (celle non valide sotto il corpo: 0)
+12:18:03.492                  dove: nucleo=7/503  corona esterna=28/298
+12:18:04.898 [ARCHI] 739 archi fuori dal grafo per la scansione dal vivo (739 rivalutati, 0 oltre il raggio di refresh), prima della pendenza.
+12:18:04.900 [NODI] 1 nodi scartati: meno di 0.30 m di spazio libero dove li vediamo (primi: [1083]).
+12:18:04.900 [SPAZIO] Archi su cui i due criteri non concordano: 38 su 3294 (1.2%) -- 1 bloccati solo dalla mappa binaria, 37 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 96007.
+12:18:04.906 [REPLAN STABILE] Percorso invariato da 1082 a 1143 (73 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:18:04.907 [FRONTE] 1.52 m confermati su 0.97 m di percorso, avanzamento consentito 0.97 m -- percorso libero fino all'obiettivo
+12:18:04.908 [TEMPO] scansione 0.18 s | elaborazione 0.01 | mappe 0.05 | PRM 1.36 | fronte 0.00 | decisione: move
+12:18:04.908 [OK] Tratto 1082->1143 confermato libero dal fronte. Eseguo movimento...
+12:18:04.909 [SLOPE-SOURCE] Arco 1082->1143: LIVE (long=0.097, lat=0.096)
+12:18:04.913 [SLOPE-CHECK] Arco 1082->1143: in uso long=0.097 lat=0.096 | interpolata long=0.362 lat=0.286 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:18:04.913 [GAIT] Terrain tier: PLAIN (gradient=0.097, roughness=0.016) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:18:04.962 [INFO] Step 1: Rotating to face target...
+12:18:07.120 [MOVIMENTO] Rotazione completata: -12 gradi su -13 richiesti (il centro del corpo si e' spostato di 0.01 m girando).
+12:18:07.120 [INFO] Step 2: Moving forward 0.97m...
+12:18:10.641 [MOVIMENTO] Arrivato: percorsi 1.00 m su 0.97 richiesti.
+12:18:10.651 [TILT] Arco 1082->1143: picco roll=0.5 deg, pitch=4.4 deg (24 campioni) | stimato long=0.097 (~5.6 deg), lat=0.096 (~5.5 deg) | tier=PLAIN, 5.7s
+12:18:10.651 [INFO] Spostamento completato con successo su (89.38, -32.95)
+12:18:10.674 
+12:18:10.674 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:18:10.674   Name: wp_26 (manual waypoint format)
+12:18:10.674   Number: 26
+12:18:10.674   Position: (89.352, -32.897, -16.726)
+12:18:10.674   Orientation (yaw): 170.4°
+12:18:10.674   Cell: (1, 2)
+12:18:11.693 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:18:11.693   Name: wp_26
+12:18:11.694   ID: dicey-weasel-FtChRcMcaXU7gJSfJuEkQg==
+12:18:11.694   Pose saved for future realignment
+12:18:11.694   Cell saved: (1, 2)
+12:18:11.694   Status: 1
+12:18:11.694 
+12:18:11.694 [GRAPH_CACHE] Cache invalidated
+12:18:11.694 [BRICIOLA] Waypoint wp_26 in (89.35, -32.90), nodo PRM 1143 (traccia: 22 waypoint).
+12:18:11.732 [CHECK] Point (89.35,-32.90) IS inside cell (1,2)
+12:18:11.750 [MAP] Cell (1, 2) marked as visited (robot center inside)
+12:18:11.766 
+12:18:11.766 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:18:11.766   Name: wp_27 (manual waypoint format)
+12:18:11.766   Number: 27
+12:18:11.767   Position: (89.352, -32.900, -16.726)
+12:18:11.767   Orientation (yaw): 170.4°
+12:18:11.767   Cell: (1, 2)
+12:18:11.821 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:18:11.821   Name: wp_27
+12:18:11.821   ID: ferine-sawfly-BixX1HlMkD+QJ06.0nWp7A==
+12:18:11.821   Pose saved for future realignment
+12:18:11.821   Cell saved: (1, 2)
+12:18:11.821   Status: 1
+12:18:11.821 
+12:18:11.821 [GRAPH_CACHE] Cache invalidated
+12:18:11.821 [WAYPOINT] Registered waypoint #5 at (89.352, -32.900)
+12:18:11.821 [VISITED] Cell (1,2) marked as visited (value=1)
+12:18:11.821 
+12:18:11.821 [ADJACENT] Searching for adjacent unexplored neighbors from cell (1,2)
+12:18:11.821   ✓ Neighbor south: (2,2) with rank=10
+12:18:11.821   ✓ Neighbor west: (1,1) with rank=6
+12:18:11.821 [ADJACENT] ✓ Found 2 unexplored neighbors
+12:18:11.821 [ADJACENT] Neighbor with lowest rank: (1,1) rank=6
+12:18:11.821 [(1, 0, 7), (1, 1, 6), (2, 3, 11), (2, 2, 10)]
+12:18:11.828 
+12:18:11.828 [ADJACENT] Searching for adjacent unexplored neighbors from cell (1,2)
+12:18:11.828   ✓ Neighbor south: (2,2) with rank=10
+12:18:11.828   ✓ Neighbor west: (1,1) with rank=6
+12:18:11.828 [ADJACENT] ✓ Found 2 unexplored neighbors
+12:18:11.828 [ADJACENT] Neighbor with lowest rank: (1,1) rank=6
+12:18:11.828 
+12:18:11.828 [ATTEMPT] Trying to enter cell (1,1) from current position...
+12:18:11.931 [FOOTPRINT-DIAG] scan-cella: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+12:18:12.075 [MAP] Mappa globale salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_occupancy_map.pkl
+12:18:12.457 [MAP] Mappa globale del terreno salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_terrain_map.pkl
+12:18:12.457 [MAP] Dimensione mappe globali -- occupazione: 98580 celle, terreno: 98580 celle
+12:18:12.458 [DATA SAVE] Matrici .npy salvate per cella (1,1)
+12:18:25.174 [GRAFO] 98659 archi ammessi su 105250 coppie del reticolo (3185 nodi, passo 0.2500 m); 53944 in zona senza dati, con il solo costo geometrico
+12:18:25.180 [TEMPO] costruzione completa del grafo: 12.72 s
+12:18:25.180 [ARCHI] 814 archi scartati subito dalla scansione dal vivo (passano a meno di 0.20 m da un ostacolo appena visto), prima della pendenza.
+12:18:25.182 [TARGET] Cella (1,1): centro geometrico non utilizzabile, ripiego sul punto libero piu' vicino al centro (87.46, -31.68), a 1.77 m da esso  [liberi=9 ignoti=217 occupati=0]
+12:18:25.182 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1), (0, 2), (0, 3), (1, 1), (1, 2), (1, 3)]: 1825 nodi su 3185. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+12:18:25.184 [NODO] partenza tentativo: agganciato al nodo 1143 in (89.38, -32.95), a 0.06 m da (89.35, -32.90) -- nessun nodo nuovo
+12:18:25.278 
+12:18:25.278 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:18:25.278   Name: wp_28 (manual waypoint format)
+12:18:25.278   Number: 28
+12:18:25.278   Position: (89.353, -32.900, -16.727)
+12:18:25.279   Orientation (yaw): 170.5°
+12:18:25.279   Cell: (1, 1)
+12:18:25.467 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:18:25.468   Name: wp_28
+12:18:25.468   ID: enough-eland-6q9oWl8RPLSxu.HgyOBADw==
+12:18:25.468   Pose saved for future realignment
+12:18:25.468   Cell saved: (1, 1)
+12:18:25.468   Status: 1
+12:18:25.468 
+12:18:25.468 [GRAPH_CACHE] Cache invalidated
+12:18:25.468 [BRICIOLA] Waypoint wp_28 in (89.35, -32.90), nodo PRM 1143 (traccia: 23 waypoint).
+12:18:25.486 [NODO] obiettivo cella (1,1): agganciato al nodo 1526 in (87.46, -31.68), a 0.00 m da (87.46, -31.68) -- nessun nodo nuovo
+12:18:25.951 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/799 (0.0%)
+12:18:27.356 [ARCHI] 434 archi fuori dal grafo per la scansione dal vivo (434 rivalutati, 0 oltre il raggio di refresh), prima della pendenza.
+12:18:27.358 [NODI] 2 nodi scartati: meno di 0.30 m di spazio libero dove li vediamo (primi: [1083, 1149]).
+12:18:27.358 [SPAZIO] Archi su cui i due criteri non concordano: 16 su 3299 (0.5%) -- 4 bloccati solo dalla mappa binaria, 12 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 98488.
+12:18:27.384 [REPLAN STABILE] Percorso invariato da 1143 a 1526 (74 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:18:27.386 [FRONTE] 2.32 m confermati su 2.26 m di percorso, avanzamento consentito 1.67 m -- si ferma sul bordo dei dati in (87.41, -31.65): avanzo e riguardo
+12:18:27.387 [TEMPO] scansione 0.30 s | elaborazione 0.01 | mappe 0.05 | PRM 1.39 | fronte 0.00 | decisione: move
+12:18:27.387 [OK] Tratto 1143->1335 confermato libero dal fronte. Eseguo movimento...
+12:18:27.388 [SLOPE-SOURCE] Arco 1143->1335: LIVE (long=0.112, lat=0.083)
+12:18:27.393 [SLOPE-CHECK] Arco 1143->1335: in uso long=0.112 lat=0.083 | interpolata long=0.255 lat=0.281 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:18:27.393 [GAIT] Terrain tier: PLAIN (gradient=0.112, roughness=0.013) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:18:27.535 [INFO] Step 1: Rotating to face target...
+12:18:29.818 [MOVIMENTO] Rotazione completata: -27 gradi su -27 richiesti (il centro del corpo si e' spostato di 0.05 m girando).
+12:18:29.823 [INFO] Step 2: Moving forward 1.01m...
+12:18:33.621 [MOVIMENTO] Arrivato: percorsi 1.05 m su 1.01 richiesti.
+12:18:33.651 [TILT] Arco 1143->1335: picco roll=0.7 deg, pitch=7.3 deg (28 campioni) | stimato long=0.112 (~6.4 deg), lat=0.083 (~4.7 deg) | tier=PLAIN, 6.3s
+12:18:33.651 [INFO] Spostamento completato con successo su (88.54, -32.30)
+12:18:33.676 
+12:18:33.676 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:18:33.677   Name: wp_29 (manual waypoint format)
+12:18:33.677   Number: 29
+12:18:33.677   Position: (88.492, -32.223, -16.630)
+12:18:33.677   Orientation (yaw): 143.4°
+12:18:33.677   Cell: (1, 1)
+12:18:35.077 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:18:35.077   Name: wp_29
+12:18:35.084   ID: cogent-eel-Ekogs.s03fyi+kJLD8E1ug==
+12:18:35.084   Pose saved for future realignment
+12:18:35.084   Cell saved: (1, 1)
+12:18:35.085   Status: 1
+12:18:35.085 
+12:18:35.085 [GRAPH_CACHE] Cache invalidated
+12:18:35.085 [BRICIOLA] Waypoint wp_29 in (88.49, -32.22), nodo PRM 1335 (traccia: 24 waypoint).
+12:18:35.188 [GROUND-FILTER] scan-passo: 102 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0005 m
+12:18:35.190 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+12:18:36.887 [REPLAN STABILE] Percorso invariato da 1335 a 1526 (72 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:18:36.888 [FRONTE] 1.71 m confermati su 1.16 m di percorso, avanzamento consentito 1.16 m -- percorso libero fino all'obiettivo
+12:18:36.889 [TEMPO] scansione 0.08 s | elaborazione 0.01 | mappe 0.05 | PRM 1.65 | fronte 0.00 | decisione: move
+12:18:36.889 [OK] Tratto 1335->1526 confermato libero dal fronte. Eseguo movimento...
+12:18:36.890 [SLOPE-SOURCE] Arco 1335->1526: LIVE (long=0.204, lat=0.079)
+12:18:36.896 [SLOPE-CHECK] Arco 1335->1526: in uso long=0.204 lat=0.079 | interpolata long=0.352 lat=0.259 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:18:36.897 [GAIT] Terrain tier: MODERATE (gradient=0.204, roughness=0.017) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.6, vel_max=0.35 m/s, rot_max=0.50 rad/s
+12:18:36.904 [INFO] Step 1: Rotating to face target...
+12:18:38.820 [MOVIMENTO] Rotazione completata: +8 gradi su +8 richiesti (il centro del corpo si e' spostato di 0.03 m girando).
+12:18:38.820 [INFO] Step 2: Moving forward 1.16m...
+12:18:44.217 [MOVIMENTO] Arrivato: percorsi 1.16 m su 1.16 richiesti.
+12:18:44.230 [TILT] Arco 1335->1526: picco roll=1.5 deg, pitch=10.8 deg (35 campioni) | stimato long=0.204 (~11.5 deg), lat=0.079 (~4.5 deg) | tier=MODERATE, 7.3s
+12:18:44.230 [INFO] Spostamento completato con successo su (87.46, -31.68)
+12:18:44.249 
+12:18:44.249 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:18:44.249   Name: wp_30 (manual waypoint format)
+12:18:44.249   Number: 30
+12:18:44.249   Position: (87.436, -31.690, -16.454)
+12:18:44.249   Orientation (yaw): 151.8°
+12:18:44.249   Cell: (1, 1)
+12:18:46.250 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:18:46.250   Name: wp_30
+12:18:46.250   ID: abuzz-ram-+Ha71+WCvkINnabyxKKACA==
+12:18:46.250   Pose saved for future realignment
+12:18:46.250   Cell saved: (1, 1)
+12:18:46.250   Status: 1
+12:18:46.250 
+12:18:46.250 [GRAPH_CACHE] Cache invalidated
+12:18:46.250 [BRICIOLA] Waypoint wp_30 in (87.44, -31.69), nodo PRM 1526 (traccia: 25 waypoint).
+12:18:46.270 [CHECK] Point (87.43,-31.69) IS inside cell (1,1)
+12:18:46.289 [MAP] Cell (1, 1) marked as visited (robot center inside)
+12:18:46.308 
+12:18:46.308 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:18:46.314   Name: wp_31 (manual waypoint format)
+12:18:46.314   Number: 31
+12:18:46.314   Position: (87.428, -31.685, -16.454)
+12:18:46.314   Orientation (yaw): 151.8°
+12:18:46.314   Cell: (1, 1)
+12:18:46.481 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:18:46.482   Name: wp_31
+12:18:46.482   ID: velar-bison-iJmNUyNlOzRJTxHRF7x8HA==
+12:18:46.482   Pose saved for future realignment
+12:18:46.482   Cell saved: (1, 1)
+12:18:46.482   Status: 1
+12:18:46.482 
+12:18:46.482 [GRAPH_CACHE] Cache invalidated
+12:18:46.482 [WAYPOINT] Registered waypoint #6 at (87.428, -31.685)
+12:18:46.482 [VISITED] Cell (1,1) marked as visited (value=1)
+12:18:46.482 
+12:18:46.482 [ADJACENT] Searching for adjacent unexplored neighbors from cell (1,1)
+12:18:46.482   ✓ Neighbor south: (2,1) with rank=9
+12:18:46.482   ✓ Neighbor west: (1,0) with rank=7
+12:18:46.482 [ADJACENT] ✓ Found 2 unexplored neighbors
+12:18:46.482 [ADJACENT] Neighbor with lowest rank: (1,0) rank=7
+12:18:46.482 [(1, 0, 7), (2, 3, 11), (2, 2, 10), (2, 1, 9)]
+12:18:46.494 
+12:18:46.494 [ADJACENT] Searching for adjacent unexplored neighbors from cell (1,1)
+12:18:46.494   ✓ Neighbor south: (2,1) with rank=9
+12:18:46.494   ✓ Neighbor west: (1,0) with rank=7
+12:18:46.494 [ADJACENT] ✓ Found 2 unexplored neighbors
+12:18:46.494 [ADJACENT] Neighbor with lowest rank: (1,0) rank=7
+12:18:46.494 
+12:18:46.494 [ATTEMPT] Trying to enter cell (1,0) from current position...
+12:18:46.582 [FOOTPRINT-DIAG] scan-cella: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+12:18:46.720 [MAP] Mappa globale salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_occupancy_map.pkl
+12:18:47.173 [MAP] Mappa globale del terreno salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_terrain_map.pkl
+12:18:47.173 [MAP] Dimensione mappe globali -- occupazione: 108704 celle, terreno: 108704 celle
+12:18:47.174 [DATA SAVE] Matrici .npy salvate per cella (1,0)
+12:18:57.213 [GRAFO] 98656 archi ammessi su 105250 coppie del reticolo (3185 nodi, passo 0.2500 m); 47258 in zona senza dati, con il solo costo geometrico
+12:18:57.219 [TEMPO] costruzione completa del grafo: 10.04 s
+12:18:57.221 [TARGET] Cella (1,0): uso il centro geometrico (81.72, -32.14)  [liberi=0 ignoti=256 occupati=0]
+12:18:57.222 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1), (1, 2), (1, 3)]: 2080 nodi su 3185. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+12:18:57.223 [NODO] partenza tentativo: agganciato al nodo 1526 in (87.46, -31.68), a 0.03 m da (87.43, -31.69) -- nessun nodo nuovo
+12:18:57.365 
+12:18:57.365 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:18:57.365   Name: wp_32 (manual waypoint format)
+12:18:57.365   Number: 32
+12:18:57.365   Position: (87.429, -31.686, -16.454)
+12:18:57.365   Orientation (yaw): 151.7°
+12:18:57.365   Cell: (1, 0)
+12:18:57.552 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:18:57.552   Name: wp_32
+12:18:57.552   ID: pained-shark-v3RkS1GY9xoZB5Zj3RI5ng==
+12:18:57.552   Pose saved for future realignment
+12:18:57.552   Cell saved: (1, 0)
+12:18:57.552   Status: 1
+12:18:57.552 
+12:18:57.552 [GRAPH_CACHE] Cache invalidated
+12:18:57.552 [BRICIOLA] Waypoint wp_32 in (87.43, -31.69), nodo PRM 1526 (traccia: 26 waypoint).
+12:18:57.566 [NODO] obiettivo cella (1,0): agganciato al nodo 1568 in (81.72, -32.14), a 0.00 m da (81.72, -32.14) -- nessun nodo nuovo
+12:18:58.229 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/802 (0.0%)
+12:18:59.919 [REPLAN STABILE] Percorso invariato da 1526 a 1568 (75 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:18:59.921 [FRONTE] 2.06 m confermati su 5.87 m di percorso, avanzamento consentito 1.41 m -- si ferma sul bordo dei dati in (85.50, -31.65): avanzo e riguardo
+12:18:59.922 [TEMPO] scansione 0.42 s | elaborazione 0.01 | mappe 0.05 | PRM 1.64 | fronte 0.00 | decisione: move
+12:18:59.922 [OK] Tratto 1526->1652 confermato libero dal fronte. Eseguo movimento...
+12:18:59.923 [SLOPE-SOURCE] Arco 1526->1652: LIVE (long=0.181, lat=0.104)
+12:18:59.929 [SLOPE-CHECK] Arco 1526->1652: in uso long=0.181 lat=0.104 | interpolata long=0.258 lat=0.214 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:18:59.929 [GAIT] Terrain tier: MODERATE (gradient=0.181, roughness=0.009) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.6, vel_max=0.35 m/s, rot_max=0.50 rad/s
+12:19:00.022 [INFO] Step 1: Rotating to face target...
+12:19:01.132 [MOVIMENTO] Rotazione completata: +7 gradi su +8 richiesti (il centro del corpo si e' spostato di 0.00 m girando).
+12:19:01.132 [INFO] Step 2: Moving forward 1.09m...
+12:19:06.291 [MOVIMENTO] Arrivato: percorsi 1.11 m su 1.09 richiesti.
+12:19:06.302 [TILT] Arco 1526->1652: picco roll=1.6 deg, pitch=11.8 deg (31 campioni) | stimato long=0.181 (~10.3 deg), lat=0.104 (~5.9 deg) | tier=MODERATE, 6.4s
+12:19:06.302 [INFO] Spostamento completato con successo su (86.41, -31.30)
+12:19:06.336 
+12:19:06.336 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:19:06.336   Name: wp_33 (manual waypoint format)
+12:19:06.336   Number: 33
+12:19:06.336   Position: (86.393, -31.300, -16.300)
+12:19:06.336   Orientation (yaw): 158.9°
+12:19:06.336   Cell: (1, 0)
+12:19:07.890 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:19:07.890   Name: wp_33
+12:19:07.890   ID: gluey-dassie-X+j9ype5eClP4llWJjFyCQ==
+12:19:07.890   Pose saved for future realignment
+12:19:07.890   Cell saved: (1, 0)
+12:19:07.890   Status: 1
+12:19:07.890 
+12:19:07.890 [GRAPH_CACHE] Cache invalidated
+12:19:07.890 [BRICIOLA] Waypoint wp_33 in (86.39, -31.30), nodo PRM 1652 (traccia: 27 waypoint).
+12:19:08.013 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/801 (0.0%)
+12:19:09.814 [REPLAN STABILE] Percorso invariato da 1652 a 1568 (72 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:19:09.818 [FRONTE] 1.85 m confermati su 4.77 m di percorso, avanzamento consentito 1.20 m -- si ferma sul bordo dei dati in (84.62, -31.78): avanzo e riguardo
+12:19:09.818 [TEMPO] scansione 0.10 s | elaborazione 0.01 | mappe 0.05 | PRM 1.75 | fronte 0.00 | decisione: move
+12:19:09.828 [OK] Tratto 1652->1583 confermato libero dal fronte. Eseguo movimento...
+12:19:09.830 [SLOPE-SOURCE] Arco 1652->1583: LIVE (long=0.040, lat=0.190)
+12:19:09.836 [SLOPE-CHECK] Arco 1652->1583: in uso long=0.040 lat=0.190 | interpolata long=0.155 lat=0.271 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:19:09.836 [GAIT] Terrain tier: MODERATE (gradient=0.190, roughness=0.012) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.6, vel_max=0.35 m/s, rot_max=0.50 rad/s
+12:19:09.845 [INFO] Step 1: Rotating to face target...
+12:19:12.337 [MOVIMENTO] Rotazione completata: +43 gradi su +43 richiesti (il centro del corpo si e' spostato di 0.03 m girando).
+12:19:12.338 [INFO] Step 2: Moving forward 1.02m...
+12:19:16.871 [MOVIMENTO] Arrivato: percorsi 1.03 m su 1.02 richiesti.
+12:19:16.884 [TILT] Arco 1652->1583: picco roll=1.4 deg, pitch=7.2 deg (34 campioni) | stimato long=0.040 (~2.3 deg), lat=0.190 (~10.8 deg) | tier=MODERATE, 7.0s
+12:19:16.884 [INFO] Spostamento completato con successo su (85.44, -31.68)
+12:19:16.898 
+12:19:16.898 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:19:16.898   Name: wp_34 (manual waypoint format)
+12:19:16.898   Number: 34
+12:19:16.898   Position: (85.417, -31.700, -16.284)
+12:19:16.898   Orientation (yaw): -158.5°
+12:19:16.898   Cell: (1, 0)
+12:19:17.430 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:19:17.430   Name: wp_34
+12:19:17.430   ID: pearly-bat-zToCWfM88PIrM9O7KfpGnA==
+12:19:17.430   Pose saved for future realignment
+12:19:17.430   Cell saved: (1, 0)
+12:19:17.430   Status: 1
+12:19:17.430 
+12:19:17.430 [GRAPH_CACHE] Cache invalidated
+12:19:17.430 [BRICIOLA] Waypoint wp_34 in (85.42, -31.70), nodo PRM 1583 (traccia: 28 waypoint).
+12:19:17.570 [GROUND-FILTER] scan-passo: 3 celle scartate, fino a 1.36 m sopra il suolo (suolo z=-16.753, stimato sotto il robot su 1696 celle)
+12:19:17.572 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/799 (0.0%)
+12:19:19.435 [ARCHI] 288 archi fuori dal grafo per la scansione dal vivo (3 rivalutati, 285 oltre il raggio di refresh), prima della pendenza.
+12:19:19.438 [NODI] 2 nodi scartati: meno di 0.30 m di spazio libero dove li vediamo (primi: [1316, 1380]).
+12:19:19.438 [SPAZIO] Archi su cui i due criteri non concordano: 11 su 3417 (0.3%) -- 0 bloccati solo dalla mappa binaria, 11 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 118806.
+12:19:19.469 [REPLAN STABILE] Percorso invariato da 1583 a 1568 (75 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:19:19.471 [FRONTE] 1.96 m confermati su 3.72 m di percorso, avanzamento consentito 1.31 m -- si ferma sul bordo dei dati in (83.46, -31.92): avanzo e riguardo
+12:19:19.472 [TEMPO] scansione 0.10 s | elaborazione 0.01 | mappe 0.04 | PRM 1.85 | fronte 0.00 | decisione: move
+12:19:19.472 [OK] Tratto 1583->1578 confermato libero dal fronte. Eseguo movimento...
+12:19:19.473 [SLOPE-SOURCE] Arco 1583->1578: LIVE (long=0.107, lat=0.153)
+12:19:19.479 [SLOPE-CHECK] Arco 1583->1578: in uso long=0.107 lat=0.153 | interpolata long=0.147 lat=0.248 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:19:19.480 [GAIT] Terrain tier: MODERATE (gradient=0.153, roughness=0.009) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.6, vel_max=0.35 m/s, rot_max=0.50 rad/s
+12:19:19.491 [INFO] Step 1: Rotating to face target...
+12:19:22.205 [MOVIMENTO] Rotazione completata: -15 gradi su -15 richiesti (il centro del corpo si e' spostato di 0.05 m girando).
+12:19:22.205 [INFO] Step 2: Moving forward 1.22m...
+12:19:27.384 [MOVIMENTO] Arrivato: percorsi 1.23 m su 1.22 richiesti.
+12:19:27.549 [TILT] Arco 1583->1578: picco roll=1.6 deg, pitch=6.6 deg (37 campioni) | stimato long=0.107 (~6.1 deg), lat=0.153 (~8.7 deg) | tier=MODERATE, 8.1s
+12:19:27.549 [INFO] Spostamento completato con successo su (84.20, -31.83)
+12:19:27.755 
+12:19:27.755 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:19:27.755   Name: wp_35 (manual waypoint format)
+12:19:27.755   Number: 35
+12:19:27.755   Position: (84.144, -31.864, -16.196)
+12:19:27.755   Orientation (yaw): -174.0°
+12:19:27.756   Cell: (1, 0)
+12:19:29.623 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:19:29.623   Name: wp_35
+12:19:29.623   ID: inapt-pig-R4KXZr1BkGECGjb4uxzeTQ==
+12:19:29.623   Pose saved for future realignment
+12:19:29.623   Cell saved: (1, 0)
+12:19:29.623   Status: 1
+12:19:29.623 
+12:19:29.623 [GRAPH_CACHE] Cache invalidated
+12:19:29.623 [BRICIOLA] Waypoint wp_35 in (84.14, -31.86), nodo PRM 1578 (traccia: 29 waypoint).
+12:19:30.061 [GROUND-FILTER] scan-passo: 55 celle scartate, fino a 1.48 m sopra il suolo (suolo z=-16.671, stimato sotto il robot su 1696 celle)
+12:19:30.061 [GROUND-FILTER] scan-passo: 168 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0005 m
+12:19:30.063 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/799 (0.0%)
+12:19:31.805 [ARCHI] 1441 archi fuori dal grafo per la scansione dal vivo (407 rivalutati, 1034 oltre il raggio di refresh), prima della pendenza.
+12:19:31.811 [NODI] 8 nodi scartati: meno di 0.30 m di spazio libero dove li vediamo (primi: [1182, 1185, 1443, 1444, 1899, 1900, 1963, 2028]).
+12:19:31.811 [SPAZIO] Archi su cui i due criteri non concordano: 260 su 3402 (7.6%) -- 16 bloccati solo dalla mappa binaria, 244 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 124387.
+12:19:31.829 [REPLAN STABILE] Percorso invariato da 1578 a 1568 (75 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:19:31.831 [FRONTE] 1.90 m confermati su 2.43 m di percorso, avanzamento consentito 1.25 m -- si ferma sul bordo dei dati in (82.25, -32.07): avanzo e riguardo
+12:19:31.831 [TEMPO] scansione 0.42 s | elaborazione 0.00 | mappe 0.08 | PRM 1.69 | fronte 0.00 | decisione: move
+12:19:31.832 [OK] Tratto 1578->1573 confermato libero dal fronte. Eseguo movimento...
+12:19:31.833 [SLOPE-SOURCE] Arco 1578->1573: LIVE (long=0.079, lat=0.115)
+12:19:31.839 [SLOPE-CHECK] Arco 1578->1573: in uso long=0.079 lat=0.115 | interpolata long=0.258 lat=0.256 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:19:31.839 [GAIT] Terrain tier: PLAIN (gradient=0.115, roughness=0.010) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:19:31.852 [INFO] Step 1: Rotating to face target...
+12:19:31.921 [MOVIMENTO] Rotazione completata: -0 gradi su -0 richiesti (il centro del corpo si e' spostato di 0.00 m girando).
+12:19:31.921 [INFO] Step 2: Moving forward 1.18m...
+12:19:36.758 [MOVIMENTO] Arrivato: percorsi 1.22 m su 1.18 richiesti.
+12:19:36.779 [TILT] Arco 1578->1573: picco roll=1.0 deg, pitch=8.3 deg (24 campioni) | stimato long=0.079 (~4.5 deg), lat=0.115 (~6.6 deg) | tier=PLAIN, 4.9s
+12:19:36.779 [INFO] Spostamento completato con successo su (82.96, -31.98)
+12:19:36.798 
+12:19:36.798 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:19:36.798   Name: wp_36 (manual waypoint format)
+12:19:36.798   Number: 36
+12:19:36.798   Position: (82.926, -31.977, -16.096)
+12:19:36.798   Orientation (yaw): -174.0°
+12:19:36.799   Cell: (1, 0)
+12:19:38.320 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:19:38.320   Name: wp_36
+12:19:38.320   ID: dexter-cod-FTOZ.2.LVp9PDht3qT0ifw==
+12:19:38.320   Pose saved for future realignment
+12:19:38.320   Cell saved: (1, 0)
+12:19:38.320   Status: 1
+12:19:38.320 
+12:19:38.320 [GRAPH_CACHE] Cache invalidated
+12:19:38.320 [BRICIOLA] Waypoint wp_36 in (82.93, -31.98), nodo PRM 1573 (traccia: 30 waypoint).
+12:19:38.504 [GROUND-FILTER] scan-passo: 37 celle scartate, fino a 1.42 m sopra il suolo (suolo z=-16.610, stimato sotto il robot su 1696 celle)
+12:19:38.505 [GROUND-FILTER] scan-passo: 258 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0008 m
+12:19:38.508 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+12:19:39.871 [ARCHI] 685 archi fuori dal grafo per la scansione dal vivo (676 rivalutati, 9 oltre il raggio di refresh), prima della pendenza.
+12:19:39.874 [NODI] 1 nodi scartati: meno di 0.30 m di spazio libero dove li vediamo (primi: [1377]).
+12:19:39.874 [SPAZIO] Archi su cui i due criteri non concordano: 75 su 3289 (2.3%) -- 33 bloccati solo dalla mappa binaria, 42 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 129619.
+12:19:39.877 [REPLAN STABILE] Percorso invariato da 1573 a 1568 (73 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:19:39.878 [FRONTE] 1.76 m confermati su 1.21 m di percorso, avanzamento consentito 1.21 m -- percorso libero fino all'obiettivo
+12:19:39.879 [TEMPO] scansione 0.14 s | elaborazione 0.01 | mappe 0.07 | PRM 1.30 | fronte 0.00 | decisione: move
+12:19:39.879 [OK] Tratto 1573->1568 confermato libero dal fronte. Eseguo movimento...
+12:19:39.880 [SLOPE-SOURCE] Arco 1573->1568: LIVE (long=0.080, lat=0.121)
+12:19:39.887 [SLOPE-CHECK] Arco 1573->1568: in uso long=0.080 lat=0.121 | interpolata long=0.142 lat=0.190 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:19:39.887 [GAIT] Terrain tier: PLAIN (gradient=0.121, roughness=0.011) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:19:39.896 [INFO] Step 1: Rotating to face target...
+12:19:39.929 [MOVIMENTO] Rotazione completata: -0 gradi su +2 richiesti (il centro del corpo si e' spostato di 0.00 m girando).
+12:19:39.929 [INFO] Step 2: Moving forward 1.21m...
+12:19:43.729 [MOVIMENTO] Arrivato: percorsi 1.25 m su 1.21 richiesti.
+12:19:43.739 [TILT] Arco 1573->1568: picco roll=1.0 deg, pitch=6.4 deg (20 campioni) | stimato long=0.080 (~4.6 deg), lat=0.121 (~6.9 deg) | tier=PLAIN, 3.9s
+12:19:43.739 [INFO] Spostamento completato con successo su (81.72, -32.14)
+12:19:43.755 
+12:19:43.755 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:19:43.756   Name: wp_37 (manual waypoint format)
+12:19:43.756   Number: 37
+12:19:43.756   Position: (81.674, -32.114, -16.106)
+12:19:43.756   Orientation (yaw): -174.1°
+12:19:43.756   Cell: (1, 0)
+12:19:45.036 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:19:45.036   Name: wp_37
+12:19:45.036   ID: pushy-skink-WDf.02zJsJbI9+VTXANglA==
+12:19:45.036   Pose saved for future realignment
+12:19:45.036   Cell saved: (1, 0)
+12:19:45.036   Status: 1
+12:19:45.036 
+12:19:45.036 [GRAPH_CACHE] Cache invalidated
+12:19:45.036 [BRICIOLA] Waypoint wp_37 in (81.67, -32.11), nodo PRM 1568 (traccia: 31 waypoint).
+12:19:45.077 [CHECK] Point (81.67,-32.11) IS inside cell (1,0)
+12:19:45.096 [MAP] Cell (1, 0) marked as visited (robot center inside)
+12:19:45.109 
+12:19:45.109 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:19:45.109   Name: wp_38 (manual waypoint format)
+12:19:45.109   Number: 38
+12:19:45.109   Position: (81.665, -32.108, -16.105)
+12:19:45.110   Orientation (yaw): -174.1°
+12:19:45.110   Cell: (1, 0)
+12:19:45.213 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:19:45.213   Name: wp_38
+12:19:45.213   ID: salted-virus-wzzNgdnEdoLsMnXk2r2nvQ==
+12:19:45.213   Pose saved for future realignment
+12:19:45.213   Cell saved: (1, 0)
+12:19:45.213   Status: 1
+12:19:45.213 
+12:19:45.213 [GRAPH_CACHE] Cache invalidated
+12:19:45.213 [WAYPOINT] Registered waypoint #7 at (81.665, -32.108)
+12:19:45.213 [VISITED] Cell (1,0) marked as visited (value=1)
+12:19:45.213 
+12:19:45.213 [ADJACENT] Searching for adjacent unexplored neighbors from cell (1,0)
+12:19:45.213   ✓ Neighbor south: (2,0) with rank=8
+12:19:45.213 [ADJACENT] ✓ Found 1 unexplored neighbors
+12:19:45.214 [ADJACENT] Neighbor with lowest rank: (2,0) rank=8
+12:19:45.214 [(2, 3, 11), (2, 2, 10), (2, 1, 9), (2, 0, 8)]
+12:19:45.222 
+12:19:45.222 [ADJACENT] Searching for adjacent unexplored neighbors from cell (1,0)
+12:19:45.222   ✓ Neighbor south: (2,0) with rank=8
+12:19:45.222 [ADJACENT] ✓ Found 1 unexplored neighbors
+12:19:45.222 [ADJACENT] Neighbor with lowest rank: (2,0) rank=8
+12:19:45.222 
+12:19:45.222 [ATTEMPT] Trying to enter cell (2,0) from current position...
+12:19:45.312 [GROUND-FILTER] scan-iniziale: 46 celle scartate, fino a 1.43 m sopra il suolo (suolo z=-16.618, stimato sotto il robot su 1696 celle)
+12:19:45.312 [GROUND-FILTER] scan-iniziale: 2737 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0005 m
+12:19:45.314 [FOOTPRINT-DIAG] scan-cella: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+12:19:45.499 [MAP] Mappa globale salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_occupancy_map.pkl
+12:19:46.053 [MAP] Mappa globale del terreno salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_terrain_map.pkl
+12:19:46.053 [MAP] Dimensione mappe globali -- occupazione: 132821 celle, terreno: 132887 celle
+12:19:46.053 [DATA SAVE] Matrici .npy salvate per cella (2,0)
+12:19:56.383 [GRAFO] 94023 archi ammessi su 105250 coppie del reticolo (3185 nodi, passo 0.2500 m); 35781 in zona senza dati, con il solo costo geometrico
+12:19:56.388 [TEMPO] costruzione completa del grafo: 10.33 s
+12:19:56.388 [ARCHI] 3828 archi scartati subito dalla scansione dal vivo (passano a meno di 0.20 m da un ostacolo appena visto), prima della pendenza.
+12:19:56.391 [TARGET] Cella (2,0): centro geometrico non utilizzabile, ripiego sul punto libero piu' vicino al centro (81.48, -30.15), a 2.00 m da esso  [liberi=7 ignoti=281 occupati=2]
+12:19:56.391 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1), (1, 2), (1, 3), (2, 0)]: 2369 nodi su 3185. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+12:19:56.393 [NODO] partenza tentativo: agganciato al nodo 1568 in (81.72, -32.14), a 0.06 m da (81.67, -32.11) -- nessun nodo nuovo
+12:19:56.512 
+12:19:56.512 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:19:56.512   Name: wp_39 (manual waypoint format)
+12:19:56.512   Number: 39
+12:19:56.512   Position: (81.665, -32.108, -16.105)
+12:19:56.512   Orientation (yaw): -174.1°
+12:19:56.512   Cell: (2, 0)
+12:19:56.701 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:19:56.701   Name: wp_39
+12:19:56.701   ID: snorty-minnow-z51DEUFm7Y+ylY.AJCDa3g==
+12:19:56.701   Pose saved for future realignment
+12:19:56.701   Cell saved: (2, 0)
+12:19:56.701   Status: 1
+12:19:56.701 
+12:19:56.701 [GRAPH_CACHE] Cache invalidated
+12:19:56.701 [BRICIOLA] Waypoint wp_39 in (81.67, -32.11), nodo PRM 1568 (traccia: 32 waypoint).
+12:19:56.713 [NODO] obiettivo cella (2,0): agganciato al nodo 2088 in (81.48, -30.15), a 0.00 m da (81.48, -30.15) -- nessun nodo nuovo
+12:19:57.162 [GROUND-FILTER] scan-passo: 8 celle scartate, fino a 1.37 m sopra il suolo (suolo z=-16.618, stimato sotto il robot su 1696 celle)
+12:19:57.162 [GROUND-FILTER] scan-passo: 2738 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0005 m
+12:19:57.165 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+12:19:58.201 [ARCHI] 1088 archi fuori dal grafo per la scansione dal vivo (1088 rivalutati, 0 oltre il raggio di refresh), prima della pendenza.
+12:19:58.205 [NODI] 13 nodi scartati: meno di 0.30 m di spazio libero dove li vediamo (primi: [1110, 1175, 1240, 1305, 1370, 1435, 1500, 1565]).
+12:19:58.205 [SPAZIO] Archi su cui i due criteri non concordano: 38 su 3300 (1.2%) -- 38 bloccati solo dalla mappa binaria, 0 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 132763.
+12:19:58.213 [REPLAN STABILE] Percorso invariato da 1568 a 2088 (74 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:19:58.215 [FRONTE] 1.93 m confermati su 1.96 m di percorso, avanzamento consentito 1.28 m -- si ferma sul bordo dei dati in (81.48, -30.18): avanzo e riguardo
+12:19:58.215 [TEMPO] scansione 0.29 s | elaborazione 0.01 | mappe 0.05 | PRM 1.00 | fronte 0.00 | decisione: move
+12:19:58.216 [OK] Tratto 1568->1763 confermato libero dal fronte. Eseguo movimento...
+12:19:58.216 [SLOPE-SOURCE] Arco 1568->1763: LIVE (long=0.134, lat=0.026)
+12:19:58.219 [SLOPE-CHECK] Arco 1568->1763: in uso long=0.134 lat=0.026 | interpolata long=0.197 lat=0.064 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:19:58.220 [GAIT] Terrain tier: PLAIN (gradient=0.134, roughness=0.008) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:19:58.569 [INFO] Step 1: Rotating to face target...
+12:20:03.500 [MOVIMENTO] Rotazione completata: -93 gradi su -93 richiesti (il centro del corpo si e' spostato di 0.03 m girando).
+12:20:03.500 [INFO] Step 2: Moving forward 0.71m...
+12:20:06.438 [MOVIMENTO] Arrivato: percorsi 0.77 m su 0.71 richiesti.
+12:20:06.449 [TILT] Arco 1568->1763: picco roll=0.6 deg, pitch=6.6 deg (35 campioni) | stimato long=0.134 (~7.6 deg), lat=0.026 (~1.5 deg) | tier=PLAIN, 8.2s
+12:20:06.449 [INFO] Spostamento completato con successo su (81.63, -31.39)
+12:20:06.468 
+12:20:06.468 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:20:06.468   Name: wp_40 (manual waypoint format)
+12:20:06.468   Number: 40
+12:20:06.468   Position: (81.613, -31.306, -16.020)
+12:20:06.469   Orientation (yaw): 92.8°
+12:20:06.469   Cell: (2, 0)
+12:20:06.706 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:20:06.706   Name: wp_40
+12:20:06.706   ID: taking-owl-yrLlVU7NlqXYJ3xKUUbqow==
+12:20:06.706   Pose saved for future realignment
+12:20:06.706   Cell saved: (2, 0)
+12:20:06.706   Status: 1
+12:20:06.706 
+12:20:06.706 [GRAPH_CACHE] Cache invalidated
+12:20:06.707 [BRICIOLA] Waypoint wp_40 in (81.61, -31.31), nodo PRM 1763 (traccia: 33 waypoint).
+12:20:06.949 [GROUND-FILTER] scan-passo: 28 celle scartate, fino a 1.51 m sopra il suolo (suolo z=-16.526, stimato sotto il robot su 1696 celle)
+12:20:06.949 [GROUND-FILTER] scan-passo: 2669 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0010 m
+12:20:06.952 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/799 (0.0%)
+12:20:08.145 [ARCHI] 1782 archi fuori dal grafo per la scansione dal vivo (1110 rivalutati, 672 oltre il raggio di refresh), prima della pendenza.
+12:20:08.148 [NODI] 3 nodi scartati: meno di 0.30 m di spazio libero dove li vediamo (primi: [2150, 2158, 2161]).
+12:20:08.148 [SPAZIO] Archi su cui i due criteri non concordano: 76 su 3251 (2.3%) -- 50 bloccati solo dalla mappa binaria, 26 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 135371.
+12:20:08.153 [REPLAN STABILE] Percorso invariato da 1763 a 2088 (72 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:20:08.154 [FRONTE] 1.71 m confermati su 1.16 m di percorso, avanzamento consentito 1.16 m -- percorso libero fino all'obiettivo
+12:20:08.154 [TEMPO] scansione 0.21 s | elaborazione 0.01 | mappe 0.04 | PRM 1.16 | fronte 0.00 | decisione: move
+12:20:08.154 [OK] Tratto 1763->2088 confermato libero dal fronte. Eseguo movimento...
+12:20:08.155 [SLOPE-SOURCE] Arco 1763->2088: LIVE (long=0.133, lat=0.013)
+12:20:08.162 [SLOPE-CHECK] Arco 1763->2088: in uso long=0.133 lat=0.013 | interpolata long=0.190 lat=0.095 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:20:08.162 [GAIT] Terrain tier: PLAIN (gradient=0.133, roughness=0.007) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:20:08.190 [INFO] Step 1: Rotating to face target...
+12:20:09.247 [MOVIMENTO] Rotazione completata: +4 gradi su +4 richiesti (il centro del corpo si e' spostato di 0.00 m girando).
+12:20:09.247 [INFO] Step 2: Moving forward 1.16m...
+12:20:13.053 [MOVIMENTO] Arrivato: percorsi 1.18 m su 1.16 richiesti.
+12:20:13.078 [TILT] Arco 1763->2088: picco roll=0.5 deg, pitch=7.2 deg (21 campioni) | stimato long=0.133 (~7.6 deg), lat=0.013 (~0.7 deg) | tier=PLAIN, 4.9s
+12:20:13.078 [INFO] Spostamento completato con successo su (81.48, -30.15)
+12:20:13.134 
+12:20:13.134 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:20:13.134   Name: wp_41 (manual waypoint format)
+12:20:13.134   Number: 41
+12:20:13.134   Position: (81.497, -30.125, -15.878)
+12:20:13.134   Orientation (yaw): 96.5°
+12:20:13.134   Cell: (2, 0)
+12:20:14.439 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:20:14.444   Name: wp_41
+12:20:14.450   ID: bass-crake-p8aGpE+GSlaAKAF5jQfKfg==
+12:20:14.460   Pose saved for future realignment
+12:20:14.468   Cell saved: (2, 0)
+12:20:14.469   Status: 1
+12:20:14.469 
+12:20:14.469 [GRAPH_CACHE] Cache invalidated
+12:20:14.469 [BRICIOLA] Waypoint wp_41 in (81.50, -30.13), nodo PRM 2088 (traccia: 34 waypoint).
+12:20:15.210 [CHECK] Point (81.50,-30.12) IS inside cell (2,0)
+12:20:15.235 [MAP] Cell (2, 0) marked as visited (robot center inside)
+12:20:15.300 
+12:20:15.300 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:20:15.300   Name: wp_42 (manual waypoint format)
+12:20:15.300   Number: 42
+12:20:15.300   Position: (81.497, -30.120, -15.878)
+12:20:15.300   Orientation (yaw): 96.4°
+12:20:15.300   Cell: (2, 0)
+12:20:15.438 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:20:15.438   Name: wp_42
+12:20:15.438   ID: amuck-gull-7iD0Z4DvTgK+ldDSw47MGw==
+12:20:15.438   Pose saved for future realignment
+12:20:15.438   Cell saved: (2, 0)
+12:20:15.438   Status: 1
+12:20:15.438 
+12:20:15.438 [GRAPH_CACHE] Cache invalidated
+12:20:15.438 [WAYPOINT] Registered waypoint #8 at (81.497, -30.120)
+12:20:15.438 [VISITED] Cell (2,0) marked as visited (value=1)
+12:20:15.438 
+12:20:15.438 [ADJACENT] Searching for adjacent unexplored neighbors from cell (2,0)
+12:20:15.438   ✓ Neighbor east: (2,1) with rank=9
+12:20:15.438 [ADJACENT] ✓ Found 1 unexplored neighbors
+12:20:15.438 [ADJACENT] Neighbor with lowest rank: (2,1) rank=9
+12:20:15.438 [(2, 3, 11), (2, 2, 10), (2, 1, 9)]
+12:20:15.601 
+12:20:15.601 [ADJACENT] Searching for adjacent unexplored neighbors from cell (2,0)
+12:20:15.601   ✓ Neighbor east: (2,1) with rank=9
+12:20:15.601 [ADJACENT] ✓ Found 1 unexplored neighbors
+12:20:15.601 [ADJACENT] Neighbor with lowest rank: (2,1) rank=9
+12:20:15.601 
+12:20:15.601 [ATTEMPT] Trying to enter cell (2,1) from current position...
+12:20:16.195 [GROUND-FILTER] scan-iniziale: 10 celle scartate, fino a 1.35 m sopra il suolo (suolo z=-16.376, stimato sotto il robot su 1696 celle)
+12:20:16.195 [GROUND-FILTER] scan-iniziale: 2761 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0003 m
+12:20:16.198 [FOOTPRINT-DIAG] scan-cella: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+12:20:16.402 [MAP] Mappa globale salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_occupancy_map.pkl
+12:20:16.959 [MAP] Mappa globale del terreno salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_terrain_map.pkl
+12:20:16.959 [MAP] Dimensione mappe globali -- occupazione: 139880 celle, terreno: 139880 celle
+12:20:16.959 [DATA SAVE] Matrici .npy salvate per cella (2,1)
+12:20:22.264 [GRAFO] 91818 archi ammessi su 105250 coppie del reticolo (3185 nodi, passo 0.2500 m); 30940 in zona senza dati, con il solo costo geometrico
+12:20:22.269 [TEMPO] costruzione completa del grafo: 5.31 s
+12:20:22.270 [ARCHI] 3524 archi scartati subito dalla scansione dal vivo (passano a meno di 0.20 m da un ostacolo appena visto), prima della pendenza.
+12:20:22.272 [TARGET] Cella (2,1): centro geometrico non utilizzabile, ripiego sul punto libero piu' vicino al centro (85.41, -29.41), a 1.75 m da esso  [liberi=19 ignoti=237 occupati=0]
+12:20:22.272 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1), (1, 2), (1, 3), (2, 0), (2, 1)]: 2624 nodi su 3185. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+12:20:22.274 [NODO] partenza tentativo: agganciato al nodo 2088 in (81.48, -30.15), a 0.04 m da (81.50, -30.12) -- nessun nodo nuovo
+12:20:22.343 
+12:20:22.343 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:20:22.343   Name: wp_43 (manual waypoint format)
+12:20:22.343   Number: 43
+12:20:22.343   Position: (81.498, -30.119, -15.878)
+12:20:22.343   Orientation (yaw): 96.4°
+12:20:22.343   Cell: (2, 1)
+12:20:22.522 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:20:22.522   Name: wp_43
+12:20:22.522   ID: mat-dove-gcojf.q2Gn86dZa.1+pI+g==
+12:20:22.522   Pose saved for future realignment
+12:20:22.522   Cell saved: (2, 1)
+12:20:22.522   Status: 1
+12:20:22.522 
+12:20:22.522 [GRAPH_CACHE] Cache invalidated
+12:20:22.523 [BRICIOLA] Waypoint wp_43 in (81.50, -30.12), nodo PRM 2088 (traccia: 35 waypoint).
+12:20:22.564 [NODO] obiettivo cella (2,1): agganciato al nodo 2169 in (85.41, -29.41), a 0.00 m da (85.41, -29.41) -- nessun nodo nuovo
+12:20:23.362 [GROUND-FILTER] scan-passo: 8 celle scartate, fino a 1.35 m sopra il suolo (suolo z=-16.376, stimato sotto il robot su 1696 celle)
+12:20:23.362 [GROUND-FILTER] scan-passo: 2736 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0008 m
+12:20:23.363 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+12:20:24.403 [ARCHI] 1282 archi fuori dal grafo per la scansione dal vivo (1281 rivalutati, 1 oltre il raggio di refresh), prima della pendenza.
+12:20:24.404 [SPAZIO] Archi su cui i due criteri non concordano: 35 su 3341 (1.0%) -- 35 bloccati solo dalla mappa binaria, 0 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 139734.
+12:20:24.438 [REPLAN STABILE] Percorso invariato da 2088 a 2169 (73 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:20:24.440 [FRONTE] 2.14 m confermati su 4.14 m di percorso, avanzamento consentito 1.49 m -- si ferma sul bordo dei dati in (83.43, -29.41): avanzo e riguardo
+12:20:24.440 [TEMPO] scansione 0.60 s | elaborazione 0.00 | mappe 0.04 | PRM 1.03 | fronte 0.00 | decisione: move
+12:20:24.440 [OK] Tratto 2088->2221 confermato libero dal fronte. Eseguo movimento...
+12:20:24.441 [SLOPE-SOURCE] Arco 2088->2221: LIVE (long=0.131, lat=0.112)
+12:20:24.445 [SLOPE-CHECK] Arco 2088->2221: in uso long=0.131 lat=0.112 | interpolata long=0.221 lat=0.158 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:20:24.445 [GAIT] Terrain tier: PLAIN (gradient=0.131, roughness=0.009) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:20:26.799 [INFO] Step 1: Rotating to face target...
+12:20:30.096 [MOVIMENTO] Rotazione completata: -56 gradi su -56 richiesti (il centro del corpo si e' spostato di 0.04 m girando).
+12:20:30.096 [INFO] Step 2: Moving forward 0.86m...
+12:20:33.324 [MOVIMENTO] Arrivato: percorsi 0.92 m su 0.86 richiesti.
+12:20:33.349 [TILT] Arco 2088->2221: picco roll=2.3 deg, pitch=11.4 deg (26 campioni) | stimato long=0.131 (~7.5 deg), lat=0.112 (~6.4 deg) | tier=PLAIN, 8.9s
+12:20:33.349 [INFO] Spostamento completato con successo su (82.16, -29.56)
+12:20:33.408 
+12:20:33.408 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:20:33.411   Name: wp_44 (manual waypoint format)
+12:20:33.411   Number: 44
+12:20:33.411   Position: (82.252, -29.535, -15.767)
+12:20:33.411   Orientation (yaw): 40.0°
+12:20:33.411   Cell: (2, 1)
+12:20:33.699 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:20:33.703   Name: wp_44
+12:20:33.703   ID: edited-medusa-r0A9Nxk8oOYBCT+.WkXg3g==
+12:20:33.703   Pose saved for future realignment
+12:20:33.703   Cell saved: (2, 1)
+12:20:33.703   Status: 1
+12:20:33.703 
+12:20:33.704 [GRAPH_CACHE] Cache invalidated
+12:20:33.704 [BRICIOLA] Waypoint wp_44 in (82.25, -29.53), nodo PRM 2221 (traccia: 36 waypoint).
+12:20:33.840 [GROUND-FILTER] scan-passo: 3 celle scartate, fino a 1.25 m sopra il suolo (suolo z=-16.268, stimato sotto il robot su 1696 celle)
+12:20:33.841 [GROUND-FILTER] scan-passo: 342 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota +0.0000 m
+12:20:33.843 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+12:20:35.304 [ARCHI] 803 archi fuori dal grafo per la scansione dal vivo (803 rivalutati, 0 oltre il raggio di refresh), prima della pendenza.
+12:20:35.305 [SPAZIO] Archi su cui i due criteri non concordano: 17 su 3386 (0.5%) -- 8 bloccati solo dalla mappa binaria, 9 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 143495.
+12:20:35.331 [REPLAN STABILE] Percorso invariato da 2221 a 2169 (74 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:20:35.333 [FRONTE] 1.83 m confermati su 3.18 m di percorso, avanzamento consentito 1.18 m -- si ferma sul bordo dei dati in (84.07, -29.49): avanzo e riguardo
+12:20:35.334 [TEMPO] scansione 0.12 s | elaborazione 0.01 | mappe 0.05 | PRM 1.44 | fronte 0.00 | decisione: move
+12:20:35.369 [OK] Tratto 2221->2226 confermato libero dal fronte. Eseguo movimento...
+12:20:35.370 [SLOPE-SOURCE] Arco 2221->2226: LIVE (long=0.123, lat=0.175)
+12:20:35.376 [SLOPE-CHECK] Arco 2221->2226: in uso long=0.123 lat=0.175 | interpolata long=0.562 lat=0.374 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:20:35.376 [GAIT] Terrain tier: MODERATE (gradient=0.175, roughness=0.025) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.6, vel_max=0.35 m/s, rot_max=0.50 rad/s
+12:20:35.395 [INFO] Step 1: Rotating to face target...
+12:20:37.666 [MOVIMENTO] Rotazione completata: -34 gradi su -34 richiesti (il centro del corpo si e' spostato di 0.03 m girando).
+12:20:37.666 [INFO] Step 2: Moving forward 1.15m...
+12:20:42.746 [MOVIMENTO] Arrivato: percorsi 1.18 m su 1.15 richiesti.
+12:20:42.761 [TILT] Arco 2221->2226: picco roll=1.4 deg, pitch=15.8 deg (35 campioni) | stimato long=0.123 (~7.0 deg), lat=0.175 (~9.9 deg) | tier=MODERATE, 7.4s
+12:20:42.761 [INFO] Spostamento completato con successo su (83.40, -29.41)
+12:20:42.782 
+12:20:42.782 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:20:42.782   Name: wp_45 (manual waypoint format)
+12:20:42.782   Number: 45
+12:20:42.782   Position: (83.453, -29.430, -15.825)
+12:20:42.782   Orientation (yaw): 6.1°
+12:20:42.782   Cell: (2, 1)
+12:20:43.521 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:20:43.521   Name: wp_45
+12:20:43.521   ID: gummed-moa-8SQC3qKOgneFg6q6Lszm4w==
+12:20:43.521   Pose saved for future realignment
+12:20:43.521   Cell saved: (2, 1)
+12:20:43.521   Status: 1
+12:20:43.521 
+12:20:43.521 [GRAPH_CACHE] Cache invalidated
+12:20:43.521 [BRICIOLA] Waypoint wp_45 in (83.45, -29.43), nodo PRM 2226 (traccia: 37 waypoint).
+12:20:43.695 [GROUND-FILTER] scan-passo: 14 celle scartate, fino a 1.33 m sopra il suolo (suolo z=-16.290, stimato sotto il robot su 1696 celle)
+12:20:43.698 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 67/801 (8.4%)
+12:20:43.698                  perche': prossimita'=48  rugosita'=0  entrambi=19   (celle non valide sotto il corpo: 0)
+12:20:43.698                  dove: nucleo=24/500  corona esterna=43/301
+12:20:45.254 [ARCHI] 550 archi fuori dal grafo per la scansione dal vivo (550 rivalutati, 0 oltre il raggio di refresh), prima della pendenza.
+12:20:45.257 [NODI] 1 nodi scartati: meno di 0.30 m di spazio libero dove li vediamo (primi: [2161]).
+12:20:45.257 [SPAZIO] Archi su cui i due criteri non concordano: 95 su 3436 (2.8%) -- 50 bloccati solo dalla mappa binaria, 45 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 146446.
+12:20:45.265 [REPLAN] Percorso aggiornato (75 nodi locali rivalutati): 2 waypoint rimanenti.
+12:20:45.395 [FRONTE] 1.93 m confermati su 1.99 m di percorso, avanzamento consentito 1.28 m -- si ferma sul bordo dei dati in (85.36, -29.40): avanzo e riguardo
+12:20:45.395 [TEMPO] scansione 0.11 s | elaborazione 0.01 | mappe 0.05 | PRM 1.65 | fronte 0.00 | decisione: move
+12:20:45.396 [OK] Tratto 2226->2231 confermato libero dal fronte. Eseguo movimento...
+12:20:45.396 [SLOPE-SOURCE] Arco 2226->2231: LIVE (long=0.130, lat=0.192)
+12:20:45.402 [SLOPE-CHECK] Arco 2226->2231: in uso long=0.130 lat=0.192 | interpolata long=0.270 lat=0.303 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:20:45.402 [GAIT] Terrain tier: MODERATE (gradient=0.192, roughness=0.016) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.6, vel_max=0.35 m/s, rot_max=0.50 rad/s
+12:20:45.413 [INFO] Step 1: Rotating to face target...
+12:20:45.440 [MOVIMENTO] Rotazione completata: -0 gradi su +2 richiesti (il centro del corpo si e' spostato di 0.00 m girando).
+12:20:45.440 [INFO] Step 2: Moving forward 1.20m...
+12:20:50.450 [MOVIMENTO] Arrivato: percorsi 1.20 m su 1.20 richiesti.
+12:20:50.462 [TILT] Arco 2226->2231: picco roll=2.1 deg, pitch=9.0 deg (25 campioni) | stimato long=0.130 (~7.4 deg), lat=0.192 (~10.9 deg) | tier=MODERATE, 5.1s
+12:20:50.462 [INFO] Spostamento completato con successo su (84.64, -29.26)
+12:20:50.478 
+12:20:50.478 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:20:50.478   Name: wp_46 (manual waypoint format)
+12:20:50.478   Number: 46
+12:20:50.478   Position: (84.652, -29.327, -15.955)
+12:20:50.478   Orientation (yaw): 6.0°
+12:20:50.478   Cell: (2, 1)
+12:20:52.183 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:20:52.183   Name: wp_46
+12:20:52.183   ID: angled-tarpan-y1snBBEd+k6vV0hQvu0LYg==
+12:20:52.183   Pose saved for future realignment
+12:20:52.183   Cell saved: (2, 1)
+12:20:52.183   Status: 1
+12:20:52.183 
+12:20:52.183 [GRAPH_CACHE] Cache invalidated
+12:20:52.183 [BRICIOLA] Waypoint wp_46 in (84.65, -29.33), nodo PRM 2231 (traccia: 38 waypoint).
+12:20:52.329 [GROUND-FILTER] scan-passo: 19 celle scartate, fino a 1.51 m sopra il suolo (suolo z=-16.435, stimato sotto il robot su 1696 celle)
+12:20:52.329 [GROUND-FILTER] scan-passo: 146 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota +0.0000 m
+12:20:52.330 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/802 (0.0%)
+12:20:54.145 [ARCHI] 105 archi fuori dal grafo per la scansione dal vivo (105 rivalutati, 0 oltre il raggio di refresh), prima della pendenza.
+12:20:54.148 [NODI] 3 nodi scartati: meno di 0.30 m di spazio libero dove li vediamo (primi: [2161, 2224, 2225]).
+12:20:54.148 [SPAZIO] Archi su cui i due criteri non concordano: 36 su 3488 (1.0%) -- 9 bloccati solo dalla mappa binaria, 27 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 149392.
+12:20:54.153 [REPLAN STABILE] Percorso invariato da 2231 a 2169 (76 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:20:54.155 [FRONTE] 1.32 m confermati su 0.77 m di percorso, avanzamento consentito 0.77 m -- percorso libero fino all'obiettivo
+12:20:54.155 [TEMPO] scansione 0.12 s | elaborazione 0.00 | mappe 0.04 | PRM 1.78 | fronte 0.00 | decisione: move
+12:20:54.155 [OK] Tratto 2231->2169 confermato libero dal fronte. Eseguo movimento...
+12:20:54.156 [SLOPE-SOURCE] Arco 2231->2169: LIVE (long=0.143, lat=0.165)
+12:20:54.160 [SLOPE-CHECK] Arco 2231->2169: in uso long=0.143 lat=0.165 | interpolata long=0.215 lat=0.273 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:20:54.160 [GAIT] Terrain tier: MODERATE (gradient=0.165, roughness=0.012) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.6, vel_max=0.35 m/s, rot_max=0.50 rad/s
+12:20:54.190 [INFO] Step 1: Rotating to face target...
+12:20:56.547 [MOVIMENTO] Rotazione completata: -13 gradi su -13 richiesti (il centro del corpo si e' spostato di 0.06 m girando).
+12:20:56.547 [INFO] Step 2: Moving forward 0.77m...
+12:21:00.953 [MOVIMENTO] Arrivato: percorsi 0.79 m su 0.77 richiesti.
+12:21:00.965 [TILT] Arco 2231->2169: picco roll=1.8 deg, pitch=8.1 deg (30 campioni) | stimato long=0.143 (~8.1 deg), lat=0.165 (~9.4 deg) | tier=MODERATE, 6.8s
+12:21:00.965 [INFO] Spostamento completato con successo su (85.41, -29.41)
+12:21:00.999 
+12:21:00.999 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:21:01.000   Name: wp_47 (manual waypoint format)
+12:21:01.000   Number: 47
+12:21:01.000   Position: (85.468, -29.456, -16.047)
+12:21:01.000   Orientation (yaw): -6.7°
+12:21:01.000   Cell: (2, 1)
+12:21:02.602 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:21:02.602   Name: wp_47
+12:21:02.602   ID: eighty-snake-8LpSq2nn3HDyKBozxsOGDQ==
+12:21:02.602   Pose saved for future realignment
+12:21:02.602   Cell saved: (2, 1)
+12:21:02.602   Status: 1
+12:21:02.602 
+12:21:02.602 [GRAPH_CACHE] Cache invalidated
+12:21:02.602 [BRICIOLA] Waypoint wp_47 in (85.47, -29.46), nodo PRM 2169 (traccia: 39 waypoint).
+12:21:02.634 [CHECK] Point (85.47,-29.45) IS inside cell (2,1)
+12:21:02.652 [MAP] Cell (2, 1) marked as visited (robot center inside)
+12:21:02.667 
+12:21:02.667 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:21:02.667   Name: wp_48 (manual waypoint format)
+12:21:02.667   Number: 48
+12:21:02.667   Position: (85.467, -29.453, -16.047)
+12:21:02.667   Orientation (yaw): -6.7°
+12:21:02.667   Cell: (2, 1)
+12:21:02.823 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:21:02.823   Name: wp_48
+12:21:02.823   ID: auburn-beaver-taMCUmu1izw4gRZbTJ8oCw==
+12:21:02.823   Pose saved for future realignment
+12:21:02.823   Cell saved: (2, 1)
+12:21:02.823   Status: 1
+12:21:02.823 
+12:21:02.823 [GRAPH_CACHE] Cache invalidated
+12:21:02.823 [WAYPOINT] Registered waypoint #9 at (85.467, -29.453)
+12:21:02.823 [VISITED] Cell (2,1) marked as visited (value=1)
+12:21:02.823 
+12:21:02.823 [ADJACENT] Searching for adjacent unexplored neighbors from cell (2,1)
+12:21:02.823   ✓ Neighbor east: (2,2) with rank=10
+12:21:02.823 [ADJACENT] ✓ Found 1 unexplored neighbors
+12:21:02.823 [ADJACENT] Neighbor with lowest rank: (2,2) rank=10
+12:21:02.823 [(2, 3, 11), (2, 2, 10)]
+12:21:02.830 
+12:21:02.831 [ADJACENT] Searching for adjacent unexplored neighbors from cell (2,1)
+12:21:02.831   ✓ Neighbor east: (2,2) with rank=10
+12:21:02.831 [ADJACENT] ✓ Found 1 unexplored neighbors
+12:21:02.831 [ADJACENT] Neighbor with lowest rank: (2,2) rank=10
+12:21:02.831 
+12:21:02.831 [ATTEMPT] Trying to enter cell (2,2) from current position...
+12:21:02.913 [FOOTPRINT-DIAG] scan-cella: celle sotto il corpo marcate ostacolo: 0/801 (0.0%)
+12:21:03.135 [MAP] Mappa globale salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_occupancy_map.pkl
+12:21:03.750 [MAP] Mappa globale del terreno salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_terrain_map.pkl
+12:21:03.750 [MAP] Dimensione mappe globali -- occupazione: 151311 celle, terreno: 151311 celle
+12:21:03.750 [DATA SAVE] Matrici .npy salvate per cella (2,2)
+12:21:13.403 [GRAFO] 91905 archi ammessi su 105250 coppie del reticolo (3185 nodi, passo 0.2500 m); 25451 in zona senza dati, con il solo costo geometrico
+12:21:13.409 [TEMPO] costruzione completa del grafo: 9.66 s
+12:21:13.411 [TARGET] Cella (2,2): centro geometrico non utilizzabile, ripiego sul punto libero piu' vicino al centro (87.21, -27.68), a 2.02 m da esso  [liberi=6 ignoti=284 occupati=0]
+12:21:13.412 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1), (1, 2), (1, 3), (2, 0), (2, 1), (2, 2)]: 2913 nodi su 3185. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+12:21:13.413 [NODO] partenza tentativo: agganciato al nodo 2169 in (85.41, -29.41), a 0.07 m da (85.47, -29.45) -- nessun nodo nuovo
+12:21:13.440 
+12:21:13.440 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:21:13.440   Name: wp_49 (manual waypoint format)
+12:21:13.440   Number: 49
+12:21:13.440   Position: (85.467, -29.453, -16.047)
+12:21:13.440   Orientation (yaw): -6.8°
+12:21:13.440   Cell: (2, 2)
+12:21:13.546 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:21:13.546   Name: wp_49
+12:21:13.546   ID: elvish-heron-bRJooyXy3+g0Xa2yjDGghw==
+12:21:13.546   Pose saved for future realignment
+12:21:13.546   Cell saved: (2, 2)
+12:21:13.546   Status: 1
+12:21:13.546 
+12:21:13.546 [GRAPH_CACHE] Cache invalidated
+12:21:13.546 [BRICIOLA] Waypoint wp_49 in (85.47, -29.45), nodo PRM 2169 (traccia: 40 waypoint).
+12:21:13.581 [NODO] obiettivo cella (2,2): agganciato al nodo 2567 in (87.21, -27.68), a 0.00 m da (87.21, -27.68) -- nessun nodo nuovo
+12:21:13.854 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/801 (0.0%)
+12:21:15.529 [SPAZIO] Archi su cui i due criteri non concordano: 6 su 3359 (0.2%) -- 0 bloccati solo dalla mappa binaria, 6 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 151142.
+12:21:15.559 [REPLAN STABILE] Percorso invariato da 2169 a 2567 (73 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:21:15.561 [FRONTE] 2.61 m confermati su 2.49 m di percorso, avanzamento consentito 1.96 m -- si ferma sul bordo dei dati in (87.30, -27.60): avanzo e riguardo
+12:21:15.562 [TEMPO] scansione 0.07 s | elaborazione 0.00 | mappe 0.04 | PRM 1.66 | fronte 0.00 | decisione: move
+12:21:15.562 [OK] Tratto 2169->2368 confermato libero dal fronte. Eseguo movimento...
+12:21:15.563 [SLOPE-SOURCE] Arco 2169->2368: LIVE (long=0.077, lat=0.189)
+12:21:15.570 [SLOPE-CHECK] Arco 2169->2368: in uso long=0.077 lat=0.189 | interpolata long=0.156 lat=0.289 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:21:15.570 [GAIT] Terrain tier: MODERATE (gradient=0.189, roughness=0.011) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.6, vel_max=0.35 m/s, rot_max=0.50 rad/s
+12:21:15.590 [INFO] Step 1: Rotating to face target...
+12:21:18.610 [MOVIMENTO] Rotazione completata: +54 gradi su +54 richiesti (il centro del corpo si e' spostato di 0.04 m girando).
+12:21:18.610 [INFO] Step 2: Moving forward 1.24m...
+12:21:23.784 [MOVIMENTO] Arrivato: percorsi 1.24 m su 1.24 richiesti.
+12:21:23.805 [TILT] Arco 2169->2368: picco roll=1.5 deg, pitch=7.4 deg (38 campioni) | stimato long=0.077 (~4.4 deg), lat=0.189 (~10.7 deg) | tier=MODERATE, 8.2s
+12:21:23.805 [INFO] Spostamento completato con successo su (86.31, -28.54)
+12:21:23.886 
+12:21:23.886 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:21:23.886   Name: wp_50 (manual waypoint format)
+12:21:23.886   Number: 50
+12:21:23.886   Position: (86.340, -28.507, -15.965)
+12:21:23.886   Orientation (yaw): 46.6°
+12:21:23.886   Cell: (2, 2)
+12:21:24.645 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:21:24.645   Name: wp_50
+12:21:24.645   ID: agleam-marlin-ELDLuxhDVFlOrxnIJ2rAfA==
+12:21:24.645   Pose saved for future realignment
+12:21:24.645   Cell saved: (2, 2)
+12:21:24.645   Status: 1
+12:21:24.645 
+12:21:24.645 [GRAPH_CACHE] Cache invalidated
+12:21:24.646 [BRICIOLA] Waypoint wp_50 in (86.34, -28.51), nodo PRM 2368 (traccia: 41 waypoint).
+12:21:25.084 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/801 (0.0%)
+12:21:26.808 [REPLAN STABILE] Percorso invariato da 2368 a 2567 (74 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:21:26.809 [FRONTE] 1.75 m confermati su 1.20 m di percorso, avanzamento consentito 1.20 m -- percorso libero fino all'obiettivo
+12:21:26.810 [TEMPO] scansione 0.32 s | elaborazione 0.01 | mappe 0.05 | PRM 1.67 | fronte 0.00 | decisione: move
+12:21:26.810 [OK] Tratto 2368->2567 confermato libero dal fronte. Eseguo movimento...
+12:21:26.811 [SLOPE-SOURCE] Arco 2368->2567: LIVE (long=0.091, lat=0.240)
+12:21:26.817 [SLOPE-CHECK] Arco 2368->2567: in uso long=0.091 lat=0.240 | interpolata long=0.160 lat=0.316 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:21:26.817 [GAIT] Terrain tier: MODERATE (gradient=0.240, roughness=0.013) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.6, vel_max=0.35 m/s, rot_max=0.50 rad/s
+12:21:26.921 [INFO] Step 1: Rotating to face target...
+12:21:27.785 [MOVIMENTO] Rotazione completata: -3 gradi su -3 richiesti (il centro del corpo si e' spostato di 0.00 m girando).
+12:21:27.785 [INFO] Step 2: Moving forward 1.20m...
+12:21:32.866 [MOVIMENTO] Arrivato: percorsi 1.18 m su 1.20 richiesti.
+12:21:32.881 [TILT] Arco 2368->2567: picco roll=1.4 deg, pitch=6.6 deg (24 campioni) | stimato long=0.091 (~5.2 deg), lat=0.240 (~13.5 deg) | tier=MODERATE, 6.1s
+12:21:32.881 [INFO] Spostamento completato con successo su (87.21, -27.68)
+12:21:32.905 
+12:21:32.905 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:21:32.905   Name: wp_51 (manual waypoint format)
+12:21:32.905   Number: 51
+12:21:32.905   Position: (87.205, -27.691, -15.902)
+12:21:32.905   Orientation (yaw): 43.7°
+12:21:32.905   Cell: (2, 2)
+12:21:34.329 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:21:34.329   Name: wp_51
+12:21:34.329   ID: bugged-koodoo-5F6125UXVK6K3A2y.e3iDw==
+12:21:34.329   Pose saved for future realignment
+12:21:34.329   Cell saved: (2, 2)
+12:21:34.329   Status: 1
+12:21:34.329 
+12:21:34.329 [GRAPH_CACHE] Cache invalidated
+12:21:34.329 [BRICIOLA] Waypoint wp_51 in (87.20, -27.69), nodo PRM 2567 (traccia: 42 waypoint).
+12:21:34.377 [CHECK] Point (87.21,-27.68) is OUTSIDE cell (2,2) by (-2.01,-0.26)
+12:21:44.627 [GRAFO] 91905 archi ammessi su 105250 coppie del reticolo (3185 nodi, passo 0.2500 m); 19144 in zona senza dati, con il solo costo geometrico
+12:21:44.636 [TARGET] Cella (2,2): centro geometrico non utilizzabile, ripiego sul punto libero piu' vicino al centro (88.17, -27.30), a 1.00 m da esso  [liberi=51 ignoti=239 occupati=0]
+12:21:44.637 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1), (1, 2), (1, 3), (2, 0), (2, 1), (2, 2)]: 2913 nodi su 3185. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+12:21:44.638 [NODO] verifica recupero (robot): agganciato al nodo 2567 in (87.21, -27.68), a 0.01 m da (87.21, -27.68) -- nessun nodo nuovo
+12:21:44.640 [NODO] verifica recupero (obiettivo): agganciato al nodo 2636 in (88.17, -27.30), a 0.00 m da (88.17, -27.30) -- nessun nodo nuovo
+12:21:44.646 [RECOVERY] Trovato percorso alternativo con costo 1 <= 4. Riprovo l'ingresso...
+12:21:44.646 
+12:21:44.646 [ATTEMPT] Trying to enter cell (2,2) from current position...
+12:21:44.709 [FOOTPRINT-DIAG] scan-cella: celle sotto il corpo marcate ostacolo: 0/803 (0.0%)
+12:21:44.968 [MAP] Mappa globale salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_occupancy_map.pkl
+12:21:45.666 [MAP] Mappa globale del terreno salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_terrain_map.pkl
+12:21:45.666 [MAP] Dimensione mappe globali -- occupazione: 163040 celle, terreno: 163040 celle
+12:21:45.667 [DATA SAVE] Matrici .npy salvate per cella (2,2)
+12:21:53.307 [GRAFO] 91905 archi ammessi su 105250 coppie del reticolo (3185 nodi, passo 0.2500 m); 19223 in zona senza dati, con il solo costo geometrico
+12:21:53.313 [TEMPO] costruzione completa del grafo: 7.65 s
+12:21:53.316 [TARGET] Cella (2,2): centro geometrico non utilizzabile, ripiego sul punto libero piu' vicino al centro (88.92, -27.21), a 0.25 m da esso  [liberi=117 ignoti=173 occupati=0]
+12:21:53.316 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1), (1, 2), (1, 3), (2, 0), (2, 1), (2, 2)]: 2913 nodi su 3185. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+12:21:53.318 [NODO] partenza tentativo: agganciato al nodo 2567 in (87.21, -27.68), a 0.01 m da (87.21, -27.68) -- nessun nodo nuovo
+12:21:53.361 
+12:21:53.361 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:21:53.361   Name: wp_52 (manual waypoint format)
+12:21:53.361   Number: 52
+12:21:53.361   Position: (87.208, -27.683, -15.904)
+12:21:53.361   Orientation (yaw): 43.6°
+12:21:53.361   Cell: (2, 2)
+12:21:53.470 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:21:53.470   Name: wp_52
+12:21:53.470   ID: lee-mouse-4BU1vS0wzYEjtu6oF8Bepg==
+12:21:53.470   Pose saved for future realignment
+12:21:53.470   Cell saved: (2, 2)
+12:21:53.470   Status: 1
+12:21:53.470 
+12:21:53.470 [GRAPH_CACHE] Cache invalidated
+12:21:53.470 [BRICIOLA] Waypoint wp_52 in (87.21, -27.68), nodo PRM 2567 (traccia: 43 waypoint).
+12:21:53.489 [NODO] obiettivo cella (2,2): agganciato al nodo 2639 in (88.92, -27.21), a 0.00 m da (88.92, -27.21) -- nessun nodo nuovo
+12:21:54.521 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/802 (0.0%)
+12:21:56.182 [REPLAN STABILE] Percorso invariato da 2567 a 2639 (73 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:21:56.184 [FRONTE] 1.99 m confermati su 1.79 m di percorso, avanzamento consentito 1.34 m -- si ferma sul bordo dei dati in (89.12, -27.19): avanzo e riguardo
+12:21:56.185 [TEMPO] scansione 0.82 s | elaborazione 0.01 | mappe 0.06 | PRM 1.60 | fronte 0.00 | decisione: move
+12:21:56.185 [OK] Tratto 2567->2636 confermato libero dal fronte. Eseguo movimento...
+12:21:56.186 [SLOPE-SOURCE] Arco 2567->2636: LIVE (long=0.056, lat=0.263)
+12:21:56.191 [SLOPE-CHECK] Arco 2567->2636: in uso long=0.056 lat=0.263 | interpolata long=0.280 lat=0.452 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:21:56.191 [GAIT] Terrain tier: HARD (gradient=0.263, roughness=0.018) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.4, vel_max=0.25 m/s, rot_max=0.40 rad/s
+12:21:56.440 [INFO] Step 1: Rotating to face target...
+12:21:59.784 [MOVIMENTO] Rotazione completata: -22 gradi su -22 richiesti (il centro del corpo si e' spostato di 0.04 m girando).
+12:21:59.784 [INFO] Step 2: Moving forward 1.04m...
+12:22:05.592 [MOVIMENTO] Arrivato: percorsi 1.05 m su 1.04 richiesti.
+12:22:05.605 [TILT] Arco 2567->2636: picco roll=1.5 deg, pitch=4.0 deg (30 campioni) | stimato long=0.056 (~3.2 deg), lat=0.263 (~14.7 deg) | tier=HARD, 9.4s
+12:22:05.605 [INFO] Spostamento completato con successo su (88.17, -27.30)
+12:22:05.627 
+12:22:05.627 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:22:05.627   Name: wp_53 (manual waypoint format)
+12:22:05.627   Number: 53
+12:22:05.627   Position: (88.223, -27.339, -15.938)
+12:22:05.627   Orientation (yaw): 21.3°
+12:22:05.627   Cell: (2, 2)
+12:22:07.762 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:22:07.762   Name: wp_53
+12:22:07.762   ID: azonal-brahma-2Ai6CU8L3jLfmVQQdjM6nw==
+12:22:07.762   Pose saved for future realignment
+12:22:07.762   Cell saved: (2, 2)
+12:22:07.762   Status: 1
+12:22:07.762 
+12:22:07.762 [GRAPH_CACHE] Cache invalidated
+12:22:07.762 [BRICIOLA] Waypoint wp_53 in (88.22, -27.34), nodo PRM 2636 (traccia: 44 waypoint).
+12:22:07.924 [GROUND-FILTER] scan-passo: 129 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota +0.0000 m
+12:22:07.927 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/799 (0.0%)
+12:22:09.847 [ARCHI] 368 archi fuori dal grafo per la scansione dal vivo (3 rivalutati, 365 oltre il raggio di refresh), prima della pendenza.
+12:22:09.849 [NODI] 2 nodi scartati: meno di 0.30 m di spazio libero dove li vediamo (primi: [2968, 3033]).
+12:22:09.849 [SPAZIO] Archi su cui i due criteri non concordano: 5 su 3403 (0.1%) -- 0 bloccati solo dalla mappa binaria, 5 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 168039.
+12:22:09.853 [REPLAN STABILE] Percorso invariato da 2636 a 2639 (75 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:22:09.854 [FRONTE] 1.25 m confermati su 0.70 m di percorso, avanzamento consentito 0.70 m -- percorso libero fino all'obiettivo
+12:22:09.854 [TEMPO] scansione 0.14 s | elaborazione 0.01 | mappe 0.10 | PRM 1.83 | fronte 0.00 | decisione: move
+12:22:09.854 [OK] Tratto 2636->2639 confermato libero dal fronte. Eseguo movimento...
+12:22:09.855 [SLOPE-SOURCE] Arco 2636->2639: LIVE (long=0.063, lat=0.271)
+12:22:09.858 [SLOPE-CHECK] Arco 2636->2639: in uso long=0.063 lat=0.271 | interpolata long=0.234 lat=0.479 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:22:09.858 [GAIT] Terrain tier: HARD (gradient=0.271, roughness=0.016) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.4, vel_max=0.25 m/s, rot_max=0.40 rad/s
+12:22:09.870 [INFO] Step 1: Rotating to face target...
+12:22:12.296 [MOVIMENTO] Rotazione completata: -12 gradi su -12 richiesti (il centro del corpo si e' spostato di 0.05 m girando).
+12:22:12.296 [INFO] Step 2: Moving forward 0.70m...
+12:22:16.416 [MOVIMENTO] Arrivato: percorsi 0.70 m su 0.70 richiesti.
+12:22:16.427 [TILT] Arco 2636->2639: picco roll=1.0 deg, pitch=6.4 deg (31 campioni) | stimato long=0.063 (~3.6 deg), lat=0.271 (~15.2 deg) | tier=HARD, 6.6s
+12:22:16.428 [INFO] Spostamento completato con successo su (88.92, -27.21)
+12:22:16.450 [CHECK] Point (88.95,-27.26) IS inside cell (2,2)
+12:22:16.461 [MAP] Cell (2, 2) marked as visited (robot center inside)
+12:22:16.472 
+12:22:16.472 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:22:16.472   Name: wp_54 (manual waypoint format)
+12:22:16.472   Number: 54
+12:22:16.472   Position: (88.946, -27.256, -15.993)
+12:22:16.472   Orientation (yaw): 9.7°
+12:22:16.472   Cell: (2, 2)
+12:22:17.890 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:22:17.890   Name: wp_54
+12:22:17.890   ID: woozy-bear-5Rw5coT3JQ6aVN5HfJvbSQ==
+12:22:17.890   Pose saved for future realignment
+12:22:17.890   Cell saved: (2, 2)
+12:22:17.890   Status: 1
+12:22:17.890 
+12:22:17.890 [GRAPH_CACHE] Cache invalidated
+12:22:17.890 [WAYPOINT] Registered waypoint #10 at (88.946, -27.256)
+12:22:17.890 [VISITED] Cell (2,2) marked as visited (value=1)
+12:22:17.890 
+12:22:17.890 [ADJACENT] Searching for adjacent unexplored neighbors from cell (2,2)
+12:22:17.891   ✓ Neighbor east: (2,3) with rank=11
+12:22:17.891 [ADJACENT] ✓ Found 1 unexplored neighbors
+12:22:17.891 [ADJACENT] Neighbor with lowest rank: (2,3) rank=11
+12:22:17.891 [(2, 3, 11)]
+12:22:17.908 
+12:22:17.908 [ADJACENT] Searching for adjacent unexplored neighbors from cell (2,2)
+12:22:17.908   ✓ Neighbor east: (2,3) with rank=11
+12:22:17.908 [ADJACENT] ✓ Found 1 unexplored neighbors
+12:22:17.908 [ADJACENT] Neighbor with lowest rank: (2,3) rank=11
+12:22:17.908 
+12:22:17.908 [ATTEMPT] Trying to enter cell (2,3) from current position...
+12:22:18.030 [GROUND-FILTER] scan-iniziale: 4 celle scartate, fino a 1.36 m sopra il suolo (suolo z=-16.486, stimato sotto il robot su 1696 celle)
+12:22:18.030 [GROUND-FILTER] scan-iniziale: 104 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0010 m
+12:22:18.032 [FOOTPRINT-DIAG] scan-cella: celle sotto il corpo marcate ostacolo: 0/799 (0.0%)
+12:22:18.297 [MAP] Mappa globale salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_occupancy_map.pkl
+12:22:19.036 [MAP] Mappa globale del terreno salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_terrain_map.pkl
+12:22:19.036 [MAP] Dimensione mappe globali -- occupazione: 171535 celle, terreno: 171535 celle
+12:22:19.036 [DATA SAVE] Matrici .npy salvate per cella (2,3)
+12:22:27.674 [PENDENZE] costruzione: archi vetati per pendenza -- longitudinale 33 (max 0.71), laterale 60 (max 0.69), 93 mai vetati prima; 0 cambi di verdetto vicino soglia (soglia 0.60).
+12:22:27.674 [GRAFO] 90625 archi ammessi su 105250 coppie del reticolo (3185 nodi, passo 0.2500 m); 15027 in zona senza dati, con il solo costo geometrico
+12:22:27.681 [TEMPO] costruzione completa del grafo: 8.64 s
+12:22:27.681 [ARCHI] 1141 archi scartati subito dalla scansione dal vivo (passano a meno di 0.20 m da un ostacolo appena visto), prima della pendenza.
+12:22:27.683 [TARGET] Cella (2,3): centro geometrico non utilizzabile, ripiego sul punto libero piu' vicino al centro (93.14, -28.70), a 2.02 m da esso  [liberi=6 ignoti=267 occupati=0]
+12:22:27.684 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1), (1, 2), (1, 3), (2, 0), (2, 1), (2, 2), (2, 3)]: 3185 nodi su 3185. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+12:22:27.685 [NODO] partenza tentativo: agganciato al nodo 2639 in (88.92, -27.21), a 0.05 m da (88.95, -27.25) -- nessun nodo nuovo
+12:22:27.758 
+12:22:27.758 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:22:27.758   Name: wp_55 (manual waypoint format)
+12:22:27.758   Number: 55
+12:22:27.758   Position: (88.946, -27.254, -15.993)
+12:22:27.758   Orientation (yaw): 9.7°
+12:22:27.758   Cell: (2, 3)
+12:22:27.939 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:22:27.939   Name: wp_55
+12:22:27.939   ID: fizzy-mayfly-77OEFWx8lUTGYs6Ii2vQQA==
+12:22:27.939   Pose saved for future realignment
+12:22:27.939   Cell saved: (2, 3)
+12:22:27.939   Status: 1
+12:22:27.939 
+12:22:27.939 [GRAPH_CACHE] Cache invalidated
+12:22:27.939 [BRICIOLA] Waypoint wp_55 in (88.95, -27.25), nodo PRM 2639 (traccia: 45 waypoint).
+12:22:27.966 [NODO] obiettivo cella (2,3): agganciato al nodo 2135 in (93.14, -28.70), a 0.00 m da (93.14, -28.70) -- nessun nodo nuovo
+12:22:28.601 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/799 (0.0%)
+12:22:30.190 [PENDENZE] refresh: archi vetati per pendenza -- longitudinale 7 (max 0.66), laterale 0 (max 0.00), 0 mai vetati prima; 2 cambi di verdetto vicino soglia (soglia 0.60).
+12:22:30.191 [ARCHI] 144 archi fuori dal grafo per la scansione dal vivo (134 rivalutati, 10 oltre il raggio di refresh), prima della pendenza.
+12:22:30.194 [NODI] 4 nodi scartati: meno di 0.30 m di spazio libero dove li vediamo (primi: [2775, 2776, 2839, 2903]).
+12:22:30.250 [REPLAN STABILE] Percorso invariato da 2639 a 2135 (74 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:22:30.252 [FRONTE] 1.89 m confermati su 4.52 m di percorso, avanzamento consentito 1.24 m -- si ferma sul bordo dei dati in (90.73, -27.65): avanzo e riguardo
+12:22:30.252 [TEMPO] scansione 0.38 s | elaborazione 0.01 | mappe 0.06 | PRM 1.59 | fronte 0.00 | decisione: move
+12:22:30.253 [OK] Tratto 2639->2641 confermato libero dal fronte. Eseguo movimento...
+12:22:30.253 [SLOPE-SOURCE] Arco 2639->2641: LIVE (long=0.023, lat=0.224)
+12:22:30.255 [SLOPE-CHECK] Arco 2639->2641: in uso long=0.023 lat=0.224 | interpolata long=0.488 lat=0.440 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:22:30.255 [GAIT] Terrain tier: MODERATE (gradient=0.224, roughness=0.022) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.6, vel_max=0.35 m/s, rot_max=0.50 rad/s
+12:22:30.265 [INFO] Step 1: Rotating to face target...
+12:22:30.301 [MOVIMENTO] Rotazione completata: -0 gradi su +3 richiesti (il centro del corpo si e' spostato di 0.00 m girando).
+12:22:30.301 [INFO] Step 2: Moving forward 0.48m...
+12:22:33.797 [MOVIMENTO] Arrivato: percorsi 0.49 m su 0.48 richiesti.
+12:22:33.810 [TILT] Arco 2639->2641: picco roll=1.0 deg, pitch=5.2 deg (18 campioni) | stimato long=0.023 (~1.3 deg), lat=0.224 (~12.6 deg) | tier=MODERATE, 3.6s
+12:22:33.811 [INFO] Spostamento completato con successo su (89.42, -27.15)
+12:22:33.929 [GROUND-FILTER] scan-passo: 139 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0003 m
+12:22:33.932 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/799 (0.0%)
+12:22:35.676 [PENDENZE] refresh: archi vetati per pendenza -- longitudinale 5 (max 0.65), laterale 0 (max 0.00), 0 mai vetati prima; 33 cambi di verdetto vicino soglia (soglia 0.60).
+12:22:35.676 [ARCHI] 747 archi fuori dal grafo per la scansione dal vivo (416 rivalutati, 331 oltre il raggio di refresh), prima della pendenza.
+12:22:35.679 [NODI] 3 nodi scartati: meno di 0.30 m di spazio libero dove li vediamo (primi: [2774, 2777, 3097]).
+12:22:35.679 [SPAZIO] Archi su cui i due criteri non concordano: 3 su 3431 (0.1%) -- 2 bloccati solo dalla mappa binaria, 1 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 173709.
+12:22:35.723 [REPLAN] Percorso aggiornato (75 nodi locali rivalutati): 4 waypoint rimanenti.
+12:22:35.899 [FRONTE] 1.96 m confermati su 4.10 m di percorso, avanzamento consentito 1.31 m -- si ferma sul bordo dei dati in (91.28, -27.64): avanzo e riguardo
+12:22:35.900 [TEMPO] scansione 0.10 s | elaborazione 0.01 | mappe 0.09 | PRM 1.87 | fronte 0.00 | decisione: move
+12:22:35.900 [OK] Tratto 2641->2515 confermato libero dal fronte. Eseguo movimento...
+12:22:35.905 [SLOPE-SOURCE] Arco 2641->2515: LIVE (long=0.182, lat=0.126)
+12:22:35.911 [SLOPE-CHECK] Arco 2641->2515: in uso long=0.182 lat=0.126 | interpolata long=0.538 lat=0.314 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:22:35.911 [GAIT] Terrain tier: MODERATE (gradient=0.182, roughness=0.014) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.6, vel_max=0.35 m/s, rot_max=0.50 rad/s
+12:22:35.921 [INFO] Step 1: Rotating to face target...
+12:22:38.622 [MOVIMENTO] Rotazione completata: -29 gradi su -29 richiesti (il centro del corpo si e' spostato di 0.01 m girando).
+12:22:38.622 [INFO] Step 2: Moving forward 1.10m...
+12:22:43.623 [MOVIMENTO] Arrivato: percorsi 1.11 m su 1.10 richiesti.
+12:22:43.637 [TILT] Arco 2641->2515: picco roll=1.8 deg, pitch=10.4 deg (37 campioni) | stimato long=0.182 (~10.3 deg), lat=0.126 (~7.2 deg) | tier=MODERATE, 7.7s
+12:22:43.637 [INFO] Spostamento completato con successo su (90.47, -27.52)
+12:22:43.661 
+12:22:43.661 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:22:43.662   Name: wp_56 (manual waypoint format)
+12:22:43.662   Number: 56
+12:22:43.662   Position: (90.490, -27.521, -16.183)
+12:22:43.662   Orientation (yaw): -18.9°
+12:22:43.662   Cell: (2, 3)
+12:22:46.130 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:22:46.130   Name: wp_56
+12:22:46.130   ID: snoopy-slug-pKDlKb1pyU0xTe6jrk1lhg==
+12:22:46.130   Pose saved for future realignment
+12:22:46.130   Cell saved: (2, 3)
+12:22:46.130   Status: 1
+12:22:46.130 
+12:22:46.130 [GRAPH_CACHE] Cache invalidated
+12:22:46.130 [BRICIOLA] Waypoint wp_56 in (90.49, -27.52), nodo PRM 2515 (traccia: 46 waypoint).
+12:22:46.369 [GROUND-FILTER] scan-passo: 9 celle scartate, fino a 1.34 m sopra il suolo (suolo z=-16.692, stimato sotto il robot su 1696 celle)
+12:22:46.369 [GROUND-FILTER] scan-passo: 115 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0008 m
+12:22:46.372 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/799 (0.0%)
+12:22:48.068 [PENDENZE] refresh: archi vetati per pendenza -- longitudinale 0 (max 0.00), laterale 0 (max 0.00), 0 mai vetati prima; 1 cambi di verdetto vicino soglia (soglia 0.60).
+12:22:48.068 [ARCHI] 502 archi fuori dal grafo per la scansione dal vivo (380 rivalutati, 122 oltre il raggio di refresh), prima della pendenza.
+12:22:48.070 [NODI] 1 nodi scartati: meno di 0.30 m di spazio libero dove li vediamo (primi: [2844]).
+12:22:48.071 [SPAZIO] Archi su cui i due criteri non concordano: 9 su 3435 (0.3%) -- 5 bloccati solo dalla mappa binaria, 4 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 178497.
+12:22:48.099 [REPLAN] Percorso aggiornato (74 nodi locali rivalutati): 4 waypoint rimanenti.
+12:22:48.253 [SCORCIATOIA] Tratto diretto confermato libero verso il nodo 2387: salto 1 nodi intermedi [2517].
+12:22:48.254 [FRONTE] 2.18 m confermati su 2.97 m di percorso, avanzamento consentito 1.53 m -- si ferma sul bordo dei dati in (92.35, -28.61): avanzo e riguardo
+12:22:48.254 [TEMPO] scansione 0.18 s | elaborazione 0.01 | mappe 0.07 | PRM 1.80 | fronte 0.00 | decisione: move
+12:22:48.254 [OK] Tratto 2515->2387 confermato libero dal fronte. Eseguo movimento...
+12:22:48.254 [SLOPE-SOURCE] Arco 2515->2387: LIVE (long=0.405, lat=0.093)
+12:22:48.257 [SLOPE-CHECK] Arco 2515->2387: in uso long=0.405 lat=0.093 | interpolata long=0.660 lat=0.357 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:22:48.257 [GAIT] Terrain tier: HARD (gradient=0.405, roughness=0.022) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.4, vel_max=0.25 m/s, rot_max=0.40 rad/s
+12:22:48.286 [INFO] Step 1: Rotating to face target...
+12:22:50.608 [MOVIMENTO] Rotazione completata: -20 gradi su -20 richiesti (il centro del corpo si e' spostato di 0.06 m girando).
+12:22:50.608 [INFO] Step 2: Moving forward 0.69m...
+12:22:55.101 [MOVIMENTO] Arrivato: percorsi 0.73 m su 0.69 richiesti.
+12:22:55.285 [TILT] Arco 2515->2387: picco roll=1.6 deg, pitch=21.5 deg (33 campioni) | stimato long=0.405 (~22.0 deg), lat=0.093 (~5.3 deg) | tier=HARD, 7.0s
+12:22:55.285 [INFO] Spostamento completato con successo su (91.03, -27.96)
+12:22:55.324 
+12:22:55.324 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:22:55.324   Name: wp_57 (manual waypoint format)
+12:22:55.325   Number: 57
+12:22:55.325   Position: (91.083, -28.025, -16.422)
+12:22:55.325   Orientation (yaw): -39.2°
+12:22:55.325   Cell: (2, 3)
+12:22:56.936 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:22:56.936   Name: wp_57
+12:22:56.936   ID: rimmed-bedbug-hhKf0G4epg.MT5dlRgur1A==
+12:22:56.936   Pose saved for future realignment
+12:22:56.936   Cell saved: (2, 3)
+12:22:56.936   Status: 1
+12:22:56.936 
+12:22:56.936 [GRAPH_CACHE] Cache invalidated
+12:22:56.936 [BRICIOLA] Waypoint wp_57 in (91.08, -28.02), nodo PRM 2387 (traccia: 47 waypoint).
+12:22:57.586 [GROUND-FILTER] scan-passo: 137 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0008 m
+12:22:57.589 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+12:22:59.355 [ARCHI] 73 archi fuori dal grafo per la scansione dal vivo (73 rivalutati, 0 oltre il raggio di refresh), prima della pendenza.
+12:22:59.357 [SPAZIO] Archi su cui i due criteri non concordano: 27 su 3424 (0.8%) -- 11 bloccati solo dalla mappa binaria, 16 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 181003.
+12:22:59.374 [REPLAN STABILE] Percorso invariato da 2387 a 2135 (74 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:22:59.376 [FRONTE] 2.08 m confermati su 2.20 m di percorso, avanzamento consentito 1.43 m -- si ferma sul bordo dei dati in (93.02, -28.69): avanzo e riguardo
+12:22:59.377 [TEMPO] scansione 0.62 s | elaborazione 0.01 | mappe 0.10 | PRM 1.69 | fronte 0.00 | decisione: move
+12:22:59.377 [OK] Tratto 2387->2196 confermato libero dal fronte. Eseguo movimento...
+12:22:59.378 [SLOPE-SOURCE] Arco 2387->2196: LIVE (long=0.121, lat=0.148)
+12:22:59.384 [SLOPE-CHECK] Arco 2387->2196: in uso long=0.121 lat=0.148 | interpolata long=0.400 lat=0.380 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:22:59.384 [GAIT] Terrain tier: PLAIN (gradient=0.148, roughness=0.016) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:22:59.420 [INFO] Step 1: Rotating to face target...
+12:23:01.340 [MOVIMENTO] Rotazione completata: +11 gradi su +11 richiesti (il centro del corpo si e' spostato di 0.05 m girando).
+12:23:01.340 [INFO] Step 2: Moving forward 1.17m...
+12:23:05.415 [MOVIMENTO] Arrivato: percorsi 1.18 m su 1.17 richiesti.
+12:23:05.426 [TILT] Arco 2387->2196: picco roll=1.3 deg, pitch=18.7 deg (27 campioni) | stimato long=0.121 (~6.9 deg), lat=0.148 (~8.4 deg) | tier=PLAIN, 6.0s
+12:23:05.427 [INFO] Spostamento completato con successo su (92.11, -28.58)
+12:23:05.453 
+12:23:05.453 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:23:05.453   Name: wp_58 (manual waypoint format)
+12:23:05.453   Number: 58
+12:23:05.453   Position: (92.178, -28.603, -16.481)
+12:23:05.453   Orientation (yaw): -28.4°
+12:23:05.453   Cell: (2, 3)
+12:23:06.962 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:23:06.963   Name: wp_58
+12:23:06.963   ID: listed-lizard-cIdqlN+2tMtEGrHNNjBnfQ==
+12:23:06.963   Pose saved for future realignment
+12:23:06.963   Cell saved: (2, 3)
+12:23:06.964   Status: 1
+12:23:06.964 
+12:23:06.964 [GRAPH_CACHE] Cache invalidated
+12:23:06.965 [BRICIOLA] Waypoint wp_58 in (92.18, -28.60), nodo PRM 2196 (traccia: 48 waypoint).
+12:23:07.068 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/801 (0.0%)
+12:23:08.888 [REPLAN STABILE] Percorso invariato da 2196 a 2135 (75 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:23:08.889 [FRONTE] 1.51 m confermati su 0.96 m di percorso, avanzamento consentito 0.96 m -- percorso libero fino all'obiettivo
+12:23:08.889 [TEMPO] scansione 0.07 s | elaborazione 0.01 | mappe 0.05 | PRM 1.77 | fronte 0.00 | decisione: move
+12:23:08.889 [OK] Tratto 2196->2135 confermato libero dal fronte. Eseguo movimento...
+12:23:08.890 [SLOPE-SOURCE] Arco 2196->2135: LIVE (long=0.039, lat=0.136)
+12:23:08.895 [SLOPE-CHECK] Arco 2196->2135: in uso long=0.039 lat=0.136 | interpolata long=0.174 lat=0.309 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:23:08.895 [GAIT] Terrain tier: PLAIN (gradient=0.136, roughness=0.015) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:23:08.914 [INFO] Step 1: Rotating to face target...
+12:23:10.836 [MOVIMENTO] Rotazione completata: +22 gradi su +22 richiesti (il centro del corpo si e' spostato di 0.03 m girando).
+12:23:10.836 [INFO] Step 2: Moving forward 0.96m...
+12:23:14.028 [MOVIMENTO] Arrivato: percorsi 0.99 m su 0.96 richiesti.
+12:23:14.096 [TILT] Arco 2196->2135: picco roll=0.7 deg, pitch=3.3 deg (24 campioni) | stimato long=0.039 (~2.2 deg), lat=0.136 (~7.8 deg) | tier=PLAIN, 5.2s
+12:23:14.096 [INFO] Spostamento completato con successo su (93.14, -28.70)
+12:23:14.111 
+12:23:14.111 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:23:14.111   Name: wp_59 (manual waypoint format)
+12:23:14.111   Number: 59
+12:23:14.111   Position: (93.196, -28.730, -16.475)
+12:23:14.111   Orientation (yaw): -6.4°
+12:23:14.111   Cell: (2, 3)
+12:23:15.533 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:23:15.533   Name: wp_59
+12:23:15.533   ID: pro-dove-bGTVALV7sAaIyNZ24uQ.Zw==
+12:23:15.533   Pose saved for future realignment
+12:23:15.533   Cell saved: (2, 3)
+12:23:15.533   Status: 1
+12:23:15.533 
+12:23:15.533 [GRAPH_CACHE] Cache invalidated
+12:23:15.533 [BRICIOLA] Waypoint wp_59 in (93.20, -28.73), nodo PRM 2135 (traccia: 49 waypoint).
+12:23:15.589 [CHECK] Point (93.20,-28.73) is OUTSIDE cell (2,3) by (-0.19,-2.04)
+12:23:27.504 [GRAFO] 90060 archi ammessi su 105250 coppie del reticolo (3185 nodi, passo 0.2500 m); 9210 in zona senza dati, con il solo costo geometrico
+12:23:27.513 [TARGET] Cella (2,3): centro geometrico non utilizzabile, ripiego sul punto libero piu' vicino al centro (93.17, -26.94), a 0.25 m da esso  [liberi=112 ignoti=158 occupati=3]
+12:23:27.514 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1), (1, 2), (1, 3), (2, 0), (2, 1), (2, 2), (2, 3)]: 3185 nodi su 3185. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+12:23:27.516 [NODO] verifica recupero (robot): agganciato al nodo 2135 in (93.14, -28.70), a 0.07 m da (93.20, -28.74) -- nessun nodo nuovo
+12:23:27.517 [NODO] verifica recupero (obiettivo): agganciato al nodo 2591 in (93.17, -26.94), a 0.00 m da (93.17, -26.94) -- nessun nodo nuovo
+12:23:27.534 [RECOVERY] Trovato percorso alternativo con costo 2 <= 4. Riprovo l'ingresso...
+12:23:27.534 
+12:23:27.534 [ATTEMPT] Trying to enter cell (2,3) from current position...
+12:23:27.796 [FOOTPRINT-DIAG] scan-cella: celle sotto il corpo marcate ostacolo: 0/799 (0.0%)
+12:23:28.061 [MAP] Mappa globale salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_occupancy_map.pkl
+12:23:28.820 [MAP] Mappa globale del terreno salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_13-10-2026_12-14-30/global_terrain_map.pkl
+12:23:28.820 [MAP] Dimensione mappe globali -- occupazione: 185525 celle, terreno: 185525 celle
+12:23:28.820 [DATA SAVE] Matrici .npy salvate per cella (2,3)
+12:23:36.954 [GRAFO] 90060 archi ammessi su 105250 coppie del reticolo (3185 nodi, passo 0.2500 m); 9340 in zona senza dati, con il solo costo geometrico
+12:23:36.961 [TEMPO] costruzione completa del grafo: 8.14 s
+12:23:36.964 [TARGET] Cella (2,3): centro geometrico non utilizzabile, ripiego sul punto libero piu' vicino al centro (93.17, -26.94), a 0.25 m da esso  [liberi=139 ignoti=131 occupati=3]
+12:23:36.965 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1), (1, 2), (1, 3), (2, 0), (2, 1), (2, 2), (2, 3)]: 3185 nodi su 3185. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+12:23:36.967 [NODO] partenza tentativo: agganciato al nodo 2135 in (93.14, -28.70), a 0.07 m da (93.20, -28.74) -- nessun nodo nuovo
+12:23:36.985 
+12:23:36.985 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:23:36.985   Name: wp_60 (manual waypoint format)
+12:23:36.985   Number: 60
+12:23:36.985   Position: (93.200, -28.736, -16.475)
+12:23:36.985   Orientation (yaw): -6.5°
+12:23:36.985   Cell: (2, 3)
+12:23:37.083 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:23:37.083   Name: wp_60
+12:23:37.083   ID: boiled-kudu-0LNymYwwIIQzPZOvBC40hg==
+12:23:37.083   Pose saved for future realignment
+12:23:37.083   Cell saved: (2, 3)
+12:23:37.083   Status: 1
+12:23:37.083 
+12:23:37.083 [GRAPH_CACHE] Cache invalidated
+12:23:37.083 [BRICIOLA] Waypoint wp_60 in (93.20, -28.74), nodo PRM 2135 (traccia: 50 waypoint).
+12:23:37.105 [NODO] obiettivo cella (2,3): agganciato al nodo 2591 in (93.17, -26.94), a 0.00 m da (93.17, -26.94) -- nessun nodo nuovo
+12:23:37.422 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+12:23:39.055 [REPLAN STABILE] Percorso invariato da 2135 a 2591 (73 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:23:39.057 [FRONTE] 1.90 m confermati su 1.81 m di percorso, avanzamento consentito 1.25 m -- si ferma sul bordo dei dati in (93.16, -26.85): avanzo e riguardo
+12:23:39.057 [TEMPO] scansione 0.08 s | elaborazione 0.00 | mappe 0.04 | PRM 1.59 | fronte 0.00 | decisione: move
+12:23:39.057 [OK] Tratto 2135->2396 confermato libero dal fronte. Eseguo movimento...
+12:23:39.058 [SLOPE-SOURCE] Arco 2135->2396: LIVE (long=0.162, lat=0.048)
+12:23:39.063 [SLOPE-CHECK] Arco 2135->2396: in uso long=0.162 lat=0.048 | interpolata long=0.434 lat=0.256 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:23:39.064 [GAIT] Terrain tier: MODERATE (gradient=0.162, roughness=0.016) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.6, vel_max=0.35 m/s, rot_max=0.50 rad/s
+12:23:39.126 [INFO] Step 1: Rotating to face target...
+12:23:43.367 [MOVIMENTO] Rotazione completata: +93 gradi su +93 richiesti (il centro del corpo si e' spostato di 0.01 m girando).
+12:23:43.367 [INFO] Step 2: Moving forward 1.06m...
+12:23:48.539 [MOVIMENTO] Arrivato: percorsi 1.06 m su 1.06 richiesti.
+12:23:48.569 [TILT] Arco 2135->2396: picco roll=1.6 deg, pitch=9.0 deg (43 campioni) | stimato long=0.162 (~9.2 deg), lat=0.048 (~2.7 deg) | tier=MODERATE, 9.5s
+12:23:48.569 [INFO] Spostamento completato con successo su (93.26, -27.68)
+12:23:48.597 
+12:23:48.597 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:23:48.597   Name: wp_61 (manual waypoint format)
+12:23:48.597   Number: 61
+12:23:48.597   Position: (93.282, -27.667, -16.352)
+12:23:48.597   Orientation (yaw): 86.4°
+12:23:48.597   Cell: (2, 3)
+12:23:49.043 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:23:49.048   Name: wp_61
+12:23:49.048   ID: taupe-koodoo-YTGPxZo3edrJam8YYFflZg==
+12:23:49.048   Pose saved for future realignment
+12:23:49.048   Cell saved: (2, 3)
+12:23:49.048   Status: 1
+12:23:49.048 
+12:23:49.048 [GRAPH_CACHE] Cache invalidated
+12:23:49.048 [BRICIOLA] Waypoint wp_61 in (93.28, -27.67), nodo PRM 2396 (traccia: 51 waypoint).
+12:23:49.183 [GROUND-FILTER] scan-passo: 148 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota +0.0000 m
+12:23:49.186 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/797 (0.0%)
+12:23:51.002 [SPAZIO] Archi su cui i due criteri non concordano: 1 su 3327 (0.0%) -- 1 bloccati solo dalla mappa binaria, 0 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 188267.
+12:23:51.005 [REPLAN STABILE] Percorso invariato da 2396 a 2591 (73 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+12:23:51.007 [FRONTE] 1.29 m confermati su 0.74 m di percorso, avanzamento consentito 0.74 m -- percorso libero fino all'obiettivo
+12:23:51.007 [TEMPO] scansione 0.11 s | elaborazione 0.01 | mappe 0.05 | PRM 1.76 | fronte 0.00 | decisione: move
+12:23:51.007 [OK] Tratto 2396->2591 confermato libero dal fronte. Eseguo movimento...
+12:23:51.008 [SLOPE-SOURCE] Arco 2396->2591: LIVE (long=0.137, lat=0.054)
+12:23:51.011 [SLOPE-CHECK] Arco 2396->2591: in uso long=0.137 lat=0.054 | interpolata long=0.237 lat=0.256 | campioni dentro griglia: lungo arco 100%, laterali 100%
+12:23:51.011 [GAIT] Terrain tier: PLAIN (gradient=0.137, roughness=0.015) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+12:23:51.031 [INFO] Step 1: Rotating to face target...
+12:23:52.504 [MOVIMENTO] Rotazione completata: +12 gradi su +13 richiesti (il centro del corpo si e' spostato di 0.01 m girando).
+12:23:52.504 [INFO] Step 2: Moving forward 0.74m...
+12:23:55.348 [MOVIMENTO] Arrivato: percorsi 0.77 m su 0.74 richiesti.
+12:23:55.515 [TILT] Arco 2396->2591: picco roll=0.6 deg, pitch=6.9 deg (20 campioni) | stimato long=0.137 (~7.8 deg), lat=0.054 (~3.1 deg) | tier=PLAIN, 4.5s
+12:23:55.515 [INFO] Spostamento completato con successo su (93.17, -26.94)
+12:23:55.551 
+12:23:55.552 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:23:55.552   Name: wp_62 (manual waypoint format)
+12:23:55.552   Number: 62
+12:23:55.552   Position: (93.160, -26.901, -16.277)
+12:23:55.552   Orientation (yaw): 98.5°
+12:23:55.552   Cell: (2, 3)
+12:23:56.818 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:23:56.818   Name: wp_62
+12:23:56.818   ID: sedgy-camel-cbAHi6eN7bFt5zXKyS239g==
+12:23:56.818   Pose saved for future realignment
+12:23:56.818   Cell saved: (2, 3)
+12:23:56.818   Status: 1
+12:23:56.818 
+12:23:56.818 [GRAPH_CACHE] Cache invalidated
+12:23:56.818 [BRICIOLA] Waypoint wp_62 in (93.16, -26.90), nodo PRM 2591 (traccia: 52 waypoint).
+12:23:57.015 [CHECK] Point (93.17,-26.89) IS inside cell (2,3)
+12:23:57.025 [MAP] Cell (2, 3) marked as visited (robot center inside)
+12:23:57.033 
+12:23:57.033 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:23:57.033   Name: wp_63 (manual waypoint format)
+12:23:57.033   Number: 63
+12:23:57.033   Position: (93.169, -26.891, -16.275)
+12:23:57.033   Orientation (yaw): 98.5°
+12:23:57.033   Cell: (2, 3)
+12:23:57.223 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:23:57.223   Name: wp_63
+12:23:57.223   ID: fifth-lemur-N5p9vL1AIYF1icqXsZYIww==
+12:23:57.223   Pose saved for future realignment
+12:23:57.223   Cell saved: (2, 3)
+12:23:57.223   Status: 1
+12:23:57.223 
+12:23:57.223 [GRAPH_CACHE] Cache invalidated
+12:23:57.223 [WAYPOINT] Registered waypoint #11 at (93.169, -26.891)
+12:23:57.223 [VISITED] Cell (2,3) marked as visited (value=1)
+12:23:57.223 
+12:23:57.223 [ADJACENT] Searching for adjacent unexplored neighbors from cell (2,3)
+12:23:57.223 [ADJACENT] No adjacent unexplored neighbors found
+12:23:57.223 
+12:23:57.223 --- Environment Map ---
+12:23:57.223 1 1 1 1
+12:23:57.223 1 1 1 1
+12:23:57.223 1 1 1 1
+12:23:57.223 Current cell: (2, 3)
+12:23:57.223 -----------------------
+12:23:57.223 
+12:23:57.429 
+12:23:57.429 [WAYPOINT CREATION] Creating new MANUAL waypoint:
+12:23:57.429   Name: wp_64 (manual waypoint format)
+12:23:57.429   Number: 64
+12:23:57.429   Position: (93.169, -26.891, -16.275)
+12:23:57.429   Orientation (yaw): 98.5°
+12:23:57.429   Cell: (2, 3)
+12:23:57.610 [WAYPOINT CREATION] ✓ Successfully created waypoint:
+12:23:57.610   Name: wp_64
+12:23:57.611   ID: alpine-eland-1uBNEi2XpOWLhdnymg4XGQ==
+12:23:57.611   Pose saved for future realignment
+12:23:57.611   Cell saved: (2, 3)
+12:23:57.611   Status: 1
+12:23:57.611 
+12:23:57.611 [GRAPH_CACHE] Cache invalidated
+12:23:57.611 [FINAL SCAN] Acquiring one last look-around before returning to start...
+12:23:58.041 [GROUND-FILTER] scan-finale: 50 celle scartate, fino a 1.54 m sopra il suolo (suolo z=-16.756, stimato sotto il robot su 1696 celle)
+12:23:58.272 [FINAL SCAN] Done -- global map now includes the final look-around.
+12:23:58.272 
+12:23:58.272 ================ [PRM MISSION SUMMARY] ================
+12:23:58.273 Fonte pendenza usata nel costo degli archi (totale 1565634 query):
+12:23:58.273   live           : 235926  ( 15.1%)
+12:23:58.273   global_map     : 634810  ( 40.5%)
+12:23:58.273   fallback_nodes : 694898  ( 44.4%)
+12:23:58.273 Veti -- archi DISTINTI (e, tra parentesi, valutazioni totali, che contano lo stesso arco a ogni refresh):
+12:23:58.273   longitudinale: 41 (55)  laterale: 60 (60)  occupazione: 16074 (170675)
+12:23:58.273 Pendenza massima misurata su un arco -- longitudinale: 0.709, laterale: 0.685 (soglia veto 0.600)
+12:23:58.273 Geometria del profilo d'arco -- base 0.25 m, fetta laterale +/-0.30 m
+12:23:58.273 Pesi del costo -- alpha=1.0, beta(long)=2.0, beta_lateral=2.0, gamma=0.0
+12:23:58.273 Flip del veto pendenza vicino soglia (possibile oscillazione): 41
+12:23:58.273 =========================================================
+12:23:58.273 
+12:23:58.273 ================ [MISSION STATS] ================
+12:23:58.273 Distribuzione tier di gait (totale 46 passi):
+12:23:58.273   PLAIN     :     30  ( 65.2%)
+12:23:58.273   MODERATE  :     13  ( 28.3%)
+12:23:58.273   HARD      :      3  (  6.5%)
+12:23:58.273 Ripianificazioni totali: 5
+12:23:58.273 Segmenti registrati nel CSV: 46
+12:23:58.273 Salvataggi .npz per archi vicino soglia: 0
+12:23:58.273 Blocchi confermati dal fronte: 0, arresti a meta' movimento: 1, rotazioni rifiutate: 0, arretramenti dritti: 0, obiettivi riscelti: 0, scorciatoie: 3
+12:23:58.273 Avanzamenti nel cono di rotazione: 0, arretramenti evitati perche' inutili: 0, ripianificazioni immediate: 1
+12:23:58.273 Ritorni con GraphNav: 0 riusciti, 0 falliti (ripiego a zampe); nodi PRM scartati perche' dentro ostacoli: 66
+12:23:58.273 Trappole riconosciute dal ventaglio: 0, passi rifiutati per mancanza di uscite all'arrivo: 0
+12:23:58.273 Movimenti multinodo: 1, 2 nodi attraversati (2.0 per movimento); fermati a un nodo intermedio (rotazione o arrivo): 0
+12:23:58.273 Refresh degli archi del PRM: 46 fatti, 0 saltati perche' senza eventi (0% di giri risparmiati)
+12:23:58.273 Cadute: 0, rialzate da solo: 0
+12:23:58.273 Spostamenti GraphNav riusciti: 0, falliti: 0
+12:23:58.273 Riagganci GraphNav (robot perso): 0 riusciti, 0 falliti | celle rimandate dopo 2 ritorni nello stesso tentativo: 0 | archi tolti dalla scansione dal vivo nei refresh: 17872
+12:23:58.273 Scansioni scartate (layer mancanti o non allineati): ciclo principale 0, controllo in movimento 0
+12:23:58.273 Pacchetti di scansione salvati: 46
+12:23:58.273 [TEMPO] Ripartizione del tempo misurato (466 s):
+12:23:58.273   movimento                 270.4 s  ( 58.1%)
+12:23:58.273   costruzione grafo         108.9 s  ( 23.4%)
+12:23:58.273   PRM e ripianificazione     71.1 s  ( 15.3%)
+12:23:58.273   scansione                  10.1 s  (  2.2%)
+12:23:58.273   mappe globali               2.4 s  (  0.5%)
+12:23:58.273   dati figure                 2.3 s  (  0.5%)
+12:23:58.273   elaborazione griglia        0.2 s  (  0.1%)
+12:23:58.273   fronte e decisione          0.1 s  (  0.0%)
+12:23:58.273 ===================================================
+12:23:58.273 
+12:23:58.472 [GRAPH_CACHE] Downloading fresh graph from robot...
+12:24:00.504 [GRAPH_CACHE] Cache invalidated
+12:24:00.504 [GRAPHNAV] prima del ritorno a wp_0: 30 scorciatoie dalla mappa globale (waypoint a meno di 2.0 m, linea vista libera) + 0 da Spot (chiusure d'anello con controllo di collisione).
+12:24:00.523 Created 0 new edge(s).
+12:24:00.543 Successfully stopped recording a map.
+12:24:00.543 
+12:24:00.543 [========================================]
+12:24:00.544 [ANCHORING] Avvio ottimizzazione globale dell'ancoraggio...
+12:24:00.585 [ANCHORING] ✓ Ottimizzazione completata!
+12:24:00.585 [ANCHORING] Status: 1, Iterazioni: 4, Costo finale: 15073.6787
+12:24:00.585 [========================================]
+12:24:00.585 
+12:24:00.585 [GRAPH_CACHE] Cache invalidated
+12:24:00.585 [GRAPH_CACHE] Downloading fresh graph from robot...
+12:24:03.156 [GRAPH_CACHE] Cache invalidated
+12:24:03.156 [GRAPHNAV] ritorno a wp_0: 0 scorciatoie dalla mappa globale (waypoint a meno di 2.0 m, linea vista libera) + 1 da Spot (chiusure d'anello con controllo di collisione).
+12:24:03.156 [GRAPHNAV] ritorno a wp_0: avvio (massimo 480 s, 0.5 m/s).
+12:24:03.210 [LOCALIZZAZIONE] prima di 'ritorno a wp_0': localizzato su wp_64 | localizzazioni accettate 8755, rifiutate 236 (0 dall'ultima accettata, 0.0 m fatti cosi'), archi cattivi di fila 0 | ultimo passo PLAIN, beccheggio -5.0 gradi.
+12:24:45.511 [GRAPHNAV] ritorno a wp_0: arrivato in 42 s.
+12:24:52.546 [GRAPH_CACHE] Downloading fresh graph from robot...
+12:24:52.574 [MAP DOWNLOAD] New map will be saved to: Grafo_13-10-2026_12-24-52
+12:24:52.574 
+12:24:52.574 [MAP DOWNLOAD] Starting download...
+12:24:52.574 [MAP DOWNLOAD] Destination: Grafo_13-10-2026_12-24-52
+12:24:52.574 [MAP DOWNLOAD] Graph downloaded with 78 waypoints and 108 edges
+12:24:53.214 Downloaded 1 of the total 78 waypoint snapshots.
+12:24:53.521 Downloaded 2 of the total 78 waypoint snapshots.
+12:24:53.605 Downloaded 3 of the total 78 waypoint snapshots.
+12:24:53.678 Downloaded 4 of the total 78 waypoint snapshots.
+12:24:54.313 Downloaded 5 of the total 78 waypoint snapshots.
+12:24:54.349 Downloaded 6 of the total 78 waypoint snapshots.
+12:24:55.760 Downloaded 7 of the total 78 waypoint snapshots.
+12:24:57.250 Downloaded 8 of the total 78 waypoint snapshots.
+12:24:58.276 Downloaded 9 of the total 78 waypoint snapshots.
+12:24:58.653 Downloaded 10 of the total 78 waypoint snapshots.
+12:24:58.858 Downloaded 11 of the total 78 waypoint snapshots.
+12:24:59.089 Downloaded 12 of the total 78 waypoint snapshots.
+12:25:00.147 Downloaded 13 of the total 78 waypoint snapshots.
+12:25:00.700 Downloaded 14 of the total 78 waypoint snapshots.
+12:25:01.067 Downloaded 15 of the total 78 waypoint snapshots.
+12:25:01.408 Downloaded 16 of the total 78 waypoint snapshots.
+12:25:01.786 Downloaded 17 of the total 78 waypoint snapshots.
+12:25:02.170 Downloaded 18 of the total 78 waypoint snapshots.
+12:25:02.540 Downloaded 19 of the total 78 waypoint snapshots.
+12:25:02.844 Downloaded 20 of the total 78 waypoint snapshots.
+12:25:03.281 Downloaded 21 of the total 78 waypoint snapshots.
+12:25:03.614 Downloaded 22 of the total 78 waypoint snapshots.
+12:25:03.782 Downloaded 23 of the total 78 waypoint snapshots.
+12:25:04.253 Downloaded 24 of the total 78 waypoint snapshots.
+12:25:04.320 Downloaded 25 of the total 78 waypoint snapshots.
+12:25:04.390 Downloaded 26 of the total 78 waypoint snapshots.
+12:25:04.659 Downloaded 27 of the total 78 waypoint snapshots.
+12:25:04.887 Downloaded 28 of the total 78 waypoint snapshots.
+12:25:04.932 Downloaded 29 of the total 78 waypoint snapshots.
+12:25:05.210 Downloaded 30 of the total 78 waypoint snapshots.
+12:25:05.296 Downloaded 31 of the total 78 waypoint snapshots.
+12:25:05.377 Downloaded 32 of the total 78 waypoint snapshots.
+12:25:05.905 Downloaded 33 of the total 78 waypoint snapshots.
+12:25:05.967 Downloaded 34 of the total 78 waypoint snapshots.
+12:25:06.296 Downloaded 35 of the total 78 waypoint snapshots.
+12:25:06.760 Downloaded 36 of the total 78 waypoint snapshots.
+12:25:07.024 Downloaded 37 of the total 78 waypoint snapshots.
+12:25:07.482 Downloaded 38 of the total 78 waypoint snapshots.
+12:25:07.860 Downloaded 39 of the total 78 waypoint snapshots.
+12:25:08.122 Downloaded 40 of the total 78 waypoint snapshots.
+12:25:08.212 Downloaded 41 of the total 78 waypoint snapshots.
+12:25:08.614 Downloaded 42 of the total 78 waypoint snapshots.
+12:25:09.021 Downloaded 43 of the total 78 waypoint snapshots.
+12:25:09.095 Downloaded 44 of the total 78 waypoint snapshots.
+12:25:09.488 Downloaded 45 of the total 78 waypoint snapshots.
+12:25:09.896 Downloaded 46 of the total 78 waypoint snapshots.
+12:25:10.158 Downloaded 47 of the total 78 waypoint snapshots.
+12:25:10.188 Downloaded 48 of the total 78 waypoint snapshots.
+12:25:10.263 Downloaded 49 of the total 78 waypoint snapshots.
+12:25:10.501 Downloaded 50 of the total 78 waypoint snapshots.
+12:25:10.737 Downloaded 51 of the total 78 waypoint snapshots.
+12:25:11.086 Downloaded 52 of the total 78 waypoint snapshots.
+12:25:11.404 Downloaded 53 of the total 78 waypoint snapshots.
+12:25:11.645 Downloaded 54 of the total 78 waypoint snapshots.
+12:25:11.898 Downloaded 55 of the total 78 waypoint snapshots.
+12:25:12.522 Downloaded 56 of the total 78 waypoint snapshots.
+12:25:12.765 Downloaded 57 of the total 78 waypoint snapshots.
+12:25:12.806 Downloaded 58 of the total 78 waypoint snapshots.
+12:25:13.494 Downloaded 59 of the total 78 waypoint snapshots.
+12:25:13.526 Downloaded 60 of the total 78 waypoint snapshots.
+12:25:14.115 Downloaded 61 of the total 78 waypoint snapshots.
+12:25:14.202 Downloaded 62 of the total 78 waypoint snapshots.
+12:25:14.473 Downloaded 63 of the total 78 waypoint snapshots.
+12:25:15.001 Downloaded 64 of the total 78 waypoint snapshots.
+12:25:15.059 Downloaded 65 of the total 78 waypoint snapshots.
+12:25:15.109 Downloaded 66 of the total 78 waypoint snapshots.
+12:25:15.425 Downloaded 67 of the total 78 waypoint snapshots.
+12:25:15.670 Downloaded 68 of the total 78 waypoint snapshots.
+12:25:15.734 Downloaded 69 of the total 78 waypoint snapshots.
+12:25:15.824 Downloaded 70 of the total 78 waypoint snapshots.
+12:25:16.112 Downloaded 71 of the total 78 waypoint snapshots.
+12:25:16.187 Downloaded 72 of the total 78 waypoint snapshots.
+12:25:16.393 Downloaded 73 of the total 78 waypoint snapshots.
+12:25:16.750 Downloaded 74 of the total 78 waypoint snapshots.
+12:25:17.096 Downloaded 75 of the total 78 waypoint snapshots.
+12:25:17.121 Downloaded 76 of the total 78 waypoint snapshots.
+12:25:17.202 Downloaded 77 of the total 78 waypoint snapshots.
+12:25:17.668 Downloaded 78 of the total 78 waypoint snapshots.
+12:25:17.675 Downloaded 1 of the total 1 edge snapshots.
+12:25:17.682 Downloaded 2 of the total 2 edge snapshots.
+12:25:17.692 Downloaded 3 of the total 3 edge snapshots.
+12:25:17.700 Downloaded 4 of the total 4 edge snapshots.
+12:25:17.707 Downloaded 5 of the total 5 edge snapshots.
+12:25:17.713 Downloaded 6 of the total 6 edge snapshots.
+12:25:17.720 Downloaded 7 of the total 7 edge snapshots.
+12:25:17.727 Downloaded 8 of the total 8 edge snapshots.
+12:25:17.733 Downloaded 9 of the total 9 edge snapshots.
+12:25:17.740 Downloaded 10 of the total 10 edge snapshots.
+12:25:17.745 Downloaded 11 of the total 11 edge snapshots.
+12:25:17.752 Downloaded 12 of the total 12 edge snapshots.
+12:25:17.761 Downloaded 13 of the total 13 edge snapshots.
+12:25:17.768 Downloaded 14 of the total 14 edge snapshots.
+12:25:17.774 Downloaded 15 of the total 15 edge snapshots.
+12:25:17.780 Downloaded 16 of the total 16 edge snapshots.
+12:25:17.788 Downloaded 17 of the total 17 edge snapshots.
+12:25:17.793 Downloaded 18 of the total 18 edge snapshots.
+12:25:17.800 Downloaded 19 of the total 19 edge snapshots.
+12:25:17.805 Downloaded 20 of the total 20 edge snapshots.
+12:25:17.812 Downloaded 21 of the total 21 edge snapshots.
+12:25:17.818 Downloaded 22 of the total 22 edge snapshots.
+12:25:17.827 Downloaded 23 of the total 23 edge snapshots.
+12:25:17.836 Downloaded 24 of the total 24 edge snapshots.
+12:25:17.842 Downloaded 25 of the total 25 edge snapshots.
+12:25:17.849 Downloaded 26 of the total 26 edge snapshots.
+12:25:17.854 Downloaded 27 of the total 27 edge snapshots.
+12:25:17.860 Downloaded 28 of the total 28 edge snapshots.
+12:25:17.866 Downloaded 29 of the total 29 edge snapshots.
+12:25:17.872 Downloaded 30 of the total 30 edge snapshots.
+12:25:17.881 Downloaded 31 of the total 31 edge snapshots.
+12:25:17.893 Downloaded 32 of the total 32 edge snapshots.
+12:25:17.900 Downloaded 33 of the total 33 edge snapshots.
+12:25:17.906 Downloaded 34 of the total 34 edge snapshots.
+12:25:17.911 Downloaded 35 of the total 35 edge snapshots.
+12:25:17.920 Downloaded 36 of the total 36 edge snapshots.
+12:25:17.926 Downloaded 37 of the total 37 edge snapshots.
+12:25:17.932 Downloaded 38 of the total 38 edge snapshots.
+12:25:17.939 Downloaded 39 of the total 39 edge snapshots.
+12:25:17.946 Downloaded 40 of the total 40 edge snapshots.
+12:25:17.953 Downloaded 41 of the total 41 edge snapshots.
+12:25:17.964 Downloaded 42 of the total 42 edge snapshots.
+12:25:17.972 Downloaded 43 of the total 43 edge snapshots.
+12:25:17.979 Downloaded 44 of the total 44 edge snapshots.
+12:25:17.986 Downloaded 45 of the total 45 edge snapshots.
+12:25:17.992 Downloaded 46 of the total 46 edge snapshots.
+12:25:17.999 Downloaded 47 of the total 47 edge snapshots.
+12:25:18.006 Downloaded 48 of the total 48 edge snapshots.
+12:25:18.013 Downloaded 49 of the total 49 edge snapshots.
+12:25:18.021 Downloaded 50 of the total 50 edge snapshots.
+12:25:18.036 Downloaded 51 of the total 51 edge snapshots.
+12:25:18.045 Downloaded 52 of the total 52 edge snapshots.
+12:25:18.052 Downloaded 53 of the total 53 edge snapshots.
+12:25:18.061 Downloaded 54 of the total 54 edge snapshots.
+12:25:18.067 Downloaded 55 of the total 55 edge snapshots.
+12:25:18.075 Downloaded 56 of the total 56 edge snapshots.
+12:25:18.083 Downloaded 57 of the total 57 edge snapshots.
+12:25:18.096 Downloaded 58 of the total 58 edge snapshots.
+12:25:18.109 Downloaded 59 of the total 59 edge snapshots.
+12:25:18.116 Downloaded 60 of the total 60 edge snapshots.
+12:25:18.132 Downloaded 61 of the total 61 edge snapshots.
+12:25:18.183 Downloaded 62 of the total 62 edge snapshots.
+12:25:18.193 Downloaded 63 of the total 63 edge snapshots.
+12:25:18.200 Downloaded 64 of the total 64 edge snapshots.
+12:25:18.207 Downloaded 65 of the total 65 edge snapshots.
+12:25:18.215 Downloaded 66 of the total 66 edge snapshots.
+12:25:18.226 Downloaded 67 of the total 67 edge snapshots.
+12:25:18.236 Downloaded 68 of the total 68 edge snapshots.
+12:25:18.252 Downloaded 69 of the total 69 edge snapshots.
+12:25:18.268 Downloaded 70 of the total 70 edge snapshots.
+12:25:18.275 Downloaded 71 of the total 71 edge snapshots.
+12:25:18.283 Downloaded 72 of the total 72 edge snapshots.
+12:25:18.295 Downloaded 73 of the total 73 edge snapshots.
+12:25:18.302 Downloaded 74 of the total 74 edge snapshots.
+12:25:18.309 Downloaded 75 of the total 75 edge snapshots.
+12:25:18.316 Downloaded 76 of the total 76 edge snapshots.
+12:25:18.321 Downloaded 77 of the total 77 edge snapshots.
+12:25:18.329 Downloaded 78 of the total 78 edge snapshots.
+12:25:18.339 Downloaded 79 of the total 79 edge snapshots.
+12:25:18.346 Downloaded 80 of the total 80 edge snapshots.
+12:25:18.352 Downloaded 81 of the total 81 edge snapshots.
+12:25:18.362 Downloaded 82 of the total 82 edge snapshots.
+12:25:18.371 Downloaded 83 of the total 83 edge snapshots.
+12:25:18.377 Downloaded 84 of the total 84 edge snapshots.
+12:25:18.385 Downloaded 85 of the total 85 edge snapshots.
+12:25:18.390 Downloaded 86 of the total 86 edge snapshots.
+12:25:18.397 Downloaded 87 of the total 87 edge snapshots.
+12:25:18.404 Downloaded 88 of the total 88 edge snapshots.
+12:25:18.410 Downloaded 89 of the total 89 edge snapshots.
+12:25:18.418 Downloaded 90 of the total 90 edge snapshots.
+12:25:18.431 Downloaded 91 of the total 91 edge snapshots.
+12:25:18.443 Downloaded 92 of the total 92 edge snapshots.
+12:25:18.451 Downloaded 93 of the total 93 edge snapshots.
+12:25:18.461 Downloaded 94 of the total 94 edge snapshots.
+12:25:18.468 Downloaded 95 of the total 95 edge snapshots.
+12:25:18.476 Downloaded 96 of the total 96 edge snapshots.
+12:25:18.483 Downloaded 97 of the total 97 edge snapshots.
+12:25:18.493 Downloaded 98 of the total 98 edge snapshots.
+12:25:18.502 Downloaded 99 of the total 99 edge snapshots.
+12:25:18.510 Downloaded 100 of the total 100 edge snapshots.
+12:25:18.516 Downloaded 101 of the total 101 edge snapshots.
+12:25:18.522 Downloaded 102 of the total 102 edge snapshots.
+12:25:18.535 Downloaded 103 of the total 103 edge snapshots.
+12:25:18.543 Downloaded 104 of the total 104 edge snapshots.
+12:25:18.549 Downloaded 105 of the total 105 edge snapshots.
+12:25:18.562 Downloaded 106 of the total 106 edge snapshots.
+12:25:18.568 Downloaded 107 of the total 107 edge snapshots.
+12:25:18.568 [MAP DOWNLOAD] ✓ Map successfully saved to: /home/andrea/spotSDK/v2/AutonomousNavigationSpot/graph/Mission_13-10-2026_12-14-30/Grafo_13-10-2026_12-24-52
+12:25:18.569 [TEMPO] Chiusura della missione, 80.3 s in tutto:
+12:25:18.569   ritorno a wp_0                     44.9 s
+12:25:18.569   scaricamento della mappa           26.0 s
+12:25:18.569   seduta e spegnimento                7.0 s
+12:25:18.569   chiusura mappa e ancoraggio         2.3 s
+12:25:18.582 [ESTOP] Robot stopped
