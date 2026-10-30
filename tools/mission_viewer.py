@@ -1601,6 +1601,9 @@ def _latest_mission_folder():
 
 
 def main():
+    if '-h' in sys.argv or '--help' in sys.argv:
+        print(__doc__)
+        return 0
     skip = {sys.argv.index(o) + 1 for o in ("--png", "--background") if o in sys.argv}
     args = [a for k, a in enumerate(sys.argv[1:], 1) if not a.startswith("--") and k not in skip]
     if not args:

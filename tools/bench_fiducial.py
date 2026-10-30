@@ -24,8 +24,11 @@ from spot_explorer.robot import connection
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] in ('-h', '--help'):
+        print(__doc__)
+        return
     duration = float(sys.argv[1]) if len(sys.argv) > 1 else 10.0
-    options = SimpleNamespace(name="provaFiducial", hostname="192.168.80.3", verbose=False,
+    options = SimpleNamespace(name="benchFiducial", hostname="192.168.80.3", verbose=False,
                               recording_user_name="", recording_session_name="")
     robot, _lease, robot_state_client, _meta = connection.setLogInfo(options)
     print(f"Connected. Looking for fiducials for {duration:.0f} s "

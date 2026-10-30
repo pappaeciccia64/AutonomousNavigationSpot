@@ -64,4 +64,7 @@ def main(a, b):
 
 
 if __name__ == '__main__':
+    if len(sys.argv) != 3 or sys.argv[1] in ('-h', '--help'):
+        print(__doc__)
+        sys.exit(0 if len(sys.argv) > 1 and sys.argv[1] in ('-h', '--help') else 2)
     sys.exit(main(sys.argv[1], sys.argv[2]))
