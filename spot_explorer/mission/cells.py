@@ -1,14 +1,14 @@
 """
-environmentMap.py -- la mappa a celle della missione.
+cells.py -- the mission cell map.
 
-Una griglia rows x cols di celle quadrate di lato cell_size. Per ogni cella: 0 = non
-visitata, 1 = visitata, -1 = bloccata (provata da tutti i lati, senza successo), piu' una
-maschera a 4 bit dei lati da cui si e' gia' provato a entrare (Nord 0b1000, Est 0b0100,
-Sud 0b0010, Ovest 0b0001).
+A rows x cols grid of square cells of side cell_size. For each cell: 0 = not visited,
+1 = visited, -1 = blocked (tried from all sides, without success), plus a 4-bit mask of
+the sides it has already been tried from (North 0b1000, East 0b0100, South 0b0010,
+West 0b0001).
 
-Il frame della griglia e' fissato all'accensione (set_origin): il centro della cella di
-partenza e' nell'origine, l'asse x della griglia e' l'avanti del robot in quel momento
-(colonne), l'asse y la sua sinistra (righe). L'ordine di visita e' a serpentina.
+The grid frame is fixed at power-on (set_origin): the centre of the starting cell is at
+the origin, the grid x axis is the robot's forward direction at that moment (columns),
+the y axis its left (rows). The visiting order is a serpentine.
 """
 import numpy as np
 
@@ -17,16 +17,16 @@ class EnvironmentMap(object):
         self.map = [[0 for _ in range(cols)] for _ in range(rows)]
         self.rows = rows
         self.cols = cols
-        self.cell_size = cell_size  # lato della cella, m
-        self.origin_x = 0.0  # origine della griglia nel frame del mondo
+        self.cell_size = cell_size  # cell side, m
+        self.origin_x = 0.0  # grid origin in the world frame
         self.origin_y = 0.0
-        self.origin_yaw = 0.0  # orientamento del robot all'accensione, rad
-        self.start_cell = (0, 0)  # cella di partenza (riga, colonna)
+        self.origin_yaw = 0.0  # robot heading at power-on, rad
+        self.start_cell = (0, 0)  # starting cell (row, column)
         self.current_cell = (0, 0)
         self.explored_sides = {}
 
     def mark_cell_visited(self, row, col):
-        """Segna la cella come visitata (1). False se e' fuori dalla griglia."""
+        """Mark the cell as visited (1). False if it is outside the grid."""
         if 0 <= row < self.rows and 0 <= col < self.cols:
             self.map[row][col] = 1
             print(f"[VISITED] Cella ({row},{col}) segnata come visitata (valore 1)")
@@ -36,15 +36,15 @@ class EnvironmentMap(object):
             return False
 
     def is_cell_visited(self, row, col):
-        """True se la cella e' visitata (1)."""
+        """True if the cell is visited (1)."""
         if 0 <= row < self.rows and 0 <= col < self.cols:
             return self.map[row][col] == 1
         return False
 
     def is_point_in_cell(self, x, y, target_row, target_col):
         """
-        True se il punto (x, y) del mondo sta dentro la cella, bordi compresi. Controlla i
-        confini veri della cella, ruotati con la griglia.
+        True if the world point (x, y) lies inside the cell, borders included. Checks the
+        real cell boundaries, rotated with the grid.
         """
         cell_center = self.get_world_position_from_cell(target_row, target_col)
         if cell_center is None:
@@ -54,7 +54,7 @@ class EnvironmentMap(object):
 
         half_size = self.cell_size / 2.0
 
-        # Punto rispetto al centro della cella, ruotato nel frame della griglia
+        # Point relative to the cell centre, rotated into the grid frame
         delta_x = x - center_x
         delta_y = y - center_y
 
@@ -67,7 +67,7 @@ class EnvironmentMap(object):
         return abs(local_x) <= half_size and abs(local_y) <= half_size
 
     def mark_cell_blocked(self, row, col):
-        """Segna la cella come bloccata (-1): provata e non raggiungibile."""
+        """Mark the cell as blocked (-1): tried and not reachable."""
         if 0 <= row < self.rows and 0 <= col < self.cols:
             self.map[row][col] = -1
             print(f"[BLOCKED] Cella ({row},{col}) segnata come bloccata (valore -1)")
@@ -75,59 +75,60 @@ class EnvironmentMap(object):
             print(f"[ERROR] Impossibile segnare bloccata la cella ({row},{col}): fuori dalla griglia")
 
     def is_cell_blocked(self, row, col):
-        """True se la cella e' bloccata (-1)."""
+        """True if the cell is blocked (-1)."""
         if 0 <= row < self.rows and 0 <= col < self.cols:
             return self.map[row][col] == -1
         return False
 
     def get_side_bit_facing_origin(self, origin_row, origin_col, target_row, target_col):
         """
-        Il robot e' andato (o ha provato) da (origin_row, origin_col) verso (target_row,
-        target_col). Restituisce il bit del lato di TARGET rivolto verso origin, cioe' il lato
-        provato davvero. 0 se le celle non sono adiacenti.
+        The robot went (or tried to go) from (origin_row, origin_col) towards (target_row,
+        target_col). Returns the bit of TARGET's side facing origin, i.e. the side actually
+        tried. 0 if the cells are not adjacent.
         """
         dr, dc = target_row - origin_row, target_col - origin_col
         if dr == -1 and dc == 0:
-            return 0b0010  # target a nord di origin: si entra dal lato SUD
+            return 0b0010  # target north of origin: entered from the SOUTH side
         if dr == 1 and dc == 0:
-            return 0b1000  # target a sud: si entra da NORD
+            return 0b1000  # target south: entered from the NORTH
         if dr == 0 and dc == 1:
-            return 0b0001  # target a est: si entra da OVEST
+            return 0b0001  # target east: entered from the WEST
         if dr == 0 and dc == -1:
-            return 0b0100  # target a ovest: si entra da EST
+            return 0b0100  # target west: entered from the EAST
         return 0b0000
 
     def get_valid_neighbor_sides_mask(self, row, col):
         """
-        Maschera dei lati che hanno davvero una cella vicina dentro la griglia (le celle di
-        bordo e d'angolo ne hanno meno di 4): tutti i lati da cui si potrebbe mai provare.
-        La usa all_sides_explored per sapere quando una cella ha finito le possibilita'.
-        Nord 0b1000, Est 0b0100, Sud 0b0010, Ovest 0b0001.
+        Mask of the sides that really have a neighbouring cell inside the grid (border and
+        corner cells have fewer than 4): all the sides it could ever be tried from.
+        Used by all_sides_explored to know when a cell has run out of options.
+        North 0b1000, East 0b0100, South 0b0010, West 0b0001.
         """
         mask = 0b0000
         if row - 1 >= 0:
-            mask |= 0b1000  # nord
+            mask |= 0b1000  # north
         if row + 1 < self.rows:
-            mask |= 0b0010  # sud
+            mask |= 0b0010  # south
         if col + 1 < self.cols:
-            mask |= 0b0100  # est
+            mask |= 0b0100  # east
         if col - 1 >= 0:
-            mask |= 0b0001  # ovest
+            mask |= 0b0001  # west
         return mask
 
     def all_sides_explored(self, row, col):
         """
-        True solo se si e' gia' provato a entrare da OGNI lato che ha un vicino. Solo allora
-        la cella si segna bloccata (-1); prima resta a 0, cosi' l'esplorazione la ripropone
-        piu' avanti da un lato non ancora provato invece di escluderla al primo fallimento.
+        True only if entry has already been tried from EVERY side that has a neighbour. Only
+        then is the cell marked blocked (-1); before that it stays at 0, so exploration
+        proposes it again later from a side not yet tried instead of excluding it at the
+        first failure.
         """
         return (self.get_cell_sides_status(row, col) & self.get_valid_neighbor_sides_mask(row, col)) == \
                self.get_valid_neighbor_sides_mask(row, col)
 
     def mark_cell_side_explored(self, row, col, side_bit):
         """
-        Registra che si e' provato a entrare nella cella dal lato side_bit
-        (Nord 0b1000, Est 0b0100, Sud 0b0010, Ovest 0b0001).
+        Record that entry into the cell was tried from side side_bit
+        (North 0b1000, East 0b0100, South 0b0010, West 0b0001).
         """
         cell_key = (row, col)
         current = self.explored_sides.get(cell_key, 0b0000)
@@ -137,14 +138,12 @@ class EnvironmentMap(object):
 
     def get_adjacent_frontier_cells(self, cell_row, cell_col, path):
         """
-        Le celle adiacenti (nord, sud, est, ovest) non ancora visitate (valore 0), escluse
-        quelle in cui si e' gia' provato a entrare da questo stesso lato.
+        The adjacent cells (north, south, east, west) not yet visited (value 0), except
+        those already tried from this same side.
 
-        path: la serpentina, lista di (riga, colonna); il rango di una cella e' la sua
-        posizione in path.
+        path: the serpentine, list of (row, column); a cell's rank is its position in path.
 
-        Restituisce [(riga, colonna, rango), ...] in ordine di rango crescente, [] se non
-        ce ne sono.
+        Returns [(row, column, rank), ...] in increasing rank order, [] if there are none.
         """
         if path is None:
             print(f"[ERROR] get_adjacent_frontier_cells richiede il parametro path")
@@ -168,9 +167,9 @@ class EnvironmentMap(object):
                 continue
 
             if self.map[neighbor_row][neighbor_col] == 0:
-                # La cella puo' essere ancora a 0 ma gia' provata da QUESTO lato senza
-                # successo (gli altri lati restano da provare). Non si ripropone subito lo
-                # stesso tentativo: tornera' in gioco da un altro lato.
+                # The cell may still be at 0 but already tried from THIS side without
+                # success (the other sides remain to be tried). The same attempt is not
+                # proposed again right away: it will come back into play from another side.
                 side_bit = self.get_side_bit_facing_origin(cell_row, cell_col, neighbor_row, neighbor_col)
                 if self.get_cell_sides_status(neighbor_row, neighbor_col) & side_bit:
                     continue
@@ -184,9 +183,9 @@ class EnvironmentMap(object):
 
     def get_lowest_rank_from_frontier_list(self, frontier_list, path):
         """
-        Fra le celle di frontier_list ((riga, colonna) o (riga, colonna, rango)), quella con
-        il rango piu' basso nella serpentina path. Restituisce (riga, colonna, rango), None
-        se la lista e' vuota o manca path.
+        Among the cells of frontier_list ((row, column) or (row, column, rank)), the one
+        with the lowest rank in the serpentine path. Returns (row, column, rank), None if
+        the list is empty or path is missing.
         """
         if path is None:
             print(f"[ERROR] get_lowest_rank_from_frontier_list richiede il parametro path")
@@ -204,7 +203,7 @@ class EnvironmentMap(object):
         best_cell = None
 
         for cell in frontier_list:
-            # Il rango eventualmente gia' presente si ignora: si rilegge da path.
+            # Any rank already present is ignored: it is re-read from path.
             if isinstance(cell, tuple):
                 if len(cell) >= 2:
                     row, col = cell[0], cell[1]
@@ -226,15 +225,15 @@ class EnvironmentMap(object):
             return None
 
     def get_cell_sides_status(self, row, col):
-        """Maschera a 4 bit dei lati gia' provati (da 0b0000 a 0b1111)."""
+        """4-bit mask of the sides already tried (from 0b0000 to 0b1111)."""
         cell_key = (row, col)
         return self.explored_sides.get(cell_key, 0b0000)
 
     def set_origin(self, x, y, yaw=0.0, start_row=0, start_col=0):
         """
-        Fissa la griglia sulla posa del robot (x, y, yaw nel frame del mondo): il centro di
-        (start_row, start_col) cade in (x, y) e la griglia e' allineata con l'orientamento
-        yaw. Segna la cella di partenza come visitata.
+        Fix the grid on the robot pose (x, y, yaw in the world frame): the centre of
+        (start_row, start_col) falls on (x, y) and the grid is aligned with heading yaw.
+        Marks the starting cell as visited.
         """
         self.origin_x = x
         self.origin_y = y
@@ -249,22 +248,21 @@ class EnvironmentMap(object):
 
     def update_position(self, x, y):
         """
-        Aggiorna la cella corrente dalla posizione (x, y) del robot e la segna visitata se
-        era a 0. Restituisce (riga, colonna), oppure None se il centro del robot e' fuori
-        dalla griglia.
+        Update the current cell from the robot position (x, y) and mark it visited if it
+        was 0. Returns (row, column), or None if the robot centre is outside the grid.
         """
         delta_x = x - self.origin_x
         delta_y = y - self.origin_y
 
-        # Nel frame della griglia: x = avanti del robot all'accensione (colonne),
-        # y = sinistra (righe).
+        # In the grid frame: x = robot forward at power-on (columns),
+        # y = left (rows).
         cos_yaw = np.cos(-self.origin_yaw)
         sin_yaw = np.sin(-self.origin_yaw)
 
         grid_x = delta_x * cos_yaw - delta_y * sin_yaw
         grid_y = delta_x * sin_yaw + delta_y * cos_yaw
 
-        # La cella che contiene il centro del robot, bordi compresi
+        # The cell containing the robot centre, borders included
         half_size = self.cell_size / 2.0
 
         col = None
@@ -295,8 +293,8 @@ class EnvironmentMap(object):
 
     def get_cell_from_world(self, x, y):
         """
-        La cella (riga, colonna) che contiene il punto (x, y) del mondo, senza segnarla
-        visitata. Non controlla i limiti: fuori dalla griglia restituisce indici fuori range.
+        The cell (row, column) containing the world point (x, y), without marking it
+        visited. Does not check the limits: outside the grid it returns out-of-range indices.
         """
         delta_x = x - self.origin_x
         delta_y = y - self.origin_y
@@ -307,7 +305,7 @@ class EnvironmentMap(object):
         grid_x = delta_x * cos_yaw - delta_y * sin_yaw
         grid_y = delta_x * sin_yaw + delta_y * cos_yaw
 
-        # Centro di cella piu' vicino
+        # Nearest cell centre
         col = self.start_cell[1] + round(grid_x / self.cell_size)
         row = self.start_cell[0] + round(grid_y / self.cell_size)
 
@@ -315,8 +313,8 @@ class EnvironmentMap(object):
 
     def get_cell_status(self, row, col):
         """
-        (valore, lati_provati): valore 0 non visitata, 1 visitata, -1 bloccata; lati_provati
-        e' la maschera a 4 bit. (None, None) fuori dalla griglia.
+        (value, sides_tried): value 0 not visited, 1 visited, -1 blocked; sides_tried is
+        the 4-bit mask. (None, None) outside the grid.
         """
         if 0 <= row < self.rows and 0 <= col < self.cols:
             cell_value = self.map[row][col]
@@ -326,20 +324,20 @@ class EnvironmentMap(object):
 
     def generate_serpentine_path(self, start_cell=None):
         """
-        L'ordine di visita a serpentina, lista di (riga, colonna):
+        The serpentine visiting order, list of (row, column):
             1  2  3  4  5
             10 9  8  7  6
             11 12 13 14 15
-        ruotato in modo da partire da start_cell (default: self.start_cell).
+        rotated so as to start from start_cell (default: self.start_cell).
         """
         path = []
         for row in range(self.rows):
             if row % 2 == 0:
-                # righe pari: da sinistra a destra
+                # even rows: left to right
                 for col in range(self.cols):
                     path.append((row, col))
             else:
-                # righe dispari: da destra a sinistra
+                # odd rows: right to left
                 for col in range(self.cols - 1, -1, -1):
                     path.append((row, col))
 
@@ -356,18 +354,18 @@ class EnvironmentMap(object):
 
     def get_world_position_from_cell(self, row, col):
         """
-        Il centro della cella nel frame del mondo, (x, y); None fuori dalla griglia. Il
-        centro della cella di partenza e' l'origine, cioe' la posa del robot all'accensione.
+        The cell centre in the world frame, (x, y); None outside the grid. The centre of
+        the starting cell is the origin, i.e. the robot pose at power-on.
         """
         if 0 <= row < self.rows and 0 <= col < self.cols:
             delta_row = row - self.start_cell[0]
             delta_col = col - self.start_cell[1]
 
-            # Nel frame della griglia: x = colonne, y = righe
+            # In the grid frame: x = columns, y = rows
             grid_x = delta_col * self.cell_size
             grid_y = delta_row * self.cell_size
 
-            # Nel frame del mondo
+            # In the world frame
             cos_yaw = np.cos(self.origin_yaw)
             sin_yaw = np.sin(self.origin_yaw)
 
@@ -381,7 +379,7 @@ class EnvironmentMap(object):
         return None
 
     def print_map(self):
-        """Stampa la mappa delle celle."""
+        """Print the cell map."""
         print("\n--- Mappa delle celle ---")
         for row in self.map:
             print(" ".join(str(cell) for cell in row))
@@ -391,12 +389,12 @@ class EnvironmentMap(object):
 
 
 # =========================================================================================
-# FUNZIONI SULLE CELLE (accettano anche una griglia finta con la stessa interfaccia)
+# FUNCTIONS ON CELLS (they also accept a fake grid with the same interface)
 # =========================================================================================
 def cell_border_distance(env, row, col, x, y):
     """
-    Distanza di (x, y) dal bordo della cella (row, col), nel frame ruotato della griglia:
-    positiva dentro, negativa fuori. None se la cella non esiste.
+    Distance of (x, y) from the border of cell (row, col), in the rotated grid frame:
+    positive inside, negative outside. None if the cell does not exist.
     """
     center = env.get_world_position_from_cell(row, col)
     if center is None:

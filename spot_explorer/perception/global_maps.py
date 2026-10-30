@@ -1,4 +1,4 @@
-"""Mappe globali accumulate per tutta la missione: occupazione, spazio libero, terreno."""
+"""Global maps accumulated over the whole mission: occupancy, free space, terrain."""
 import numpy as np
 from scipy.ndimage import binary_dilation
 import pickle
@@ -7,27 +7,27 @@ from spot_explorer.perception.slopes import (LATERAL_SLICE_HALF_WIDTH_M, MIN_ARC
 from spot_explorer.perception.spot_grid import slope_usable_mask
 
 # =========================================================================
-# MAPPA GLOBALE DEGLI OSTACOLI (vedi GlobalGrid.update)
-#   GLOBAL_OCC_CONFIRM_OBS: una cella diventa occupata dopo tante osservazioni CONSECUTIVE di
-#     ostacolo: la mappa ricorda gli ostacoli fra un tentativo e l'altro e non puo' credere a
-#     una scansione isolata. La prima osservazione di ostacolo azzera le prove di "libero"
-#     (reazione rapida a un ostacolo nuovo).
-#   GLOBAL_OCC_CONFIRM_WALKED: conferme richieste dove il robot e' passato col corpo: averci
-#     camminato e' una prova piu' forte di una lettura da lontano. Le celle non diventano
-#     immuni (il mondo cambia), ma servono piu' conferme.
-#   GLOBAL_OCC_MAX_COUNT: tetto del contatore di prove.
+# GLOBAL OBSTACLE MAP (see GlobalGrid.update)
+#   GLOBAL_OCC_CONFIRM_OBS: a cell becomes occupied after this many CONSECUTIVE obstacle
+#     observations: the map remembers obstacles from one attempt to the next and cannot
+#     trust an isolated scan. The first obstacle observation resets the "free" evidence
+#     (fast reaction to a new obstacle).
+#   GLOBAL_OCC_CONFIRM_WALKED: confirmations required where the robot passed with its body:
+#     having walked there is stronger evidence than a reading from afar. The cells do not
+#     become immune (the world changes), but more confirmations are needed.
+#   GLOBAL_OCC_MAX_COUNT: cap of the evidence counter.
 # =========================================================================
 GLOBAL_OCC_CONFIRM_OBS = 2
 GLOBAL_OCC_MAX_COUNT = 4
-GLOBAL_OCC_COARSE_CELLS = 8          # lato del blocco dell'indice a grana grossa (8 x 3 cm = 24 cm)
+GLOBAL_OCC_COARSE_CELLS = 8          # side of the coarse index block (8 x 3 cm = 24 cm)
 GLOBAL_OCC_CONFIRM_WALKED = 4
 
 # =========================================================================
-# MAPPA DELLO SPAZIO LIBERO (vedi GlobalGrid.update_clearance)
-# Per ogni cella ricorda QUANTO spazio c'era (obstacle_distance), non solo "ostacolo si/no".
-# La usa la scelta dell'obiettivo della cella (easy_walk.find_best_point_in_cell); archi e
-# nodi del grafo si giudicano sulla mappa binaria. Statistica: media delle osservazioni prese
-# entro CLEARANCE_NEAR_M dal robot; dove non ce ne sono, media di tutte.
+# FREE-SPACE MAP (see GlobalGrid.update_clearance)
+# For each cell it remembers HOW MUCH space there was (obstacle_distance), not only "obstacle yes/no".
+# Used by the cell goal choice (goal.find_best_point_in_cell); graph edges and
+# nodes are judged on the binary map. Statistic: mean of the observations taken
+# within CLEARANCE_NEAR_M of the robot; where there are none, mean of all.
 # =========================================================================
 CLEARANCE_NEAR_M = 1.0
 
@@ -35,43 +35,43 @@ CLEARANCE_NEAR_M = 1.0
 class GlobalGrid:
     def __init__(self, resolution=0.03):
         self.resolution = resolution
-        # Dizionario globale: la chiave e' (grid_x, grid_y), il valore e' lo stato:
-        #  1.0 -> Libero/Sicuro
-        # -1.0 -> Occupato/Ostacolo
+        # Global dictionary: the key is (grid_x, grid_y), the value is the state:
+        #  1.0 -> Free/Safe
+        # -1.0 -> Occupied/Obstacle
         self.grid = {}
         self.obs_count = {}
         self._cached_margin = None
         self._cached_offsets = []
         self.global_occupancy_map = None
-        self.global_terrain_map = None  # GlobalTerrainGrid, lazy-init altrove
-        # Indice a grana grossa: blocco (GLOBAL_OCC_COARSE_CELLS celle di lato) -> numero di
-        # celle occupate al suo interno. Serve a is_occupied() per rispondere "libero" senza
-        # guardare cella per cella quando nell'intorno non c'e' nessun blocco con ostacoli,
-        # che e' il caso di gran lunga piu' comune (vedi PRM_EDGE_SAFETY_MARGIN_M).
+        self.global_terrain_map = None  # GlobalTerrainGrid, lazily initialized elsewhere
+        # Coarse index: block (GLOBAL_OCC_COARSE_CELLS cells per side) -> number of
+        # occupied cells inside it. Lets is_occupied() answer "free" without
+        # looking cell by cell when there is no block with obstacles nearby,
+        # which is by far the most common case (see PRM_EDGE_SAFETY_MARGIN_M).
         self._coarse_occ = {}
-        # Celle dei dischi pericolosi (mark_hazard): restano occupate per tutta la missione.
+        # Cells of the hazard disks (mark_hazard): they stay occupied for the whole mission.
         self.hazard_cells = set()
         self.hazards = []
-        # Celle su cui il CORPO del robot e' passato: per dichiararle occupate servono
-        # GLOBAL_OCC_CONFIRM_WALKED conferme invece di GLOBAL_OCC_CONFIRM_OBS.
+        # Cells the robot's BODY passed over: declaring them occupied requires
+        # GLOBAL_OCC_CONFIRM_WALKED confirmations instead of GLOBAL_OCC_CONFIRM_OBS.
         self.walked_cells = set()
-        # MAPPA DELLO SPAZIO LIBERO (vedi CLEARANCE_NEAR_M): media delle obstacle_distance
-        # osservate, tenuta separata fra viste ravvicinate e tutte.
+        # FREE-SPACE MAP (see CLEARANCE_NEAR_M): mean of the observed obstacle_distance,
+        # kept separately for close-up views and all views.
         self.clear_near_sum = {}
         self.clear_near_n = {}
         self.clear_all_sum = {}
         self.clear_all_n = {}
-        # Versione delle celle occupate: cresce a ogni cambio da/verso -1. Serve
-        # a riusare il raster dilatato di occupied_many finche' la mappa non cambia.
+        # Version of the occupied cells: grows at every change to/from -1. Used
+        # to reuse the dilated raster of occupied_many until the map changes.
         self._occ_version = 0
-        self._margin_raster = None      # (versione, steps, raster, gx0, gy0)
+        self._margin_raster = None      # (version, steps, raster, gx0, gy0)
 
     def _coarse_key(self, gx, gy):
         c = GLOBAL_OCC_COARSE_CELLS
         return (gx // c, gy // c)
 
     def _set_state(self, key, new_state):
-        """Unico punto in cui cambia lo stato di una cella: tiene allineato l'indice grosso."""
+        """The only place where a cell's state changes: keeps the coarse index aligned."""
         old_state = self.grid.get(key)
         if old_state == new_state:
             return
@@ -90,8 +90,8 @@ class GlobalGrid:
 
     def clearance(self, x, y):
         """
-        Spazio libero ricordato in quel punto (m), o None se mai osservato. Media delle
-        viste ravvicinate quando ce ne sono, altrimenti media di tutte (vedi CLEARANCE_NEAR_M).
+        Free space remembered at that point (m), or None if never observed. Mean of the
+        close-up views when there are some, otherwise mean of all (see CLEARANCE_NEAR_M).
         """
         key = (int(np.floor(x / self.resolution)), int(np.floor(y / self.resolution)))
         n = self.clear_near_n.get(key, 0)
@@ -101,7 +101,7 @@ class GlobalGrid:
         return (self.clear_all_sum[key] / n) if n else None
 
     def clearance_many(self, xs, ys):
-        """clearance() su molti punti: array di float, NaN dove mai osservato."""
+        """clearance() on many points: float array, NaN where never observed."""
         xs = np.asarray(xs, dtype=np.float64)
         ys = np.asarray(ys, dtype=np.float64)
         out = np.full(xs.shape, np.nan)
@@ -124,12 +124,12 @@ class GlobalGrid:
 
     def update_clearance(self, pts, obstacle_distance, usable, near=None):
         """
-        Impara lo spazio libero per cella. Chiamata accanto a update().
+        Learn the free space per cell. Called next to update().
 
-        obstacle_distance: le distanze (gia' filtrate) della scansione, allineate a pts.
-        usable: celle da cui si puo' imparare (attendibili, oppure sotto il corpo).
-        near: osservazioni prese entro CLEARANCE_NEAR_M dal robot -- vanno in un
-            accumulatore separato, che ha la precedenza (vedi clearance()).
+        obstacle_distance: the (already filtered) distances of the scan, aligned with pts.
+        usable: cells it can learn from (reliable, or under the body).
+        near: observations taken within CLEARANCE_NEAR_M of the robot -- they go into a
+            separate accumulator, which takes precedence (see clearance()).
         """
         p = np.asarray(pts).reshape(-1, pts.shape[-1] if np.ndim(pts) > 1 else 2)
         od = np.asarray(obstacle_distance, dtype=np.float64).ravel()
@@ -151,26 +151,26 @@ class GlobalGrid:
 
     def update(self, pts, obstacle_mask, walked=None):
         """
-        Aggiorna la mappa con una scansione. obstacle_mask: -1 ostacolo, +1 vista libera,
-        0 nessuna informazione (cella non attendibile in questa scansione: si salta).
+        Update the map with a scan. obstacle_mask: -1 obstacle, +1 seen free, 0 no
+        information (cell not reliable in this scan: skipped).
 
-        Isteresi per cella (contatore in obs_count):
-          - occupata dopo GLOBAL_OCC_CONFIRM_OBS osservazioni di ostacolo consecutive (la prima
-            azzera le prove di "libero");
-          - libera quando il contatore torna a 0 o sotto;
-          - nel mezzo resta com'era. Una cella mai vista e osservata libera diventa libera
-            (serve a is_known).
-        Le celle di un disco pericoloso (mark_hazard) non tornano mai libere.
+        Per-cell hysteresis (counter in obs_count):
+          - occupied after GLOBAL_OCC_CONFIRM_OBS consecutive obstacle observations (the
+            first resets the "free" evidence);
+          - free when the counter goes back to 0 or below;
+          - in between it stays as it was. A cell never seen and observed free becomes free
+            (needed by is_known).
+        The cells of a hazard disk (mark_hazard) never become free again.
 
-        walked: maschera, allineata a pts, delle celle coperte dal CORPO del robot adesso.
-        Vengono ricordate (walked_cells) e per dichiararle occupate servono
-        GLOBAL_OCC_CONFIRM_WALKED osservazioni invece di GLOBAL_OCC_CONFIRM_OBS.
+        walked: mask, aligned with pts, of the cells covered by the robot's BODY now.
+        They are remembered (walked_cells) and declaring them occupied requires
+        GLOBAL_OCC_CONFIRM_WALKED observations instead of GLOBAL_OCC_CONFIRM_OBS.
         """
         pts_flat = pts.reshape(-1, 3)
         mask_flat = obstacle_mask.ravel()
 
-        # Chiave di cella = floor(x / resolution), come in is_occupied (np.round sui centri
-        # delle celle arrotonderebbe al pari e lascerebbe chiavi mai scritte).
+        # Cell key = floor(x / resolution), as in is_occupied (np.round on the cell centres
+        # would round to even and leave keys never written).
         gx_array = np.floor(pts_flat[:, 0] / self.resolution).astype(int)
         gy_array = np.floor(pts_flat[:, 1] / self.resolution).astype(int)
 
@@ -196,7 +196,7 @@ class GlobalGrid:
                 if new_count >= confirm:
                     self._set_state(key, -1.0)
                 elif key not in self.grid:
-                    self._set_state(key, 1.0)    # vista, ma non ancora confermata occupata
+                    self._set_state(key, 1.0)    # seen, but not yet confirmed occupied
             else:
                 new_count = max(curr_count - 1, -GLOBAL_OCC_MAX_COUNT)
                 self.obs_count[key] = new_count
@@ -207,8 +207,8 @@ class GlobalGrid:
 
     def is_occupied(self, x, y, safety_margin=0.0):
         """
-        True se (x, y) cade in una cella occupata o, con safety_margin > 0, se c'e' una
-        cella occupata entro safety_margin metri (disco). Una cella mai vista e' libera.
+        True if (x, y) falls in an occupied cell or, with safety_margin > 0, if there is an
+        occupied cell within safety_margin metres (disk). A cell never seen is free.
         """
         gx_center = int(np.floor(x / self.resolution))
         gy_center = int(np.floor(y / self.resolution))
@@ -216,8 +216,8 @@ class GlobalGrid:
         if safety_margin <= 0.0:
             return self.grid.get((gx_center, gy_center), 1.0) == -1.0
 
-        # Prefiltro a grana grossa: se nessun blocco che tocca l'intorno contiene celle
-        # occupate, la risposta e' "libero" senza guardare le singole celle (stesso risultato).
+        # Coarse prefilter: if no block touching the neighbourhood contains occupied
+        # cells, the answer is "free" without looking at the single cells (same result).
         steps = int(np.ceil(safety_margin / self.resolution))
         c = GLOBAL_OCC_COARSE_CELLS
         any_coarse = False
@@ -231,7 +231,7 @@ class GlobalGrid:
         if not any_coarse:
             return False
 
-        # Rigenera la maschera di vicinato solo se il margine cambia
+        # Regenerate the neighbourhood mask only if the margin changes
         if self._cached_margin != safety_margin:
             self._cached_margin = safety_margin
             steps = int(np.ceil(safety_margin / self.resolution))
@@ -250,10 +250,10 @@ class GlobalGrid:
 
     def _get_margin_raster(self, safety_margin):
         """
-        Raster delle celle per cui is_occupied(x, y, safety_margin) e' True: le
-        celle occupate dilatate con LO STESSO disco di is_occupied (dx^2 + dy^2 <= steps^2,
-        steps = ceil(margin / resolution)). Restituisce (raster, gx0, gy0) oppure None se non
-        c'e' nessuna cella occupata. Ricostruito solo quando la mappa cambia (_occ_version).
+        Raster of the cells for which is_occupied(x, y, safety_margin) is True: the
+        occupied cells dilated with THE SAME disk as is_occupied (dx^2 + dy^2 <= steps^2,
+        steps = ceil(margin / resolution)). Returns (raster, gx0, gy0) or None if there is
+        no occupied cell. Rebuilt only when the map changes (_occ_version).
         """
         steps = int(np.ceil(safety_margin / self.resolution)) if safety_margin > 0.0 else 0
         ver = getattr(self, '_occ_version', 0)
@@ -280,8 +280,8 @@ class GlobalGrid:
 
     def occupied_many(self, xs, ys, safety_margin=0.0):
         """
-        is_occupied su molti punti insieme, con risultato IDENTICO punto per punto (stesse
-        chiavi floor(x / resolution), stesso disco): serve alla costruzione del grafo.
+        is_occupied on many points together, with a result IDENTICAL point by point (same
+        keys floor(x / resolution), same disk): used for building the graph.
         """
         xs = np.asarray(xs, dtype=np.float64)
         ys = np.asarray(ys, dtype=np.float64)
@@ -298,11 +298,11 @@ class GlobalGrid:
 
     def mark_hazard(self, x, y, radius=0.5):
         """
-        Segna come occupato un disco attorno a un punto pericoloso (oggi: dove il robot e'
-        CADUTO). Il terreno li' puo' sembrare normale ai sensori (scivoloso, cedevole, una
-        buca coperta d'erba), quindi non si aspetta conferma dalle scansioni, e le scansioni
-        successive non lo liberano: resta occupato per tutta la missione. Restituisce il
-        numero di celle segnate.
+        Mark as occupied a disk around a dangerous point (today: where the robot FELL).
+        The terrain there may look normal to the sensors (slippery, yielding, a hole
+        covered by grass), so no confirmation from the scans is awaited, and later scans
+        do not free it: it stays occupied for the whole mission. Returns the number of
+        cells marked.
         """
         if not hasattr(self, 'hazards'):
             self.hazards = []
@@ -324,7 +324,7 @@ class GlobalGrid:
         return n
 
     def segment_hits_hazard(self, x1, y1, x2, y2, margin=0.0):
-        """True se il segmento passa entro (raggio + margin) dal centro di un disco pericoloso."""
+        """True if the segment passes within (radius + margin) of the centre of a hazard disk."""
         for hx, hy, hr in getattr(self, 'hazards', []):
             dx, dy = x2 - x1, y2 - y1
             L2 = dx * dx + dy * dy
@@ -335,24 +335,24 @@ class GlobalGrid:
 
     def is_known(self, x, y):
         """
-        True se questa posizione e' stata OSSERVATA almeno una volta (libera o occupata).
-        is_occupied da sola non distingue "vista libera" da "mai vista" (entrambe False): qui
-        si', e serve per esempio a scegliere un obiettivo visto libero piuttosto che ignoto
-        (find_best_point_in_cell) e a non creare scorciatoie GraphNav su terreno mai visto.
+        True if this position has been OBSERVED at least once (free or occupied).
+        is_occupied alone does not tell "seen free" from "never seen" (both False): this
+        does, and is used for example to choose a goal seen free rather than unknown
+        (find_best_point_in_cell) and not to create GraphNav shortcuts on terrain never seen.
         """
         gx = int(np.floor(x / self.resolution))
         gy = int(np.floor(y / self.resolution))
         return (gx, gy) in self.grid
 
     def save_map(self, file_path):
-        """Salva la mappa globale di occupazione in un file pickle."""
+        """Save the global occupancy map to a pickle file."""
         with open(file_path, 'wb') as f:
             pickle.dump({
                 'resolution': self.resolution,
                 'grid': self.grid,
-                'hazards': list(getattr(self, 'hazards', [])),   # dischi delle cadute (x, y, raggio)
-                'walked_cells': list(getattr(self, 'walked_cells', ())),  # celle su cui il corpo e' passato
-                # mappa dello spazio libero (vedi clearance()): somme e conteggi
+                'hazards': list(getattr(self, 'hazards', [])),   # fall disks (x, y, radius)
+                'walked_cells': list(getattr(self, 'walked_cells', ())),  # cells the body passed over
+                # free-space map (see clearance()): sums and counts
                 'clear_near_sum': getattr(self, 'clear_near_sum', {}),
                 'clear_near_n': getattr(self, 'clear_near_n', {}),
                 'clear_all_sum': getattr(self, 'clear_all_sum', {}),
@@ -362,33 +362,33 @@ class GlobalGrid:
 
 class GlobalTerrainGrid:
     """
-    Mappa globale e persistente della QUOTA del terreno (media delle osservazioni per
-    cella), non della pendenza: la pendenza dipende da come si percorre un arco e si
-    ricalcola al volo (compute_arc_slope_profile). Stessa risoluzione della griglia locale;
-    se in missioni lunghe la memoria diventasse un problema, la leva e' `resolution`.
+    Global, persistent map of the terrain HEIGHT (mean of the observations per cell), not
+    of the slope: the slope depends on how an edge is travelled and is recomputed on the
+    fly (compute_arc_slope_profile). Same resolution as the local grid; if memory became a
+    problem in long missions, the lever is `resolution`.
 
-    Si alimenta solo con quote corrette (LocalGrid.correct_terrain) e con la stessa maschera
-    del calcolo dal vivo (slope_usable_mask: celle attendibili e non ostacolo),
-    tramite fold_scan_into_global_maps.
+    It is fed only with corrected heights (LocalGrid.correct_terrain) and with the same
+    mask as the live computation (slope_usable_mask: reliable, non-obstacle cells),
+    through fold_scan_into_global_maps.
 
-    Limite: se l'odometria (frame VISION) derivasse, letture della "stessa" cella verrebbero
-    da punti un po' diversi. Sulle missioni del 13-10 lo scarto fra scansioni successive e'
-    0.1 cm in mediana.
+    Limit: if the odometry (VISION frame) drifted, readings of the "same" cell would come
+    from slightly different points. On the missions of 13-10 the offset between
+    consecutive scans is 0.1 cm in median.
     """
     def __init__(self, resolution=0.03):
         self.resolution = resolution
-        self.height_sum = {}    # (gx, gy) -> somma delle altezze valide osservate
-        self.height_count = {}  # (gx, gy) -> numero di osservazioni valide
-        # Rettangoli (xmin, xmax, ymin, ymax) aggiornati, uno per chiamata a update: servono
-        # al PRM per sapere quali pendenze in cache rifare (prm_graph._sync_global_slope_cache).
+        self.height_sum = {}    # (gx, gy) -> sum of the valid heights observed
+        self.height_count = {}  # (gx, gy) -> number of valid observations
+        # Rectangles (xmin, xmax, ymin, ymax) updated, one per call to update: they tell
+        # the PRM which cached slopes to redo (roadmap._sync_global_slope_cache).
         self.update_rects = []
 
     def update(self, pts, heights, is_valid):
         """
         Args:
-            pts: (N,3) o (N,2) -- solo le colonne x,y vengono usate (posizione mondo)
-            heights: array 1D di N altezze GIA' corrette (vedi correct_terrain)
-            is_valid: array 1D booleano di N elementi, True dove la quota va usata
+            pts: (N,3) or (N,2) -- only the x,y columns are used (world position)
+            heights: 1D array of N heights ALREADY corrected (see correct_terrain)
+            is_valid: 1D boolean array of N elements, True where the height is to be used
         """
         pts_flat = np.asarray(pts).reshape(-1, pts.shape[-1] if pts.ndim > 1 else 2)
         x_array = pts_flat[:, 0]
@@ -396,8 +396,8 @@ class GlobalTerrainGrid:
         heights_flat = np.asarray(heights).ravel()
         valid_flat = np.asarray(is_valid).ravel()
 
-        # Chiave = floor(x / resolution) come in get_height (np.round sui centri delle celle
-        # arrotonderebbe al pari e lascerebbe chiavi mai scritte).
+        # Key = floor(x / resolution) as in get_height (np.round on the cell centres
+        # would round to even and leave keys never written).
         gx_array = np.floor(x_array / self.resolution).astype(int)
         gy_array = np.floor(y_array / self.resolution).astype(int)
 
@@ -415,7 +415,7 @@ class GlobalTerrainGrid:
             self.height_count[key] = self.height_count.get(key, 0) + 1
 
     def get_height(self, x, y):
-        """Altezza media osservata in quella posizione, o None se mai vista."""
+        """Mean height observed at that position, or None if never seen."""
         gx = int(np.floor(x / self.resolution))
         gy = int(np.floor(y / self.resolution))
         key = (gx, gy)
@@ -425,8 +425,8 @@ class GlobalTerrainGrid:
         return self.height_sum[key] / count
 
     def compute_arc_slope_profiles_batch(self, x1, y1, x2, y2, perp_sample_spacing_m=0.10, body_ext_m=0.0):
-        """compute_arc_slope_profile della mappa globale per molti archi (array), stesse uscite
-        anticipate. Vedi arc_slope_profiles_batch per il formato del risultato."""
+        """compute_arc_slope_profile of the global map for many edges (arrays), same early
+        exits. See arc_slope_profiles_batch for the result format."""
         x1 = np.asarray(x1, dtype=np.float64); y1 = np.asarray(y1, dtype=np.float64)
         x2 = np.asarray(x2, dtype=np.float64); y2 = np.asarray(y2, dtype=np.float64)
         out = np.zeros((x1.size, 6))
@@ -453,8 +453,8 @@ class GlobalTerrainGrid:
 
     def compute_arc_slope_profile(self, x1, y1, x2, y2, perp_sample_spacing_m=0.10, body_ext_m=0.0):
         """
-        Come slopes.compute_arc_slope_profile, ma sulla mappa globale: serve per gli archi
-        fuori dalla finestra di adesso in zone gia' viste prima (vedi
+        Like slopes.compute_arc_slope_profile, but on the global map: used for the edges
+        outside the current window in areas already seen before (see
         _slope_profile_from_sampler).
 
         Returns:
@@ -464,8 +464,8 @@ class GlobalTerrainGrid:
         if rects is not None:
             if not rects:
                 return _no_slope_data(body_ext_m)
-            # Uscita rapida: arco tutto fuori dal rettangolo che contiene tutto cio' che e'
-            # stato visto -> nessun campione puo' avere dati (stesso risultato, senza leggere).
+            # Quick exit: edge entirely outside the rectangle containing everything that has
+            # been seen -> no sample can have data (same result, without reading).
             if not hasattr(self, '_seen_bbox') or self._seen_bbox[4] != len(rects):
                 r = np.array(rects)
                 self._seen_bbox = (r[:, 0].min(), r[:, 1].max(), r[:, 2].min(), r[:, 3].max(), len(rects))
@@ -481,9 +481,9 @@ class GlobalTerrainGrid:
 
     def _mean_height_raster(self):
         """
-        Raster delle altezze medie (height_sum / height_count, NaN dove mai vista),
-        ricostruito solo quando la mappa cambia. Stessa divisione di get_height, quindi stessi
-        valori al bit.
+        Raster of the mean heights (height_sum / height_count, NaN where never seen),
+        rebuilt only when the map changes. Same division as get_height, so the same
+        values to the bit.
         """
         ver = (len(self.height_count), len(getattr(self, 'update_rects', None) or []))
         cached = getattr(self, '_mh_raster', None)
@@ -504,7 +504,7 @@ class GlobalTerrainGrid:
         return result
 
     def _sample_heights(self, xs, ys):
-        """get_height su un array di punti (NaN dove mai vista), stessa chiave floor(x / res)."""
+        """get_height on an array of points (NaN where never seen), same key floor(x / res)."""
         xs = np.asarray(xs, dtype=np.float64)
         ys = np.asarray(ys, dtype=np.float64)
         out = np.full(xs.shape, np.nan)
@@ -519,7 +519,7 @@ class GlobalTerrainGrid:
         return out
 
     def _has_height_raster(self):
-        """Raster booleano delle celle con almeno un'altezza (height_count > 0), con cache."""
+        """Boolean raster of the cells with at least one height (height_count > 0), cached."""
         ver = (len(self.height_count), len(getattr(self, 'update_rects', None) or []))
         cached = getattr(self, '_hh_raster', None)
         if cached is not None and cached[0] == ver:
@@ -540,11 +540,11 @@ class GlobalTerrainGrid:
 
     def certainly_no_slope_data(self, x1, y1, x2, y2, min_sample_fraction=MIN_ARC_SAMPLE_FRACTION):
         """
-        Per molti archi insieme (array): True dove compute_arc_slope_profile risponderebbe
-        CERTAMENTE "nessun dato". Riproduce esattamente le sue uscite anticipate (mappa vuota,
-        arco fuori dal rettangolo del visto, inizio/meta'/fine senza dati, copertura della
-        linea sotto min_sample_fraction) con gli stessi campioni. Dove risponde False si
-        chiama la funzione vera: il risultato e' identico, si evitano solo le chiamate inutili.
+        For many edges together (arrays): True where compute_arc_slope_profile would
+        CERTAINLY answer "no data". Reproduces exactly its early exits (empty map, edge
+        outside the rectangle of what was seen, start/middle/end without data, line
+        coverage below min_sample_fraction) with the same samples. Where it answers False
+        the real function is called: the result is identical, only useless calls are avoided.
         """
         x1 = np.asarray(x1, dtype=np.float64); y1 = np.asarray(y1, dtype=np.float64)
         x2 = np.asarray(x2, dtype=np.float64); y2 = np.asarray(y2, dtype=np.float64)
@@ -586,33 +586,33 @@ class GlobalTerrainGrid:
         return out
 
     def save_map(self, file_path):
-        """Salva la mappa globale di altezza in un file pickle."""
+        """Save the global height map to a pickle file."""
         with open(file_path, 'wb') as f:
             pickle.dump({
                 'resolution': self.resolution,
                 'height_sum': self.height_sum,
                 'height_count': self.height_count,
-                # quote nel frame VISION (rispetto all'accensione); sottrarre questo valore
-                # per averle rispetto al suolo all'avvio missione. None se non noto.
+                # heights in the VISION frame (relative to power-on); subtract this value
+                # to have them relative to the ground at mission start. None if unknown.
                 'mission_z0': getattr(self, 'mission_z0', None),
             }, f)
 
 # =========================================================================================
-# DALLA SCANSIONE ALLE MAPPE GLOBALI, e righe di log sullo stato di griglie e mappe
+# FROM THE SCAN TO THE GLOBAL MAPS, and log lines on the state of grids and maps
 # =========================================================================================
-# --- Zona attorno al corpo nella mappa GLOBALE ------------------------------------------
-# Le celle a ridosso del fianco del robot risultano "ostacolo" SOLO quando il robot ci sta
-# accanto: lette da 1-2 m sono libere, lette con il robot fermo li' accanto scendono sotto
-# soglia, a 0.2-0.45 m dall'asse, all'altezza delle zampe posteriori. Due scansioni da fermo
-# basterebbero a confermarle nella mappa globale (GLOBAL_OCC_CONFIRM_OBS = 2), e il PRM
-# scarterebbe l'arco su cui il robot e' APPENA passato.
-#   - NUCLEO (il rettangolo del corpo): il robot ci sta sopra, quindi e' libero per
-#     costruzione -> si scrive "visto libero".
-#   - ANELLO (fino a GLOBAL_MAP_SELF_RING_M oltre il corpo): da qui la lettura non e'
-#     attendibile -> un ostacolo NON si scrive (nessuna informazione); il libero si'.
-# Vale solo per la mappa globale: il fronte sicuro usa la scansione dal vivo, intera, quindi
-# un ostacolo vero accanto al robot continua a fermarlo. E un ostacolo vero viene comunque
-# scritto nella mappa globale dalle scansioni fatte da un altro punto.
+# --- Area around the body in the GLOBAL map ---------------------------------------------
+# The cells right next to the robot's flank come out as "obstacle" ONLY when the robot is
+# beside them: read from 1-2 m they are free, read with the robot standing next to them
+# they drop below threshold, 0.2-0.45 m from the axis, at the height of the rear legs. Two
+# scans standing still would be enough to confirm them in the global map
+# (GLOBAL_OCC_CONFIRM_OBS = 2), and the PRM would discard the edge the robot JUST travelled.
+#   - CORE (the body rectangle): the robot stands on it, so it is free by
+#     construction -> "seen free" is written.
+#   - RING (up to GLOBAL_MAP_SELF_RING_M beyond the body): from here the reading is not
+#     reliable -> an obstacle is NOT written (no information); free is.
+# Only for the global map: the safe frontier uses the live scan, whole, so
+# a real obstacle next to the robot still stops it. And a real obstacle is still
+# written in the global map by the scans taken from another point.
 GLOBAL_MAP_SELF_BODY_LENGTH_M = 1.10
 
 GLOBAL_MAP_SELF_BODY_WIDTH_M = 0.50
@@ -623,17 +623,17 @@ GLOBAL_MAP_SELF_RING_M = 0.25
 def mask_for_global_map(obstacle_mask, is_valid, pts=None, robot_pose=None,
                          return_core=False):
     """
-    Maschera da passare a GlobalGrid.update: -1 ostacolo, +1 vista libera, 0 nessuna
-    informazione (cella non attendibile in questa scansione, che quindi non conta come
-    "vista libera": vedi GlobalGrid.update).
+    Mask to pass to GlobalGrid.update: -1 obstacle, +1 seen free, 0 no information (cell
+    not reliable in this scan, which therefore does not count as "seen free": see
+    GlobalGrid.update).
 
-    pts, robot_pose=(x, y, yaw): se passati, applica la zona attorno al corpo (vedi
-    GLOBAL_MAP_SELF_RING_M): nucleo libero, anello senza ostacoli.
+    pts, robot_pose=(x, y, yaw): if given, applies the area around the body (see
+    GLOBAL_MAP_SELF_RING_M): free core, ring without obstacles.
 
-    return_core: restituisce anche la maschera del NUCLEO, cioe' le celle
-    coperte dal corpo adesso. Va passata a GlobalGrid.update come `walked`: sono celle su
-    cui il robot e' fisicamente passato, e per dichiararle occupate serviranno piu'
-    conferme (vedi GLOBAL_OCC_CONFIRM_WALKED).
+    return_core: also return the CORE mask, i.e. the cells covered by the body now. It
+    must be passed to GlobalGrid.update as `walked`: they are cells the robot physically
+    passed over, and declaring them occupied will require more confirmations (see
+    GLOBAL_OCC_CONFIRM_WALKED).
     """
     m = np.asarray(obstacle_mask, dtype=np.float64).ravel()
     v = np.asarray(is_valid, dtype=bool).ravel()
@@ -658,17 +658,16 @@ def mask_for_global_map(obstacle_mask, is_valid, pts=None, robot_pose=None,
 def fold_scan_into_global_maps(global_map, global_terrain_map, pts, terrain, obstacle_mask, is_valid,
                                cells_obstacle_dist, shape, robot_pose):
     """
-    Una scansione nelle due mappe globali: occupazione (con la zona attorno al
-    corpo, vedi _mask_for_global_map) e terreno. Unico punto usato dalla missione (inizio
-    tentativo, ogni giro, scansione finale) e da test_replay.py, cosi' la prova di rigioco
-    verifica il codice vero e non una sua copia.
+    One scan into the two global maps: occupancy (with the area around the body, see
+    _mask_for_global_map) and terrain. The only entry point used by the mission (attempt
+    start, every turn, final scan) and by test_replay.py, so the replay test checks the
+    real code and not a copy of it.
 
-    La mappa del terreno riceve la STESSA maschera del calcolo dal vivo (slope_usable_mask:
-    attendibili E non ostacolo): le quote delle celle ostacolo trasformerebbero tronchi e
-    muri in "pendenze" nella mappa globale.
+    The terrain map receives THE SAME mask as the live computation (slope_usable_mask:
+    reliable AND non-obstacle): the heights of obstacle cells would turn logs and walls
+    into "slopes" in the global map.
 
-    Restituisce la maschera del nucleo (celle sotto il corpo), che serve alla mappa dello
-    spazio libero.
+    Returns the core mask (cells under the body), needed by the free-space map.
     """
     gm_mask, gm_core = mask_for_global_map(obstacle_mask, is_valid, pts, robot_pose, return_core=True)
     global_map.update(pts, gm_mask, walked=gm_core)
@@ -678,12 +677,12 @@ def fold_scan_into_global_maps(global_map, global_terrain_map, pts, terrain, obs
 
 def update_clearance_map(global_map, pts, snap, is_valid, unwritten, core, robot_xy):
     """
-    Alimenta la mappa dello spazio libero con la scansione corrente.
+    Feed the free-space map with the current scan.
 
-    Usa la obstacle_distance FILTRATA (quella su cui il fronte decide davvero, mediana +
-    isteresi: vedi arcVerification), non la lettura grezza. Imparano solo le celle
-    attendibili; sotto il corpo il valore non puo' essere minore di mezza larghezza, perche'
-    il robot ci sta sopra (stesso principio di _under_body nel fronte).
+    Uses the FILTERED obstacle_distance (the one the frontier really decides on, median +
+    hysteresis: see safe_frontier), not the raw reading. Only reliable cells learn; under
+    the body the value cannot be less than half the width, because the robot stands
+    there (same principle as _under_body in the frontier).
     """
     if not hasattr(global_map, 'update_clearance') or snap is None:
         return
@@ -700,5 +699,5 @@ def update_clearance_map(global_map, pts, snap, is_valid, unwritten, core, robot
         p = np.asarray(pts, dtype=np.float64).reshape(-1, 3)
         near = np.hypot(p[:, 0] - robot_xy[0], p[:, 1] - robot_xy[1]) <= CLEARANCE_NEAR_M
         global_map.update_clearance(p, od, usable, near=near)
-    except Exception as e:      # mai fatale: e' una mappa di appoggio
+    except Exception as e:      # never fatal: it is a helper map
         print(f"[SPAZIO] Mappa dello spazio libero non aggiornata: {e}")

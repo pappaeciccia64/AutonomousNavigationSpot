@@ -1,32 +1,32 @@
-"""Pendenza degli archi: profili longitudinale e laterale su una base di 0.48 m, dal vivo e dalla mappa del terreno."""
+"""Edge slope: longitudinal and lateral profiles over a 0.48 m base, live and from the terrain map."""
 import numpy as np
 from spot_explorer.perception.geometry import ROBOT_HALF_LENGTH_M
 SLOPE_THRESHOLD = 0.6       # gradient (tan of slope): tan(28deg)=~0.53, tan(25deg)=~0.46
-FRONTIER_SLOPE_MIN_LENGTH_M = 0.50   # sotto questa lunghezza la pendenza non e' stimabile
+FRONTIER_SLOPE_MIN_LENGTH_M = 0.50   # below this length the slope cannot be estimated
 
-# Peso della pendenza LATERALE (rollio) rispetto a quella longitudinale nel costo degli archi
-# (beta_lateral = beta * questo). 1.0 = stesso peso. Non scarta archi: serve solo a preferire,
-# fra due archi ammessi, quello meno esposto al rollio.
+# Weight of the LATERAL slope (roll) relative to the longitudinal one in the edge cost
+# (beta_lateral = beta * this). 1.0 = same weight. Does not discard edges: it only serves to
+# prefer, between two accepted edges, the one less exposed to roll.
 LATERAL_SLOPE_COST_MULTIPLIER = 1.0
 
-# Quanto vicino a SLOPE_THRESHOLD conta come "quasi al limite" nei log e nei salvataggi di
-# diagnostica. Non influisce su nessuna decisione.
+# How close to SLOPE_THRESHOLD counts as "near the limit" in the logs and in the diagnostic
+# saves. Does not affect any decision.
 NEAR_THRESHOLD_MARGIN_FRACTION = 0.15
 
 # =========================================================================
-# PROFILO DI PENDENZA DI UN ARCO (vedi compute_arc_slope_profile)
-#   SLOPE_BASELINE_M: MEZZA base della differenza di quota. La differenza e' centrata, k celle
-#     avanti e k indietro con k = round(0.25 / 0.03) = 8: il dislivello si misura su ~0.48 m,
-#     circa un passo. Su una base piu' corta la faccia di un mobile darebbe pendenze enormi;
-#     su questa un gradino netto di H vale H / 0.48.
-#   LATERAL_SLICE_HALF_WIDTH_M: mezza larghezza della fetta perpendicolare per il rollio:
-#     larga quanto il robot (0.50 m) piu' margine. Oltre quella fascia non e' rollio.
-#   MIN_ARC_SAMPLE_FRACTION: frazione minima di campioni con dati perche' l'arco abbia una
-#     pendenza (has_data); sotto, l'arco e' "senza dati", che non vuol dire piatto.
-#   ARC_BODY_EXTENSION_M: di quanto si allunga l'arco a OGNI estremo per la pendenza "col
-#     corpo", usata per veto, costo e andatura: il robot fermo su un nodo ha le zampe 0.55 m
-#     davanti e dietro, quindi sente il terreno oltre i due nodi. Il fronte resta sull'arco fra
-#     i nodi (piu' permissivo del PRM). 0 = solo l'arco.
+# SLOPE PROFILE OF AN EDGE (see compute_arc_slope_profile)
+#   SLOPE_BASELINE_M: HALF base of the height difference. The difference is centred, k cells
+#     ahead and k behind with k = round(0.25 / 0.03) = 8: the drop is measured over ~0.48 m,
+#     about one step. On a shorter base the face of a piece of furniture would give huge
+#     slopes; on this one a sharp step of H counts as H / 0.48.
+#   LATERAL_SLICE_HALF_WIDTH_M: half width of the perpendicular slice for the roll:
+#     as wide as the robot (0.50 m) plus margin. Beyond that band it is not roll.
+#   MIN_ARC_SAMPLE_FRACTION: minimum fraction of samples with data for the edge to have a
+#     slope (has_data); below it, the edge is "without data", which does not mean flat.
+#   ARC_BODY_EXTENSION_M: how much the edge is extended at EACH end for the slope "with the
+#     body", used for veto, cost and gait: the robot standing on a node has its legs 0.55 m
+#     ahead and behind, so it feels the terrain beyond the two nodes. The frontier stays on
+#     the edge between the nodes (more permissive than the PRM). 0 = the edge only.
 # =========================================================================
 SLOPE_BASELINE_M = 0.25
 LATERAL_SLICE_HALF_WIDTH_M = 0.30
@@ -36,13 +36,13 @@ ARC_BODY_EXTENSION_M = ROBOT_HALF_LENGTH_M
 
 def _gather_heights(terrain_2d, grid_origin_x, grid_origin_y, cell_size, xs, ys, valid_2d=None):
     """
-    Quote della griglia nelle posizioni (xs, ys), array di qualunque forma.
+    Grid heights at positions (xs, ys), arrays of any shape.
 
-    Restituisce (quote, dentro): dove non c'e' dato la quota e' NaN e il campione resta al
-    suo posto (non viene compattato via, che inventerebbe pendenze fra punti non vicini).
-    Con valid_2d i campioni su celle non attendibili valgono NaN come quelli fuori griglia,
-    e `dentro` vuol dire "dentro E attendibile". Usa np.floor e non int(), che sbaglia cella
-    per coordinate negative.
+    Returns (heights, inside): where there is no data the height is NaN and the sample
+    stays in its place (it is not compacted away, which would invent slopes between points
+    that are not close). With valid_2d the samples on unreliable cells are NaN like those
+    outside the grid, and `inside` means "inside AND reliable". Uses np.floor and not int(),
+    which gets the cell wrong for negative coordinates.
     """
     num_rows, num_cols = terrain_2d.shape
     cols = np.floor((xs - grid_origin_x) / cell_size).astype(np.int64)
@@ -60,8 +60,9 @@ def _gather_heights(terrain_2d, grid_origin_x, grid_origin_y, cell_size, xs, ys,
 
 def p90(values):
     """
-    90 percentile, IDENTICO a float(np.percentile(values, 90)) (interpolazione lineare) per
-    valori finiti, ma senza il costo fisso di np.percentile, che qui si chiama molto spesso.
+    90th percentile, IDENTICAL to float(np.percentile(values, 90)) (linear interpolation)
+    for finite values, but without the fixed cost of np.percentile, which is called very
+    often here.
     """
     a = np.asarray(values, dtype=np.float64).ravel()
     n = a.size
@@ -79,10 +80,10 @@ def p90(values):
 
 def _baseline_gradient(heights, step, baseline_m):
     """
-    Pendenza come differenza centrata su una base FISICA (vedi SLOPE_BASELINE_M), lungo
-    l'ultimo asse: va bene per un profilo 1D (longitudinale) e per una pila di fette 2D
-    (laterale), che vengono messe in comune. Dove manca un campione il risultato e' NaN e
-    viene scartato. Restituisce l'array 1D dei moduli di pendenza validi (anche vuoto).
+    Slope as a centred difference over a PHYSICAL base (see SLOPE_BASELINE_M), along the
+    last axis: fine for a 1D profile (longitudinal) and for a stack of 2D slices (lateral),
+    which are pooled. Where a sample is missing the result is NaN and is discarded. Returns
+    the 1D array of the valid slope magnitudes (possibly empty).
     """
     n = heights.shape[-1]
     k = max(1, int(round(baseline_m / step)))
@@ -101,48 +102,49 @@ def compute_arc_slope_profile(terrain_2d, grid_origin_x, grid_origin_y, cell_siz
                               min_sample_fraction=MIN_ARC_SAMPLE_FRACTION, valid_2d=None,
                               obstacle_2d=None, body_ext_m=0.0):
     """
-    Pendenza che Spot sentirebbe percorrendo l'arco (x1, y1) -> (x2, y2), misurata sulle
-    quote della griglia passata. Funzione pura dei dati: la usano il PRM (sulla scansione
-    del momento) e il fronte (sulla sua fotografia).
+    Slope Spot would feel travelling the edge (x1, y1) -> (x2, y2), measured on the heights
+    of the given grid. Pure function of the data: used by the PRM (on the current scan) and
+    by the frontier (on its snapshot).
 
-      - LONGITUDINALE (beccheggio): quote ogni cella lungo la linea dell'arco, differenze
-        su SLOPE_BASELINE_M (vedi _baseline_gradient).
-      - LATERALE (rollio): ogni perp_sample_spacing_m lungo l'arco una fetta perpendicolare
-        larga quanto il robot (+/- lateral_half_width_m), con le stesse differenze; i
-        campioni di tutte le fette vanno insieme.
+      - LONGITUDINAL (pitch): heights every cell along the edge line, differences over
+        SLOPE_BASELINE_M (see _baseline_gradient).
+      - LATERAL (roll): every perp_sample_spacing_m along the edge a perpendicular slice as
+        wide as the robot (+/- lateral_half_width_m), with the same differences; the samples
+        of all the slices go together.
 
-    Ognuna delle due si riassume col 90 percentile: una cella sbagliata isolata non conta,
-    ma un tratto ripido non viene annacquato dalla media dell'arco.
+    Each of the two is summarized with the 90th percentile: an isolated wrong cell does not
+    count, but a steep stretch is not watered down by the average of the edge.
 
-    has_data e' True solo se almeno min_sample_fraction dei campioni ha un dato, in
-    entrambe le direzioni: un arco visto per meno di meta' e' "senza dati", che non vuol
-    dire piatto (il PRM passa allora alla mappa globale).
+    has_data is True only if at least min_sample_fraction of the samples have data, in both
+    directions: an edge seen for less than half is "without data", which does not mean
+    flat (the PRM then moves on to the global map).
 
-    valid_2d: maschera delle celle attendibili; le altre (riempite, filtrate, mai scritte)
-    non entrano. obstacle_2d: celle gia' ostacolo per obstacle_distance, escluse anche loro:
-    la faccia di un mobile non e' un pendio, ed e' gia' gestita come ostacolo dal PRM e dal
-    fronte. Un arco che perde cosi' i dati diventa "senza dati", non "libero": entra nel
-    grafo con un costo di ripiego e chi lo percorre lo verifica col fronte.
+    valid_2d: mask of the reliable cells; the others (filled, filtered, never written) do
+    not count. obstacle_2d: cells already obstacle by obstacle_distance, excluded too: the
+    face of a piece of furniture is not a slope, and is already handled as an obstacle by
+    the PRM and the frontier. An edge that loses its data this way becomes "without data",
+    not "free": it enters the graph with a fallback cost and whoever travels it checks it
+    with the frontier.
 
-    body_ext_m > 0: in piu' i tre valori "col corpo" (vedi _body_slope).
+    body_ext_m > 0: additionally the three values "with the body" (see _body_slope).
 
     Returns:
-        (long, lat, has_data), oppure con body_ext_m > 0
-        (long, lat, has_data, long col corpo, lat col corpo, has col corpo)
+        (long, lat, has_data), or with body_ext_m > 0
+        (long, lat, has_data, long with body, lat with body, has with body)
     """
     if terrain_2d is None or grid_origin_x is None or cell_size is None:
         return _no_slope_data(body_ext_m)
 
-    # x*x e non **2: e' l'operazione che numpy fa sugli array, quindi la lunghezza (e da
-    # li' passo e pendenza) e' identica bit per bit a quella del calcolo in blocco
-    # (arc_slope_profiles_batch); **2 su un numero singolo a volte differisce all'ultima cifra.
+    # x*x and not **2: it is the operation numpy does on arrays, so the length (and from
+    # there step and slope) is bit-for-bit identical to that of the batch computation
+    # (arc_slope_profiles_batch); **2 on a single number sometimes differs in the last digit.
     dist = float(np.sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1)))
     if dist < 1e-6:
         return _no_slope_data(body_ext_m)
 
-    # Uscita rapida: se l'arco, allargato della fetta laterale, non tocca la griglia, nessun
-    # campione vi cade dentro -> "senza dati", identico al calcolo completo ma senza pagarlo
-    # (la maggior parte degli archi sta fuori dalla finestra di 3.84 m).
+    # Quick exit: if the edge, widened by the lateral slice, does not touch the grid, no
+    # sample falls inside it -> "without data", identical to the full computation but without
+    # paying for it (most edges lie outside the 3.84 m window).
     num_rows, num_cols = terrain_2d.shape
     pad = lateral_half_width_m + cell_size
     if (max(x1, x2) + pad < grid_origin_x or min(x1, x2) - pad > grid_origin_x + num_cols * cell_size or
@@ -152,13 +154,13 @@ def compute_arc_slope_profile(terrain_2d, grid_origin_x, grid_origin_y, cell_siz
     dir_x, dir_y = (x2 - x1) / dist, (y2 - y1) / dist   # along-arc unit vector
     perp_x, perp_y = -dir_y, dir_x                      # across-arc unit vector
 
-    # Celle attendibili E non ostacolo: una sola maschera per entrambe le direzioni.
+    # Reliable AND non-obstacle cells: a single mask for both directions.
     usable_2d = valid_2d
     if obstacle_2d is not None:
         obs = np.asarray(obstacle_2d, dtype=bool)
         usable_2d = (~obs) if valid_2d is None else (np.asarray(valid_2d, dtype=bool) & ~obs)
 
-    # --- LONGITUDINALE: lungo la linea dell'arco ---
+    # --- LONGITUDINAL: along the edge line ---
     num_along = max(2, int(dist / cell_size) + 1)
     t = np.linspace(0.0, 1.0, num_along)
     step_along = dist / (num_along - 1)
@@ -169,7 +171,7 @@ def compute_arc_slope_profile(terrain_2d, grid_origin_x, grid_origin_y, cell_siz
     grad_long = _baseline_gradient(h_along, step_along, baseline_m)
     longitudinal_slope = p90(grad_long) if grad_long.size else 0.0
 
-    # --- LATERALE: fette perpendicolari larghe quanto il ROBOT, non quanto l'arco ---
+    # --- LATERAL: perpendicular slices as wide as the ROBOT, not as the edge ---
     num_slices = max(1, int(dist / perp_sample_spacing_m) + 1)
     num_perp = max(2, int(2 * lateral_half_width_m / cell_size) + 1)
     step_perp = 2 * lateral_half_width_m / (num_perp - 1)
@@ -199,18 +201,18 @@ def compute_arc_slope_profile(terrain_2d, grid_origin_x, grid_origin_y, cell_siz
 
 
 # =========================================================================
-# PENDENZA DI MOLTI ARCHI INSIEME
+# SLOPE OF MANY EDGES TOGETHER
 #
-# Stesso calcolo di compute_arc_slope_profile / _slope_profile_from_sampler / _body_slope,
-# fatto con matrici: una riga per arco. Gli archi si raggruppano per numero di campioni (che
-# dipende solo dalla lunghezza: sul reticolo le lunghezze sono poche decine), e per ogni
-# gruppo posizioni, letture delle quote, differenze e 90 percentile si fanno in un colpo
-# solo. Le operazioni sono le stesse e nello stesso ordine, quindi i numeri sono IDENTICI al
-# bit a quelli arco per arco: va mantenuto cosi' (lo controlla test_replay.py).
+# Same computation as compute_arc_slope_profile / _slope_profile_from_sampler / _body_slope,
+# done with matrices: one row per edge. Edges are grouped by number of samples (which
+# depends only on the length: on the lattice there are only a few dozen lengths), and for
+# each group positions, height readings, differences and 90th percentile are done in one
+# go. The operations are the same and in the same order, so the numbers are bit-for-bit
+# IDENTICAL to the edge-by-edge ones: it must stay that way (test_replay.py checks it).
 # =========================================================================
 def p90_rows(m):
-    """p90 riga per riga di una matrice, ignorando i NaN; IDENTICO a p90 sui valori finiti di
-    ogni riga. Restituisce (valori, quanti finiti); 0.0 dove la riga non ha valori finiti."""
+    """Row-by-row p90 of a matrix, ignoring NaNs; IDENTICAL to p90 on the finite values of
+    each row. Returns (values, how many finite); 0.0 where the row has no finite values."""
     m = np.asarray(m, dtype=np.float64)
     if m.ndim == 1:
         m = m[None, :]
@@ -219,7 +221,7 @@ def p90_rows(m):
     ok = cnt > 0
     if not ok.any() or m.shape[1] == 0:
         return out, cnt
-    srt = np.sort(m[ok], axis=1)                      # i NaN vanno in fondo
+    srt = np.sort(m[ok], axis=1)                      # NaNs go to the end
     n = cnt[ok]
     v = (n - 1) * 0.9
     lo = np.floor(v).astype(np.int64)
@@ -233,9 +235,9 @@ def p90_rows(m):
 
 
 def _baseline_gradient_rows(h, step, baseline_m):
-    """_baseline_gradient su un gruppo di righe con lo STESSO k (step: un valore per riga).
-    Restituisce la matrice delle pendenze con NaN dove manca un campione (nessuna
-    compattazione: ci pensa p90_rows), o None se la riga e' troppo corta."""
+    """_baseline_gradient on a group of rows with the SAME k (step: one value per row).
+    Returns the slope matrix with NaN where a sample is missing (no compaction: p90_rows
+    takes care of it), or None if the row is too short."""
     n = h.shape[-1]
     k = max(1, int(round(baseline_m / float(step[0]))))
     if n <= 2 * k:
@@ -247,7 +249,7 @@ def _baseline_gradient_rows(h, step, baseline_m):
 
 
 def _k_of(baseline_m, step):
-    """Il k di _baseline_gradient per ogni riga (serve a raggruppare)."""
+    """The k of _baseline_gradient for each row (used for grouping)."""
     return np.array([max(1, int(round(baseline_m / float(s)))) for s in step], dtype=np.int64)
 
 
@@ -257,16 +259,16 @@ def arc_slope_profiles_batch(sample, x1, y1, x2, y2, cell_size, perp_sample_spac
                              min_sample_fraction=MIN_ARC_SAMPLE_FRACTION, body_ext_m=0.0,
                              sampler_mode=False):
     """
-    Profilo di pendenza di molti archi insieme. sample(xs, ys) -> (quote, dentro) su array di
-    qualunque forma (NaN / False dove non c'e' dato).
+    Slope profile of many edges together. sample(xs, ys) -> (heights, inside) on arrays of
+    any shape (NaN / False where there is no data).
 
-    sampler_mode=False: come compute_arc_slope_profile (griglia dal vivo).
-    sampler_mode=True:  come _slope_profile_from_sampler (mappa globale): stesse uscite
-        anticipate -- i tre punti inizio/meta'/fine senza dati, copertura della mezzeria
-        sotto min_sample_fraction -- che danno "nessun dato" con pendenze 0.
+    sampler_mode=False: like compute_arc_slope_profile (live grid).
+    sampler_mode=True:  like _slope_profile_from_sampler (global map): same early exits --
+        the three points start/middle/end without data, centre-line coverage below
+        min_sample_fraction -- which give "no data" with slopes 0.
 
-    Restituisce un array (N, 6): long, lat, has, long col corpo, lat col corpo, has col corpo
-    (has come 0.0 / 1.0). Senza body_ext_m le ultime tre colonne ripetono le prime tre.
+    Returns an (N, 6) array: long, lat, has, long with body, lat with body, has with body
+    (has as 0.0 / 1.0). Without body_ext_m the last three columns repeat the first three.
     """
     x1 = np.asarray(x1, dtype=np.float64); y1 = np.asarray(y1, dtype=np.float64)
     x2 = np.asarray(x2, dtype=np.float64); y2 = np.asarray(y2, dtype=np.float64)
@@ -309,7 +311,7 @@ def arc_slope_profiles_batch(sample, x1, y1, x2, y2, cell_size, perp_sample_spac
         st = step_along[sel]
         dir_x, dir_y = (ax2 - ax1) / dd, (ay2 - ay1) / dd
         perp_x, perp_y = -dir_y, dir_x
-        # --- longitudinale
+        # --- longitudinal
         t = np.linspace(0.0, 1.0, n_al)
         h_al, in_al = sample(ax1[:, None] + t[None, :] * (ax2 - ax1)[:, None],
                              ay1[:, None] + t[None, :] * (ay2 - ay1)[:, None])
@@ -322,7 +324,7 @@ def arc_slope_profiles_batch(sample, x1, y1, x2, y2, cell_size, perp_sample_spac
             lo, n_lo = np.zeros(rows.size), np.zeros(rows.size, dtype=np.int64)
         else:
             lo, n_lo = p90_rows(g_long)
-        # --- laterale
+        # --- lateral
         ts = np.linspace(0.0, 1.0, n_sl) if n_sl > 1 else np.array([0.5])
         cx = ax1[:, None] + ts[None, :] * (ax2 - ax1)[:, None]
         cy = ay1[:, None] + ts[None, :] * (ay2 - ay1)[:, None]
@@ -376,8 +378,8 @@ def arc_slope_profiles_batch(sample, x1, y1, x2, y2, cell_size, perp_sample_spac
 
 def compute_arc_slope_profiles_batch(terrain_2d, grid_origin_x, grid_origin_y, cell_size,
                                      x1, y1, x2, y2, valid_2d=None, body_ext_m=0.0, **kw):
-    """compute_arc_slope_profile per molti archi (array), dalla griglia dal vivo. Vedi
-    arc_slope_profiles_batch per il formato del risultato."""
+    """compute_arc_slope_profile for many edges (arrays), from the live grid. See
+    arc_slope_profiles_batch for the result format."""
     n = np.size(x1)
     if terrain_2d is None or grid_origin_x is None or cell_size is None:
         return np.zeros((n, 6))
@@ -397,7 +399,7 @@ def compute_arc_slope_profiles_batch(terrain_2d, grid_origin_x, grid_origin_y, c
 
 
 def _no_slope_data(body_ext_m):
-    """Risultato "nessun dato": 3 valori, o 6 se e' stata chiesta anche la misura col corpo."""
+    """"No data" result: 3 values, or 6 if the measurement with the body was also requested."""
     return (0.0, 0.0, False) if body_ext_m <= 0 else (0.0, 0.0, False, 0.0, 0.0, False)
 
 
@@ -405,19 +407,19 @@ def _body_slope(gather, base, x1, y1, x2, y2, dir_x, dir_y, perp_x, perp_y,
                 h_along, inside_along, step_along, grad_lat, inside_perp, u, step_perp,
                 num_slices, dist, perp_spacing, baseline_m, min_sample_fraction, ext_m):
     """
-    Pendenza "col corpo": come quella dell'arco, ma sul tratto allungato di ext_m a entrambi
-    gli estremi (vedi ARC_BODY_EXTENSION_M). Riusa i campioni gia' letti per l'arco e legge
-    solo i pezzi aggiunti, allo stesso passo (ext arrotondato a un multiplo del passo:
-    +/- 1.5 cm lungo l'arco, +/- 5 cm per le fette laterali).
+    Slope "with the body": like the edge's, but on the stretch extended by ext_m at both
+    ends (see ARC_BODY_EXTENSION_M). Reuses the samples already read for the edge and reads
+    only the added pieces, at the same step (ext rounded to a multiple of the step:
+    +/- 1.5 cm along the edge, +/- 5 cm for the lateral slices).
 
-    Restituisce (long, lat, has) gia' presi come il PEGGIORE fra arco e arco allungato, cosi'
-    il tratto aggiunto non puo' diluire una salita che sta dentro l'arco. Se l'arco non ha
-    dati, o il tratto allungato non ne ha abbastanza, restituisce i valori dell'arco.
+    Returns (long, lat, has) already taken as the WORSE between edge and extended edge, so
+    the added stretch cannot dilute a climb that lies inside the edge. If the edge has no
+    data, or the extended stretch does not have enough, returns the edge values.
     """
     lo, la, has = base
     if not has:
         return base
-    # Longitudinale: profilo continuo pezzo prima + arco + pezzo dopo.
+    # Longitudinal: continuous profile piece before + edge + piece after.
     k = max(1, int(round(ext_m / step_along)))
     off = np.arange(1, k + 1) * step_along
     xs = np.concatenate((x1 - dir_x * off[::-1], x2 + dir_x * off))
@@ -426,7 +428,7 @@ def _body_slope(gather, base, x1, y1, x2, y2, dir_x, dir_y, perp_x, perp_y,
     h_full = np.concatenate((h_ext[:k], h_along, h_ext[k:]))
     cov_along = (float(np.count_nonzero(in_ext)) + float(np.count_nonzero(inside_along))) / (2 * k + h_along.size)
     g_long = _baseline_gradient(h_full, step_along, baseline_m)
-    # Laterale: fette aggiunte allo stesso passo delle fette dell'arco.
+    # Lateral: slices added at the same step as the edge slices.
     ds = dist / (num_slices - 1) if num_slices > 1 else perp_spacing
     kl = max(1, int(round(ext_m / ds)))
     offl = np.arange(1, kl + 1) * ds
@@ -448,21 +450,20 @@ def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
                                 min_sample_fraction=MIN_ARC_SAMPLE_FRACTION,
                                 sample_array=None, body_ext_m=0.0):
     """
-    Pendenza di un arco su una mappa SPARSA (la mappa globale del terreno, vedi
-    GlobalTerrainGrid.compute_arc_slope_profile). sample_height(px, py) da' la quota in un
-    punto o None; sample_array fa lo stesso su un array (NaN dove manca).
+    Slope of an edge on a SPARSE map (the global terrain map, see
+    GlobalTerrainGrid.compute_arc_slope_profile). sample_height(px, py) gives the height at
+    a point or None; sample_array does the same on an array (NaN where missing).
 
-    Stessa geometria e stessa base di compute_arc_slope_profile: le due fonti devono
-    misurare la stessa grandezza, altrimenti un arco cambierebbe pendenza entrando o uscendo
-    dalla finestra scansionata (test_replay.py lo controlla). has_data dice se ci sono
-    abbastanza campioni VERI.
+    Same geometry and same base as compute_arc_slope_profile: the two sources must measure
+    the same quantity, otherwise an edge would change slope entering or leaving the scanned
+    window (test_replay.py checks it). has_data tells whether there are enough REAL samples.
 
     Returns:
         (longitudinal_slope, lateral_slope, has_data)
     """
-    # x*x e non **2: e' l'operazione che numpy fa sugli array, quindi la lunghezza (e da
-    # li' passo e pendenza) e' identica bit per bit a quella del calcolo in blocco
-    # (arc_slope_profiles_batch); **2 su un numero singolo a volte differisce all'ultima cifra.
+    # x*x and not **2: it is the operation numpy does on arrays, so the length (and from
+    # there step and slope) is bit-for-bit identical to that of the batch computation
+    # (arc_slope_profiles_batch); **2 on a single number sometimes differs in the last digit.
     dist = float(np.sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1)))
     if dist < 1e-6:
         return _no_slope_data(body_ext_m)
@@ -470,9 +471,9 @@ def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
     dir_x, dir_y = (x2 - x1) / dist, (y2 - y1) / dist
     perp_x, perp_y = -dir_y, dir_x
 
-    # Uscita anticipata: se inizio, meta' e fine dell'arco non hanno dati, "senza dati"
-    # (la maggior parte degli archi sta fuori da tutto cio' che e' stato visto). Se almeno
-    # uno risponde si fa il calcolo completo, e decide min_sample_fraction.
+    # Early exit: if start, middle and end of the edge have no data, "without data"
+    # (most edges lie outside everything that has been seen). If at least
+    # one answers the full computation is done, and min_sample_fraction decides.
     if sample_array is not None:
         h3 = sample_array(np.array([x1, 0.5 * (x1 + x2), x2]), np.array([y1, 0.5 * (y1 + y2), y2]))
         if not np.isfinite(h3).any():
@@ -483,7 +484,7 @@ def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
         return _no_slope_data(body_ext_m)
 
     def _sample_array(xs, ys):
-        """Campiona un array di posizioni, NaN dove la mappa non ha dati."""
+        """Sample an array of positions, NaN where the map has no data."""
         if sample_array is not None:
             return sample_array(xs, ys)
         flat_x = np.ravel(xs)
@@ -494,23 +495,23 @@ def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
             out[i] = np.nan if h is None else float(h)
         return out.reshape(np.shape(xs))
 
-    # --- LONGITUDINALE ---
+    # --- LONGITUDINAL ---
     num_along = max(2, int(dist / cell_size) + 1)
     t = np.linspace(0.0, 1.0, num_along)
     step_along = dist / (num_along - 1)
     h_along = _sample_array(x1 + t * (x2 - x1), y1 + t * (y2 - y1))
     cov_along = float(np.isfinite(h_along).mean())
 
-    # Il laterale costa ~6 volte il longitudinale (una fetta ogni 10 cm, ciascuna
-    # larga quanto il robot). Se la copertura longitudinale e' gia' insufficiente,
-    # has_data sarebbe False comunque: inutile pagarlo.
+    # The lateral costs ~6 times the longitudinal (one slice every 10 cm, each
+    # as wide as the robot). If the longitudinal coverage is already insufficient,
+    # has_data would be False anyway: no point paying for it.
     if cov_along < min_sample_fraction:
         return _no_slope_data(body_ext_m)
 
     grad_long = _baseline_gradient(h_along, step_along, baseline_m)
     longitudinal_slope = p90(grad_long) if grad_long.size else 0.0
 
-    # --- LATERALE ---
+    # --- LATERAL ---
     num_slices = max(1, int(dist / perp_sample_spacing_m) + 1)
     num_perp = max(2, int(2 * lateral_half_width_m / cell_size) + 1)
     step_perp = 2 * lateral_half_width_m / (num_perp - 1)

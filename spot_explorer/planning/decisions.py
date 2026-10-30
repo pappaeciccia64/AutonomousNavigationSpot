@@ -1,4 +1,4 @@
-"""Decisioni sul fronte: il passo da fare (decide_next_move), la rotazione, il ventaglio delle direzioni d'uscita, cono, arretramento, uscite all'arrivo, scorciatoie."""
+"""Decisions on the frontier: the step to take (decide_next_move), the rotation, the fan of exit directions, cone, back-off, exits on arrival, shortcuts."""
 import numpy as np
 from spot_explorer import config as P
 from spot_explorer.planning import roadmap as prm_graph
@@ -8,36 +8,35 @@ from spot_explorer.planning.safe_frontier import (GridSnapshot, allowed_advance,
 
 def decide_next_move(robot_xy, path_waypoints, frontier, no_progress_count, in_target_cell=True):
     """
-    Cosa fare adesso, dato il fronte sicuro. Funzione pura: niente robot, niente I/O, quindi
-    provabile fuori dal campo.
+    What to do now, given the safe frontier. Pure function: no robot, no I/O, so it can be
+    tested off the field.
 
-    path_waypoints: [(node_id, x, y), ...] -- i nodi ancora da raggiungere, il primo e' il
-        prossimo. La posizione del robot NON e' inclusa.
-    frontier: risultato di arcVerification.compute_safe_frontier sul percorso
-        [robot] + waypoint.
-    no_progress_count: scansioni consecutive in cui non si e' potuto avanzare.
-    in_target_cell: il robot e' gia' dentro la cella obiettivo, o fuori al massimo di
-        ARRIVAL_OUTSIDE_CELL_M (lo decide il chiamante). L'arrivo per tolleranza vale solo
-        li': fermarsi 0.65 m prima di un obiettivo vicino al bordo puo' voler dire restare
-        nella cella precedente. Altrimenti si prosegue come per un fronte bloccato (attesa,
-        poi blocco).
+    path_waypoints: [(node_id, x, y), ...] -- the nodes still to reach, the first is the
+        next. The robot position is NOT included.
+    frontier: result of safe_frontier.compute_safe_frontier on the path
+        [robot] + waypoints.
+    no_progress_count: consecutive scans in which no advance was possible.
+    in_target_cell: the robot is already inside the goal cell, or outside by at most
+        ARRIVAL_OUTSIDE_CELL_M (the caller decides). Arrival by tolerance only counts
+        there: stopping 0.65 m before a goal near the border may mean staying in the
+        previous cell. Otherwise it continues as for a blocked frontier (wait, then block).
 
-    Restituisce un dict con 'kind':
-      'reached_node'  il prossimo nodo e' gia' sotto il robot (< 5 cm): consumarlo e basta
-      'move'          muoversi verso 'target'; 'full' = True se il target e' il nodo stesso.
-                      'final' = True: passo sotto MIN_PARTIAL_STEP_M che porta entro la
-                      tolleranza d'arrivo (vedi FINAL_STEP_MIN_M).
-                      'nodes' = quanti nodi del percorso stanno dentro l'avanzamento
-                      consentito dal fronte: il ciclo li percorre uno dopo l'altro senza
-                      riscansionare (vedi AVANZAMENTO MULTINODO). Vale 1 o piu' quando
-                      'full', e non c'e' quando il passo e' parziale.
-      'arrived'       non si puo' avanzare, ma l'obiettivo finale e' entro tolleranza e il
-                      robot e' dentro la cella obiettivo
-      'wait'          non si puo' avanzare: riscansionare da fermi prima di concludere
-      'blocked'       non si puo' avanzare da FRONTIER_BLOCK_CONFIRM_SCANS scansioni
-                      consecutive: blocco confermato da vicino. 'segment' = indice del
-                      tratto del percorso in cui si e' fermato il fronte (0 = dal robot al
-                      primo nodo).
+    Returns a dict with 'kind':
+      'reached_node'  the next node is already under the robot (< 5 cm): just consume it
+      'move'          move towards 'target'; 'full' = True if the target is the node itself.
+                      'final' = True: step below MIN_PARTIAL_STEP_M that brings it within
+                      the arrival tolerance (see FINAL_STEP_MIN_M).
+                      'nodes' = how many path nodes lie inside the advance allowed by the
+                      frontier: the loop travels them one after the other without
+                      rescanning (see MULTI-NODE ADVANCE). It is 1 or more when 'full',
+                      and absent when the step is partial.
+      'arrived'       no advance is possible, but the final goal is within tolerance and
+                      the robot is inside the goal cell
+      'wait'          no advance is possible: rescan standing still before concluding
+      'blocked'       no advance has been possible for FRONTIER_BLOCK_CONFIRM_SCANS
+                      consecutive scans: block confirmed up close. 'segment' = index of
+                      the path leg where the frontier stopped (0 = from the robot to the
+                      first node).
     """
     rx, ry = robot_xy
     _, nx, ny = path_waypoints[0]
@@ -47,19 +46,19 @@ def decide_next_move(robot_xy, path_waypoints, frontier, no_progress_count, in_t
 
     adv = allowed_advance(frontier)
     if adv >= seg_len - 0.02:
-        # --- AVANZAMENTO MULTINODO ----------------------------------------------------
-        # Il fronte sicuro percorre TUTTO il percorso pianificato, non il primo tratto:
-        # restituisce fin dove e' confermato libero adesso, spesso piu' nodi avanti.
-        # Si contano TUTTI i nodi che stanno dentro l'avanzamento consentito, e il
-        # ciclo li percorre uno dopo l'altro SENZA scansione, refresh ne' ripianificazione
-        # in mezzo, invece di fermarsi e riscansionare a ogni nodo. Si cammina sempre sulla
-        # polilinea, un tratto per volta: NON si taglia la corda fra due nodi, che
-        # passerebbe su terreno non verificato (e' quello che fa shortcut_index, ma solo
-        # dopo avere verificato la corda col fronte).
-        # Il controllo NON diventa un verdetto ricordato: durante il movimento il thread
-        # ricalcola il fronte a ~5 Hz sul percorso rimanente e ferma il robot se si
-        # accorcia (vedi _should_abort_move e FRONTIER_ABORT_CONFIRM). Si eliminano le
-        # FERMATE, non le verifiche.
+        # --- MULTI-NODE ADVANCE -------------------------------------------------------
+        # The safe frontier covers the WHOLE planned path, not the first leg:
+        # it returns how far it is confirmed free now, often several nodes ahead.
+        # ALL the nodes inside the allowed advance are counted, and the
+        # loop travels them one after the other WITHOUT a scan, refresh or replan
+        # in between, instead of stopping and rescanning at every node. It always walks on the
+        # polyline, one leg at a time: it does NOT cut the chord between two nodes, which
+        # would pass over unverified terrain (that is what shortcut_index does, but only
+        # after verifying the chord with the frontier).
+        # The check does NOT become a remembered verdict: during the move the thread
+        # recomputes the frontier at ~5 Hz on the remaining path and stops the robot if it
+        # gets shorter (see _should_abort_move and FRONTIER_ABORT_CONFIRM). What is removed is
+        # the STOPS, not the checks.
         cum, nodes = 0.0, 0
         px, py = rx, ry
         for (_, wx, wy) in path_waypoints:
@@ -69,8 +68,8 @@ def decide_next_move(robot_xy, path_waypoints, frontier, no_progress_count, in_t
             px, py, nodes = wx, wy, nodes + 1
         return {'kind': 'move', 'target': (nx, ny), 'full': True, 'dist': seg_len,
                 'nodes': max(1, nodes)}
-    # PASSO FINALE (vedi FINAL_STEP_MIN_M): anche sotto il passo minimo, se dopo il passo
-    # l'obiettivo e' entro la tolleranza d'arrivo e il robot e' nella cella.
+    # FINAL STEP (see FINAL_STEP_MIN_M): even below the minimum step, if after the step
+    # the goal is within the arrival tolerance and the robot is in the cell.
     final = (in_target_cell and adv >= P.FINAL_STEP_MIN_M
              and frontier['path_len'] > P.GOAL_REACHED_TOLERANCE_M
              and frontier['path_len'] - adv <= P.GOAL_REACHED_TOLERANCE_M)
@@ -94,24 +93,24 @@ def decide_next_move(robot_xy, path_waypoints, frontier, no_progress_count, in_t
 
 def rotation_plan(robot_yaw, robot_xy, target_xy, od_robot, snap=None):
     """
-    Si puo' ruotare sul posto per guardare il punto da raggiungere?
+    Can the robot rotate in place to face the point to reach?
 
-    Ruotando di un certo angolo il corpo spazza un settore, non tutto il cerchio di raggio
-    0.60 attorno al robot: si controllano le celle davvero spazzate. Chiedere libero tutto
-    il cerchio (obstacle_distance sotto il robot >= ROTATION_CLEARANCE_M) e' il caso
-    peggiore su tutte le direzioni e tutti gli angoli, e rifiuterebbe molte rotazioni sicure.
+    Rotating by a given angle the body sweeps a sector, not the whole circle of radius
+    0.60 around the robot: the cells really swept are checked. Requiring the whole circle
+    free (obstacle_distance under the robot >= ROTATION_CLEARANCE_M) is the worst case over
+    all directions and all angles, and would refuse many safe rotations.
 
-    Ordine dei controlli, dal piu' economico:
-      1. rotazione sotto ROTATION_CHECK_MIN_DYAW_DEG -- trascurabile, si ruota
-      2. obstacle_distance sotto il robot >= ROTATION_CLEARANCE_M -- cerchio circoscritto
-         libero, si ruota senza altri calcoli (prefiltro)
-      3. geometry.rotation_is_clear() sulle celle davvero spazzate (0.26 ms)
+    Order of the checks, cheapest first:
+      1. rotation below ROTATION_CHECK_MIN_DYAW_DEG -- negligible, rotate
+      2. obstacle_distance under the robot >= ROTATION_CLEARANCE_M -- circumscribed circle
+         free, rotate without further computation (prefilter)
+      3. geometry.rotation_is_clear() on the cells really swept (0.26 ms)
 
-    Senza `snap` (nessuna fotografia della griglia) si ricade sul solo confronto scalare.
+    Without `snap` (no snapshot of the grid) it falls back on the scalar comparison alone.
 
-    Funzione pura, provabile fuori dal campo. Restituisce dict con:
-      turn (bool), dyaw_deg, motion_dir (rad), margin (margine del settore spazzato, in
-      metri, o None se non calcolato).
+    Pure function, testable off the field. Returns a dict with:
+      turn (bool), dyaw_deg, motion_dir (rad), margin (margin of the swept sector, in
+      metres, or None if not computed).
     """
     rx, ry = robot_xy
     tx, ty = target_xy
@@ -137,21 +136,21 @@ def rotation_plan(robot_yaw, robot_xy, target_xy, od_robot, snap=None):
 
 def shortcut_index(robot_xy, path_waypoints, snap, global_map=None, prm=None, robot_node_id=None):
     """
-    Scorciatoia: l'indice del waypoint PIU' LONTANO raggiungibile in linea retta
-    dal robot con il tratto interamente confermato libero dal fronte sicuro (muso compreso).
-    0 = nessuna scorciatoia. Toglie le svolte inutili fra nodi del PRM.
-    Il controllo e' il fronte stesso sui dati dal vivo: ostacoli, rugosita', pendenza.
+    Shortcut: the index of the FARTHEST waypoint reachable in a straight line from the
+    robot with the stretch entirely confirmed free by the safe frontier (nose included).
+    0 = no shortcut. Removes useless turns between PRM nodes.
+    The check is the frontier itself on the live data: obstacles, roughness, slope.
 
-    E anche la MAPPA GLOBALE, con lo stesso margine del PRM: alcune cose stanno solo li' --
-    il punto di una caduta, per esempio, che ai sensori puo' sembrare terreno normale (e' per
-    questo che il robot ci e' caduto). Gli archi del PRM le evitano gia'; una scorciatoia
-    controllata solo dal vivo potrebbe riportarci sopra il robot.
+    And also the GLOBAL MAP, with the same margin as the PRM: some things are only there --
+    the spot of a fall, for example, which to the sensors may look like normal terrain
+    (that is why the robot fell there). The PRM edges already avoid them; a shortcut
+    checked only live could take the robot back over them.
 
-    E GLI ARCHI GIA' SCARTATI. Senza questo controllo la scorciatoia riaggancerebbe un
-    waypoint il cui collegamento diretto e' appena stato invalidato, e il ciclo non
-    uscirebbe piu': il tratto viene scartato, Dijkstra trova una strada che passa comunque
-    per quel nodo attraverso i nodi intermedi, e la scorciatoia ci ripunta dritto. Servono
-    `prm` e `robot_node_id`; senza, il controllo si salta.
+    And the EDGES ALREADY DISCARDED. Without this check the shortcut would re-attach a
+    waypoint whose direct link has just been invalidated, and the loop would never get
+    out: the leg is discarded, Dijkstra finds a way that still goes through that node via
+    the intermediate nodes, and the shortcut points straight at it again. Needs `prm` and
+    `robot_node_id`; without them, the check is skipped.
     """
     rx, ry = robot_xy
     for k in range(len(path_waypoints) - 1, 0, -1):
@@ -160,8 +159,8 @@ def shortcut_index(robot_xy, path_waypoints, snap, global_map=None, prm=None, ro
             key = (min(robot_node_id, wid), max(robot_node_id, wid))
             if key in getattr(prm, 'tracker_blocked_edges', ()):
                 continue
-            # Anche gli scarti soft (mark_edge_blocked_soft: [SUBITO], rotazione rifiutata),
-            # altrimenti la scorciatoia ripunta il nodo appena scartato per rotazione.
+            # Also the soft discards (mark_edge_blocked_soft: [SUBITO], rotation refused),
+            # otherwise the shortcut points again at the node just discarded for rotation.
             if getattr(prm, 'edge_validity', {}).get(key) is False:
                 continue
         d = float(np.hypot(wx - rx, wy - ry))
@@ -181,21 +180,21 @@ def shortcut_index(robot_xy, path_waypoints, snap, global_map=None, prm=None, ro
 
 def plan_straight_retreat(robot_xy, robot_yaw, snap, max_dist=P.ROTATION_RETREAT_M):
     """
-    Quanto puo' arretrare il robot IN LINEA RETTA, all'indietro, senza girarsi.
+    How far the robot can back up IN A STRAIGHT LINE, backwards, without turning.
 
-    Non e' marcia obliqua: muovendosi lungo il proprio asse l'ingombro resta 0.50 m di
-    larghezza e il fronte applica la soglia normale FRONTIER_CLEARANCE_M, non i 0.59 della
-    marcia di traverso. E' la via d'uscita quando la rotazione verso il prossimo punto non e'
-    possibile: ci si stacca da cio' che impedisce di girarsi e al giro dopo si riprova da
-    una posizione diversa.
+    It is not oblique walking: moving along its own axis the footprint stays 0.50 m wide
+    and the frontier applies the normal FRONTIER_CLEARANCE_M threshold, not the 0.59 of
+    sideways walking. It is the way out when rotating towards the next point is not
+    possible: it moves away from what prevents turning and at the next turn it tries again
+    from a different position.
 
-    Funzione pura. Restituisce (x, y, distanza) del punto raggiungibile, oppure None se non
-    si puo' arretrare di almeno ROTATION_RETREAT_MIN_M.
+    Pure function. Returns (x, y, distance) of the reachable point, or None if it cannot
+    back up by at least ROTATION_RETREAT_MIN_M.
     """
     rx, ry = robot_xy
     back_x = rx - max_dist * np.cos(robot_yaw)
     back_y = ry - max_dist * np.sin(robot_yaw)
-    body = geometry.body_extents(robot_yaw, robot_yaw + np.pi)   # all'indietro: (0.55, 0.25)
+    body = geometry.body_extents(robot_yaw, robot_yaw + np.pi)   # backwards: (0.55, 0.25)
     f = compute_safe_frontier([(rx, ry), (back_x, back_y)], snap, body=body)
     adv = allowed_advance(f)
     if adv < P.ROTATION_RETREAT_MIN_M:
@@ -207,21 +206,21 @@ def plan_straight_retreat(robot_xy, robot_yaw, snap, max_dist=P.ROTATION_RETREAT
 def scan_escape_directions(robot_xy, robot_yaw, snap, step_deg=P.ESCAPE_FAN_STEP_DEG,
                            min_advance_m=P.ESCAPE_FAN_MIN_ADVANCE_M, probe_m=3.0):
     """
-    Il giro completo: in quali direzioni il robot puo' DAVVERO andare da qui?
+    The full circle: in which directions can the robot REALLY go from here?
 
-    Per ciascuna direzione del giro (passo step_deg) misura due cose indipendenti:
-      - quanto spazio concede il fronte sicuro andando in linea retta in quella direzione;
-      - se il robot puo' girarsi tanto da puntarci il muso (geometry.rotation_is_clear).
-    Una direzione e' UTILIZZABILE solo se entrambe rispondono si'. Il robot non cammina di
-    traverso (vedi ROTAZIONE E ARRETRAMENTO in parametri.py), quindi una corsia larga che richiede una
-    rotazione impossibile NON e' una via d'uscita, per quanto larga sia.
+    For each direction of the circle (step step_deg) it measures two independent things:
+      - how much space the safe frontier allows going in a straight line in that direction;
+      - whether the robot can turn enough to point its nose there (geometry.rotation_is_clear).
+    A direction is USABLE only if both answer yes. The robot does not walk sideways (see
+    ROTATION AND BACK-OFF in config.py), so a wide lane that requires an impossible rotation
+    is NOT a way out, however wide it is.
 
-    Serve a riconoscere una trappola (zero direzioni utilizzabili: robot in un angolo, con
-    le corsie aperte dietro rotazioni che li' non si fanno) con 24 valutazioni del fronte,
-    invece di scoprirlo scartando gli archi uno per uno, una scansione dopo l'altra.
+    Used to recognize a trap (zero usable directions: robot in a corner, with the lanes
+    open behind rotations that cannot be made there) with 24 frontier evaluations, instead
+    of finding out by discarding edges one by one, one scan after another.
 
-    Funzione pura. Restituisce la lista delle direzioni esaminate, ciascuna con:
-    dir_deg (assoluta), rel_deg (rotazione necessaria), advance, reason, rotatable, usable.
+    Pure function. Returns the list of the directions examined, each with:
+    dir_deg (absolute), rel_deg (rotation needed), advance, reason, rotatable, usable.
     """
     rx, ry = float(robot_xy[0]), float(robot_xy[1])
     out = []
@@ -244,7 +243,7 @@ def scan_escape_directions(robot_xy, robot_yaw, snap, step_deg=P.ESCAPE_FAN_STEP
 
 
 def describe_escape_fan(dirs, max_rows=4):
-    """Riga di log compatta: quante direzioni utilizzabili e le migliori, per i log."""
+    """Compact log line: how many usable directions and the best ones, for the logs."""
     usable = [d for d in dirs if d['usable']]
     best = sorted(dirs, key=lambda d: -d['advance'])[:max_rows]
     txt = "; ".join(f"{d['dir_deg']:+.0f} gradi: {d['advance']:.2f} m "
@@ -254,10 +253,10 @@ def describe_escape_fan(dirs, max_rows=4):
 
 def is_trapped(robot_xy, robot_yaw, snap):
     """
-    True se NESSUNA direzione del giro e' insieme percorribile e raggiungibile
-    girandosi: la condizione che l'utente ha posto per tornare indietro ("solo se non puo'
-    piu' andare avanti ne' ruotare"), verificata in una scansione invece che in venti.
-    Restituisce (trapped, dirs) -- dirs serve per il log, cosi' nei dati si vede perche'.
+    True if NO direction of the circle is both travelable and reachable by turning: the
+    condition the user set for going back ("only if it can no longer go forward or
+    rotate"), checked in one scan instead of twenty.
+    Returns (trapped, dirs) -- dirs is for the log, so the data shows why.
     """
     dirs = scan_escape_directions(robot_xy, robot_yaw, snap)
     return (not any(d['usable'] for d in dirs)), dirs
@@ -265,53 +264,53 @@ def is_trapped(robot_xy, robot_yaw, snap):
 
 def arrival_has_exit(snap, arrival_xy, heading, min_advance_m=P.ESCAPE_FAN_MIN_ADVANCE_M):
     """
-    Dal punto in cui sto per fermarmi, ci sara' un'uscita?
+    From the point where I am about to stop, will there be an exit?
 
-    Il fronte sicuro guarda la strada DAVANTI, non se dalla posa d'arrivo si potra'
-    ripartire: con un passo corto il robot puo' entrare in un angolo senza uscite.
+    The safe frontier looks at the road AHEAD, not at whether it can set off again from
+    the arrival pose: with a short step the robot can enter a corner with no exits.
 
-    Si valuta il ventaglio nel punto d'arrivo usando la fotografia CORRENTE: e' una stima
-    (da li' il robot vedra' di piu'), ma e' la stessa informazione su cui si sta decidendo
-    di andarci, quindi la decisione e' almeno coerente con se stessa. Per non pagarla su
-    ogni movimento la chiama solo il ciclo principale, e solo per i passi corti o verso
-    spazi stretti -- vedi ARRIVAL_EXIT_CHECK_MAX_STEP_M / _OD_M.
+    The fan is evaluated at the arrival point using the CURRENT snapshot: it is an
+    estimate (from there the robot will see more), but it is the same information the
+    decision to go there is based on, so the decision is at least consistent with itself.
+    To avoid paying for it on every move only the main loop calls it, and only for short
+    steps or towards tight spaces -- see ARRIVAL_EXIT_CHECK_MAX_STEP_M / _OD_M.
 
-    Restituisce (ha_uscita, dirs).
+    Returns (has_exit, dirs).
     """
     ax, ay = float(arrival_xy[0]), float(arrival_xy[1])
-    # Stessa griglia, ma con il robot dichiarato nel punto d'arrivo: e' cio' che cambia il
-    # riferimento della regola di uscita del fronte e il centro delle rotazioni provate.
+    # Same grid, but with the robot declared at the arrival point: that is what changes the
+    # reference of the frontier's exit rule and the centre of the rotations tried.
     probe = GridSnapshot(
         snap.obstacle_dist, snap.rough_veto, snap.seen, snap.terrain,
         snap.origin_x, snap.origin_y, snap.cell_size, ax, ay,
         timestamp=snap.time, valid=snap.valid, blocked_latch=snap.blocked_latch)
     dirs = scan_escape_directions((ax, ay), float(heading), probe, min_advance_m=min_advance_m)
-    # Una direzione girabile che si ferma perche' FINISCONO I DATI conta come uscita: dal
-    # punto d'arrivo il robot vedra' di piu', e "non visto" non vuol dire "chiuso". Senza,
-    # in un corridoio la direzione avanti finiva sul bordo della scansione (0.09 m) e il
-    # passo veniva rifiutato; al terzo rifiuto si andava lo stesso, ed era il passo giusto
-    # (28-10 12:16, e lo scenario S16 di test_e2e_loop.py).
+    # A turnable direction that stops because THE DATA RUNS OUT counts as an exit: from the
+    # arrival point the robot will see more, and "not seen" does not mean "closed". Without
+    # this, in a corridor the forward direction ended at the edge of the scan (0.09 m) and the
+    # step was refused; at the third refusal it went anyway, and it was the right step
+    # (28-10 12:16, and scenario S16 of test_e2e_loop.py).
     return any(d['usable'] or (d['rotatable'] and d['reason'] == 'fine_dati') for d in dirs), dirs
 
 
 def plan_cone_move(robot_xy, robot_yaw, snap, goal_xy, max_dyaw_deg=P.CONE_SWEEP_MAX_DEG,
                    step_deg=P.CONE_SWEEP_STEP_DEG, min_gain_m=P.CONE_MIN_GAIN_M):
     """
-    "Ruota quanto PUOI, non quanto vorresti, e cammina."
+    "Rotate as much as you CAN, not as much as you would like, and walk."
 
-    Quando la rotazione verso il prossimo nodo e' rifiutata, la domanda giusta non e' piu'
-    "posso girarmi verso il nodo?" ma "qual e' la rotazione piu' grande che posso fare qui,
-    e in quale direzione dentro quel cono conviene andare?". In un corridoio stretto girarsi
-    richiede 1.21 m di diametro e non si puo', ma camminare si': spesso andare dritti, o
-    quasi, avvicina all'obiettivo piu' di qualunque arretramento.
+    When the rotation towards the next node is refused, the right question is no longer
+    "can I turn towards the node?" but "what is the largest rotation I can make here, and
+    in which direction inside that cone is it best to go?". In a narrow corridor turning
+    around takes 1.21 m of diameter and cannot be done, but walking can: often going
+    straight, or almost, gets closer to the goal than any back-off.
 
-    Criterio di scelta: fra le direzioni che AVVICINANO all'obiettivo
-    di almeno min_gain_m, si prende quella con piu' spazio confermato libero. Non la piu'
-    libera in assoluto: quella porterebbe il robot via dalla cella.
+    Selection criterion: among the directions that bring it CLOSER to the goal by at
+    least min_gain_m, the one with the most space confirmed free is taken. Not the most
+    free in absolute terms: that would take the robot away from the cell.
 
-    Funzione pura. Restituisce None se nessuna direzione del cono avvicina, altrimenti
-    dict con: dyaw_deg (rotazione da fare, gradi, puo' essere 0), target (x, y), dist
-    (avanzamento), gain (metri guadagnati verso l'obiettivo), reason (motivo del fronte).
+    Pure function. Returns None if no direction of the cone gets closer, otherwise a dict
+    with: dyaw_deg (rotation to make, degrees, may be 0), target (x, y), dist (advance),
+    gain (metres gained towards the goal), reason (frontier reason).
     """
     rx, ry = float(robot_xy[0]), float(robot_xy[1])
     gx, gy = float(goal_xy[0]), float(goal_xy[1])
@@ -320,8 +319,8 @@ def plan_cone_move(robot_xy, robot_yaw, snap, goal_xy, max_dyaw_deg=P.CONE_SWEEP
     best = None
     rels = np.arange(-abs(max_dyaw_deg), abs(max_dyaw_deg) + 1e-9, abs(step_deg))
     for rel in rels:
-        # La rotazione deve essere possibile: sotto la soglia di trascurabilita' non si
-        # controlla nulla (e' quello che fa anche rotation_plan), sopra si misura il settore.
+        # The rotation must be possible: below the negligible threshold nothing is checked
+        # (that is what rotation_plan does too), above it the sector is measured.
         if abs(rel) >= geometry.ROTATION_CHECK_MIN_DYAW_DEG:
             ok, _ = geometry.rotation_is_clear(
                 snap.obstacle_dist, snap.origin_x, snap.origin_y, snap.cell_size,
@@ -342,7 +341,7 @@ def plan_cone_move(robot_xy, robot_yaw, snap, goal_xy, max_dyaw_deg=P.CONE_SWEEP
             continue
         cand = {'dyaw_deg': float(rel), 'target': (float(nx), float(ny)), 'dist': float(adv),
                 'gain': float(gain), 'reason': f['reason']}
-        # Piu' spazio libero vince; a pari spazio, la rotazione piu' piccola.
+        # More free space wins; with equal space, the smaller rotation.
         if best is None or (cand['dist'], -abs(cand['dyaw_deg'])) > (best['dist'], -abs(best['dyaw_deg'])):
             best = cand
     return best
@@ -350,14 +349,15 @@ def plan_cone_move(robot_xy, robot_yaw, snap, goal_xy, max_dyaw_deg=P.CONE_SWEEP
 
 def retreat_would_help(snap, back_xy, robot_yaw, dyaw_deg):
     """
-    L'arretramento di 0.60 m renderebbe possibile la rotazione che serve?
+    Would the 0.60 m back-off make the needed rotation possible?
 
-    In un corridoio la geometria 0.60 m piu' indietro e' la stessa: arretrare non apre
-    spazio, lo sposta. Si arretra solo se da li' la rotazione diventa possibile.
+    In a corridor the geometry 0.60 m further back is the same: backing up does not open
+    space, it moves it. It backs up only if from there the rotation becomes possible.
 
-    Si valuta la rotazione nel punto di ARRIVO usando la fotografia corrente -- e' una stima,
-    perche' da li' il robot vedra' qualcosa di piu', ma e' la stessa informazione su cui si
-    e' deciso di arretrare, quindi almeno la decisione e' coerente con se stessa.
+    The rotation is evaluated at the ARRIVAL point using the current snapshot -- it is an
+    estimate, because from there the robot will see a bit more, but it is the same
+    information the decision to back up was based on, so at least the decision is
+    consistent with itself.
     """
     if abs(dyaw_deg) < geometry.ROTATION_CHECK_MIN_DYAW_DEG:
         return True, None

@@ -1,44 +1,44 @@
 #!/usr/bin/env python3
 """
-Prova AL BANCO della chiusura d'anello di Spot (ProcessTopology), su un grafo vero salvato.
+BENCH test of Spot's loop closure (ProcessTopology), on a real saved graph.
 
-Il robot NON si muove: serve acceso e collegato, anche seduto o in carica, con i motori spenti.
-Lo script non accende i motori e non crea l'E-Stop; prende il lease, sostituisce la mappa
-GraphNav che il robot ha in memoria con quella del grafo indicato (la missione la svuota
-comunque all'avvio) e alla fine la svuota.
+The robot does NOT move: it must be on and connected, even sitting or charging, with the
+motors off. The script does not power the motors and does not create the E-Stop; it takes
+the lease, replaces the GraphNav map the robot has in memory with the given graph (the
+mission clears it at start-up anyway) and clears it at the end.
 
-SERIE 1 (eseguita il 26-10 alle 12:41, vedi CHANGELOG), sul grafo intero:
-  A. come il 22-10, ma aspettando la fine: quanto ci mette davvero e quanti archi trova;
-  B-E. con il limite lato Spot (timeout_seconds), con meno coppie candidate
-     (max_loop_closure_path_length), senza controllo di collisione;
-  F. la chiamata con limite 4 s ripetuta, modificando la mappa: il lavoro prosegue o riparte?
+SERIES 1 (run on 26-10 at 12:41, see CHANGELOG), on the whole graph:
+  A. as on 22-10, but waiting for the end: how long it really takes and how many edges it finds;
+  B-E. with the limit on Spot's side (timeout_seconds), with fewer candidate pairs
+     (max_loop_closure_path_length), without collision checking;
+  F. the call with a 4 s limit repeated, modifying the map: does the work continue or restart?
 
-SERIE 3 (default; sul grafo del 26-10 15:11, che ha gia' gli archi della chiusura veloce fatta
-prima di ogni spostamento): la chiusura COMPLETA di fine missione, che il 26-10 ha dato 2 archi
-in 65 s. Con prune_edges di Spot (un solo arco per zona: le zone erano gia' collegate) e senza
-(prune_edges=False: archi corretti sulle scansioni anche accanto a quelli veloci), con 45 e 90 s.
-Poi il modo usato in missione dal 26-10 sera: Spot calcola senza scrivere e gli archi si
-caricano con upload_graph (niente MapModifiedError); si contano gli archi della mappa prima e
-dopo.
+SERIES 3 (default; on the graph of 26-10 15:11, which already has the edges of the quick
+closure done before every move): the FULL end-of-mission closure, which on 26-10 gave 2
+edges in 65 s. With Spot's prune_edges (one edge per area: the areas were already
+connected) and without (prune_edges=False: edges corrected on the scans even next to the
+quick ones), with 45 and 90 s. Then the mode used in the mission since the evening of 26-10:
+Spot computes without writing and the edges are uploaded with upload_graph (no
+MapModifiedError); the map's edges are counted before and after.
 
-SERIE 2:
-  1. Grafo ricostruito come a inizio, meta' e fine missione (i primi 100, 200, tutti i 388
-     waypoint in ordine di creazione): a ogni dimensione, le idee per una chiusura d'anello
-     veloce PRIMA degli spostamenti -- limite 2 s, senza ICP (l'allineamento delle scansioni:
-     se il costo e' li', diventa veloce, ma gli archi non sono piu' verificati), senza feature
-     matching, solo anelli veri (waypoint ad almeno 8 m lungo il grafo) -- e una chiamata da
-     60 s per vedere fino a che dimensione l'elaborazione FINISCE.
-  2. Grafo intero, A FINE MISSIONE: limiti 45, 60, 90, 120 s. Quanti archi in piu', e se Spot
-     si ferma comunque verso i 30 s come nella serie 1.
-Tutte le misure senza modificare la mappa (modify_map_on_server=False).
+SERIES 2:
+  1. Graph rebuilt as at the start, middle and end of the mission (the first 100, 200, all
+     388 waypoints in creation order): at each size, the ideas for a quick loop closure
+     BEFORE moves -- 2 s limit, without ICP (scan alignment: if the cost is there, it
+     becomes fast, but the edges are no longer verified), without feature matching, only
+     true loops (waypoints at least 8 m apart along the graph) -- and a 60 s call to see up
+     to which size the processing FINISHES.
+  2. Whole graph, AT THE END OF THE MISSION: limits 45, 60, 90, 120 s. How many more edges,
+     and whether Spot stops around 30 s anyway as in series 1.
+All measurements without modifying the map (modify_map_on_server=False).
 
-Uso (chiede utente e password del robot, se non sono in BOSDYN_CLIENT_USERNAME/PASSWORD):
-    python3 prova_anelli.py                 # serie 3, circa 10 minuti
-    python3 prova_anelli.py --series 2       # la serie del 26-10 13:02, circa 20 minuti
-    python3 prova_anelli.py --series 1       # la serie del 26-10 12:41
-    python3 prova_anelli.py --graph graph/Mission_<nome>/Grafo_<...> --hostname 192.168.80.3
+Usage (asks for the robot's user and password, if not in BOSDYN_CLIENT_USERNAME/PASSWORD):
+    python3 tools/bench_loop_closure.py               # series 3, about 10 minutes
+    python3 tools/bench_loop_closure.py --series 2    # the series of 26-10 13:02, about 20 minutes
+    python3 tools/bench_loop_closure.py --series 1    # the series of 26-10 12:41
+    python3 tools/bench_loop_closure.py --graph graph/Mission_<name>/Grafo_<...> --hostname 192.168.80.3
 
-Risultati a schermo e in MissionLogs/prova_anelli_<data>.txt (+ .json).
+Results on screen and in MissionLogs/prova_anelli_<date>.txt (+ .json).
 """
 import argparse
 import datetime
@@ -48,15 +48,15 @@ import sys
 import time
 from types import SimpleNamespace
 
-HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # cartella del progetto
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # project folder
 sys.path.insert(0, HERE)
 
 DEFAULT_GRAPH = 'graph/Mission_22-10-2026_16-04-22/Grafo_22-10-2026_16-48-11'
 DEFAULT_GRAPH_3 = 'graph/Mission_26-10-2026_15-11-21/Grafo_26-10-2026_15-39-18'
 
-# --- Serie 1 --------------------------------------------------------------------------
-# (nome, parametri di close_loops_checked). Per A, senza limite lato Spot, la RPC aspetta
-# fino a 300 s.
+# --- Series 1 -------------------------------------------------------------------------
+# (name, close_loops_checked parameters). For A, without a limit on Spot's side, the RPC
+# waits up to 300 s.
 CONFIGS_1 = [
     ("A. come giovedi', senza limite", dict(timeout_s=None)),
     ("B. limite 4 s", dict(timeout_s=4.0)),
@@ -66,8 +66,8 @@ CONFIGS_1 = [
 ]
 REPEAT_CALLS = 8
 
-# --- Serie 2 --------------------------------------------------------------------------
-STAGES = [100, 200, None]          # waypoint del grafo ricostruito; None = tutti
+# --- Series 2 -------------------------------------------------------------------------
+STAGES = [100, 200, None]          # waypoints of the rebuilt graph; None = all
 CONFIGS_BEFORE = [
     ("limite 2 s", dict(timeout_s=2.0)),
     ("limite 4 s", dict(timeout_s=4.0)),
@@ -92,7 +92,7 @@ def log(fh, msg=""):
 
 
 def subgraph(graph, n):
-    """I primi n waypoint in ordine di creazione e gli archi fra loro (n=None: tutto)."""
+    """The first n waypoints in creation order and the edges between them (n=None: everything)."""
     from bosdyn.api.graph_nav import map_pb2
     if n is None or n >= len(graph.waypoints):
         return graph
@@ -108,9 +108,9 @@ def subgraph(graph, n):
 
 def upload(gn, gdir, graph, fh, done_wp=None, done_edges=None):
     """
-    Carica sul robot la mappa vuota + graph, con le istantanee. Restituisce (secondi, waypoint
-    caricati, archi caricati). Con done_wp/done_edges (gia' sul robot) carica solo la parte
-    nuova; se il robot la rifiuta, svuota e ricarica tutto.
+    Upload the empty map + graph to the robot, with the snapshots. Returns (seconds,
+    waypoints uploaded, edges uploaded). With done_wp/done_edges (already on the robot) it
+    uploads only the new part; if the robot rejects it, it clears and uploads everything.
     """
     from bosdyn.api.graph_nav import map_pb2
     t0 = time.perf_counter()
@@ -152,12 +152,12 @@ def upload(gn, gdir, graph, fh, done_wp=None, done_edges=None):
 
 
 def measure(ri, fh, name, kw, n_wp, rows):
-    """Una chiamata senza modificare la mappa; riga di log e riga di risultato."""
+    """One call without modifying the map; log line and result line."""
     kw = dict(kw)
     t = time.perf_counter()
     try:
         if kw.get('timeout_s') is None:
-            # Senza limite lato Spot: la RPC aspetta fino a 300 s.
+            # Without a limit on Spot's side: the RPC waits up to 300 s.
             kw.pop('timeout_s', None)
             orig = ri._map_processing_client.process_topology
             ri._map_processing_client.process_topology = lambda *a, **k: orig(*a, timeout=300.0, **k)
@@ -244,7 +244,7 @@ def series_3(ri, gn, gdir, graph, fh, results):
     results['prove'] = []
     for name, kw in CONFIGS_3:
         measure(ri, fh, name, kw, len(graph.waypoints), results['prove'])
-    # Il modo della missione: calcolo senza scrivere + upload_graph degli archi trovati.
+    # The mission mode: compute without writing + upload_graph of the edges found.
     log(fh, "")
     before = len(gn.download_graph().edges)
     t = time.perf_counter()

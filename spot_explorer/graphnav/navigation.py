@@ -1,4 +1,4 @@
-"""Spostamenti con GraphNav: viaggio a un waypoint, ritorno di qualche briciola, ritorno a wp_0."""
+"""GraphNav moves: trip to a waypoint, going back a few breadcrumbs, return to wp_0."""
 import time
 import numpy as np
 from bosdyn.api.graph_nav import graph_nav_pb2 as _graph_nav_pb2
@@ -12,9 +12,9 @@ from spot_explorer.graphnav.map_shortcuts import graphnav_add_shortcuts
 
 
 # =========================================================================================
-# GRAPHNAV DURANTE LA MISSIONE: spostamenti fra celle, ritorni, ritorno a wp_0; scorciatoie
-# e chiusura d'anello; localizzazione, riaggancio e deriva; briciole.
-# Usa RecordingInterface (sopra) per parlare con GraphNav.
+# GRAPHNAV DURING THE MISSION: moves between cells, going back, return to wp_0; shortcuts
+# and loop closure; localization, re-anchoring and drift; breadcrumbs.
+# Uses RecordingInterface (map_recording) to talk to GraphNav.
 # =========================================================================================
 _GN = _graph_nav_pb2.NavigationFeedbackResponse
 
@@ -29,12 +29,12 @@ _GRAPHNAV_FAIL_STATUSES = {
 
 def graphnav_arrival_heading(recordingInterface, waypoint_id, face_xy, label):
     """
-    ORIENTAMENTO ALL'ARRIVO (vedi P.GRAPHNAV_ARRIVAL_HEADING): la posa del corpo rispetto al
-    waypoint da chiedere a GraphNav (destination_waypoint_tform_body_goal), per arrivare
-    girati verso face_xy (punto VISION). Il frame del waypoint ha l'imbardata che il corpo
-    aveva quando l'abbiamo creato (waypoint_poses), quindi l'angolo e' la differenza fra la
-    direzione voluta e quella. None = orientamento del waypoint, come senza: waypoint non
-    creato da noi, face_xy mancante o troppo vicino. Mai eccezioni.
+    HEADING ON ARRIVAL (see P.GRAPHNAV_ARRIVAL_HEADING): the body pose relative to the
+    waypoint to ask GraphNav for (destination_waypoint_tform_body_goal), to arrive facing
+    face_xy (VISION point). The waypoint frame has the yaw the body had when we created it
+    (waypoint_poses), so the angle is the difference between the wanted direction and that
+    one. None = waypoint heading, as without it: waypoint not created by us, face_xy missing
+    or too close. Never raises.
     """
     if face_xy is None or P.GRAPHNAV_ARRIVAL_HEADING != 'verso_obiettivo':
         return None
@@ -58,18 +58,18 @@ def graphnav_arrival_heading(recordingInterface, waypoint_id, face_xy, label):
 
 def graphnav_navigate_to(recordingInterface, waypoint_id, robot_state_client, command_client, label,
                           timeout_s=P.GRAPHNAV_TIMEOUT_S, face_xy=None, move='graphnav'):
-    """Porta il robot a un waypoint con GraphNav. True solo se ci arriva davvero.
+    """Take the robot to a waypoint with GraphNav. True only if it really gets there.
 
-    face_xy: punto VISION verso cui arrivare girati (vedi graphnav_arrival_heading); None =
-    orientamento del waypoint. Con GRAPHNAV_ARRIVAL_HEADING = 'libero', se face_xy c'e' il
-    robot arriva senza girarsi. move: etichetta del movimento in trajectory.csv."""
-    # Prima di muoversi: chiusure d'anello di Spot (a registrazione ferma). Le scorciatoie
-    # dalla mappa le aggiunge chi chiama, PRIMA di fermare la registrazione.
-    # Tutto cio' che sta qui dentro finisce nella voce 'GraphNav' di [TEMPO]: e' una delle
-    # fasi piu' lunghe della missione (il solo ritorno a wp_0 puo' durare minuti).
+    face_xy: VISION point to face on arrival (see graphnav_arrival_heading); None =
+    waypoint heading. With GRAPHNAV_ARRIVAL_HEADING = 'libero', if face_xy is given the
+    robot arrives without turning. move: label of the move in trajectory.csv."""
+    # Before moving: Spot's loop closures (with recording stopped). The shortcuts from
+    # the map are added by the caller, BEFORE stopping the recording.
+    # Everything in here ends up in the 'GraphNav' entry of [TEMPO]: it is one of the
+    # longest phases of the mission (the return to wp_0 alone can take minutes).
     _t_gn = time.perf_counter()
     try:
-        # 2026-10-26: anche i tratti GraphNav finiscono in trajectory.csv (vedi _TRAJECTORY_COLUMNS).
+        # 2026-10-26: GraphNav legs end up in trajectory.csv too (see _TRAJECTORY_COLUMNS).
         with TrajectoryLog(robot_state_client, move):
             return _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_client,
                                                command_client, label, timeout_s, face_xy)
@@ -77,7 +77,7 @@ def graphnav_navigate_to(recordingInterface, waypoint_id, robot_state_client, co
         timing_add('GraphNav', time.perf_counter() - _t_gn)
 
 
-# Perche' l'ultimo spostamento GraphNav si e' fermato senza arrivare (per il ritorno a wp_0).
+# Why the last GraphNav move stopped without arriving (for the return to wp_0).
 _LAST_GRAPHNAV_FAIL = {'reason': None}
 
 
@@ -92,11 +92,11 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
     client = recordingInterface._graph_nav_client
     tp = _graph_nav_pb2.TravelParams()
     tp.velocity_limit.CopyFrom(movements._velocity_limit(P.GRAPHNAV_MAX_LINEAR_VEL_MPS, P.GRAPHNAV_MAX_ANGULAR_VEL_RPS))
-    # Rilevatore di perdita permissivo (vedi LOCALIZZAZIONE DI GRAPHNAV).
+    # Permissive loss detector (see GRAPHNAV LOCALIZATION).
     if P.GRAPHNAV_LOST_DETECTOR_STRICTNESS and hasattr(tp, 'lost_detector_strictness'):
         try:
-            # dal descrittore: l'enum sta in lost_detection_pb2, che nelle versioni vecchie
-            # dell'SDK non c'e'; cosi' funziona ovunque il campo esista.
+            # from the descriptor: the enum is in lost_detection_pb2, which old SDK versions
+            # do not have; this way it works wherever the field exists.
             enum = tp.DESCRIPTOR.fields_by_name['lost_detector_strictness'].enum_type
             tp.lost_detector_strictness = enum.values_by_name[P.GRAPHNAV_LOST_DETECTOR_STRICTNESS].number
         except Exception:
@@ -105,8 +105,8 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
     if face_xy is not None and P.GRAPHNAV_ARRIVAL_HEADING == 'libero' and hasattr(tp, 'ignore_final_yaw'):
         tp.ignore_final_yaw = True
     print(f"[GRAPHNAV] {label}: avvio (massimo {timeout_s:.0f} s, {P.GRAPHNAV_MAX_LINEAR_VEL_MPS:.1f} m/s).")
-    # Prima di partire si guarda lo stato del localizzatore; se e' perso si riaggancia
-    # subito, invece di farsi rifiutare il comando.
+    # Before leaving, check the localizer state; if it is lost, re-anchor
+    # right away, instead of having the command rejected.
     relocs = 0
     loc0 = graphnav_log_localization(None, recordingInterface, robot_state_client,
                                      f"prima di '{label}'", force=True)
@@ -130,7 +130,7 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
                 continue
             nav_errors += 1
             print(f"[GRAPHNAV] {label}: comando rifiutato ({nav_errors}/3): {e}")
-            # Un errore RPC transitorio non abbandona lo spostamento: si rinuncia al terzo.
+            # A transient RPC error does not abandon the move: give up at the third.
             if nav_errors >= 3:
                 _stop_graphnav(command_client, reason="GraphNav: comando rifiutato")
                 MISSION_STATS['graphnav_fail'] += 1
@@ -149,7 +149,7 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
                 _stop_graphnav(command_client, reason="GraphNav: feedback non disponibile")
                 MISSION_STATS['graphnav_fail'] += 1
                 return False
-            cmd_id = None      # il comando potrebbe non essere piu' valido: se ne invia uno nuovo
+            cmd_id = None      # the command may no longer be valid: send a new one
             time.sleep(0.5)
             continue
         if status == _GN.STATUS_REACHED_GOAL:
@@ -158,8 +158,8 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
             graphnav_log_drift(recordingInterface, robot_state_client, label)
             return True
         if status == _GN.STATUS_LOST and relocs < P.GRAPHNAV_MAX_RELOCALIZATIONS:
-            # Riaggancio sul waypoint piu' vicino (NON sulla destinazione, e senza dichiarare
-            # l'arrivo: si rimanda il comando e si continua a navigare).
+            # Re-anchor on the nearest waypoint (NOT on the destination, and without declaring
+            # arrival: the command is resent and navigation continues).
             relocs += 1
             print(f"[GRAPHNAV] {label}: GraphNav ha perso la localizzazione per strada: "
                   f"riaggancio ({relocs}/{P.GRAPHNAV_MAX_RELOCALIZATIONS}).")
@@ -169,13 +169,13 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
             cmd_id = None
             continue
         if status == _GN.STATUS_LOST:
-            # Non si forza la localizzazione sulla destinazione (vedi sopra): fallimento.
+            # Localization is not forced on the destination (see above): failure.
             print(f"[GRAPHNAV] {label}: GraphNav ha perso la localizzazione. Fermo il robot.")
             _stop_graphnav(command_client, reason="GraphNav: robot perso")
             MISSION_STATS['graphnav_fail'] += 1
             return False
         if status == _GN.STATUS_COMMAND_TIMED_OUT:
-            cmd_id = None          # comando scaduto: se ne invia uno nuovo
+            cmd_id = None          # command expired: send a new one
             continue
         if status in _GRAPHNAV_FAIL_STATUSES:
             print(f"[GRAPHNAV] {label}: interrotto -- {_GRAPHNAV_FAIL_STATUSES[status]}.")
@@ -190,15 +190,15 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
 
 def graphnav_return_to_start(recordingInterface, robot_state_client, command_client):
     """
-    Ritorno a wp_0 a fine missione, con tempo massimo. Tre esiti:
-      'arrivato'      GraphNav dice di essere arrivato;
-      'vicino'        GraphNav si e' fermato senza arrivare (STUCK, tempo scaduto...) ma il
-                      robot e' entro P.GRAPHNAV_RETURN_NEAR_M da wp_0: il ritorno NON e'
-                      riuscito, ma il fiducial e la deriva si misurano lo stesso (13:50 del
-                      28-10: fermo nell'erba a 0.63 m, misure perse);
-      'non arrivato'  tutto il resto.
-    La distanza da wp_0 e' quella che dice GraphNav se e' localizzato su wp_0, altrimenti
-    quella delle pose VISION (con la deriva dell'odometria dentro).
+    Return to wp_0 at the end of the mission, with a time limit. Three outcomes:
+      'arrivato'      GraphNav says it has arrived;
+      'vicino'        GraphNav stopped without arriving (STUCK, timeout...) but the robot
+                      is within P.GRAPHNAV_RETURN_NEAR_M of wp_0: the return did NOT
+                      succeed, but the fiducial and the drift are measured anyway (13:50 on
+                      28-10: stuck in the grass at 0.63 m, measurements lost);
+      'non arrivato'  everything else.
+    The distance from wp_0 is the one GraphNav reports if it is localized on wp_0,
+    otherwise the one from the VISION poses (with the odometry drift in it).
     """
     try:
         graph = recordingInterface._get_graph(force_refresh=True)
@@ -232,18 +232,18 @@ def graphnav_return_to_start(recordingInterface, robot_state_client, command_cli
 def graphnav_step_back(env, recordingInterface, robot_state_client, command_client,
                        min_dist_m=0.40, face_xy=None):
     """
-    Torna al waypoint piu' recente che sia almeno min_dist_m DIETRO, con GraphNav.
+    Go back with GraphNav to the most recent waypoint at least min_dist_m BEHIND.
 
-    Si cerca indietro nella traccia perche' l'ultima briciola puo' essere stata lasciata qui,
-    dove il robot e' adesso: tornarci non sposterebbe niente. Se nessuna briciola e' abbastanza
-    lontana si usa comunque la piu' vecchia disponibile.
+    The search goes backwards along the track because the last breadcrumb may have been
+    dropped here, where the robot is now: going back to it would move nothing. If no
+    breadcrumb is far enough, the oldest available one is used anyway.
 
-    Restituisce (ok, crumb). ok=True solo se GraphNav dichiara di essere ARRIVATO: in
-    _graphnav_navigate_to_inner lo STATUS_LOST e' un fallimento, non si forza la localizzazione
-    sulla destinazione (vedi SPOSTAMENTI CON GRAPHNAV).
+    Returns (ok, crumb). ok=True only if GraphNav declares it has ARRIVED: in
+    _graphnav_navigate_to_inner STATUS_LOST is a failure, localization is not forced on the
+    destination (see GRAPHNAV MOVES).
 
-    La registrazione va FERMATA prima di navigare e ripresa dopo: GraphNav non naviga mentre
-    registra. E' la stessa sequenza usata per gli spostamenti fra celle.
+    Recording must be STOPPED before navigating and resumed after: GraphNav does not
+    navigate while recording. It is the same sequence used for moves between cells.
     """
     trail = getattr(env, '_graphnav_trail', None) or []
     if not trail:
@@ -263,8 +263,8 @@ def graphnav_step_back(env, recordingInterface, robot_state_client, command_clie
     crumb = trail[idx]
     d_crumb = float(np.hypot(crumb['x'] - rx, crumb['y'] - ry))
     if d_crumb < min_dist_m:
-        # Tutte le briciole sono qui attorno (22-10 16:22: il robot stava SU wp_138): GraphNav
-        # non sposterebbe il robot. Si ripianifica da dove si e', senza muoversi.
+        # All breadcrumbs are around here (22-10 16:22: the robot was ON wp_138): GraphNav
+        # would not move the robot. Replan from where it is, without moving.
         MISSION_STATS['backtracks_in_place'] += 1
         print(f"[RITORNO] La briciola piu' lontana dietro, {crumb['wp_name']}, e' a {d_crumb:.2f} m "
               f"(meno di {min_dist_m:.2f}): non mi muovo, ripianifico da qui.")
@@ -289,8 +289,8 @@ def graphnav_step_back(env, recordingInterface, robot_state_client, command_clie
             print(f"[RITORNO] Registrazione non ripresa ({e}): le briciole successive "
                   "potrebbero non essere create.")
     if ok:
-        # I tratti percorsi a zampe non descrivono piu' la strada da cui si e' arrivati:
-        # GraphNav non li registra, e la ritirata di ripiego non deve usarli.
+        # The walked legs no longer describe the way the robot came:
+        # GraphNav does not record them, and the fallback retreat must not use them.
         env._traveled_arcs = []
-        del trail[len(trail) - hop:]        # le briciole oltre questa non servono piu'
+        del trail[len(trail) - hop:]        # breadcrumbs beyond this one are no longer needed
     return ok, crumb

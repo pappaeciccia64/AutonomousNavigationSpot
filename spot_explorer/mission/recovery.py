@@ -1,4 +1,4 @@
-"""Uscire da un blocco: ritorno indietro con GraphNav, ritirata a zampe, celle bloccate o rimandate."""
+"""Getting out of a block: going back with GraphNav, walked retreat, blocked or deferred cells."""
 import numpy as np
 
 from spot_explorer.graphnav import navigation
@@ -15,25 +15,25 @@ from spot_explorer.records import MISSION_STATS, TrajectoryLog
 
 
 # =========================================================================
-# RITORNO INDIETRO CON GRAPHNAV, quando dal punto in cui si e' il grafo non porta
-# alla cella
+# GOING BACK WITH GRAPHNAV, when from where the robot is the graph does not lead
+# to the cell
 # =========================================================================
 
 
 def backtracking_cannot_help(env, prm_graph, goal_id, robot_state_client, max_hops,
                              min_dist_m=0.40):
     """
-    Tornare indietro con GraphNav puo' servire a qualcosa?
+    Can going back with GraphNav achieve anything?
 
-    escape_by_backtracking torna a una briciola e SOLO DOPO chiede al grafo un percorso da
-    li'. Ma ogni briciola ha gia' il suo nodo PRM: la stessa domanda si puo' fare prima di
-    muoversi. Se l'obiettivo sta in un'altra componente del grafo, nessun waypoint dietro
-    puo' cambiare la risposta, e i ritorni sarebbero solo strada sprecata.
+    escape_by_backtracking goes back to a breadcrumb and ONLY THEN asks the graph for a path
+    from there. But every breadcrumb already has its PRM node: the same question can be asked
+    before moving. If the goal is in another component of the graph, no waypoint behind can
+    change the answer, and the returns would only be wasted travel.
 
-    Risponde True solo se OGNI briciola che verrebbe visitata ha un nodo PRM collegato nel
-    grafo e da nessuno di essi c'e' un percorso. Se anche una sola non si puo' giudicare
-    (nodo mancante o isolato, es. scartato dentro un ostacolo) risponde False e si torna
-    indietro: nel dubbio non si toglie la via d'uscita.
+    Answers True only if EVERY breadcrumb that would be visited has a PRM node connected in
+    the graph and there is no path from any of them. If even one cannot be judged (missing
+    or isolated node, e.g. discarded inside an obstacle) it answers False and the robot goes
+    back: when in doubt, the way out is not taken away.
     """
     trail = getattr(env, '_graphnav_trail', None) or []
     if not trail or goal_id not in prm_graph.nodes:
@@ -59,18 +59,18 @@ def _trap_backtrack(trap_state, block_arc, env, prm_graph, goal_id, recordingInt
                     robot_state_client, command_client, global_map, mobility_kwargs, pts,
                     obstacle_mask, label="", **kwargs):
     """
-    Ritorno indietro (escape_by_backtracking) con MEMORIA per il tentativo.
+    Going back (escape_by_backtracking) with MEMORY for the attempt.
 
-    trap_state: dict del tentativo ({'n': ritorni gia' fatti}), che non si azzera mai dentro
-    il tentativo. block_arc: (a, b), l'arco su cui il robot si e' fermato.
+    trap_state: the attempt's dict ({'n': returns already made}), never reset within the
+    attempt. block_arc: (a, b), the edge the robot stopped on.
 
-    Prima di ripianificare, l'arco diventa impercorribile per il resto del tentativo
-    (penalita' del tentativo: sopravvive a refresh e ricostruzioni e si toglie solo
-    all'inizio del tentativo successivo, vedi prm_graph.clear_penalties_for_attempt). Da li'
-    il pianificatore deve proporre un'altra strada, o ammettere che non c'e'. Al
-    MAX_BACKTRACKS_PER_ATTEMPT-esimo ritorno il robot torna comunque indietro -- la' dov'e'
-    non puo' restare -- ma il tentativo finisce: la cella si rimanda e si prova da un altro
-    lato. Senza questa memoria il robot rifarebbe lo stesso giro all'infinito.
+    Before replanning, the edge becomes impassable for the rest of the attempt (attempt
+    penalty: it survives refreshes and rebuilds and is removed only at the start of the
+    next attempt, see roadmap.clear_penalties_for_attempt). From there the planner must
+    propose another way, or admit there is none. At the MAX_BACKTRACKS_PER_ATTEMPT-th
+    return the robot goes back anyway -- it cannot stay where it is -- but the attempt
+    ends: the cell is deferred and tried from another side. Without this memory the robot
+    would repeat the same loop forever.
     """
     trap_state['n'] = trap_state.get('n', 0) + 1
     if block_arc is not None and block_arc[0] is not None and block_arc[1] is not None:
@@ -96,22 +96,22 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
                            max_hops=P.GRAPHNAV_MAX_BACKTRACK_HOPS, label="",
                            skip_if_graph_cannot_help=False):
     """
-    La via d'uscita quando da qui non si va da nessuna parte.
+    The way out when from here there is nowhere to go.
 
-    Si torna indietro di un waypoint con GraphNav e si prova a ripianificare verso
-    l'obiettivo da li'; se non si puo', si torna indietro di un altro, e cosi' via fino a
-    max_hops. Dopo max_hops la cella si rimanda e si passa alla priorita' successiva.
+    Go back one waypoint with GraphNav and try to replan towards the goal from there; if
+    that is not possible, go back another one, and so on up to max_hops. After max_hops the
+    cell is deferred and the next priority is taken.
 
-    Se GraphNav non ce la fa (traccia vuota, non localizzato, STUCK, tempo scaduto) si ricade
-    sulla ritirata a zampe: e' peggiore, ma e' l'ultima rete e non la togliamo. In una
-    trappola dove ruotare e' impossibile GraphNav, che per percorrere un arco vuole girare il
-    muso, puo' tornare STUCK proprio dove serve.
+    If GraphNav cannot do it (empty track, not localized, STUCK, timeout) it falls back on
+    the walked retreat: it is worse, but it is the last safety net and we keep it. In a
+    trap where rotating is impossible GraphNav, which wants to turn the nose to follow an
+    edge, can return STUCK exactly where it is needed.
 
-    Restituisce dict: ok (si puo' continuare la missione), ids (nuovo percorso o None),
-    robot_node (nuovo nodo del robot o None), how (cosa e' successo, per il log).
+    Returns a dict: ok (the mission can continue), ids (new path or None), robot_node (new
+    robot node or None), how (what happened, for the log).
     """
-    # Solo quando il robot NON e' intrappolato (chiamanti "nessuna alternativa nel grafo"):
-    # in una trappola o dopo un fallimento fisico tornare indietro serve anche a liberarlo.
+    # Only when the robot is NOT trapped (callers "no alternative in the graph"):
+    # in a trap or after a physical failure going back also serves to free it.
     if skip_if_graph_cannot_help and backtracking_cannot_help(
             env, prm_graph, goal_id, robot_state_client, max_hops):
         print(f"[RITORNO] {label}: dai nodi delle prossime {max_hops} briciole il grafo non "
@@ -121,7 +121,7 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
         return {'ok': False, 'ids': None, 'robot_node': None, 'how': 'cella rimandata'}
 
     for hop in range(1, int(max_hops) + 1):
-        # Si arriva girati verso l'obiettivo del tentativo: da li' si ripianifica verso di lui.
+        # Arrive facing the attempt's goal: from there replan towards it.
         ok, crumb = navigation.graphnav_step_back(env, recordingInterface, robot_state_client, command_client,
                                                      face_xy=prm_graph.get_node_position(goal_id))
         if not ok:
@@ -139,9 +139,9 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
 
         if not crumb.get('in_place'):
             MISSION_STATS['graphnav_backtracks'] += 1
-        prm_graph.needs_refresh = True       # il robot si e' spostato: vedi REFRESH A EVENTI
-        # La scansione dello scarto preliminare e' stata fatta da un altro punto (e
-        # l'esclusione del corpo starebbe dove il robot era): via, fino alla prossima scansione.
+        prm_graph.needs_refresh = True       # the robot has moved: see EVENT REFRESH
+        # The scan of the preliminary discard was taken from another point (and the
+        # body exclusion would be where the robot was): drop it, until the next scan.
         prm_graph.set_live_obstacles(None, None, 0, 0, 1, 0, 0)
         try:
             ax, ay, _, _ = spotUtils.getPosition(robot_state_client)
@@ -150,8 +150,8 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
         new_node = prm_graph.add_stop_node(
             ax, ay, global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M,
             label=f"sosta (ritorno GraphNav a {crumb['wp_name']})")
-        # Niente deroga alla mappa globale attorno a questo nodo: vedi il commento al
-        # chiamante di set_robot_node nel ciclo principale.
+        # No global-map exemption around this node: see the comment at the
+        # caller of set_robot_node in the main loop.
         prm_graph.set_robot_node(new_node, 0.0)
 
         ids = prm_graph.find_path_dijkstra(new_node, goal_id)
@@ -162,7 +162,7 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
         print(f"[RITORNO] {label}: tornato a {crumb['wp_name']} ({hop}/{max_hops}) ma da qui il "
               f"grafo non offre percorsi verso l'obiettivo.")
         if crumb.get('in_place'):
-            break           # non ci sono briciole piu' lontane: altri giri sarebbero uguali
+            break           # there are no farther breadcrumbs: more rounds would be the same
 
     print(f"[RITORNO] {label}: {hop} ritorni senza trovare un percorso. Rimando la cella.")
     return {'ok': False, 'ids': None, 'robot_node': None, 'how': 'cella rimandata'}
@@ -170,7 +170,7 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
 
 
 # =========================================================================
-# RITIRATA A ZAMPE all'indietro: l'ultima rete
+# WALKED RETREAT backwards: the last safety net
 # =========================================================================
 
 
@@ -179,26 +179,27 @@ def retreat_along_traveled_path(env, robot_state_client, command_client,
                                 mobility_kwargs=None,
                                 pts=None, obstacle_mask=None):
     """
-    Ritirata: torna indietro sui propri passi camminando ALL'INDIETRO, senza mai girarsi.
-    E' l'ultima rete, quando il ritorno con GraphNav non riesce (vedi escape_by_backtracking).
+    Retreat: go back over its own steps walking BACKWARDS, without ever turning.
+    It is the last safety net, when the return with GraphNav fails (see
+    escape_by_backtracking).
 
-    Quando il robot si infila in uno spazio stretto e li' non esiste piu' un percorso
-    verso l'obiettivo, girarsi non e' una via d'uscita --
-    serve spazio che in quel punto non c'e'. Arretrare invece ripercorre il varco da cui
-    si e' entrati, che per costruzione era abbastanza largo da passarci. E arretrare lungo
-    l'asse del corpo non e' marcia di traverso: l'ingombro resta 0.50 m di larghezza.
+    When the robot gets into a narrow space and there is no longer a path towards the goal
+    from there, turning around is not a way out -- it needs space that is not there at that
+    point. Backing up instead retraces the gap it came in through, which by construction
+    was wide enough to pass. And backing up along the body axis is not sideways walking:
+    the footprint stays 0.50 m wide.
 
-    I punti da cui si e' passati sono gia' registrati in env._traveled_arcs, riempito a
-    ogni spostamento completato. Si ripercorrono a ritroso, uno per uno, mantenendo
-    l'orientamento attuale (vedi movements.move_to_world_point_without_turning).
+    The points it passed through are already recorded in env._traveled_arcs, filled at
+    every completed move. They are retraced backwards, one by one, keeping the current
+    heading (see motion.move_to_world_point_without_turning).
 
-    Se vengono passati `pts` e `obstacle_mask` della scansione corrente, ogni tratto
-    viene prima controllato sui dati freschi: il fatto di esserci passati poco fa e' un
-    ottimo indizio, non una garanzia, e non ha senso arretrare dentro qualcosa che nel
-    frattempo si vede occupato. In quel caso la ritirata si ferma li' e lo dichiara.
+    If `pts` and `obstacle_mask` of the current scan are passed, every leg is first checked
+    on the fresh data: having passed there shortly before is a very good hint, not a
+    guarantee, and it makes no sense to back into something that in the meantime is seen
+    occupied. In that case the retreat stops there and says so.
 
     Returns:
-        (segmenti_percorsi: int, distanza_totale: float)
+        (segments_travelled: int, total_distance: float)
     """
     mobility_kwargs = mobility_kwargs or {}
     traveled = getattr(env, '_traveled_arcs', None)
@@ -229,7 +230,7 @@ def retreat_along_traveled_path(env, robot_state_client, command_client,
             break
 
         if seg_len < P.RETREAT_MIN_SEGMENT_M:
-            # Tratto troppo corto per valere un comando a se': lo consumiamo e proseguiamo.
+            # Leg too short to be worth a command of its own: consume it and continue.
             traveled.pop()
             continue
 
@@ -268,23 +269,23 @@ def retreat_along_traveled_path(env, robot_state_client, command_client,
 
 
 # =========================================================================
-# CELLE BLOCCATE O RIMANDATE
+# BLOCKED OR DEFERRED CELLS
 # =========================================================================
 
 
 def cell_has_reachable_target(env, sampler, global_map, row, col, safety_margin=None):
     """
-    Nella cella c'e' ANCORA un punto dove il robot potrebbe stare, secondo la
-    mappa globale accumulata finora? Restituisce (si_no, liberi, ignoti, occupati).
+    Is there STILL a point in the cell where the robot could stand, according to the
+    global map accumulated so far? Returns (yes_no, free, unknown, occupied).
 
-    Serve a non ritentare una cella il cui obiettivo e' fisicamente dentro un ostacolo
-    (per esempio quando la griglia di missione non sta nello spazio):
-    finalize_or_defer_blocked_cell marca bloccata una cella solo dopo averne provati tutti
-    i lati, ma se l'obiettivo e' in un muro i lati non c'entrano niente.
+    Used not to retry a cell whose goal is physically inside an obstacle (for example
+    when the mission grid does not fit the space): finalize_or_defer_blocked_cell marks a
+    cell blocked only after trying all its sides, but if the goal is in a wall the sides
+    have nothing to do with it.
 
-    Si guarda solo cio' che e' stato VISTO: ignoto non e' occupato (e' la stessa regola del
-    fronte, che distingue 'fine_dati' da 'ostacolo'). Quindi una cella mai vista risponde
-    sempre si', e questo controllo non puo' impedire una prima esplorazione.
+    Only what has been SEEN is considered: unknown is not occupied (the same rule as the
+    frontier, which tells 'fine_dati' from 'ostacolo'). So a cell never seen always answers
+    yes, and this check cannot prevent a first exploration.
     """
     if global_map is None:
         return True, 0, 0, 0
@@ -311,30 +312,30 @@ def cell_has_reachable_target(env, sampler, global_map, row, col, safety_margin=
 
 def finalize_or_defer_blocked_cell(env, row, col, sampler=None, global_map=None):
     """
-    Da chiamare subito dopo env.mark_cell_side_explored(row, col, side_bit), quando un
-    tentativo di entrare in (row, col) e' appena fallito da un lato.
+    Call right after env.mark_cell_side_explored(row, col, side_bit), when an attempt to
+    enter (row, col) has just failed from one side.
 
-    La cella si marca bloccata per sempre (env.mark_cell_blocked -> valore -1) solo quando
-    OGNI lato che ha un vicino dentro la griglia e' stato provato ed e' fallito
-    (env.all_sides_explored). Altrimenti resta al valore di non visitata (0) e NON si
-    ritenta subito: resta una candidata normale della frontiera.
-    get_adjacent_frontier_cells e get_lowest_rank_from_frontier_list trattano ogni cella a
-    0 allo stesso modo, ordinata per la sua posizione nella serpentina, come una cella mai
-    tentata. Cosi' una cella fallita una volta compete per la priorita' con la STESSA
-    logica di tutte le altre, e si ritenta quando tocca a lei, dal lato non ancora provato:
-    ne' subito fuori turno, ne' scartata dopo un solo lato.
+    The cell is marked blocked forever (env.mark_cell_blocked -> value -1) only when EVERY
+    side with a neighbour inside the grid has been tried and has failed
+    (env.all_sides_explored). Otherwise it stays at the not-visited value (0) and is NOT
+    retried right away: it stays a normal frontier candidate.
+    get_adjacent_frontier_cells and get_lowest_rank_from_frontier_list treat every cell at
+    0 the same way, ordered by its position in the serpentine, like a cell never tried.
+    So a cell that failed once competes for priority with the SAME logic as all the
+    others, and is retried when its turn comes, from the side not yet tried: neither right
+    away out of turn, nor discarded after a single side.
     """
-    # Se nella cella non esiste piu' un punto dove il robot possa stare, provare da un
-    # altro lato e' inutile -- l'obiettivo e' dentro un ostacolo, non dietro un varco
-    # che si apre da un'altra parte. Vedi cell_has_reachable_target.
+    # If there is no longer a point in the cell where the robot can stand, trying from
+    # another side is useless -- the goal is inside an obstacle, not behind a gap that
+    # opens elsewhere. See cell_has_reachable_target.
     if sampler is not None and global_map is not None:
         ok, free, unknown, occupied = cell_has_reachable_target(env, sampler, global_map, row, col)
-        # Diagnostica: dice subito se la cella sta dentro un ostacolo o non e' mai stata
-        # vista, cioe' se la griglia di missione non sta nello spazio.
-        # ATTENZIONE a come si legge: i punti candidati per cella sono decine (reticolo a
-        # 0.5 m) o centinaia (a 0.25 m), quindi "occupati" alto NON vuol dire cella irraggiungibile; vuol
-        # dire che gran parte della cella e' dentro un ostacolo. Il blocco immediato sotto
-        # scatta solo nel caso estremo in cui NON resta un solo punto libero o ignoto.
+        # Diagnostics: tells at once whether the cell is inside an obstacle or was never
+        # seen, i.e. whether the mission grid does not fit the space.
+        # CAREFUL how to read it: the candidate points per cell are dozens (lattice at
+        # 0.5 m) or hundreds (at 0.25 m), so a high "occupied" does NOT mean the cell is unreachable;
+        # it means much of the cell is inside an obstacle. The immediate block below
+        # triggers only in the extreme case where NOT a single free or unknown point is left.
         print(f"[CELLA] ({row},{col}) dopo il tentativo fallito: dei punti candidati, "
               f"{free} visti liberi, {unknown} mai visti, {occupied} dentro un ostacolo "
               f"nella mappa globale.")

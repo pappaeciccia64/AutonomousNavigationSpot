@@ -1,4 +1,4 @@
-"""Un tentativo di entrare in una cella: TentativoCella, il ciclo di navigazione con il fronte sicuro."""
+"""One attempt to enter a cell: CellAttempt, the navigation loop with the safe frontier."""
 import os
 import time
 from datetime import datetime
@@ -18,8 +18,8 @@ from spot_explorer.planning import decisions
 from spot_explorer.planning import safe_frontier
 
 from spot_explorer.planning import roadmap as prm_graph
-from spot_explorer.planning import roadmap as prm_graph_module   # dentro le funzioni `prm_graph` e' spesso il parametro (istanza)
-from spot_explorer.planning import mission_graph                   # reticolo dei nodi della missione
+from spot_explorer.planning import roadmap as prm_graph_module   # inside functions `prm_graph` is often the parameter (instance)
+from spot_explorer.planning import mission_graph                   # mission node lattice
 
 from spot_explorer import config as P
 from spot_explorer.records import (MISSION_STATS, MISSION_CTX, BodyTiltRecorder, TrajectoryLog, append_csv, append_trajectory, log_segment, mission_z0, save_npz_async, timing_add, visualize_grid_with_candidates)
@@ -28,61 +28,61 @@ from spot_explorer.mission import recovery
 
 
 def _battery_return_due(where=None):
-    """Una lettura della batteria (vedi batteria.MonitorBatteria.controlla): True se la
-    missione deve smettere di esplorare e rientrare. False se il monitor non c'e'."""
+    """One battery reading (see battery.BatteryMonitor.check): True if the mission must stop
+    exploring and return. False if there is no monitor."""
     monitor = MISSION_CTX.get('batteria')
     return monitor.check(where) if monitor is not None else False
 
 
 def _battery_low():
-    """Come _rientro_batteria ma senza leggere: solo se il rientro e' gia' deciso."""
+    """Like _battery_low but without reading: only if the return has already been decided."""
     monitor = MISSION_CTX.get('batteria')
     return monitor is not None and monitor.return_due
 
 
 # =========================================================================
-# INGRESSO IN UNA CELLA: un tentativo (TentativoCella)
+# ENTERING A CELL: one attempt (CellAttempt)
 # =========================================================================
 
 
-# Esiti di una fase del ciclo di navigazione (vedi TentativoCella._giro): None = si va avanti
-# con la fase successiva.
-CONTINUE = "continua"        # giro finito: si ricomincia dalla scansione
-STOP = "interrompi"    # fine del ciclo: decide la posizione finale (TentativoCella._fine)
-FAILED = "fallito"          # il tentativo e' fallito
+# Outcomes of a phase of the navigation loop (see CellAttempt._loop_once): None = go on
+# with the next phase.
+CONTINUE = "continua"        # turn finished: start again from the scan
+STOP = "interrompi"    # end of the loop: the final position decides (CellAttempt._finish)
+FAILED = "fallito"          # the attempt failed
 
 
 class CellAttempt:
-    """Prova a entrare nella cella (target_row, target_col) dalla posizione attuale del robot.
+    """Try to enter cell (target_row, target_col) from the robot's current position.
 
-    Scansione, aggiornamento delle mappe e del grafo, scelta del punto obiettivo, percorso,
-    poi il ciclo di navigazione con il fronte sicuro. True se il robot finisce dentro la cella.
+    Scan, update of maps and graph, choice of the goal point, path, then the navigation
+    loop with the safe frontier. True if the robot ends up inside the cell.
 
-    mobility_kwargs: dict facoltativo che impone l'andatura (locomotion_hint, ground_mu_hint,
-        swing_height) per tutti i tratti, passato fino a movements.relative_move attraverso
-        navigate_to. Vuoto = andatura scelta tratto per tratto (select_mobility_params).
+    mobility_kwargs: optional dict forcing the gait (locomotion_hint, ground_mu_hint,
+        swing_height) for all legs, passed down to motion.relative_move through
+        navigate_to. Empty = gait chosen leg by leg (select_mobility_params).
 
-    COME E' FATTO. _prepara una volta (_prima_scansione, _dati_locali_nel_grafo,
-    _obiettivo_e_percorso, _azzera_contatori), poi _giro finche' una fase decide l'esito:
+    HOW IT IS MADE. _prepare once (_first_scan, _local_data_into_graph, _goal_and_path,
+    _reset_counters), then _loop_once until a phase decides the outcome:
 
-      _guardie              troppi giri, batteria bassa, caduta, robot fermo da troppo
-      _scansione_e_grafo    _scansione_fresca, _aggiorna_grafo, _ripianifica
-      _fronte_e_decisione   scorciatoia, fronte sicuro, decisions.decide_next_move:
-                            move / reached_node / arrived / wait / blocked
-      _rotazione            (move) non posso girarmi: _avanza_nel_cono, _arretra_per_ruotare,
-                            trappola, tratto scartato
-      _nodo_o_arrivo        (reached_node, arrived)
-      _attesa               (wait) _cambia_obiettivo_irraggiungibile, _ripianifica_subito,
-                            altrimenti riguardo da fermo
-      _blocco               (blocked) obiettivo da cambiare, trappola, tratto fuori per la
-                            missione, nuova strada o ritorno con GraphNav
-      _esegui_tratti        (move) _controlla_posa_d_arrivo, poi per ogni gamba
-                            _prepara_gamba e _cammina_tratto (_terreno_del_tratto,
-                            _muovi_e_registra, esito)
+      _guards                 too many turns, low battery, fall, robot still for too long
+      _scan_and_graph         _fresh_scan, _update_graph, _replan
+      _frontier_and_decision  shortcut, safe frontier, decisions.decide_next_move:
+                              move / reached_node / arrived / wait / blocked
+      _rotation               (move) cannot turn: _advance_in_cone, _back_up_to_turn,
+                              trap, leg discarded
+      _node_or_arrival        (reached_node, arrived)
+      _wait                   (wait) _repick_unreachable_goal, _replan_now,
+                              otherwise look again standing still
+      _block                  (blocked) goal to change, trap, leg out for the mission,
+                              new way or return with GraphNav
+      _execute_legs           (move) _check_arrival_pose, then for every leg
+                              _prepare_leg and _walk_leg (_leg_terrain,
+                              _move_and_record, outcome)
 
-    Azioni comuni alle fasi: _usa_percorso, _scarta_tratto (per ora / per il tentativo / per
-    la missione), _strada_fatta e _sosta, _ventaglio ed _esci_dalla_trappola,
-    _riscegli_obiettivo, _ritorno (GraphNav all'indietro, vedi _trap_backtrack).
+    Actions shared by the phases: _use_path, _drop_edge (for now / for the attempt / for
+    the mission), _walked_path and _stop_node_here, _escape_fan and _escape_trap,
+    _repick_goal, _go_back (GraphNav backwards, see _trap_backtrack).
     """
 
     def __init__(self, local_grid, global_grid, robot_state_client, command_client,
@@ -105,7 +105,7 @@ class CellAttempt:
         self.mobility_kwargs = mobility_kwargs
 
     def run(self):
-        """True se il robot finisce dentro la cella (o accettato appena fuori, vedi _fine)."""
+        """True if the robot ends up inside the cell (or accepted just outside, see _finish)."""
         if self._prepare() is FAILED:
             return False
 
@@ -118,7 +118,7 @@ class CellAttempt:
         return self._finish()
 
     def _loop_once(self):
-        """Un giro del ciclo di navigazione: le fasi in ordine, finche' una non decide l'esito."""
+        """One turn of the navigation loop: the phases in order, until one decides the outcome."""
         for phase in (self._guards, self._scan_and_graph, self._frontier_and_decision,
                      self._rotation, self._timings, self._node_or_arrival, self._wait,
                      self._block, self._execute_legs):
@@ -128,8 +128,8 @@ class CellAttempt:
         return CONTINUE
 
     def _prepare(self):
-        """Prima del ciclo: rialzo se caduto, prima scansione, mappe e grafo, punto obiettivo
-        e percorso, contatori del tentativo. FALLITO se non si puo' nemmeno partire."""
+        """Before the loop: get up if fallen, first scan, maps and graph, goal point and path,
+        attempt counters. FAILED if it cannot even start."""
         self.mobility_kwargs = self.mobility_kwargs or {}
 
         print(f"\n[ATTEMPT] Provo a entrare nella cella ({self.target_row},{self.target_col}) dalla posizione attuale...")
@@ -144,18 +144,18 @@ class CellAttempt:
         self._reset_counters()
 
     def _first_scan(self):
-        """Rialzo se caduto, prima scansione del tentativo, posa del robot, mappe globali
-        aggiornate e salvate. La scansione elaborata, o None se non arriva."""
-        # Il robot arriva qui da un altro movimento (navigazione fra celle, ritirata): se e'
-        # caduto nel frattempo si rialza prima di tutto. Solleva RobotFallenError se non puo'.
-        # Poi esce dal disco pericoloso ripercorrendo i propri passi: rialzato, e' ancora DENTRO
-        # il punto della caduta, e da li' ogni arco del PRM verrebbe scartato.
+        """Get up if fallen, first scan of the attempt, robot pose, global maps updated and
+        saved. The processed scan, or None if it does not arrive."""
+        # The robot gets here from another move (navigation between cells, retreat): if it
+        # fell in the meantime it gets up before anything else. Raises RobotFallenError if it cannot.
+        # Then it leaves the hazard disk by retracing its steps: once up, it is still INSIDE
+        # the spot of the fall, and from there every PRM edge would be discarded.
         if movements.check_and_recover_fall(self.robot_state_client, self.command_client,
                                    self.global_grid.global_occupancy_map, "all'inizio del tentativo") is not None:
             recovery.retreat_along_traveled_path(self.env, self.robot_state_client, self.command_client,
                                         mobility_kwargs=self.mobility_kwargs)
 
-        # 1. La scansione: i layer in una richiesta, poi (sotto) la loro elaborazione
+        # 1. The scan: the layers in one request, then (below) their processing
         scan = self.local_grid.fetch_scan(self.robot_state_client)
         if scan is None:
             print("[ERROR] Rilevamento griglie locali fallito.")
@@ -165,14 +165,14 @@ class CellAttempt:
         num_x, num_y, cell_size = scan.num_x, scan.num_y, scan.cell_size
 
         # =========================================================================
-        # MAPPE GLOBALI: create alla prima scansione, poi accumulate per tutta la missione
+        # GLOBAL MAPS: created at the first scan, then accumulated for the whole mission
         # =========================================================================
         if self.global_grid.global_occupancy_map is None:
             self.global_grid.global_occupancy_map = global_maps.GlobalGrid(resolution=cell_size)
             print("[MAP] Inizializzata nuova mappa di occupazione globale persistente.")
 
-        # Mappa globale delle altezze: stessa risoluzione nativa della griglia locale (nessuna
-        # riduzione), creata come quella di occupazione.
+        # Global height map: same native resolution as the local grid (no
+        # reduction), created like the occupancy one.
         if self.global_grid.global_terrain_map is None:
             self.global_grid.global_terrain_map = global_maps.GlobalTerrainGrid(resolution=cell_size)
             print("[MAP] Inizializzata nuova mappa globale persistente del terreno (altezza).")
@@ -187,22 +187,22 @@ class CellAttempt:
         quat = vision_tform_body.rotation
         self.robot_yaw = np.arctan2(2.0 * (quat.w * quat.z + quat.x * quat.y), 1.0 - 2.0 * (quat.y ** 2 + quat.z ** 2))
 
-        # 2. Impronta del corpo, terreno corretto (da qui in poi si usa solo terrain_real),
-        # pendenza e rugosita', maschera degli ostacoli
+        # 2. Body footprint, corrected terrain (from here on only terrain_real is used),
+        # slope and roughness, obstacle mask
         self.local_grid.process_scan(scan, self.robot_x, self.robot_y, self.robot_yaw,
                                 ground_label="scan-iniziale")
         self.footprint_mask_2d, terrain_real, is_valid = scan.footprint_mask, scan.terrain, scan.is_valid
         obstacle_mask = scan.obstacle_mask
 
-        # Aggiorna le mappe globali (occupazione e terreno) con i dati appena processati
+        # Update the global maps (occupancy and terrain) with the data just processed
         global_maps.fold_scan_into_global_maps(self.global_map, self.global_terrain_map, pts, terrain_real, obstacle_mask,
                                    is_valid, cells_obstacle_dist, (num_y, num_x),
                                    (self.robot_x, self.robot_y, self.robot_yaw))
 
-        # La mappa del terreno serve al PRM come ripiego per la pendenza
+        # The terrain map serves the PRM as a fallback for the slope
         self.prm_graph.set_global_terrain_map(self.global_terrain_map)
 
-        # Mappe globali su disco (.pkl), a ogni tentativo
+        # Global maps on disk (.pkl), at every attempt
         if self.mission_folder is not None:
             pkl_map_path = os.path.join(self.mission_folder, "global_occupancy_map.pkl")
             self.global_map.save_map(pkl_map_path)
@@ -212,7 +212,7 @@ class CellAttempt:
         return scan
 
     def _local_data_into_graph(self, scan):
-        """Terreno, pendenza e ostacoli della scansione nel PRM, poi aggiornamento degli archi."""
+        """Terrain, slope and obstacles of the scan into the PRM, then edge update."""
         pts, cells_obstacle_dist, valid_values = scan.pts, scan.od, scan.valid
         num_x, num_y, cell_size = scan.num_x, scan.num_y, scan.cell_size
         terrain_real, is_valid = scan.terrain, scan.is_valid
@@ -223,7 +223,7 @@ class CellAttempt:
         transforms_snapshot = main_proto.local_grid.transforms_snapshot
 
         # ================================================================== #
-        # DATI LOCALI NEL PRM: terreno, pendenza e rugosita' della scansione
+        # LOCAL DATA INTO THE PRM: terrain, slope and roughness of the scan
         # ================================================================== #
         local_x_min, local_x_max = pts[:, 0].min(), pts[:, 0].max()
         local_y_min, local_y_max = pts[:, 1].min(), pts[:, 1].max()
@@ -247,8 +247,8 @@ class CellAttempt:
             cell_size=cell_size
         )
 
-        # Gradiente e rugosita' dei nodi PRM dentro la griglia locale; quelli fuori tengono il
-        # valore che hanno (0.0 se non ne hanno ancora uno)
+        # Gradient and roughness of the PRM nodes inside the local grid; those outside keep the
+        # value they have (0.0 if they do not have one yet)
         for node_id, (nx, ny) in self.prm_graph.nodes.items():
             if local_x_min <= nx <= local_x_max and local_y_min <= ny <= local_y_max:
                 dx = nx - grid_origin_x
@@ -269,11 +269,11 @@ class CellAttempt:
                 if node_id not in self.prm_graph.node_roughness:
                     self.prm_graph.node_roughness[node_id] = 0.0
 
-        # La scansione appena fatta entra anche nello scarto preliminare degli archi
-        # (prm_graph.LIVE_PREFILTER_OD_M): alla costruzione la mappa globale non ha ancora
-        # confermato niente di questo posto, e gli archi che attraversano gli ostacoli appena
-        # visti resterebbero validi. Qui obstacle_distance e' quella grezza: la fotografia
-        # filtrata nasce nel ciclo di navigazione.
+        # The scan just made also goes into the preliminary edge discard
+        # (roadmap.LIVE_PREFILTER_OD_M): at build time the global map has not yet
+        # confirmed anything about this place, and the edges crossing the obstacles just
+        # seen would stay valid. Here obstacle_distance is the raw one: the filtered
+        # snapshot is born in the navigation loop.
         try:
             self.prm_graph.set_live_obstacles(
                 np.asarray(cells_obstacle_dist, dtype=np.float64).reshape((num_y, num_x)),
@@ -284,9 +284,9 @@ class CellAttempt:
             print(f"[ARCHI] Scansione non usabile per lo scarto preliminare ({e}).")
 
         t_build = time.perf_counter()
-        # ATTENZIONE AI NOMI: qui `self.prm_graph` e' l'istanza di PRM, non il modulo omonimo
-        # (importato come prm_graph_module). Le coppie candidate sono quelle del grafo di
-        # missione (vedi mission_graph.build_mission_prm); veti e pesi li calcola
+        # CAREFUL WITH THE NAMES: here `self.prm_graph` is the PRM instance, not the module of the
+        # same name (imported as prm_graph_module). The candidate pairs are those of the mission
+        # graph (see mission_graph.build_mission_prm); vetoes and weights are computed by
         # PRM._evaluate_and_add_edge.
         mission_graph.rebuild_prm_edges(self.prm_graph, self.global_map)
         timing_add('costruzione grafo', time.perf_counter() - t_build)
@@ -297,14 +297,14 @@ class CellAttempt:
             print(f"[ARCHI] {self.prm_graph.live_veto_last} archi scartati subito dalla scansione dal "
                   f"vivo (passano a meno di {prm_graph_module.LIVE_PREFILTER_OD_M:.2f} m da un "
                   f"ostacolo appena visto), prima della pendenza.")
-        # Un tentativo nuovo: le trappole del tentativo precedente non valgono piu' (vedi
-        # _trap_backtrack). Le penalita' sono uno strato separato dagli archi, quindi
-        # sopravvivono alle ricostruzioni DENTRO il tentativo.
+        # A new attempt: the traps of the previous attempt no longer apply (see
+        # _trap_backtrack). The penalties are a layer separate from the edges, so
+        # they survive the rebuilds WITHIN the attempt.
         self.prm_graph.clear_penalties_for_attempt()
 
     def _goal_and_path(self, scan):
-        """Nodo del robot, punto obiettivo nella cella, briciola di partenza e primo percorso.
-        FALLITO se nella cella non c'e' nessun punto obiettivo valido."""
+        """Robot node, goal point in the cell, starting breadcrumb and first path.
+        FAILED if there is no valid goal point in the cell."""
         pts, cells_obstacle_dist, valid_values = scan.pts, scan.od, scan.valid
         num_x, num_y, cell_size = scan.num_x, scan.num_y, scan.cell_size
         terrain_real, obstacle_mask = scan.terrain, scan.obstacle_mask
@@ -312,27 +312,27 @@ class CellAttempt:
         save_path = os.path.join(self.mission_folder,
                                  f"iteration_{self.iteration}_cell_{self.target_row}_{self.target_col}.png") if self.mission_folder else None
 
-        # Solo celle visitate + cella del robot + cella obiettivo (vedi PLAN_ONLY_EXPLORED_CELLS).
+        # Only visited cells + robot cell + goal cell (see PLAN_ONLY_EXPLORED_CELLS).
         mission_graph.restrict_planning_to_explored_cells(self.prm_graph, self.env, self.target_row, self.target_col,
                                              (self.robot_x, self.robot_y))
 
-        # --- Nodi di partenza e di arrivo: nodi ESISTENTI del grafo ---------------------------
-        # add_stop_node aggancia la posizione al nodo adatto invece di crearne uno. Il nodo del
-        # robot serve PRIMA della scelta dell'obiettivo: si sceglie fra i punti che il grafo
-        # collega al robot (vedi find_best_point_in_cell, criterio 2).
+        # --- Start and arrival nodes: EXISTING graph nodes ------------------------------------
+        # add_stop_node attaches the position to the suitable node instead of creating one. The
+        # robot node is needed BEFORE the goal choice: the choice is among the points the graph
+        # connects to the robot (see find_best_point_in_cell, criterion 2).
         self.robot_node_id = self.prm_graph.add_stop_node(
             self.robot_x, self.robot_y, self.global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M,
             label="partenza tentativo")
         self.prm_graph.set_robot_node(self.robot_node_id, 0.0)
 
 
-        # Ricerca del punto target e pianificazione
+        # Search for the target point and planning
         self.target_x, self.target_y, valid_samples, rejected_samples = goal.find_best_point_in_cell(
             self.robot_x, self.robot_y, self.env, self.target_row, self.target_col, pts, cells_obstacle_dist, self.sampler,
             global_map=self.global_map, reachable=self._reachable_from_robot)
 
-        # L'obiettivo di questo tentativo, per il recupero subito dopo un fallimento
-        # (vedi RECOVERY_SAME_GOAL_M nel ciclo principale).
+        # The goal of this attempt, for the recovery right after a failure
+        # (see RECOVERY_SAME_GOAL_M in the main loop).
         self.env._last_attempt_goal = (None if self.target_x is None or self.target_y is None
                                   else (float(self.target_x), float(self.target_y)))
         if self.target_x is None or self.target_y is None:
@@ -348,12 +348,12 @@ class CellAttempt:
             )
             return FAILED
 
-        # Briciola GraphNav del punto di partenza del tentativo: e' quello a cui serve poter
-        # tornare se la cella si rivela un vicolo cieco.
+        # GraphNav breadcrumb at the attempt's starting point: it is the one the robot needs to
+        # be able to go back to if the cell turns out to be a dead end.
         map_recording.graphnav_drop_breadcrumb(self.env, self.recordingInterface, self.robot_state_client, self.robot_node_id,
                                  self.target_row, self.target_col, force=True)
-        # L'obiettivo e' il centro o un nodo del reticolo (lo sceglie find_best_point_in_cell fra
-        # i punti del campionatore).
+        # The goal is the centre or a lattice node (find_best_point_in_cell chooses it among
+        # the sampler points).
         self.goal_id = self.prm_graph.add_stop_node(
             self.target_x, self.target_y, self.global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M,
             label=f"obiettivo cella ({self.target_row},{self.target_col})", is_robot=False)
@@ -391,67 +391,67 @@ class CellAttempt:
         return None
 
     def _reset_counters(self):
-        """Contatori e memorie del tentativo, prima del primo giro."""
+        """Counters and memories of the attempt, before the first turn."""
         # ===================================================================================
-        # CICLO DI NAVIGAZIONE CON IL FRONTE SICURO
+        # NAVIGATION LOOP WITH THE SAFE FRONTIER
         #
-        # A ogni giro: scansione fresca, aggiornamento mappe e PRM, eventuale ripianificazione,
-        # poi il FRONTE: fin dove il percorso e' confermato libero adesso. Il robot avanza
-        # fino a li' (meno meta' corpo e margine), lungo il percorso.
-        #   - il muso punta SEMPRE il prossimo punto: niente marcia di traverso; se la
-        #     rotazione non e' possibile si prova il cono, poi l'arretramento dritto (vedi
-        #     plan_cone_move e plan_straight_retreat);
-        #   - la rotazione si giudica sulle celle davvero spazzate (geometry.rotation_is_clear),
-        #     non sul cerchio circoscritto;
-        #   - se l'obiettivo risulta irraggiungibile sui dati freschi se ne sceglie un altro
-        #     nella cella, invece di aspettare e dichiarare un blocco (goal_still_reachable).
+        # At every turn: fresh scan, update of maps and PRM, replanning if needed,
+        # then the FRONTIER: how far the path is confirmed free now. The robot advances
+        # up to there (minus half a body and margin), along the path.
+        #   - the nose ALWAYS points at the next point: no sideways walking; if the
+        #     rotation is not possible the cone is tried, then the straight back-off (see
+        #     plan_cone_move and plan_straight_retreat);
+        #   - the rotation is judged on the cells really swept (geometry.rotation_is_clear),
+        #     not on the circumscribed circle;
+        #   - if the goal turns out unreachable on the fresh data another one in the cell is
+        #     chosen, instead of waiting and declaring a block (goal_still_reachable).
         # ===================================================================================
         self.replan_counter = 0
-        self.need_refresh = True        # primo giro del tentativo: vedi REFRESH A EVENTI
+        self.need_refresh = True        # first turn of the attempt: see EVENT REFRESH
         self.no_progress = 0
         self.block_replans = 0
         self.loop_iter = 0
-        self.rotation_fails = {}     # tratto -> quante volte la rotazione verso di esso e' stata rifiutata
-        self.rotation_discards = 0   # scarti per rifiuto di rotazione in QUESTO tentativo
-        self.best_goal_dist = float('inf')   # per azzerare i rifiuti solo sui PROGRESSI
-        self.idle_loops = 0          # giri consecutivi senza spostarsi (vedi MAX_IDLE_LOOPS)
-        self.last_xy = None          # posizione al giro precedente, per contare i giri a vuoto
-        self.rotation_fail_xy = {}   # tratto -> posizione del robot all'ultimo rifiuto
-        self.retreats_in_a_row = 0   # arretramenti consecutivi: azzerato da un avanzamento vero
-        self.early_replans = 0       # ripianificazioni alla prima cella bloccante (ramo 'wait')
-        self.arrival_refusals = 0    # passi rifiutati perche' la posa d'arrivo non ha uscite
-        self.early_replanned_edges = set()   # tratti gia' scartati da [SUBITO] in questo tentativo
-        self.goal_repicks = 0        # quante volte si e' riscelto il punto obiettivo
-        self.tried_goals = []        # punti obiettivo gia' provati e risultati irraggiungibili
-        self.arrived_near_goal = False   # arrivo accettato con il robot appena fuori dalla cella
-        self.trap_state = {'n': 0}   # ritorni indietro in QUESTO tentativo, mai azzerato (vedi _trap_backtrack)
+        self.rotation_fails = {}     # leg -> how many times the rotation towards it was refused
+        self.rotation_discards = 0   # discards for rotation refusal in THIS attempt
+        self.best_goal_dist = float('inf')   # to reset the refusals only on PROGRESS
+        self.idle_loops = 0          # consecutive turns without moving (see MAX_IDLE_LOOPS)
+        self.last_xy = None          # position at the previous turn, to count the idle turns
+        self.rotation_fail_xy = {}   # leg -> robot position at the last refusal
+        self.retreats_in_a_row = 0   # consecutive back-offs: reset by a real advance
+        self.early_replans = 0       # replans at the first blocking cell ('wait' branch)
+        self.arrival_refusals = 0    # steps refused because the arrival pose has no exits
+        self.early_replanned_edges = set()   # legs already discarded by [SUBITO] in this attempt
+        self.goal_repicks = 0        # how many times the goal point was chosen again
+        self.tried_goals = []        # goal points already tried and found unreachable
+        self.arrived_near_goal = False   # arrival accepted with the robot just outside the cell
+        self.trap_state = {'n': 0}   # goings back in THIS attempt, never reset (see _trap_backtrack)
 
     def _reachable_from_robot(self, px, py):
         nid = self.prm_graph.anchor_node(px, py, self.global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M)
         return nid is not None and self.prm_graph.find_path_dijkstra(self.robot_node_id, nid) is not None
 
     def _waypoints_from_ids(self, ids):
-        """[(node_id, x, y), ...] senza il primo nodo (la posizione del robot)."""
+        """[(node_id, x, y), ...] without the first node (the robot position)."""
         out = []
         for nid in ids[1:]:
             nx, ny = self.prm_graph.get_node_position(nid)
             out.append((nid, nx, ny))
         return out
 
-    # --- Azioni comuni alle decisioni ----------------------------------------------------
+    # --- Actions shared by the decisions ---------------------------------------------------
     def _use_path(self, ids):
-        """Il percorso diventa ids (dal nodo del robot in poi); la conferma di un blocco
-        riparte da zero."""
+        """The path becomes ids (from the robot node on); the confirmation of a block starts
+        again from zero."""
         self.path_waypoints = self._waypoints_from_ids(ids)
         self.full_path_coords = [self.prm_graph.get_node_position(nid) for nid in ids]
         self.no_progress = 0
 
     def _drop_edge(self, a, b, duration):
-        """Toglie il tratto a-b dal grafo. durata:
-          'ora'       -- fino al prossimo refresh, che lo rimette se i dati dicono che e' libero
-                         (vedi prm_graph.mark_edge_blocked_soft);
-          'tentativo' -- per il resto del tentativo (penalita' del tentativo);
-          'missione'  -- per sempre: blocco confermato da fermo o guasto fisico."""
+        """Remove leg a-b from the graph. duration:
+          'ora'       -- until the next refresh, which puts it back if the data says it is free
+                         (see roadmap.mark_edge_blocked_soft);
+          'tentativo' -- for the rest of the attempt (attempt penalty);
+          'missione'  -- forever: block confirmed while still or physical failure."""
         if duration == 'missione':
             self.prm_graph.mark_edge_invalid(a, b)
             return
@@ -460,8 +460,8 @@ class CellAttempt:
             self.prm_graph.edge_penalty_persistent[(min(a, b), max(a, b))] = self.prm_graph._ATTEMPT_MARK
 
     def _walked_path(self, x0, y0):
-        """Il tratto camminato da (x0, y0) alla posizione di adesso, per la ritirata. Restituisce
-        la posizione di adesso."""
+        """The leg walked from (x0, y0) to the current position, for the retreat. Returns the
+        current position."""
         ax, ay, _, _ = spotUtils.getPosition(self.robot_state_client)
         if not hasattr(self.env, '_traveled_arcs'):
             self.env._traveled_arcs = []
@@ -469,21 +469,21 @@ class CellAttempt:
         return ax, ay
 
     def _stop_node_here(self, x, y, label):
-        """La posizione (x, y) diventa il nodo del robot (vedi add_stop_node)."""
+        """The position (x, y) becomes the robot node (see add_stop_node)."""
         self.robot_node_id = self.prm_graph.add_stop_node(
             x, y, self.global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M, label=label)
         self.prm_graph.set_robot_node(self.robot_node_id, 0.0)
 
     def _escape_fan(self):
-        """Le 24 direzioni d'uscita da qui (vedi decisions.is_trapped): (trappola?,
-        direzioni utilizzabili, totale, testo per il log)."""
+        """The 24 exit directions from here (see decisions.is_trapped): (trapped?,
+        usable directions, total, text for the log)."""
         trapped, fan = decisions.is_trapped((self.robot_x, self.robot_y), self.robot_yaw, self.snap)
         n_us, fan_txt = decisions.describe_escape_fan(fan)
         return trapped, n_us, len(fan), fan_txt
 
     def _escape_trap(self, edge_ab, message):
-        """Nessuna direzione d'uscita: scartare archi non serve, il problema e' il posto. Si
-        torna indietro con GraphNav (CONTINUA) o il tentativo finisce (FALLITO)."""
+        """No exit direction: discarding edges is useless, the problem is the place. Go back
+        with GraphNav (CONTINUE) or the attempt ends (FAILED)."""
         MISSION_STATS['traps_detected'] += 1
         print(message)
         if self._go_back(edge_ab, f"dal nodo {self.robot_node_id}"):
@@ -491,11 +491,11 @@ class CellAttempt:
         return FAILED
 
     def _go_back(self, block_arc, label, skip_if_graph_cannot_help=False):
-        """Ritorno con GraphNav (vedi _trap_backtrack) invece che a zampe all'indietro: si torna
-        di un waypoint, si riprova a pianificare da li', e cosi' via fino a
-        GRAPHNAV_MAX_BACKTRACK_HOPS; la ritirata a zampe resta dentro come ultima rete.
-        True se si riparte con un percorso nuovo (contatori del giro azzerati), False se il
-        tentativo deve finire."""
+        """Return with GraphNav (see _trap_backtrack) instead of walking backwards: go back one
+        waypoint, try to plan again from there, and so on up to
+        GRAPHNAV_MAX_BACKTRACK_HOPS; the walked retreat stays inside as the last net.
+        True if it starts again with a new path (turn counters reset), False if the
+        attempt must end."""
         if self.verification_tracker is not None:
             self.verification_tracker.clear_path()
         esc = recovery._trap_backtrack(
@@ -514,9 +514,9 @@ class CellAttempt:
         return True
 
     def _frontier_stops_at_goal(self):
-        """Il fronte si ferma per un ostacolo (o rugosita', pendenza) a ridosso dell'obiettivo
-        (entro REFUSED_GOAL_BLOCK_M) o oltre la fine del percorso, nel prolungamento per il
-        muso: nessun percorso verso questo obiettivo puo' passare, il problema e' il punto."""
+        """The frontier stops for an obstacle (or roughness, slope) right next to the goal
+        (within REFUSED_GOAL_BLOCK_M) or beyond the end of the path, in the extension for the
+        nose: no path to this goal can pass, the problem is the point."""
         if self.frontier['reason'] not in ('ostacolo', 'rugosita', 'pendenza'):
             return False
         sx, sy = self.frontier['stop_xy']
@@ -525,23 +525,23 @@ class CellAttempt:
 
     def _repick_goal(self, why, exclusion_reason):
         """
-        Esclude l'obiettivo corrente (per la missione, vedi _refuse_goal) e ne sceglie un altro
-        nella cella, raggiungibile dal robot. CONTINUA se c'e' un nuovo obiettivo con un
-        percorso; None se non ce n'e' (l'obiettivo resta escluso, il chiamante prosegue).
-        Al massimo MAX_BLOCK_REPLANS volte per tentativo.
+        Exclude the current goal (for the mission, see _refuse_goal) and choose another one
+        in the cell, reachable from the robot. CONTINUE if there is a new goal with a path;
+        None if there is none (the goal stays excluded, the caller carries on).
+        At most MAX_BLOCK_REPLANS times per attempt.
         """
         self.goal_repicks += 1
-        self.need_refresh = True          # piano cambiato: vedi REFRESH A EVENTI
+        self.need_refresh = True          # plan changed: see EVENT REFRESH
         MISSION_STATS['goal_repicks'] += 1
         print(f"[TARGET] {why} Ne cerco un altro nella cella "
               f"({self.goal_repicks}/{P.MAX_BLOCK_REPLANS}).")
         self.tried_goals.append((float(self.target_x), float(self.target_y)))
         goal._refuse_goal(self.env, self.target_row, self.target_col, self.target_x, self.target_y,
                      exclusion_reason)
-        # Fino a GOAL_REPICK_CANDIDATES candidati: il primo puo' non avere un percorso nel grafo.
-        # Se nessuno ce l'ha, obiettivo e percorso tornano quelli di prima (escluso per le scelte
-        # future, ma coerente con il percorso): prima restava il NUOVO obiettivo con il percorso
-        # VECCHIO, verso il punto appena escluso.
+        # Up to GOAL_REPICK_CANDIDATES candidates: the first one may not have a path in the graph.
+        # If none has one, goal and path go back to the previous ones (excluded for future
+        # choices, but consistent with the path): before, the NEW goal remained with the OLD
+        # path, towards the point just excluded.
         old = (self.target_x, self.target_y, self.goal_id)
         new_ids = None
         for _k in range(P.GOAL_REPICK_CANDIDATES):
@@ -567,14 +567,14 @@ class CellAttempt:
             self.target_x, self.target_y, self.goal_id = old
             print("[TARGET] Nessun nuovo obiettivo con un percorso: resto sul piano di prima.")
             return None
-        self.best_goal_dist = float('inf')    # nuovo obiettivo: progressi da capo
+        self.best_goal_dist = float('inf')    # new goal: progress from scratch
         self._use_path(new_ids)
         print(f"[REPLAN] Verso il nuovo obiettivo ({self.target_x:.2f}, "
               f"{self.target_y:.2f}): {len(self.path_waypoints)} waypoint.")
         return CONTINUE
 
     def _guards(self):
-        """Limiti del ciclo: troppi giri (MAX_LOOP_ITERATIONS), caduta, troppi giri fermi."""
+        """Loop limits: too many turns (MAX_LOOP_ITERATIONS), fall, too many still turns."""
         self.loop_iter += 1
         self.t_iter = time.perf_counter()
         if self.loop_iter > P.MAX_LOOP_ITERATIONS:
@@ -584,8 +584,8 @@ class CellAttempt:
                 self.verification_tracker.clear_path()
             return FAILED
 
-        # Batteria sotto soglia: il tentativo si ferma qui, la missione chiude e rientra
-        # (vedi Missione.esplora).
+        # Battery below threshold: the attempt stops here, the mission closes and returns
+        # (see Mission.explore).
         if _battery_return_due():
             print(f"[BATTERIA] Interrompo il tentativo sulla cella ({self.target_row},"
                   f"{self.target_col}) per il rientro a batteria bassa.")
@@ -606,17 +606,17 @@ class CellAttempt:
         self.robot_yaw = np.arctan2(2.0 * (robot_quat.w * robot_quat.z + robot_quat.x * robot_quat.y),
                                1.0 - 2.0 * (robot_quat.y ** 2 + robot_quat.z ** 2))
 
-        # --- Guardia generica anti-stallo: quanti giri di fila senza spostarsi.
+        # --- Generic anti-stall guard: how many turns in a row without moving.
         if self.last_xy is not None and float(np.hypot(self.robot_x - self.last_xy[0], self.robot_y - self.last_xy[1])) < P.IDLE_MOVE_M:
             self.idle_loops += 1
         else:
             self.idle_loops = 0
-        # I rifiuti di rotazione si azzerano solo quando il robot si AVVICINA davvero
-        # all'obiettivo (20 cm meglio del meglio raggiunto finora), non quando si sposta e
-        # basta: non potendo girarsi, il pianificatore puo' portare il robot un nodo piu' in
-        # la' dalla parte sbagliata e riprovare da li', e cosi' via, allontanandosi con il
-        # contatore sempre a zero (test_e2e_loop.py, scenario S11). Muoversi non e' fare
-        # progressi.
+        # The rotation refusals are reset only when the robot really gets CLOSER
+        # to the goal (20 cm better than the best reached so far), not when it just
+        # moves: unable to turn, the planner can take the robot one node further
+        # on the wrong side and try again from there, and so on, moving away with the
+        # counter always at zero (test_e2e_loop.py, scenario S11). Moving is not making
+        # progress.
         d_goal_now = float(np.hypot(self.robot_x - self.target_x, self.robot_y - self.target_y))
         if d_goal_now < self.best_goal_dist - 0.20:
             self.best_goal_dist = d_goal_now
@@ -633,8 +633,8 @@ class CellAttempt:
             return FAILED
 
     def _scan_and_graph(self):
-        """Scansione fresca, mappe globali, dati locali nel PRM ed eventuale
-        ripianificazione (REFRESH A EVENTI); si esce dal ciclo se non c'e' piu' percorso."""
+        """Fresh scan, global maps, local data into the PRM and replanning if needed (EVENT
+        REFRESH); the loop is left if there is no path any more."""
         outcome = self._fresh_scan()
         if outcome is not None:
             return outcome
@@ -645,9 +645,9 @@ class CellAttempt:
             return STOP
 
     def _fresh_scan(self):
-        """Scansione, elaborazione, mappe globali, dati locali nel PRM, fotografia per il
-        fronte e mappa dello spazio libero. FALLITO se la scansione non arriva."""
-        # 1. SCANSIONE FRESCA, prima di tutto il resto
+        """Scan, processing, global maps, local data into the PRM, snapshot for the frontier
+        and free-space map. FAILED if the scan does not arrive."""
+        # 1. FRESH SCAN, before anything else
         scan = self.local_grid.fetch_scan(self.robot_state_client)
         if scan is None:
             print("[ERROR] Rilevamento locale fallito durante il tracking. Arresto precauzionale.")
@@ -675,14 +675,14 @@ class CellAttempt:
             self.is_valid_up, self.cells_obs_up, (self.num_y_up, self.num_x_up), (self.robot_x, self.robot_y, self.robot_yaw))
         self.t_maps = time.perf_counter()
 
-        # 2. Dati locali freschi nel PRM, poi eventuale ripianificazione dal nodo attuale
+        # 2. Fresh local data into the PRM, then replanning from the current node if needed
         grad_up_2d = self.grad_up.reshape((self.num_y_up, self.num_x_up))
         self.rough_up_2d = self.rough_up.reshape((self.num_y_up, self.num_x_up))
         self.terrain_up_2d = self.terrain_real_up.reshape((self.num_y_up, self.num_x_up))
 
-        # I dati locali si iniettano sempre: costa niente (salva i riferimenti agli array) e
-        # servono comunque a sample_terrain_between_points per il gait del tratto che si sta
-        # per percorrere.
+        # The local data is always injected: it costs nothing (it stores the array references) and
+        # it is needed anyway by sample_terrain_between_points for the gait of the leg about to
+        # be travelled.
         self.prm_graph.update_local_grid_data(
             grad_values_2d=grad_up_2d,
             rough_values_2d=self.rough_up_2d,
@@ -693,46 +693,46 @@ class CellAttempt:
             cell_size=self.cell_size_up
         )
 
-        # Fotografia della scansione appena fatta: serve gia' qui -- allo scarto preliminare
-        # degli archi nel refresh (vedi prm_graph.LIVE_PREFILTER_OD_M), a quello dei nodi
-        # negli ostacoli -- e poi al fronte sicuro. Va creata UNA volta sola per scansione:
-        # make_grid_snapshot aggiorna anche il filtro temporale degli ostacoli.
+        # Snapshot of the scan just made: it is needed already here -- by the preliminary edge
+        # discard in the refresh (see roadmap.LIVE_PREFILTER_OD_M), by that of the nodes
+        # in obstacles -- and then by the safe frontier. It must be created ONLY ONCE per scan:
+        # make_grid_snapshot also updates the temporal obstacle filter.
         self.snap = safe_frontier.make_grid_snapshot(
             self.cells_obs_up, self.rough_up, self.is_valid_up, self.valid_up, self.terrain_real_up,
             self.num_x_up, self.num_y_up, self.grid_origin_x_up, self.grid_origin_y_up, self.cell_size_up,
             self.robot_x, self.robot_y, unwritten=self.unwritten_up, robot_yaw=self.robot_yaw)
 
-        # Mappa dello spazio libero: QUI, non insieme a global_map.update, perche' serve la
-        # obstacle_distance filtrata che vive nella fotografia (vedi global_maps.update_clearance_map).
-        # Si alimenta solo dal ciclo di navigazione, cosi' tutte le osservazioni passano per
-        # lo stesso filtro.
+        # Free-space map: HERE, not together with global_map.update, because it needs the
+        # filtered obstacle_distance that lives in the snapshot (see global_maps.update_clearance_map).
+        # It is fed only by the navigation loop, so all observations go through
+        # the same filter.
         global_maps.update_clearance_map(self.global_map, self.pts_up, self.snap, self.is_valid_up, self.unwritten_up,
                               _gm_core_up, (self.robot_x, self.robot_y))
 
     def _update_graph(self):
-        """Archi rivalutati sui dati nuovi (solo dopo un movimento o un evento), nodi negli
-        ostacoli fuori, rifiuti di rotazione ancora validi. I nodi toccati dal refresh."""
-        # Lo scarto preliminare degli archi legge la obstacle_distance FILTRATA
-        # (mediana su 3 scansioni + isteresi), la stessa del fronte.
+        """Edges re-evaluated on the new data (only after a move or an event), nodes in
+        obstacles out, rotation refusals still valid. The nodes touched by the refresh."""
+        # The preliminary edge discard reads the FILTERED obstacle_distance
+        # (median over 3 scans + hysteresis), the same as the frontier.
         self.prm_graph.set_live_obstacles(self.snap.obstacle_dist, self.snap.seen, self.snap.origin_x, self.snap.origin_y,
                                      self.snap.cell_size, self.robot_x, self.robot_y, self.robot_yaw)
 
-        # --- REFRESH A EVENTI ---------------------------------------------------------
-        # Pesi e pendenze degli archi cambiano solo quando cambiano i dati sotto di essi,
-        # cioe' quando la finestra si muove: a robot fermo un refresh ricalcolerebbe gli
-        # stessi numeri, e circa meta' delle scansioni sono riscansioni da fermo (conferme
-        # di blocco, giri senza movimento).
-        # Si rinfresca solo quando serve: alla fine di un MOVIMENTO (completato,
-        # interrotto o fallito, anche se ha attraversato piu' nodi e archi del PRM) e dopo
-        # gli EVENTI che cambiano il piano (blocco confermato, arco scartato,
-        # ripianificazione, obiettivo riscelto, ritorno con GraphNav, caduta).
-        # QUESTO NON TOCCA LA SICUREZZA: la rete di protezione non sono i veti del grafo ma
-        # il FRONTE SICURO, che si ricalcola da zero a ogni scansione (0.5 ms) e a ~5 Hz
-        # durante il movimento nel thread. Rimandare il refresh ritarda solo il momento in
-        # cui il PIANIFICATORE viene a sapere di un ostacolo nuovo; se il robot e' fermo non
-        # c'e' nulla di nuovo da sapere, e se qualcosa entra davvero nel campo il fronte si
-        # accorcia, la decisione diventa 'wait' o 'blocked' -- che sono eventi, quindi il
-        # refresh scatta comunque. Il caso scoperto si richiude da solo.
+        # --- EVENT REFRESH -------------------------------------------------------------
+        # Edge weights and slopes change only when the data under them changes,
+        # i.e. when the window moves: with the robot still a refresh would recompute the
+        # same numbers, and about half the scans are rescans while still (block
+        # confirmations, turns without movement).
+        # It refreshes only when needed: at the end of a MOVE (completed,
+        # interrupted or failed, even if it crossed several PRM nodes and edges) and after
+        # the EVENTS that change the plan (confirmed block, edge discarded,
+        # replan, goal chosen again, return with GraphNav, fall).
+        # THIS DOES NOT AFFECT SAFETY: the protection net is not the graph vetoes but
+        # the SAFE FRONTIER, which is recomputed from scratch at every scan (0.5 ms) and at ~5 Hz
+        # during the move in the thread. Postponing the refresh only delays the moment
+        # the PLANNER learns of a new obstacle; if the robot is still there is
+        # nothing new to learn, and if something really enters the field the frontier gets
+        # shorter, the decision becomes 'wait' or 'blocked' -- which are events, so the
+        # refresh triggers anyway. The uncovered case closes by itself.
         if self.need_refresh or getattr(self.prm_graph, 'needs_refresh', False):
             self.prm_graph.needs_refresh = False
             touched_nodes = self.prm_graph.refresh_local_edge_weights(
@@ -747,13 +747,13 @@ class CellAttempt:
                       f"({self.prm_graph.live_veto_last} rivalutati, {self.prm_graph.live_prune_last} "
                       f"oltre il raggio di refresh), prima della pendenza.")
         else:
-            # Nessun dato nuovo sotto gli archi: si tengono i pesi del giro precedente e
-            # non si ripianifica (il blocco sotto gira solo se touched_nodes non e' vuoto).
+            # No new data under the edges: the weights of the previous turn are kept and
+            # there is no replan (the block below runs only if touched_nodes is not empty).
             touched_nodes = set()
             MISSION_STATS['prm_refresh_skipped'] += 1
 
 
-        # Nodi DENTRO gli ostacoli: fuori dal grafo (vedi prune_prm_nodes_in_obstacles).
+        # Nodes INSIDE obstacles: out of the graph (see prune_prm_nodes_in_obstacles).
         pruned_nodes = safe_frontier.prune_prm_nodes_in_obstacles(self.prm_graph, self.snap)
         if pruned_nodes:
             MISSION_STATS['nodes_pruned'] += len(pruned_nodes)
@@ -761,12 +761,12 @@ class CellAttempt:
                   f"{P.PRM_NODE_MIN_CLEARANCE_M:.2f} m di spazio libero dove li vediamo "
                   f"(primi: {pruned_nodes[:8]}).")
 
-        # Archi gia' rifiutati per rotazione DA QUESTO NODO: restano fuori finche' il robot
-        # non si sposta. Lo scarto e' soft, quindi refresh_local_edge_weights li rimetterebbe
-        # in gioco a ogni giro, e il robot potrebbe restare fermo alternando due archi
-        # rifiutati senza mai arrivare alla ritirata. Il robot puo' restare agganciato allo
-        # stesso nodo anche dopo essersi spostato, quindi lo scarto vale solo finche' il robot
-        # e' dove la rotazione e' stata rifiutata.
+        # Edges already refused for rotation FROM THIS NODE: they stay out until the robot
+        # moves. The discard is soft, so refresh_local_edge_weights would put them back
+        # into play at every turn, and the robot could stay still alternating two refused
+        # edges without ever getting to the retreat. The robot can stay attached to the
+        # same node even after moving, so the discard holds only while the robot
+        # is where the rotation was refused.
         for (from_id, to_id), n_fails in self.rotation_fails.items():
             fx, fy = self.rotation_fail_xy.get((from_id, to_id), (self.robot_x, self.robot_y))
             if (from_id == self.robot_node_id and n_fails > 0
@@ -775,9 +775,9 @@ class CellAttempt:
         return touched_nodes
 
     def _replan(self, touched_nodes):
-        """Dijkstra dal nodo del robot all'obiettivo sul grafo aggiornato; il percorso cambia
-        solo se il nuovo costa almeno il 10% in meno. Senza percorso, nuovo obiettivo se e'
-        isolato l'obiettivo (REPICK_ON_REPLAN_FAIL)."""
+        """Dijkstra from the robot node to the goal on the updated graph; the path changes
+        only if the new one costs at least 10% less. Without a path, new goal if the goal is
+        the one isolated (REPICK_ON_REPLAN_FAIL)."""
         current_plan_ids = [self.robot_node_id] + [w[0] for w in self.path_waypoints]
         chosen_path_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id,
                                                        current_path_ids=current_plan_ids, margin=0.10)
@@ -786,9 +786,9 @@ class CellAttempt:
             n_free = self.prm_graph.reachable_count(self.robot_node_id, P.REPLAN_FAIL_ROBOT_FREE_NODES)
             if (P.REPICK_ON_REPLAN_FAIL and self.goal_repicks < P.MAX_BLOCK_REPLANS
                     and n_free >= P.REPLAN_FAIL_ROBOT_FREE_NODES):
-                # Dal robot il grafo va ancora da qualche parte: e' l'obiettivo a essere
-                # rimasto isolato. Se ne cerca subito un altro con un percorso; se non
-                # c'e', resta il piano di prima come sotto.
+                # From the robot the graph still goes somewhere: it is the goal that has been
+                # left isolated. Another one with a path is searched at once; if there is
+                # none, the previous plan stays as below.
                 MISSION_STATS['replan_fail_repicks'] = MISSION_STATS.get('replan_fail_repicks', 0) + 1
                 self._repick_goal(
                     f"Ripianificazione fallita: nessun percorso da {self.robot_node_id} all'obiettivo "
@@ -818,7 +818,7 @@ class CellAttempt:
                 save_path=replan_save_path, prm_graph=self.prm_graph, chosen_path=self.full_path_coords,
                 cells_obstacle_dist=self.cells_obs_up, valid_values=self.valid_up,
                 grad_values=self.grad_up, rough_values=self.rough_up,
-                include_diagnostics=False  # leggero: vista principale e mappa globale
+                include_diagnostics=False  # light: main view and global map
             )
         else:
             print(f"[REPLAN STABILE] Percorso invariato da {self.robot_node_id} a {self.goal_id} "
@@ -826,12 +826,12 @@ class CellAttempt:
                   f"supera la soglia di stabilita'. Proseguo sul piano corrente.")
 
     def _frontier_and_decision(self):
-        """Scorciatoia, fronte sicuro sul percorso e decisione (decisions.decide_next_move):
-        muoversi, nodo raggiunto, arrivati, aspettare o blocco confermato."""
+        """Shortcut, safe frontier on the path and decision (decisions.decide_next_move):
+        move, node reached, arrived, wait or confirmed block."""
         self.t_prm = time.perf_counter()
 
-        # 3. FRONTE SICURO sulla scansione appena fatta ---------------------------------
-        # La scorciatoia rispetta gli archi gia' scartati: vedi shortcut_index.
+        # 3. SAFE FRONTIER on the scan just made ---------------------------------------
+        # The shortcut respects the edges already discarded: see shortcut_index.
         k_short = decisions.shortcut_index((self.robot_x, self.robot_y), self.path_waypoints, self.snap, self.global_map,
                                  prm=self.prm_graph, robot_node_id=self.robot_node_id)
         if k_short > 0:
@@ -850,9 +850,9 @@ class CellAttempt:
 
         in_target_cell = (tuple(int(v) for v in self.env.get_cell_from_world(self.robot_x, self.robot_y))
                           == (int(self.target_row), int(self.target_col)))
-        # Appena fuori dalla cella vale come dentro, per l'arrivo per tolleranza (vedi
-        # ARRIVAL_OUTSIDE_CELL_M). Il 22-10 16:04: "Mancano 0.06 m ... ancora fuori dalla
-        # cella (2,7)", con il robot fuori di 0.01 m.
+        # Just outside the cell counts as inside, for the arrival by tolerance (see
+        # ARRIVAL_OUTSIDE_CELL_M). On 22-10 16:04: "Mancano 0.06 m ... ancora fuori dalla
+        # cella (2,7)", with the robot outside by 0.01 m.
         robot_border = environmentMap.cell_border_distance(self.env, self.target_row, self.target_col, self.robot_x, self.robot_y)
         near_goal = (not in_target_cell and robot_border is not None
                      and -robot_border <= P.ARRIVAL_OUTSIDE_CELL_M)
@@ -877,17 +877,17 @@ class CellAttempt:
                   f"({self.target_row},{self.target_col}): non vale come arrivo, proseguo come per un "
                   f"fronte bloccato.")
         self.next_node_id, next_x, next_y = self.path_waypoints[0]
-        self.keep_heading = False     # sempre False (niente traverso): resta nei dati salvati e in navigate_to
+        self.keep_heading = False     # always False (no sideways): it stays in the saved data and in navigate_to
 
-        # Il pacchetto si salva qui, prima delle fasi che possono chiudere il giro (rotazione,
-        # attesa, blocco): altrimenti quelle scansioni non finirebbero su disco.
+        # The bundle is saved here, before the phases that can close the turn (rotation,
+        # wait, block): otherwise those scans would not end up on disk.
         self._save_scan_bundle()
 
     def _save_scan_bundle(self):
-        """Tutto quello che serve a rivedere questa scansione dopo (scans/*.npz): layer della
-        griglia, fotografia filtrata, percorso, fronte e decisione. Vedi SAVE_SCAN_BUNDLES."""
-        # Un rifiuto di rotazione si ricalcola offline da obstacle_distance, robot_xyz,
-        # robot_yaw e decision_target.
+        """Everything needed to review this scan afterwards (scans/*.npz): grid layers,
+        filtered snapshot, path, frontier and decision. See SAVE_SCAN_BUNDLES."""
+        # A rotation refusal can be recomputed offline from obstacle_distance, robot_xyz,
+        # robot_yaw and decision_target.
         if P.SAVE_SCAN_BUNDLES and self.mission_folder is not None:
             gf = self.local_grid.last_ground_filter
             shape_up = (self.num_y_up, self.num_x_up)
@@ -907,11 +907,11 @@ class CellAttempt:
                 terrain_raw=np.asarray(self.terrain_up, dtype=np.float32).reshape(shape_up),
                 terrain_valid_raw=np.asarray(self.valid_up, dtype=np.float32).reshape(shape_up),
                 obstacle_distance=np.asarray(self.cells_obs_up, dtype=np.float32).reshape(shape_up),
-                # Il layer su cui il fronte DECIDE (mediana sulle ultime letture + isteresi,
-                # vedi safe_frontier._ObstacleHistory) e la maschera del latch. Senza questi
-                # due un rigioco offline non puo' riprodurre i blocchi che nascono dalle
-                # letture del thread durante il movimento. Stesso orientamento degli altri:
-                # (num_y, num_x), riga = y.
+                # The layer the frontier DECIDES on (median over the last readings + hysteresis,
+                # see safe_frontier._ObstacleHistory) and the latch mask. Without these
+                # two an offline replay cannot reproduce the blocks that come from the
+                # thread's readings during the move. Same orientation as the others:
+                # (num_y, num_x), row = y.
                 obstacle_distance_filtered=np.asarray(self.snap.obstacle_dist, dtype=np.float32),
                 blocked_latch=(np.zeros(shape_up, bool) if self.snap.blocked_latch is None
                                else np.asarray(self.snap.blocked_latch, dtype=bool)),
@@ -945,13 +945,13 @@ class CellAttempt:
             MISSION_STATS['scan_bundles'] += 1
 
     def _rotation(self):
-        """Se il passo deciso richiede di girarsi dove non si puo': avanzare nel cono,
-        arretrare dritti, riconoscere la trappola o scartare il tratto."""
-        # 4. ROTAZIONE -------------------------------------------------------------------
-        # Il muso punta SEMPRE il punto da raggiungere. Se la rotazione non e' possibile NON
-        # si cammina di traverso (vedi ROTAZIONE E ARRETRAMENTO in parametri.py). Nell'ordine:
-        # avanzare dentro il cono di rotazione possibile, arretrare dritti se da li' la
-        # rotazione diventa possibile, riconoscere una trappola, scartare il tratto.
+        """If the decided step requires turning where it cannot: advance in the cone, back up
+        straight, recognize the trap or discard the leg."""
+        # 4. ROTATION -------------------------------------------------------------------------
+        # The nose ALWAYS points at the point to reach. If the rotation is not possible it does
+        # NOT walk sideways (see ROTATION AND BACK-OFF in config.py). In order:
+        # advance inside the possible rotation cone, back up straight if from there the
+        # rotation becomes possible, recognize a trap, discard the leg.
         if self.decision['kind'] == 'move':
             rot = decisions.rotation_plan(self.robot_yaw, (self.robot_x, self.robot_y), self.decision['target'],
                                 self.frontier['od_robot'], snap=self.snap)
@@ -974,9 +974,9 @@ class CellAttempt:
                 if outcome is not None:
                     return outcome
 
-                # Ne' il cono ne' l'arretramento: e' una trappola o solo un arco sbagliato?
-                # Se e' una trappola non ha senso scartare archi uno dopo l'altro: si torna
-                # indietro subito.
+                # Neither the cone nor the back-off: is it a trap or just a wrong edge?
+                # If it is a trap it makes no sense to discard edges one after the other: go back
+                # at once.
                 trapped_rot, n_us_r, n_fan_r, fan_txt_r = self._escape_fan()
                 if trapped_rot:
                     return self._escape_trap(
@@ -987,7 +987,7 @@ class CellAttempt:
                         f"tratto da cui sono venuto.")
                 print(f"[ROTAZIONE] Direzioni utilizzabili da qui: {n_us_r}/{n_fan_r} "
                       f"({fan_txt_r}).")
-                # Limite per TENTATIVO, non per coppia di nodi (vedi MAX_ROTATION_DISCARDS).
+                # Limit per ATTEMPT, not per pair of nodes (see MAX_ROTATION_DISCARDS).
                 self.rotation_discards += 1
                 if self.rotation_discards > P.MAX_ROTATION_DISCARDS:
                     print(f"[ROTAZIONE] Gia' {self.rotation_discards - 1} tratti scartati in questo "
@@ -999,10 +999,10 @@ class CellAttempt:
                     return FAILED
                 print(f"[ROTAZIONE] Scarto il tratto {self.robot_node_id}->{self.next_node_id}: "
                       f"richiede di girarsi dove non c'e' spazio DA QUI. Ripianifico.")
-                # Scarto NON permanente: un rifiuto di rotazione dipende dalla POSA del robot,
-                # non dall'arco -- lo stesso arco, affrontato da un altro punto o con un altro
-                # muso, puo' essere percorribilissimo. Permanente resta solo cio' che e'
-                # confermato da tre scansioni ferme o da un fallimento fisico.
+                # NON-permanent discard: a rotation refusal depends on the robot's POSE,
+                # not on the edge -- the same edge, approached from another point or with another
+                # heading, can be perfectly travelable. Only what is confirmed by three still
+                # scans or by a physical failure stays permanent.
                 self._drop_edge(self.robot_node_id, self.next_node_id, 'ora')
                 new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
                 if new_ids is not None:
@@ -1016,12 +1016,12 @@ class CellAttempt:
                 return FAILED
 
     def _repick_unreachable_goal(self):
-        """Il fronte non lascia avanzare: se e' colpa dell'obiettivo (dentro un ostacolo, o fronte
-        fermo a ridosso di lui) se ne sceglie un altro. L'esito, o None."""
-        # Prima di insistere: l'obiettivo e' ancora raggiungibile sui dati FRESCHI? Il
-        # punto viene scelto all'inizio del tentativo, da metri di distanza, quando la
-        # cella e' ancora tutta ignota; arrivandoci puo' risultare a ridosso di un muro,
-        # e allora nessun numero di scansioni lo rendera' raggiungibile.
+        """The frontier does not allow advancing: if the goal is to blame (inside an obstacle, or
+        frontier stopped right next to it) another one is chosen. The outcome, or None."""
+        # Before insisting: is the goal still reachable on the FRESH data? The
+        # point is chosen at the start of the attempt, from metres away, when the
+        # cell is still entirely unknown; getting there it may turn out to be right next to a wall,
+        # and then no number of scans will make it reachable.
         if self.goal_repicks < P.MAX_BLOCK_REPLANS:
             if not safe_frontier.goal_still_reachable(self.snap, self.target_x, self.target_y):
                 r_g, c_g, in_g = safe_frontier._cells(
@@ -1049,14 +1049,14 @@ class CellAttempt:
         return None
 
     def _replan_now(self):
-        """[SUBITO]: alla prima cella bloccante il tratto si scarta e si cerca un'altra strada,
-        senza aspettare la conferma da fermo. L'esito, o None se si resta ad aspettare."""
-        # RIPIANIFICA SUBITO, alla PRIMA cella bloccante, invece di restare fermo tre
-        # scansioni sullo stesso arco. Il rumore di obstacle_distance e' gia' filtrato
-        # (mediana + isteresi in arcVerification), quindi una cella bloccante e'
-        # un'informazione da usare: l'arco si scarta e si cerca subito un percorso che
-        # passi da un'altra parte. Le scansioni da fermo restano come ultima rete, per
-        # dichiarare la cella irraggiungibile.
+        """[SUBITO]: at the first blocking cell the leg is discarded and another way is searched,
+        without waiting for the confirmation while still. The outcome, or None if it stays waiting."""
+        # REPLAN AT ONCE, at the FIRST blocking cell, instead of staying still for three
+        # scans on the same edge. The obstacle_distance noise is already filtered
+        # (median + hysteresis in safe_frontier), so a blocking cell is
+        # information to use: the edge is discarded and a path passing elsewhere is searched
+        # at once. The still scans remain as the last net, to
+        # declare the cell unreachable.
         if (self.early_replans < P.MAX_EARLY_REPLANS
                 and self.frontier['reason'] in ('ostacolo', 'rugosita', 'pendenza')
                 and self.path_waypoints):
@@ -1067,9 +1067,9 @@ class CellAttempt:
             eb = self.path_waypoints[min(seg_blk, len(self.path_waypoints) - 1)][0]
             sx_b, sy_b = self.frontier['stop_xy']
 
-            # Prima di scartare l'ennesimo arco: sono in trappola? Se tutti gli archi del
-            # nodo passano accanto allo stesso ostacolo, il blocco e' un LUOGO, non un
-            # arco, e scartarli uno per uno non serve. Il ventaglio lo vede in una scansione.
+            # Before discarding yet another edge: am I trapped? If all the edges of the
+            # node pass next to the same obstacle, the block is a PLACE, not an
+            # edge, and discarding them one by one is useless. The fan sees it in one scan.
             trapped, n_us, n_fan, fan_txt = self._escape_fan()
             if trapped:
                 return self._escape_trap(
@@ -1085,15 +1085,15 @@ class CellAttempt:
                   f"{ea}->{eb}: lo scarto adesso e cerco un altro percorso, senza "
                   f"aspettare la conferma da fermo ({self.early_replans}/{P.MAX_EARLY_REPLANS}). "
                   f"Direzioni utilizzabili da qui: {n_us}/{n_fan}.")
-            # Scarto NON permanente: dopo una sola scansione l'arco va tolto dal piano,
-            # non condannato per la missione (vedi mark_edge_blocked_soft).
+            # NON-permanent discard: after a single scan the edge must be removed from the plan,
+            # not condemned for the mission (see mark_edge_blocked_soft).
             self._drop_edge(ea, eb, 'ora')
-            # Ma se e' la SECONDA volta sullo stesso tratto, lo scarto "per ora" non e'
-            # bastato: il refresh lo ha rimesso nel grafo (lo scarto preliminare guarda una
-            # scansione a 0.25 m, il fronte la mediana di tre con l'isteresi fino a 0.29),
-            # e il piano e' tornato quello di prima. Fuori dal piano per il resto del
-            # tentativo, come i ritorni e [ARRIVO]. Il 28-10 14:23, 8 [SUBITO] su 14 erano
-            # ripetizioni dello stesso tratto (197->569 quattro volte di fila).
+            # But if it is the SECOND time on the same leg, the "for now" discard was not
+            # enough: the refresh put it back into the graph (the preliminary discard looks at one
+            # scan at 0.25 m, the frontier at the median of three with hysteresis up to 0.29),
+            # and the plan went back to the previous one. Out of the plan for the rest of the
+            # attempt, like the returns and [ARRIVO]. On 28-10 14:23, 8 [SUBITO] out of 14 were
+            # repetitions of the same leg (197->569 four times in a row).
             key_s = (min(ea, eb), max(ea, eb))
             if key_s in self.early_replanned_edges:
                 self._drop_edge(ea, eb, 'tentativo')
@@ -1112,11 +1112,11 @@ class CellAttempt:
         return None
 
     def _advance_in_cone(self, rot):
-        """Rotazione impossibile: si avanza dentro il cono di rotazione concesso, se avvicina
-        al percorso (CONTINUA), altrimenti None."""
-        # --- 4a. PRIMA DI TUTTO: posso ANDARE AVANTI dentro il cono di rotazione che
-        # mi e' concesso? Spesso andare dritti, o quasi, avvicina all'obiettivo piu'
-        # di qualunque arretramento (vedi plan_cone_move).
+        """Rotation impossible: advance inside the allowed rotation cone, if it gets closer to
+        the path (CONTINUE), otherwise None."""
+        # --- 4a. FIRST OF ALL: can I GO FORWARD inside the rotation cone I am
+        # allowed? Often going straight, or almost, gets closer to the goal than
+        # any back-off (see plan_cone_move).
         cone_goal, _ = safe_frontier.point_along(self.polyline, P.CONE_PATH_LOOKAHEAD_M)
         cone = decisions.plan_cone_move((self.robot_x, self.robot_y), self.robot_yaw, self.snap, cone_goal)
         if cone is not None:
@@ -1129,7 +1129,7 @@ class CellAttempt:
                 self.verification_tracker.clear_path()
             MISSION_STATS['cone_moves'] += 1
             cx, cy = cone['target']
-            self.need_refresh = True      # fine di un movimento: vedi REFRESH A EVENTI
+            self.need_refresh = True      # end of a move: see EVENT REFRESH
             with TrajectoryLog(self.robot_state_client, 'cono', (cx, cy)):
                 ok_c, dist_c, _ = movements.navigate_to(
                     cx, cy, self.robot_x, self.robot_y, self.robot_state_client, self.command_client,
@@ -1138,7 +1138,7 @@ class CellAttempt:
                     should_abort=None, keep_heading=False, **self.mobility_kwargs)
             if dist_c > 0.05:
                 self._stop_node_here(*self._walked_path(self.robot_x, self.robot_y), "sosta (avanzamento nel cono)")
-                self.retreats_in_a_row = 0      # ha fatto strada vera: la catena si rompe
+                self.retreats_in_a_row = 0      # it made real progress: the chain breaks
             else:
                 print(f"[CONO] Non sono riuscito ad avanzare (percorsi {dist_c:.2f} m).")
             self.no_progress = 0
@@ -1146,9 +1146,9 @@ class CellAttempt:
         return None
 
     def _back_up_to_turn(self, rot, edge_key):
-        """Rotazione impossibile: si arretra dritti, se da li' la rotazione diventa possibile
-        (CONTINUA), altrimenti None."""
-        # --- 4b. Arretrare, ma SOLO se serve a qualcosa (vedi retreat_would_help).
+        """Rotation impossible: back up straight, if from there the rotation becomes possible
+        (CONTINUE), otherwise None."""
+        # --- 4b. Back up, but ONLY if it serves a purpose (see retreat_would_help).
         back = decisions.plan_straight_retreat((self.robot_x, self.robot_y), self.robot_yaw, self.snap)
         helps, margin_back = (False, None)
         if back is not None:
@@ -1171,7 +1171,7 @@ class CellAttempt:
             if self.verification_tracker is not None:
                 self.verification_tracker.clear_path()
             MISSION_STATS['straight_retreats'] += 1
-            self.need_refresh = True      # fine di un movimento: vedi REFRESH A EVENTI
+            self.need_refresh = True      # end of a move: see EVENT REFRESH
             with TrajectoryLog(self.robot_state_client, 'arretramento', (bx, by)):
                 ok_back, dist_back = movements.move_to_world_point_without_turning(
                     bx, by, "vision", self.command_client, self.robot_state_client, **self.mobility_kwargs)
@@ -1191,7 +1191,7 @@ class CellAttempt:
         return None
 
     def _save_block_data(self):
-        """Scansione e percorso del blocco confermato, per guardarlo dopo (BLOCKED_n.npz)."""
+        """Scan and path of the confirmed block, to look at it afterwards (BLOCKED_n.npz)."""
         if self.mission_folder is not None:
             try:
                 npz_blocked = os.path.join(
@@ -1216,7 +1216,7 @@ class CellAttempt:
                 print(f"[DATA SAVE] Impossibile salvare i dati del blocco: {e}")
 
     def _timings(self):
-        """Tempi del giro, per [TEMPO] e il riepilogo."""
+        """Timings of the turn, for [TEMPO] and the summary."""
         t_front = time.perf_counter()
 
         timing_add('scansione', self.t_scan - self.t_iter)
@@ -1229,7 +1229,7 @@ class CellAttempt:
               f"| decisione: {self.decision['kind']}")
 
     def _node_or_arrival(self):
-        """Nodo del percorso raggiunto, oppure arrivo accettato prima della fine."""
+        """Path node reached, or arrival accepted before the end."""
         if self.decision['kind'] == 'reached_node':
             self.robot_node_id = self.next_node_id
             self.prm_graph.set_robot_node(self.robot_node_id, 0.0)
@@ -1244,8 +1244,8 @@ class CellAttempt:
             return STOP
 
     def _wait(self):
-        """Il fronte non lascia avanzare: obiettivo ancora raggiungibile? ripianificare subito
-        (SUBITO) o aspettare la conferma da fermo."""
+        """The frontier does not allow advancing: goal still reachable? replan at once
+        (SUBITO) or wait for the confirmation while still."""
         if self.decision['kind'] == 'wait':
             outcome = self._repick_unreachable_goal()
             if outcome is None:
@@ -1260,7 +1260,7 @@ class CellAttempt:
             return CONTINUE
 
     def _block(self):
-        """Blocco confermato da piu' scansioni ferme: arco scartato, ripianificazione o ritorno."""
+        """Block confirmed by several still scans: edge discarded, replan or return."""
         if self.decision['kind'] == 'blocked':
             k = self.decision['segment']
             edge_a = self.robot_node_id if k == 0 else self.path_waypoints[k - 1][0]
@@ -1270,9 +1270,9 @@ class CellAttempt:
                   f"senza poter avanzare. Motivo: {self.frontier['reason']} in ({sx:.2f}, {sy:.2f}), "
                   f"sul tratto {edge_a}->{edge_b}.")
             MISSION_STATS['frontier_blocks'] += 1
-            # Bloccato a ridosso dell'obiettivo (o oltre): e' l'obiettivo a non andare, non la
-            # strada. Si esclude e, se si puo', se ne sceglie un altro (sotto, dopo la trappola)
-            # invece di scartare il tratto e ripianificare verso lo stesso obiettivo.
+            # Blocked right next to the goal (or beyond): it is the goal that does not work, not the
+            # way. It is excluded and, if possible, another one is chosen (below, after the trap)
+            # instead of discarding the leg and replanning towards the same goal.
             goal_blocked = self._frontier_stops_at_goal()
             d_goal = float(np.hypot(sx - self.target_x, sy - self.target_y))
             why_goal = f"blocco confermato a {d_goal:.2f} m da lui ({self.frontier['reason']})"
@@ -1282,8 +1282,8 @@ class CellAttempt:
 
             self._save_block_data()
 
-            # Trappola? Se non c'e' nessuna direzione utilizzabile, ripianificare
-            # e' inutile per costruzione: il problema non e' l'arco, e' il posto.
+            # Trap? If there is no usable direction, replanning
+            # is useless by construction: the problem is not the edge, it is the place.
             trapped_blk, n_us_b, n_fan_b, fan_txt_b = self._escape_fan()
             print(f"[BLOCCO] Direzioni utilizzabili da qui: {n_us_b}/{n_fan_b} ({fan_txt_b}).")
             if trapped_blk:
@@ -1299,11 +1299,11 @@ class CellAttempt:
                 if outcome is not None:
                     return outcome
 
-            # Qui il blocco e' confermato da FRONTIER_BLOCK_CONFIRM_SCANS scansioni ferme:
-            # l'invalidazione resta permanente (a differenza di [SUBITO], vedi
-            # mark_edge_blocked_soft). Eccezione: sul primo tratto, se il robot
-            # non e' sul nodo a cui e' agganciato, il tratto bloccato e' robot->nodo, non
-            # l'arco del grafo: si scarta l'arco solo per ora.
+            # Here the block is confirmed by FRONTIER_BLOCK_CONFIRM_SCANS still scans:
+            # the invalidation stays permanent (unlike [SUBITO], see
+            # mark_edge_blocked_soft). Exception: on the first leg, if the robot
+            # is not on the node it is attached to, the blocked leg is robot->node, not
+            # the graph edge: the edge is discarded only for now.
             on_node = k > 0 or mission_graph.robot_on_node(self.prm_graph, edge_a, self.robot_x, self.robot_y)
             self._drop_edge(edge_a, edge_b, 'missione' if on_node else 'ora')
             self.block_replans += 1
@@ -1340,15 +1340,15 @@ class CellAttempt:
             return FAILED
 
     def _execute_legs(self):
-        """Il movimento deciso: controllo della posa d'arrivo, poi una o piu' gambe sulla
-        polilinea confermata dal fronte, con arresto a meta' se il fronte si accorcia."""
+        """The decided move: check of the arrival pose, then one or more legs on the polyline
+        confirmed by the frontier, with a stop halfway if the frontier gets shorter."""
         outcome = self._check_arrival_pose()
         if outcome is not None:
             return outcome
 
-        # --- Esecuzione: una o piu' GAMBE sulla polilinea gia' confermata dal fronte,
-        # senza scansione, refresh ne' ripianificazione in mezzo (vedi AVANZAMENTO
-        # MULTINODO in decide_next_move). n_legs = 0 e' un solo passo parziale.
+        # --- Execution: one or more LEGS on the polyline already confirmed by the frontier,
+        # without scan, refresh or replan in between (see MULTI-NODE
+        # ADVANCE in decide_next_move). n_legs = 0 is a single partial step.
         n_legs = int(self.decision.get('nodes', 1)) if self.decision['full'] else 0
         if n_legs > 1:
             MISSION_STATS['multinode_moves'] += 1
@@ -1375,7 +1375,7 @@ class CellAttempt:
                 vision_tform_body_current = get_a_tform_b(self.lg_proto_up.local_grid.transforms_snapshot,
                                                           VISION_FRAME_NAME, BODY_FRAME_NAME)
             self.no_progress = 0
-            self.retreats_in_a_row = 0   # un avanzamento vero rompe la catena di arretramenti
+            self.retreats_in_a_row = 0   # a real advance breaks the chain of back-offs
             if is_partial_step:
                 print(f"[PASSO PARZIALE] Verso il nodo {self.next_node_id}: avanzo di {self.decision['dist']:.2f} m "
                       f"su {np.hypot(next_x - self.robot_x, next_y - self.robot_y):.2f} fino a "
@@ -1389,17 +1389,17 @@ class CellAttempt:
                 break
             if outcome is FAILED:
                 return FAILED
-        # Gambe finite (o interrotte): si torna in cima con una scansione fresca.
+        # Legs finished (or interrupted): back to the top with a fresh scan.
         return CONTINUE
 
     def _check_arrival_pose(self):
-        """Il passo porterebbe in un punto senza uscite? Allora non ci si va: tratto fuori dal
-        piano per il tentativo e nuovo percorso (CONTINUA), o lato abbandonato (FALLITO).
-        None = si puo' andare."""
+        """Would the step lead to a point without exits? Then it does not go: leg out of the
+        plan for the attempt and new path (CONTINUE), or side abandoned (FAILED).
+        None = it can go."""
         move_x, move_y = self.decision['target']
-        # --- Controllo preventivo sulla posa d'arrivo --------------------------------------
-        # Solo per i passi corti o verso spazi stretti: sono quelli con cui si entra negli
-        # angoli senza uscita. Vedi arrival_has_exit.
+        # --- Preventive check on the arrival pose ----------------------------------------------
+        # Only for short steps or towards tight spaces: those are the ones that enter
+        # dead-end corners. See arrival_has_exit.
         step_len = float(np.hypot(move_x - self.robot_x, move_y - self.robot_y))
         r_a, c_a, in_a = safe_frontier._cells(self.snap, np.array([move_x]), np.array([move_y]))
         od_arrival = float(self.snap.obstacle_dist[r_a[0], c_a[0]]) if in_a[0] else float('inf')
@@ -1416,19 +1416,19 @@ class CellAttempt:
                       f"uscite: {n_us_a}/{len(fan_arr)} direzioni utilizzabili ({fan_txt_a}). "
                       f"Non ci vado ({self.arrival_refusals}/{P.MAX_ARRIVAL_REFUSALS}), scarto il tratto "
                       f"{self.robot_node_id}->{self.next_node_id} per il resto del tentativo e ripianifico.")
-                # Fuori dal piano per il RESTO DEL TENTATIVO (penalita' del tentativo, come i
-                # ritorni: vedi _trap_backtrack), non solo per ora: il tratto in se' e' libero,
-                # e' il punto d'arrivo a non avere uscite, quindi il refresh lo rimetterebbe
-                # nel grafo al giro dopo e si rifarebbe lo stesso piano. Il 28-10 12:16 lo
-                # stesso passo e' stato rifiutato tre volte di fila, e alla terza eseguito.
+                # Out of the plan for the REST OF THE ATTEMPT (attempt penalty, like the
+                # returns: see _trap_backtrack), not only for now: the leg itself is free,
+                # it is the arrival point that has no exits, so the refresh would put it back
+                # into the graph at the next turn and the same plan would be made again. On 28-10 12:16 the
+                # same step was refused three times in a row, and executed at the third.
                 self._drop_edge(self.robot_node_id, self.next_node_id, 'tentativo')
                 new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
                 if new_ids is not None and len(new_ids) > 1:
                     self._use_path(new_ids)
                     return CONTINUE
-                # Sapere in anticipo che il punto d'arrivo e' un vicolo cieco e andarci lo
-                # stesso non ha senso: si rinuncia a questo lato della cella, che verra'
-                # ritentata piu' avanti da un altro (finalize_or_defer_blocked_cell).
+                # Knowing in advance that the arrival point is a dead end and going there
+                # anyway makes no sense: this side of the cell is given up, and the cell will be
+                # retried later from another one (finalize_or_defer_blocked_cell).
                 print(f"[ARRIVO] Nessuna alternativa nel grafo e il punto d'arrivo non ha "
                       f"uscite: non ci vado. Rinuncio a entrare in ({self.target_row},{self.target_col}) "
                       f"da questo lato.")
@@ -1438,15 +1438,15 @@ class CellAttempt:
         return None
 
     def _prepare_leg(self, leg_i, n_legs, move_x, move_y):
-        """Prima di una gamba intermedia del multinodo: posa vera, rotazione possibile e
-        uscite all'arrivo. La posa VISION da cui partire, o None se ci si ferma a riguardare."""
-        # Posa VERA dopo la gamba precedente. Serve a tre cose, tutte necessarie:
-        #  - navigate_to calcola l'angolo di rotazione dall'orientamento che riceve,
-        #    e relative_move ruota RISPETTO ALLA POSA ATTUALE: con l'orientamento
-        #    della scansione iniziale (prima della gamba 0) il robot ruoterebbe
-        #    dell'angolo sbagliato e camminerebbe fuori dal percorso verificato;
-        #  - la distanza da percorrere si calcola da (robot_x, robot_y);
-        #  - l'arresto a meta' movimento misura il percorso rimanente da qui.
+        """Before an intermediate multi-node leg: true pose, possible rotation and exits on
+        arrival. The VISION pose to start from, or None if it stops to look again."""
+        # TRUE pose after the previous leg. It serves three purposes, all necessary:
+        #  - navigate_to computes the rotation angle from the heading it receives,
+        #    and relative_move rotates RELATIVE TO THE CURRENT POSE: with the heading
+        #    of the initial scan (before leg 0) the robot would rotate
+        #    by the wrong angle and walk off the verified path;
+        #  - the distance to travel is computed from (robot_x, robot_y);
+        #  - the stop halfway through the move measures the remaining path from here.
         self.robot_x, self.robot_y, self.robot_z, robot_quat = spotUtils.getPosition(self.robot_state_client)
         self.robot_yaw = np.arctan2(
             2.0 * (robot_quat.w * robot_quat.z + robot_quat.x * robot_quat.y),
@@ -1454,15 +1454,15 @@ class CellAttempt:
         fresh_vision_tform_body = SimpleNamespace(
             position=SimpleNamespace(x=self.robot_x, y=self.robot_y, z=self.robot_z), rotation=robot_quat)
 
-        # Al nodo intermedio il robot si FERMA e RUOTA verso il nodo successivo: la
-        # decisione iniziale ha controllato solo la rotazione della prima gamba.
-        # Qui si controlla questa, sulla fotografia della scansione (in coordinate
-        # mondo, quindi valida anche dopo lo spostamento) -- ma solo se TUTTO il
-        # cerchio spazzato sta dentro i dati: rotation_is_clear ignora le celle
-        # fuori finestra (ottimista), e con un percorso curvo un nodo intermedio
-        # puo' stare vicino al bordo. Se non si puo' ruotare, o non si puo' dire,
-        # ci si ferma e si riguarda: la rotazione la gestisce il ciclo, con cono,
-        # arretramento e ventaglio, sui dati freschi.
+        # At the intermediate node the robot STOPS and ROTATES towards the next node: the
+        # initial decision only checked the rotation of the first leg.
+        # Here this one is checked, on the scan snapshot (in world
+        # coordinates, so valid even after the move) -- but only if the WHOLE
+        # swept circle is inside the data: rotation_is_clear ignores the cells
+        # outside the window (optimistic), and with a curved path an intermediate node
+        # can be near the edge. If it cannot rotate, or it cannot be told,
+        # it stops and looks again: the loop handles the rotation, with cone,
+        # back-off and fan, on the fresh data.
         r_h, c_h, in_h = safe_frontier._cells(self.snap, np.array([self.robot_x]), np.array([self.robot_y]))
         od_here = float(self.snap.obstacle_dist[r_h[0], c_h[0]]) if in_h[0] else 0.0
         rot_leg = decisions.rotation_plan(self.robot_yaw, (self.robot_x, self.robot_y), (move_x, move_y),
@@ -1482,8 +1482,8 @@ class CellAttempt:
             MISSION_STATS['multinode_cut'] += 1
             return None
 
-        # Stessa prudenza della prima gamba sulla posa d'arrivo (arrival_has_exit):
-        # non fermarsi in un punto senza uscite.
+        # Same caution as the first leg on the arrival pose (arrival_has_exit):
+        # do not stop at a point without exits.
         step_leg = float(np.hypot(move_x - self.robot_x, move_y - self.robot_y))
         r_l, c_l, in_l = safe_frontier._cells(self.snap, np.array([move_x]), np.array([move_y]))
         od_leg = float(self.snap.obstacle_dist[r_l[0], c_l[0]]) if in_l[0] else float('inf')
@@ -1503,8 +1503,8 @@ class CellAttempt:
         return fresh_vision_tform_body
 
     def _leg_terrain(self, move_x, move_y):
-        """Pendenza e rugosita' del tratto, andatura scelta di conseguenza."""
-        # --- Misura della difficolta' di QUESTO segmento (per il gait e per il CSV).
+        """Slope and roughness of the leg, gait chosen accordingly."""
+        # --- Measure of the difficulty of THIS segment (for the gait and the CSV).
         segment_long_slope, segment_lat_slope, segment_roughness = self.prm_graph.sample_terrain_between_points(
             self.robot_x, self.robot_y, move_x, move_y,
             node_idx1=self.robot_node_id, node_idx2=self.next_node_id
@@ -1546,12 +1546,12 @@ class CellAttempt:
                 segment_mobility_kwargs, segment_tier)
 
     def _move_and_record(self, move_x, move_y, vision_tform_body_current, terrain_info):
-        """Il comando di movimento, con l'arresto a meta' se il fronte si accorcia, e le righe
-        di trajectory.csv, frontier_live.csv e segments.csv. Restituisce (riuscito, metri
-        percorsi, metri comandati, motivo dell'arresto o None)."""
+        """The motion command, with the stop halfway if the frontier gets shorter, and the rows
+        of trajectory.csv, frontier_live.csv and segments.csv. Returns (success, metres
+        travelled, metres commanded, stop reason or None)."""
         (segment_long_slope, segment_lat_slope, segment_roughness, slope_source,
          segment_mobility_kwargs, segment_tier) = terrain_info
-        # --- Condizione di arresto a meta' movimento ---------------------------------
+        # --- Stop condition halfway through the move ---------------------------------
         abort_state = {'reason': None, 'bad': 0}
         move_t0 = time.time()
         live_frontiers = []
@@ -1570,7 +1570,7 @@ class CellAttempt:
                                        abort_state['bad']))
             if (f['reason'] == 'fine_dati'
                     and float(np.hypot(frx - self.robot_x, fry - self.robot_y)) < P.ABORT_IGNORE_DATA_EDGE_UNTIL_M):
-                abort_state['bad'] = 0      # sta ancora ruotando sul posto: vedi la costante
+                abort_state['bad'] = 0      # still rotating in place: see the constant
                 return False
             if reach + P.FRONTIER_ABORT_TOLERANCE_M < remaining:
                 abort_state['bad'] += 1
@@ -1584,11 +1584,11 @@ class CellAttempt:
                 abort_state['bad'] = 0
             return False
 
-        # --- Esecuzione con registrazione dell'inclinazione reale del corpo ---
+        # --- Execution with recording of the real body tilt ---
         tilt_recorder = BodyTiltRecorder(self.robot_state_client)
         tilt_recorder.start()
         try:
-            self.need_refresh = True              # fine di un movimento: vedi REFRESH A EVENTI
+            self.need_refresh = True              # end of a move: see EVENT REFRESH
             success_move, distance_traveled, distance_commanded = movements.navigate_to(
                 move_x, move_y, self.robot_x, self.robot_y, self.robot_state_client, self.command_client,
                 vision_tform_body_current, should_abort=_should_abort_move,
@@ -1599,7 +1599,7 @@ class CellAttempt:
             tilt_stats = tilt_recorder.stop()
         move_duration = time.time() - move_t0
         timing_add('movimento', move_duration)
-        try:   # solo log: non deve mai interrompere la missione
+        try:   # log only: it must never interrupt the mission
             _seg_id = [self.iteration, self.target_row, self.target_col, self.loop_iter, self.robot_node_id, self.next_node_id]
             append_trajectory(getattr(tilt_recorder, 'samples', []), 'prm', (move_x, move_y), _seg_id)
             append_csv("frontier_live.csv",
@@ -1611,7 +1611,7 @@ class CellAttempt:
         except Exception as e:
             print(f"[LOG] Traiettoria/fronti del movimento non registrati: {e}")
 
-        # --- Riga del CSV per questo segmento (anche se il movimento e' fallito) ---
+        # --- CSV row for this segment (even if the move failed) ---
         try:
             seg_dist = float(np.hypot(move_x - self.robot_x, move_y - self.robot_y))
             cost_dist = self.prm_graph.alpha * seg_dist
@@ -1643,16 +1643,16 @@ class CellAttempt:
         return success_move, distance_traveled, distance_commanded, abort_state['reason']
 
     def _walk_leg(self, move_x, move_y, next_x, next_y, is_partial_step, vision_tform_body_current):
-        """Un tratto: andatura, movimento, esito. 'avanti' = riuscito, si puo' fare la gamba
-        dopo; 'fermo' = interrotto o ripianificato, si riguarda; FALLITO = guasto fisico."""
+        """One leg: gait, move, outcome. 'avanti' = succeeded, the next leg can be done;
+        'fermo' = interrupted or replanned, look again; FAILED = physical failure."""
         terrain_info = self._leg_terrain(move_x, move_y)
         success_move, distance_traveled, distance_commanded, abort_reason = self._move_and_record(
             move_x, move_y, vision_tform_body_current, terrain_info)
-        # Comando finito male (tempo scaduto, Spot non assestato...) senza un arresto chiesto
-        # dal fronte, ma con il robot ARRIVATO a pochi cm dal punto: il tratto vale come
-        # riuscito invece che come fallimento fisico (arco scartato per sempre e ritorno).
-        # 28-10 13:50, cella (3,2): salita a 20 gradi in HARD, 0.42 m su 0.44 oltre i 15 s.
-        # In segments.csv resta l'esito vero del comando.
+        # Command ended badly (timeout, Spot not settled...) without a stop requested
+        # by the frontier, but with the robot ARRIVED within a few cm of the point: the leg counts as
+        # successful instead of as a physical failure (edge discarded forever and return).
+        # 28-10 13:50, cell (3,2): 20 degree climb in HARD, 0.42 m out of 0.44 past the 15 s.
+        # segments.csv keeps the real outcome of the command.
         if not success_move and abort_reason is None:
             try:
                 ax, ay, _, _ = spotUtils.getPosition(self.robot_state_client)
@@ -1675,8 +1675,8 @@ class CellAttempt:
                 ax, ay, _, _ = spotUtils.getPosition(self.robot_state_client)
                 self._stop_node_here(ax, ay, "sosta (passo parziale)")
             else:
-                # Arco "percorso" solo se il robot e' partito dal nodo: altrimenti il tratto
-                # camminato non e' l'arco del grafo (vedi add_stop_node, nessun nodo nuovo).
+                # Edge "travelled" only if the robot started from the node: otherwise the leg
+                # walked is not the graph edge (see add_stop_node, no new node).
                 if mission_graph.robot_on_node(self.prm_graph, self.robot_node_id, self.robot_x, self.robot_y):
                     self.prm_graph.traversed_edges.add((min(self.robot_node_id, self.next_node_id),
                                                    max(self.robot_node_id, self.next_node_id)))
@@ -1684,8 +1684,8 @@ class CellAttempt:
                 self.prm_graph.set_robot_node(self.robot_node_id, 0.0)
                 self.path_waypoints.pop(0)
 
-            # Briciola per i ritorni: un waypoint GraphNav ogni
-            # GRAPHNAV_WAYPOINT_MIN_SPACING_M di strada percorsa.
+            # Breadcrumb for the returns: a GraphNav waypoint every
+            # GRAPHNAV_WAYPOINT_MIN_SPACING_M of path travelled.
             map_recording.graphnav_drop_breadcrumb(self.env, self.recordingInterface, self.robot_state_client,
                                      self.robot_node_id, self.target_row, self.target_col)
 
@@ -1707,7 +1707,7 @@ class CellAttempt:
             if distance_traveled > 0.05:
                 self._walked_path(self.robot_x, self.robot_y)
 
-            # Se il robot non partiva dal nodo, il tratto fallito non e' l'arco del grafo.
+            # If the robot did not start from the node, the failed leg is not the graph edge.
             on_node = mission_graph.robot_on_node(self.prm_graph, self.robot_node_id, self.robot_x, self.robot_y)
             self._drop_edge(self.robot_node_id, self.next_node_id, 'missione' if on_node else 'ora')
             print(f"[INFO] Tratto {self.robot_node_id}-{self.next_node_id} scartato dopo fallimento fisico.")
@@ -1730,11 +1730,11 @@ class CellAttempt:
         return 'avanti'
 
     def _finish(self):
-        """Dopo il ciclo: True se il robot e' nella cella (o l'arrivo appena fuori e' stato accettato)."""
+        """After the loop: True if the robot is in the cell (or the arrival just outside was accepted)."""
         if self.verification_tracker is not None:
             self.verification_tracker.clear_path()
 
-        # Controllo finale della posizione a fine percorso
+        # Final check of the position at the end of the path
         self.robot_x, self.robot_y, _, _ = spotUtils.getPosition(self.robot_state_client)
         if self.arrived_near_goal:
             return True
@@ -1746,7 +1746,7 @@ def attempt_enter_cell_from_position(local_grid, global_grid, robot_state_client
                                      env, target_row, target_col, sampler, prm_graph, mission_folder=None,
                                      iteration=0,
                                      recordingInterface=None, verification_tracker=None, mobility_kwargs=None):
-    """Un tentativo di entrare nella cella (target_row, target_col): vedi TentativoCella."""
+    """One attempt to enter cell (target_row, target_col): see CellAttempt."""
     return CellAttempt(local_grid, global_grid, robot_state_client, command_client,
                           env, target_row, target_col, sampler, prm_graph, mission_folder,
                           iteration, recordingInterface, verification_tracker,

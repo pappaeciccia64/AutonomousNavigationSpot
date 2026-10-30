@@ -1,127 +1,127 @@
 """
-mission_graph.py -- il grafo di missione, costruito dalla DIMENSIONE DELLA MISSIONE (righe,
-colonne, lato cella: gli stessi tre numeri di SPOT_MISSION_GRID e di
-environmentMap.EnvironmentMap). I nodi si generano in due modi (P.MISSION_GRAPH_SAMPLING,
-in parametri.py come tutti i P.* citati qui):
-  - 'reticolo' (default): un RETICOLO rettangolare di nodi equidistanziati, in forma
-    chiusa. Due flag: la SPAZIATURA fra i nodi e gli ANELLI di collegamento.
-  - 'casuale': nodi sparsi con una distribuzione scelta, per confrontare i due metodi
-    (vedi NODI CASUALI).
-Quasi tutto il commento qui sotto parla del reticolo.
+mission_graph.py -- the mission graph, built from the MISSION SIZE (rows, columns, cell
+side: the same three numbers as SPOT_MISSION_GRID and cells.EnvironmentMap). Nodes are
+generated in two ways (P.MISSION_GRAPH_SAMPLING, in config.py like all the P.* mentioned
+here):
+  - 'reticolo' (default): a rectangular LATTICE of equally spaced nodes, in closed form.
+    Two flags: the SPACING between nodes and the connection RINGS.
+  - 'casuale': scattered nodes with a chosen distribution, to compare the two methods
+    (see RANDOM NODES).
+Almost all of the comment below is about the lattice.
 
-PERCHE' UN RETICOLO
-  1. Riproducibilita'. Il grafo dipende solo dai parametri: stessi parametri, stesso grafo,
-     bit per bit. Il rigioco riproduce le scelte del pianificatore e due missioni nella
-     stessa stanza sono confrontabili.
-  2. Pochi archi. A passo 0.714 m sono 1225 nodi su 625 m^2 e, con due anelli, ~4700 archi:
-     occupazione e pendenza, il costo vero della valutazione, si calcolano su questi.
-  3. Geometria fuori dal costo. Con archi di poche lunghezze fisse alpha*dist +
-     beta*pendenza dice quello che intende dire; con punti sparsi a caso un giro piu' lungo
-     puo' costare meno di uno dritto solo per dove sono caduti i punti.
-  4. Le coppie sono quelle del reticolo, gia' pronte: non c'e' appaiamento geometrico ne'
-     all'avvio ne' a ogni aggiornamento (vedi add_edges_to_prm).
+WHY A LATTICE
+  1. Reproducibility. The graph depends only on the parameters: same parameters, same
+     graph, bit for bit. The replay reproduces the planner's choices and two missions in the
+     same room are comparable.
+  2. Few edges. At 0.714 m spacing there are 1225 nodes on 625 m^2 and, with two rings,
+     ~4700 edges: occupancy and slope, the real cost of the evaluation, are computed on these.
+  3. Geometry out of the cost. With edges of a few fixed lengths alpha*dist +
+     beta*slope says what it means to say; with randomly scattered points a longer detour
+     can cost less than a straight one just because of where the points fell.
+  4. The pairs are those of the lattice, ready-made: there is no geometric pairing either at
+     start-up or at every update (see add_edges_to_prm).
 
-PERCHE' RETTANGOLARE E NON TRIANGOLARE
-  Il triangolare sarebbe piu' isotropo e darebbe percorsi piu' corti, ma NON PUO' CONTENERE
-  I CENTRI DELLE CELLE, che sono gli obiettivi dell'esplorazione e non devono spostarsi.
-  Servirebbe che cell_size fosse multiplo sia di s sia di s*sqrt(3)/2, e con sqrt(3)
-  irrazionale non succede per nessun passo. Nel rettangolare con passo cell_size/n i centri
-  sono nodi per costruzione. Se si volesse riaprire la questione, il punto da attaccare e'
-  questo, non l'isotropia.
+WHY RECTANGULAR AND NOT TRIANGULAR
+  The triangular one would be more isotropic and give shorter paths, but it CANNOT CONTAIN
+  THE CELL CENTRES, which are the exploration goals and must not move. It would need
+  cell_size to be a multiple of both s and s*sqrt(3)/2, and with sqrt(3) irrational that
+  does not happen for any spacing. In the rectangular one with spacing cell_size/n the
+  centres are nodes by construction. If the question were to be reopened, this is the point
+  to attack, not isotropy.
 
-SPAZIATURA
-  Il passo richiesto viene SEMPRE arrotondato a cell_size/n con n intero: e' la condizione
-  che rende ogni centro cella un nodo del reticolo. La riga [GRAFO] del log dice il passo
-  effettivo. Default della missione: P.MISSION_LATTICE_SPACING_M = 0.5 m (= 4/8); senza, 0.25 m
-  (DEFAULT_LATTICE_SPACING_M).
-  Il passo puo' essere piu' corto di min_edge_length: i vicini troppo vicini semplicemente
-  non si collegano, e gli archi partono dagli anelli piu' esterni. La soglia sugli archi
-  serve alla pendenza (un arco troppo corto non dice nulla del terreno); il passo fitto
-  serve ad avere SEMPRE una fila di nodi dentro un corridoio (vedi ALIASING).
+SPACING
+  The requested spacing is ALWAYS rounded to cell_size/n with n integer: it is the
+  condition that makes every cell centre a lattice node. The [GRAFO] line of the log gives
+  the actual spacing. Mission default: P.MISSION_LATTICE_SPACING_M = 0.5 m (= 4/8); without
+  it, 0.25 m (DEFAULT_LATTICE_SPACING_M).
+  The spacing can be shorter than min_edge_length: neighbours that are too close are simply
+  not linked, and the edges start from the outer rings. The edge threshold is for the slope
+  (an edge that is too short says nothing about the terrain); the dense spacing serves to
+  ALWAYS have a row of nodes inside a corridor (see ALIASING).
 
-ANELLI -- quante connessioni
-  L'anello k e' il quadrato di nodi a k passi di indice (anello 1 = gli 8 intorno, anello 2
-  = i 16 del giro dopo, ...). `rings` = k collega ogni nodo a tutti i nodi entro la
-  diagonale dell'anello k, cioe' entro k*s*sqrt(2), purche' l'arco sia lungo almeno
-  min_edge_length. Il limite e' un cerchio e non il quadrato per coerenza con
-  PRM.refresh_local_edge_weights, che attorno al robot ricrea le coppie per distanza.
-  Con passo 0.25 e min_edge 0.5:
-    rings=2 -> archi da 0.50 (dritto), 0.56 (la "mossa del cavallo", 27 gradi) e 0.71 m
-               (diagonale): 16 direzioni invece di 8, 16 vicini per nodo;
-    rings=3 -> in piu' 0.75, 0.79, 0.90, 1.00, 1.03, 1.06 m: tratti piu' lunghi, ~2.5
-               volte gli archi.
-  I tratti lunghi in rettilineo li produce comunque arcVerification.shortcut_index, che salta i
-  nodi intermedi quando il FRONTE SICURO conferma il tratto sui dati dal vivo.
-  rings=None arriva fino a min(connection_radius, max_edge_length).
+RINGS -- how many connections
+  Ring k is the square of nodes k index steps away (ring 1 = the 8 around, ring 2 = the 16
+  of the next round, ...). `rings` = k links every node to all nodes within the diagonal
+  of ring k, i.e. within k*s*sqrt(2), provided the edge is at least min_edge_length long.
+  The limit is a circle and not the square for consistency with
+  PRM.refresh_local_edge_weights, which recreates the pairs by distance around the robot.
+  With spacing 0.25 and min_edge 0.5:
+    rings=2 -> edges of 0.50 (straight), 0.56 (the "knight's move", 27 degrees) and 0.71 m
+               (diagonal): 16 directions instead of 8, 16 neighbours per node;
+    rings=3 -> additionally 0.75, 0.79, 0.90, 1.00, 1.03, 1.06 m: longer stretches, ~2.5
+               times the edges.
+  Long straight stretches are produced anyway by decisions.shortcut_index, which skips the
+  intermediate nodes when the SAFE FRONTIER confirms the stretch on the live data.
+  rings=None goes up to min(connection_radius, max_edge_length).
 
-ANCORAGGIO
-  Il reticolo e' ancorato all'ORIGINE, che per come e' scritta environmentMap e' insieme la
-  posa di accensione del robot E il centro della cella di partenza
-  (get_world_position_from_cell: "Cell (0,0) center is at the origin"). Quindi c'e' un nodo
-  esattamente sotto il robot all'avvio, vedi origin_node_id. Gli indici (i, j) possono
-  essere negativi; il rettangolo li ritaglia.
+ANCHORING
+  The lattice is anchored at the ORIGIN, which by the way cells.EnvironmentMap is written is
+  both the robot's power-on pose AND the centre of the starting cell
+  (get_world_position_from_cell: "Cell (0,0) center is at the origin"). So there is a node
+  exactly under the robot at start-up, see origin_node_id. The indices (i, j) can be
+  negative; the rectangle crops them.
 
-ALIASING -- il limite da conoscere
-  Se un corridoio cade fra due file di nodi, nel grafo non esiste. Il fronte sicuro
-  pretende geometry.FRONTIER_CLEARANCE_M = c dalla linea centrale (0.25 m senza aria, 0.30
-  con 5 cm), quindi un corridoio utile e' largo almeno 2c e le linee centrali ammesse sono
-  una striscia larga (larghezza - 2c): perche' ci cada sempre una fila di nodi il passo deve
-  essere piu' corto della striscia. Per i nodi casuali basta copertura <= striscia / 2.
-  Passaggio garantito: reticolo 2c + passo, nodi casuali 2c + 2 * copertura. A passo 0.25
-  ogni striscia piu' larga di 0.25 m contiene una fila di nodi.
+ALIASING -- the limit to know
+  If a corridor falls between two rows of nodes, it does not exist in the graph. The safe
+  frontier requires geometry.FRONTIER_CLEARANCE_M = c from the centre line (0.25 m without
+  air, 0.30 with 5 cm), so a usable corridor is at least 2c wide and the allowed centre lines
+  are a strip (width - 2c) wide: for a row of nodes to always fall in it the spacing must
+  be shorter than the strip. For random nodes coverage <= strip / 2 is enough.
+  Guaranteed passage: lattice 2c + spacing, random nodes 2c + 2 * coverage. At spacing 0.25
+  every strip wider than 0.25 m contains a row of nodes.
 
-NODI CASUALI (P.MISSION_GRAPH_SAMPLING = 'casuale')
-  In alternativa al reticolo, i nodi si possono spargere a caso nell'area della missione,
-  per confrontare i due metodi. I centri delle celle restano SEMPRE nodi (sono gli
-  obiettivi, e il centro della cella di partenza e' il punto di accensione); gli altri
-  nodi seguono una di queste distribuzioni, con P.MISSION_RANDOM_DENSITY nodi per m^2:
-    'uniforme'   punti indipendenti e uniformi: il PRM classico, con buchi e grumi;
-    'poisson'    Poisson-disk: punti uniformi scartati se piu' vicini di una distanza
-                 minima a un nodo gia' messo (P.MISSION_POISSON_MIN_DIST_M; None = 0.75/sqrt(densita'),
-                 che lascia raggiungere la densita' chiesta): niente grumi;
-    'perturbata' l'area divisa in quadretti da 1/densita' m^2, un punto a caso in ognuno
-                 (pochi quadretti tolti o punti aggiunti a caso per arrivare al numero
-                 esatto): nessuna zona resta vuota piu' di un quadretto;
-    'halton'     sequenza di Halton in basi 2 e 3, quasi casuale e molto uniforme; il
-                 seme la trasla (rotazione di Cranley-Patterson), cosi' semi diversi danno
-                 insiemi diversi.
-  Gli archi collegano ogni coppia di nodi distante fra min_edge_length e
-  min(max_edge_length, connection_radius); passo e anelli non contano.
-  SEME: P.MISSION_RANDOM_SEED fisso ripete lo stesso grafo bit per bit; None = un seme estratto a
-  caso. In entrambi i casi il seme usato va nel log (riga [GRAFO] Nodi casuali) e in
-  mission_summary.json, cosi' la missione si puo' ripetere e test_replay la rigioca con
-  lo stesso grafo.
-  La copertura (distanza massima fra un punto dell'area e il nodo piu' vicino) qui non ha
-  una formula: si misura su una griglia fitta e va nel log, perche' e' il numero che dice
-  se un corridoio stretto puo' restare senza nodi (vedi ALIASING).
+RANDOM NODES (P.MISSION_GRAPH_SAMPLING = 'casuale')
+  As an alternative to the lattice, the nodes can be scattered at random over the mission
+  area, to compare the two methods. The cell centres ALWAYS stay nodes (they are the goals,
+  and the centre of the starting cell is the power-on point); the other nodes follow one of
+  these distributions, with P.MISSION_RANDOM_DENSITY nodes per m^2:
+    'uniforme'   independent uniform points: the classic PRM, with holes and clumps;
+    'poisson'    Poisson-disk: uniform points discarded if closer than a minimum distance
+                 to a node already placed (P.MISSION_POISSON_MIN_DIST_M; None = 0.75/sqrt(density),
+                 which lets the requested density be reached): no clumps;
+    'perturbata' the area divided into squares of 1/density m^2, one random point in each
+                 (a few squares removed or points added at random to reach the exact
+                 number): no area stays empty for more than one square;
+    'halton'     Halton sequence in bases 2 and 3, quasi-random and very uniform; the
+                 seed shifts it (Cranley-Patterson rotation), so different seeds give
+                 different sets.
+  The edges link every pair of nodes between min_edge_length and
+  min(max_edge_length, connection_radius) apart; spacing and rings do not count.
+  SEED: a fixed P.MISSION_RANDOM_SEED repeats the same graph bit for bit; None = a seed drawn
+  at random. In both cases the seed used goes into the log ([GRAFO] Nodi casuali line) and into
+  mission_summary.json, so the mission can be repeated and test_replay replays it with
+  the same graph.
+  The coverage (maximum distance between a point of the area and the nearest node) has no
+  formula here: it is measured on a dense grid and goes into the log, because it is the
+  number that tells whether a narrow corridor can be left without nodes (see ALIASING).
 
-COME SI USA
-      mg = mission_graph.build_mission_graph(env=env)   # ~0.2 s: nodi + adiacenza
-      mg.into_prm(prm)                                  # i nodi, id 0..N-1
-      gb_sampler = mg.as_sampler()                      # punti del reticolo per cella
+HOW TO USE IT
+      mg = mission_graph.build_mission_graph(env=env)   # ~0.2 s: nodes + adjacency
+      mg.into_prm(prm)                                  # the nodes, ids 0..N-1
+      gb_sampler = mg.as_sampler()                      # lattice points per cell
       ...
       mg.add_edges_to_prm(prm, global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M)
-  add_edges_to_prm valuta ogni coppia con PRM._evaluate_and_add_edge, la stessa funzione
-  usata per tutti gli archi: veti e pesi vengono da li'. Sul robot si calcolano solo i veti
-  e i pesi, che per costruzione non sono precalcolabili: l'occupazione viene dalla mappa
-  globale che si riempie strada facendo, la pendenza d'arco dal terreno visto in quel
-  momento.
-  save_npz/load_npz servono ad avere un reticolo IDENTICO fra piu' missioni, non per la
-  velocita': con la missione di default (3185 nodi) costruire da zero costa ~180 ms,
-  ricaricare ~70 ms (python3 mission_graph.py --timings).
+  add_edges_to_prm evaluates every pair with PRM._evaluate_and_add_edge, the same function
+  used for all edges: vetoes and weights come from there. On the robot only the vetoes and
+  weights are computed, which by construction cannot be precomputed: occupancy comes from
+  the global map that fills up along the way, the edge slope from the terrain seen at that
+  moment.
+  save_npz/load_npz serve to have an IDENTICAL lattice across several missions, not for
+  speed: with the default mission (3185 nodes) building from scratch costs ~180 ms,
+  reloading ~70 ms (python3 -m spot_explorer.planning.mission_graph --timings).
 
-Il modulo dipende SOLO da numpy: si importa e si prova fuori dal robot, senza l'SDK.
-environmentMap, prm_graph, scipy (solo per i nodi casuali) e matplotlib sono importati
-dentro le funzioni che li usano.
+The module depends ONLY on numpy: it can be imported and tested off the robot, without the
+SDK. cells, roadmap, scipy (only for random nodes) and matplotlib are imported inside the
+functions that use them.
 
-Da riga di comando:
-    python3 mission_graph.py --compare
-    python3 mission_graph.py --spacing 0.25 --rings 2 --preview p.png --zoom -2 2 -2 2
-    python3 mission_graph.py --graph casuale --distribution poisson --density 16 --seed 7 --preview p.png
-    python3 mission_graph.py --compare-methods metodi.png --seed 7 --zoom -2 2 -2 2
-    python3 mission_graph.py --rows 2 --cols 3 --cell 3
-    python3 mission_graph.py --save reticolo_2x4x5.npz
-    python3 mission_graph.py --timings
+From the command line:
+    python3 -m spot_explorer.planning.mission_graph --compare
+    python3 -m spot_explorer.planning.mission_graph --spacing 0.25 --rings 2 --preview p.png --zoom -2 2 -2 2
+    python3 -m spot_explorer.planning.mission_graph --graph casuale --distribution poisson --density 16 --seed 7 --preview p.png
+    python3 -m spot_explorer.planning.mission_graph --compare-methods methods.png --seed 7 --zoom -2 2 -2 2
+    python3 -m spot_explorer.planning.mission_graph --rows 2 --cols 3 --cell 3
+    python3 -m spot_explorer.planning.mission_graph --save lattice_2x4x5.npz
+    python3 -m spot_explorer.planning.mission_graph --timings
 """
 
 import math
@@ -129,15 +129,15 @@ from collections import deque
 
 import numpy as np
 
-from spot_explorer import config as P          # dimensione della missione, metodo dei nodi, archi
+from spot_explorer import config as P          # mission size, node method, edges
 from spot_explorer.planning import roadmap as prm_graph
 from spot_explorer.perception import geometry
 
 
-# La missione (righe, colonne, lato, passo, metodo dei nodi, archi) si sceglie in
-# parametri.py, cosi' la missione sul robot e le prove da riga di comando (python3
-# mission_graph.py) partono dagli stessi numeri. Questi DEFAULT_* servono solo a compare() e
-# come ripiego se in parametri un valore e' None (2 x 4 celle da 5 m, passo 0.25 m).
+# The mission (rows, columns, side, spacing, node method, edges) is chosen in
+# config.py, so the mission on the robot and the command-line tests (python3 -m
+# spot_explorer.planning.mission_graph) start from the same numbers. These DEFAULT_* are only for compare() and
+# as a fallback if a value in config is None (2 x 4 cells of 5 m, spacing 0.25 m).
 DEFAULT_MISSION_ROWS = 2
 DEFAULT_MISSION_COLS = 4
 DEFAULT_CELL_SIZE_M = 5.0
@@ -145,10 +145,10 @@ DEFAULT_LATTICE_SPACING_M = 0.25
 
 
 # ----------------------------------------------------------------------------------------
-# COME SI GENERANO I NODI (vedi NODI CASUALI nel commento in cima).
-#   'reticolo' il reticolo rettangolare, deterministico (default);
-#   'casuale'  nodi sparsi con P.MISSION_RANDOM_DISTRIBUTION, centri cella sempre compresi.
-# Si cambiano per una sola missione con gli argomenti di easy_walk.py (--graph,
+# HOW THE NODES ARE GENERATED (see RANDOM NODES in the comment at the top).
+#   'reticolo' the rectangular lattice, deterministic (default);
+#   'casuale'  scattered nodes with P.MISSION_RANDOM_DISTRIBUTION, cell centres always included.
+# They are changed for a single mission with the arguments of run_mission.py (--graph,
 # --distribution, --density, --seed).
 # ----------------------------------------------------------------------------------------
 GRAPH_SAMPLINGS = ('reticolo', 'casuale')
@@ -157,8 +157,8 @@ RANDOM_DISTRIBUTIONS = ('uniforme', 'poisson', 'perturbata', 'halton')
 
 def mission_settings(rows=None, cols=None, cell_size_m=None, spacing_m=None):
     """
-    (rows, cols, cell_size_m, spacing_m) della missione. Per ognuno vince, nell'ordine:
-    il valore passato qui, quello di parametri.py, il DEFAULT_*.
+    (rows, cols, cell_size_m, spacing_m) of the mission. For each one, in order, the winner
+    is: the value passed here, the one in config.py, the DEFAULT_*.
     """
     def pick(value, chosen, default):
         if value is not None:
@@ -170,28 +170,28 @@ def mission_settings(rows=None, cols=None, cell_size_m=None, spacing_m=None):
             float(pick(spacing_m, P.MISSION_LATTICE_SPACING_M, DEFAULT_LATTICE_SPACING_M)))
 
 
-# Valore di default di spacing_m in build_mission_graph: "prendilo da mission_settings()".
-# Non e' None perche' None vuol gia' dire suggested_spacing().
+# Default value of spacing_m in build_mission_graph: "take it from mission_settings()".
+# It is not None because None already means suggested_spacing().
 _FROM_SETTINGS = "settings"
 
 
 def covering_radius(spacing):
     """
-    Distanza massima fra un punto QUALSIASI dell'area e il nodo piu' vicino: mezza diagonale
-    della maglia. E' il numero che conta per l'aliasing.
+    Maximum distance between ANY point of the area and the nearest node: half the diagonal
+    of the mesh. It is the number that matters for aliasing.
     """
     return spacing / math.sqrt(2.0)
 
 
 def node_density(spacing):
-    """Nodi per metro quadro."""
+    """Nodes per square metre."""
     return 1.0 / spacing ** 2
 
 
 def align_spacing(spacing_m, cell_size_m):
     """
-    Il passo arrotondato a cell_size/n con n intero: la condizione che rende ogni centro
-    cella un nodo del reticolo. Restituisce (passo, n).
+    The spacing rounded to cell_size/n with n integer: the condition that makes every cell
+    centre a lattice node. Returns (spacing, n).
     """
     n = max(1, int(round(float(cell_size_m) / float(spacing_m))))
     return float(cell_size_m) / n, n
@@ -199,9 +199,9 @@ def align_spacing(spacing_m, cell_size_m):
 
 def suggested_spacing(cell_size_m=5.0, min_edge_length=P.PRM_MIN_EDGE_M):
     """
-    Il passo allineato piu' grande la cui copertura non supera min_edge_length. Con celle da
-    5 m e min_edge 0.5 m da' cell_size/7 = 0.714 m (copertura 0.505). Se cambia
-    min_edge_length nel PRM, il passo consigliato si ricalcola da solo.
+    The largest aligned spacing whose coverage does not exceed min_edge_length. With 5 m cells
+    and min_edge 0.5 m it gives cell_size/7 = 0.714 m (coverage 0.505). If min_edge_length
+    changes in the PRM, the suggested spacing is recomputed by itself.
     """
     n = max(1, int(math.ceil(float(cell_size_m) / (float(min_edge_length) * math.sqrt(2.0)))))
     return float(cell_size_m) / n
@@ -209,10 +209,10 @@ def suggested_spacing(cell_size_m=5.0, min_edge_length=P.PRM_MIN_EDGE_M):
 
 def _mission_extent(rows, cols, cell_size_m, start_cell):
     """
-    Rettangolo della missione nel FRAME DELLA GRIGLIA (x = colonne, y = righe), con il
-    centro della cella di partenza nell'origine -- la stessa convenzione di
-    EnvironmentMap.get_world_position_from_cell. I bordi stanno a mezza cella dai centri
-    estremi, come i confini usati da get_cell_from_world (round sulle celle).
+    Mission rectangle in the GRID FRAME (x = columns, y = rows), with the centre of the
+    starting cell at the origin -- the same convention as
+    EnvironmentMap.get_world_position_from_cell. The borders are half a cell from the
+    outermost centres, like the boundaries used by get_cell_from_world (round on the cells).
     """
     start_row, start_col = start_cell
     half = cell_size_m / 2.0
@@ -224,9 +224,9 @@ def _mission_extent(rows, cols, cell_size_m, start_cell):
 
 def _lattice_points(spacing, extent, border_margin_m):
     """
-    I nodi del reticolo dentro il rettangolo, ancorati all'origine. Restituisce
-    (ij, xy_local): indici interi e coordinate nel frame della griglia. Ordine
-    deterministico: fila crescente, poi colonna.
+    The lattice nodes inside the rectangle, anchored at the origin. Returns
+    (ij, xy_local): integer indices and coordinates in the grid frame. Deterministic
+    order: increasing row, then column.
     """
     x_min, x_max, y_min, y_max = extent
     x_min, x_max = x_min + border_margin_m, x_max - border_margin_m
@@ -242,14 +242,14 @@ def _lattice_points(spacing, extent, border_margin_m):
 
 def _lattice_pairs(spacing, ij, xy, min_edge_m, reach_m):
     """
-    Le coppie di nodi che diventeranno archi, con la loro lunghezza. Sfrutta il fatto che i
-    nodi stanno su indici interi: i vicini si trovano scorrendo una finestra di offset
-    (O(N*k) di aritmetica intera) invece di interrogare un albero k-d su tutte le coppie.
+    The node pairs that will become edges, with their length. Exploits the fact that the
+    nodes lie on integer indices: the neighbours are found by sliding a window of offsets
+    (O(N*k) integer arithmetic) instead of querying a k-d tree on all pairs.
 
-    Restituisce (pairs, lengths, n_sotto_soglia): le coppie ammesse, le lunghezze, e quante
-    coppie sono state scartate perche' piu' corte di min_edge_m. Con un passo allineato e
-    >= min_edge_m quel numero e' ZERO: se non lo e', il primo anello sta finendo sotto la
-    soglia del PRM.
+    Returns (pairs, lengths, n_below_threshold): the allowed pairs, the lengths, and how many
+    pairs were discarded because shorter than min_edge_m. With an aligned spacing
+    >= min_edge_m that number is ZERO: if it is not, the first ring is falling below the
+    PRM threshold.
     """
     index = {(int(a), int(b)): k for k, (a, b) in enumerate(ij)}
     w = int(math.ceil(reach_m / spacing))
@@ -262,7 +262,7 @@ def _lattice_pairs(spacing, ij, xy, min_edge_m, reach_m):
                 if di == 0 and dj == 0:
                     continue
                 other = index.get((int(i) + di, int(j) + dj))
-                if other is None or other <= k:          # ogni coppia una volta sola
+                if other is None or other <= k:          # every pair only once
                     continue
                 dx, dy = xy[other, 0] - x0, xy[other, 1] - y0
                 d2 = dx * dx + dy * dy
@@ -282,27 +282,27 @@ def _lattice_pairs(spacing, ij, xy, min_edge_m, reach_m):
 
 
 # ----------------------------------------------------------------------------------------
-# NODI CASUALI
+# RANDOM NODES
 # ----------------------------------------------------------------------------------------
 
 def draw_seed():
-    """Un seme nuovo, quando non ne e' stato chiesto uno: 31 bit dal sistema."""
+    """A new seed, when none was requested: 31 bits from the system."""
     import random
     return random.SystemRandom().randrange(2 ** 31)
 
 
 def poisson_min_dist(density_per_m2):
     """
-    Distanza minima del Poisson-disk per arrivare alla densita' chiesta. Spargendo punti a
-    caso con distanza minima r ci si ferma a circa 0.70/r^2 punti per m^2 (saturazione);
-    con r = 0.75/sqrt(densita') la saturazione sta a ~1.24 volte la densita' chiesta, che
-    resta raggiungibile.
+    Minimum Poisson-disk distance to reach the requested density. Scattering points at
+    random with minimum distance r stops at about 0.70/r^2 points per m^2 (saturation);
+    with r = 0.75/sqrt(density) saturation is at ~1.24 times the requested density, which
+    stays reachable.
     """
     return 0.75 / math.sqrt(float(density_per_m2))
 
 
 def _halton(n, base, start=1):
-    """I primi n termini della sequenza di van der Corput in `base`, dall'indice start."""
+    """The first n terms of the van der Corput sequence in `base`, from index start."""
     out = np.zeros(n, dtype=np.float64)
     for k in range(n):
         i, f, x = start + k, 1.0, 0.0
@@ -316,11 +316,11 @@ def _halton(n, base, start=1):
 
 def _poisson_points(n_target, box, fixed_xy, min_dist, rng, max_tries_per_point=50):
     """
-    Poisson-disk per lancio di freccette: punti uniformi nel rettangolo, scartati se piu'
-    vicini di min_dist a un punto gia' messo (centri cella compresi). Si ferma a n_target
-    punti o quando i tentativi falliti di fila diventano troppi (area satura). Una griglia
-    di appoggio con lato min_dist/sqrt(2) tiene al massimo un punto per casella, cosi'
-    ogni controllo guarda solo le 5 x 5 caselle attorno.
+    Poisson-disk by dart throwing: uniform points in the rectangle, discarded if closer than
+    min_dist to a point already placed (cell centres included). Stops at n_target points or
+    when the failed attempts in a row become too many (area saturated). A helper grid with
+    side min_dist/sqrt(2) holds at most one point per box, so every check only looks at the
+    5 x 5 boxes around.
     """
     x0, x1, y0, y1 = box
     h = min_dist / math.sqrt(2.0)
@@ -366,9 +366,9 @@ def _poisson_points(n_target, box, fixed_xy, min_dist, rng, max_tries_per_point=
 
 def _random_points(distribution, density_per_m2, box, fixed_xy, rng, min_dist=None):
     """
-    I nodi casuali nel rettangolo box = (x_min, x_max, y_min, y_max), senza i nodi fissi
-    (centri cella), che il poisson pero' rispetta. Restituisce (xy, note): note e' una
-    stringa per il log quando la densita' chiesta non e' stata raggiunta.
+    The random nodes in the rectangle box = (x_min, x_max, y_min, y_max), without the fixed
+    nodes (cell centres), which poisson respects though. Returns (xy, note): note is a
+    string for the log when the requested density was not reached.
     """
     x0, x1, y0, y1 = box
     w, h = x1 - x0, y1 - y0
@@ -379,13 +379,13 @@ def _random_points(distribution, density_per_m2, box, fixed_xy, rng, min_dist=No
     if distribution == 'perturbata':
         side = 1.0 / math.sqrt(float(density_per_m2))
         nx, ny = max(1, int(round(w / side))), max(1, int(round(h / side)))
-        hx, hy = w / nx, h / ny                   # quadretti che coprono il rettangolo esatto
+        hx, hy = w / nx, h / ny                   # squares covering the exact rectangle
         jj, ii = np.meshgrid(np.arange(nx), np.arange(ny))
         u = rng.random((ny * nx, 2))
         xy = np.column_stack((x0 + (jj.ravel() + u[:, 0]) * hx,
                               y0 + (ii.ravel() + u[:, 1]) * hy))
-        # I quadretti sono interi e non danno sempre esattamente n punti: si tolgono a caso
-        # quelli in piu', o si aggiungono punti uniformi, cosi' il totale e' quello chiesto.
+        # The squares are whole and do not always give exactly n points: the extra ones are
+        # removed at random, or uniform points are added, so the total is the requested one.
         if len(xy) > n:
             xy = xy[np.sort(rng.choice(len(xy), n, replace=False))]
         elif len(xy) < n:
@@ -407,8 +407,8 @@ def _random_points(distribution, density_per_m2, box, fixed_xy, rng, min_dist=No
 
 def _radius_pairs(xy, min_edge_m, reach_m):
     """
-    Le coppie di nodi distanti fra min_edge_m e reach_m, con la lunghezza, ordinate come
-    quelle del reticolo. Restituisce (pairs, lengths, n_sotto_soglia).
+    The node pairs between min_edge_m and reach_m apart, with the length, sorted like those
+    of the lattice. Returns (pairs, lengths, n_below_threshold).
     """
     from scipy.spatial import cKDTree
     found = cKDTree(xy).query_pairs(r=float(reach_m), output_type='ndarray')
@@ -425,9 +425,9 @@ def _radius_pairs(xy, min_edge_m, reach_m):
 
 def measured_covering(xy, box, step=0.05):
     """
-    Copertura misurata: (massima, 95-esimo percentile) della distanza fra i punti di una
-    griglia fitta nel rettangolo e il nodo piu' vicino. Per il reticolo c'e' la formula
-    (covering_radius); per i nodi casuali serve misurarla.
+    Measured coverage: (maximum, 95th percentile) of the distance between the points of a
+    dense grid in the rectangle and the nearest node. For the lattice there is the formula
+    (covering_radius); for random nodes it must be measured.
     """
     from scipy.spatial import cKDTree
     x0, x1, y0, y1 = box
@@ -436,20 +436,20 @@ def measured_covering(xy, box, step=0.05):
     return float(d.max()), float(np.percentile(d, 95))
 
 
-# Pendenze delle coppie calcolate in blocco con le matrici (vedi PRM.precompute_arc_slopes).
-# False = arco per arco; il risultato e' identico.
+# Slopes of the pairs computed in batch with matrices (see PRM.precompute_arc_slopes).
+# False = edge by edge; the result is identical.
 BATCH_SLOPES = True
 
 
 def _special_pairs(prm):
-    """Archi percorsi dal robot e archi bloccati nel tentativo, come coppie (min, max)."""
+    """Edges travelled by the robot and edges blocked in the attempt, as (min, max) pairs."""
     out = {(min(a, b), max(a, b)) for a, b in getattr(prm, 'traversed_edges', ())}
     out |= {(min(a, b), max(a, b)) for a, b in getattr(prm, 'tracker_blocked_edges', ())}
     return out
 
 
 def _prm_dirty_margin():
-    """prm_graph.DIRTY_MARGIN_M, importato solo quando serve (questo modulo gira anche senza SDK)."""
+    """roadmap.DIRTY_MARGIN_M, imported only when needed (this module also runs without the SDK)."""
     try:
         from spot_explorer.planning import roadmap as prm_graph
         return prm_graph.DIRTY_MARGIN_M
@@ -458,7 +458,7 @@ def _prm_dirty_margin():
 
 
 def _frontier_clearance():
-    """geometry.FRONTIER_CLEARANCE_M, importato solo quando serve (questo modulo gira anche senza SDK)."""
+    """geometry.FRONTIER_CLEARANCE_M, imported only when needed (this module also runs without the SDK)."""
     try:
         from spot_explorer.perception import geometry
         return geometry.FRONTIER_CLEARANCE_M
@@ -467,8 +467,8 @@ def _frontier_clearance():
 
 
 def _connected_components(n_nodes, pairs):
-    """(componenti, dimensione della piu' grande, nodi isolati). Solo geometria: dice se il
-    grafo CONSEGNATO e' connesso, prima che i veti del terreno lo assottiglino."""
+    """(components, size of the largest, isolated nodes). Geometry only: tells whether the
+    DELIVERED graph is connected, before the terrain vetoes thin it out."""
     adj = [[] for _ in range(n_nodes)]
     for a, b in pairs:
         adj[int(a)].append(int(b))
@@ -492,14 +492,14 @@ def _connected_components(n_nodes, pairs):
 
 
 # ========================================================================================
-# IL GRAFO DI MISSIONE
+# THE MISSION GRAPH
 # ========================================================================================
 
 class MissionGraph:
     """
-    Il grafo pronto: nodi, adiacenza geometrica con le lunghezze, e i ganci per caricarlo
-    nel PRM. NON contiene pesi ne' veti: quelli dipendono dal terreno e li calcola il PRM
-    sui dati locali (vedi add_edges_to_prm).
+    The ready graph: nodes, geometric adjacency with the lengths, and the hooks to load it
+    into the PRM. It contains NO weights or vetoes: those depend on the terrain and the PRM
+    computes them on the local data (see add_edges_to_prm).
     """
 
     def __init__(self, spacing_m, rows, cols, cell_size_m, start_cell, origin_xy, origin_yaw,
@@ -516,21 +516,21 @@ class MissionGraph:
         self.min_edge_m, self.reach_m = float(min_edge_m), float(reach_m)
         self.rings = rings
 
-        self.ij = ij                    # (N, 2) indici interi del reticolo
-        self.xy_local = xy_local        # (N, 2) frame della griglia
-        self.pairs = pairs              # (E, 2) indici di nodo, ordinate
-        self.lengths = lengths          # (E,)   metri
-        self.node_cell = node_cell      # (N, 2) cella (riga, colonna) di ogni nodo
-        self.cell_center_ids = cell_center_ids    # {(riga, col): id del nodo nel centro}
-        self.origin_node_id = origin_node_id      # nodo sotto il robot all'avvio
+        self.ij = ij                    # (N, 2) integer lattice indices
+        self.xy_local = xy_local        # (N, 2) grid frame
+        self.pairs = pairs              # (E, 2) node indices, sorted
+        self.lengths = lengths          # (E,)   metres
+        self.node_cell = node_cell      # (N, 2) cell (row, column) of every node
+        self.cell_center_ids = cell_center_ids    # {(row, col): id of the node at the centre}
+        self.origin_node_id = origin_node_id      # node under the robot at start-up
         self.n_short_pairs = int(n_short_pairs)
-        # Come sono stati generati i nodi (vedi NODI CASUALI). Per i nodi casuali ij vale
-        # -1 e spacing_m e' il passo medio 1/sqrt(densita'); la copertura e' misurata.
+        # How the nodes were generated (see RANDOM NODES). For random nodes ij is
+        # -1 and spacing_m is the mean spacing 1/sqrt(density); the coverage is measured.
         self.sampling = str(sampling)
         self.distribution = distribution
         self.density_per_m2 = None if density_per_m2 is None else float(density_per_m2)
         self.seed = None if seed is None else int(seed)
-        self.covering = covering                  # (massima, 95-esimo percentile) o None
+        self.covering = covering                  # (maximum, 95th percentile) or None
         self.sampling_note = sampling_note
 
         c, s = math.cos(self.origin_yaw), math.sin(self.origin_yaw)
@@ -547,7 +547,7 @@ class MissionGraph:
         (self.n_components, self.biggest_component,
          self.n_isolated) = _connected_components(len(xy_local), self.pairs)
 
-    # -- proprieta' --------------------------------------------------------------------
+    # -- properties --------------------------------------------------------------------
     @property
     def n_nodes(self):
         return int(len(self.xy))
@@ -575,7 +575,7 @@ class MissionGraph:
         return covering_radius(self.spacing_m)
 
     def describe(self):
-        """Il metodo dei nodi in un dict, per mission_summary.json e per rigiocare la missione."""
+        """The node method in a dict, for mission_summary.json and to replay the mission."""
         out = dict(metodo=self.sampling, nodi=self.n_nodes, coppie=self.n_edges,
                    arco_min_m=self.min_edge_m, arco_max_m=round(self.reach_m, 6),
                    copertura_m=round(self.covering_m, 4))
@@ -587,14 +587,14 @@ class MissionGraph:
         return out
 
     def node_ids(self):
-        """Gli id dei nodi, 0..N-1: gli stessi che useranno PRM.nodes."""
+        """The node ids, 0..N-1: the same PRM.nodes will use."""
         return np.arange(self.n_nodes, dtype=np.int64)
 
-    # -- aggancio al PRM ---------------------------------------------------------------
+    # -- hooking into the PRM ---------------------------------------------------------------
     def into_prm(self, prm):
         """
-        Mette i NODI nel PRM (prm.add_node), con gli id 0..N-1. Nessun arco: gli archi
-        arrivano da add_edges_to_prm, che ha bisogno dei dati di terreno.
+        Put the NODES into the PRM (prm.add_node), with ids 0..N-1. No edges: the edges
+        come from add_edges_to_prm, which needs the terrain data.
         """
         for k in range(self.n_nodes):
             prm.add_node(int(k), float(self.xy[k, 0]), float(self.xy[k, 1]))
@@ -603,22 +603,21 @@ class MissionGraph:
     def add_edges_to_prm(self, prm, global_map=None, edge_safety_margin=0.0, verbose=True,
                          incremental=False):
         """
-        Valuta le coppie GIA' CALCOLATE e aggiunge quelle ammesse con
-        PRM._evaluate_and_add_edge: veti (archi bloccati, occupazione nella mappa globale,
-        pendenza longitudinale e laterale) e pesi. Le coppie sono quelle del reticolo, non
-        si rifa' nessun appaiamento geometrico.
+        Evaluate the pairs ALREADY COMPUTED and add the allowed ones with
+        PRM._evaluate_and_add_edge: vetoes (blocked edges, occupancy in the global map,
+        longitudinal and lateral slope) and weights. The pairs are those of the lattice, no
+        geometric pairing is redone.
 
-        incremental: rivaluta SOLO le coppie vicine alle zone con dati nuovi
-        dall'ultima valutazione (prm.dirty_rects, vedi prm_graph.DIRTY_MARGIN_M); le altre
-        tengono arco e peso che hanno. Il risultato e' lo stesso della costruzione completa:
-        fuori da quelle zone nessun dato che entra nella valutazione e' cambiato. Si torna
-        alla costruzione completa quando non si puo' sapere cosa e' cambiato (vedi
-        _dirty_pairs).
+        incremental: re-evaluate ONLY the pairs near the areas with new data since the last
+        evaluation (prm.dirty_rects, see roadmap.DIRTY_MARGIN_M); the others keep the edge
+        and weight they have. The result is the same as the full build: outside those areas
+        no data entering the evaluation has changed. It falls back to the full build when it
+        cannot be known what changed (see _dirty_pairs).
         """
         todo_all = [(int(a), int(b), float(d)) for (a, b), d in zip(self.pairs, self.lengths)
                     if int(a) in prm.nodes and int(b) in prm.nodes]
         dirty = self._dirty_pairs(prm, global_map, todo_all) if incremental else None
-        prm.robot_node = None          # il permesso vicino al robot vale solo per il nodo attuale
+        prm.robot_node = None          # the exemption near the robot applies only to the current node
         if dirty is None:
             for idx in prm.nodes:
                 prm.edges[idx] = []
@@ -626,8 +625,8 @@ class MissionGraph:
             todo = todo_all
         else:
             todo = [p for p, m in zip(todo_all, dirty) if m]
-            # Si tolgono gli archi da rivalutare; poi si valutano come in una costruzione da
-            # zero (adiacenze appena svuotate per queste coppie: fresh vale anche qui).
+            # The edges to re-evaluate are removed; then they are evaluated as in a build from
+            # scratch (adjacencies just cleared for these pairs: fresh applies here too).
             drop = {}
             for a, b, _d in todo:
                 drop.setdefault(a, set()).add(b)
@@ -639,10 +638,10 @@ class MissionGraph:
             prm._sync_global_slope_cache()
 
         added = 0
-        # Occupazione di tutte le coppie in un colpo solo e cache della pendenza globale
-        # riempita dove certamente non ci sono dati (esiti identici, vedi
-        # PRM._occupancy_blocked_many e PRM._prefill_global_slope_nodata). Le adiacenze sono
-        # appena state svuotate e le coppie del reticolo sono distinte: fresh=True.
+        # Occupancy of all pairs in one go and global slope cache
+        # filled where there is certainly no data (identical outcomes, see
+        # PRM._occupancy_blocked_many and PRM._prefill_global_slope_nodata). The adjacencies have
+        # just been cleared and the lattice pairs are distinct: fresh=True.
         batch = hasattr(prm, '_occupancy_blocked_many')
         use_occ = global_map is not None and edge_safety_margin > 0.0
         occ_flags = (prm._occupancy_blocked_many(todo, global_map, edge_safety_margin)
@@ -650,18 +649,18 @@ class MissionGraph:
         if batch:
             prm._prefill_global_slope_nodata(todo)
         fresh = batch and self._pairs_distinct()
-        # ZONA SENZA DATI: archi su cui nessuna fonte ha informazione prendono
-        # direttamente il costo di ripiego, identico a quello del percorso completo (vedi
-        # PRM._add_edge_without_data). Serve gamma = 0: con la rugosita' nel costo, no.
+        # AREA WITHOUT DATA: edges on which no source has information get
+        # the fallback cost directly, identical to that of the full path (see
+        # PRM._add_edge_without_data). Needs gamma = 0: with roughness in the cost, no.
         fast_ok = (fresh and hasattr(prm, '_add_edge_without_data') and prm.gamma == 0.0)
         live_nd = prm._live_slope_certainly_nodata(todo) if fast_ok else None
         tm = getattr(prm, 'global_terrain_map', None)
         cache = getattr(prm, '_gslope_cache', {})
         blocked_set = prm.tracker_blocked_edges
         n_fast = 0
-        # Pendenze di tutte le coppie da valutare in un colpo solo (matrici), dal vivo e,
-        # dove dal vivo non ci sono dati, dalla mappa globale. Stessi numeri del calcolo arco
-        # per arco, circa 13 volte piu' in fretta (vedi PRM.precompute_arc_slopes).
+        # Slopes of all the pairs to evaluate in one go (matrices), live and,
+        # where there is no live data, from the global map. Same numbers as the edge-by-edge
+        # computation, about 13 times faster (see PRM.precompute_arc_slopes).
         live_profs = [None] * len(todo)
         if BATCH_SLOPES and batch and hasattr(prm, 'precompute_arc_slopes'):
             skip = np.array([bool(o) for o in occ_flags], dtype=bool)
@@ -685,8 +684,8 @@ class MissionGraph:
 
         self.last_update = (len(todo), len(todo_all), dirty is not None)
 
-        # Gli archi percorsi dal robot sono liberi per costruzione e vanno rimessi comunque:
-        # i nodi di sosta stanno spesso sotto min_edge_length.
+        # The edges travelled by the robot are free by construction and are put back anyway:
+        # the stop nodes are often below min_edge_length.
         for a, b in list(getattr(prm, 'traversed_edges', ())):
             if a in prm.nodes and b in prm.nodes:
                 if hasattr(prm, '_traversed_edge_ok') and not prm._traversed_edge_ok(a, b, global_map):
@@ -694,9 +693,9 @@ class MissionGraph:
                     continue
                 (xa, ya), (xb, yb) = prm.nodes[a], prm.nodes[b]
                 prm._evaluate_and_add_edge(a, b, float(math.hypot(xb - xa, yb - ya)), force=True)
-        # Le zone appena rivalutate sono a posto. Resta "da rifare" la finestra dal vivo
-        # corrente: i suoi archi sono stati giudicati sui dati dal vivo, e la prossima volta,
-        # col robot altrove, la costruzione completa li giudicherebbe sulla mappa globale.
+        # The areas just re-evaluated are settled. The current live window stays
+        # "to redo": its edges were judged on the live data, and next time,
+        # with the robot elsewhere, the full build would judge them on the global map.
         if hasattr(prm, 'dirty_rects'):
             prm.dirty_rects = list(prm.live_rects())
             prm.hazards_seen = len(getattr(global_map, 'hazards', ()) or ())
@@ -717,14 +716,14 @@ class MissionGraph:
 
     def _dirty_pairs(self, prm, global_map, todo):
         """
-        Maschera delle coppie da rivalutare (rettangolo dell'arco, allargato di
-        prm_graph.DIRTY_MARGIN_M, che tocca una zona di prm.dirty_rects), o None quando serve
-        la costruzione completa: grafo mai costruito, mappa del terreno ricaricata da file
-        (zone aggiornate ignote), una caduta nuova (mark_hazard non passa da una scansione).
+        Mask of the pairs to re-evaluate (edge rectangle, widened by
+        roadmap.DIRTY_MARGIN_M, touching an area of prm.dirty_rects), or None when the full
+        build is needed: graph never built, terrain map reloaded from file (updated areas
+        unknown), a new fall (mark_hazard does not go through a scan).
 
-        Gli archi percorsi dal robot e quelli bloccati nel tentativo si rivalutano SEMPRE,
-        insieme a quelli che lo erano all'aggiornamento precedente: il loro esito dipende da
-        quegli insiemi, non dai dati nuovi. Sono pochi.
+        The edges travelled by the robot and those blocked in the attempt are ALWAYS
+        re-evaluated, together with those that were so at the previous update: their outcome
+        depends on those sets, not on the new data. They are few.
         """
         if not getattr(prm, 'built', False) or not hasattr(prm, 'dirty_rects'):
             return None
@@ -749,7 +748,7 @@ class MissionGraph:
         return mask
 
     def _pairs_distinct(self):
-        """True se nessuna coppia del reticolo compare due volte (in nessun verso). Calcolato una volta."""
+        """True if no lattice pair appears twice (in either direction). Computed once."""
         cached = getattr(self, '_distinct_cache', None)
         if cached is None:
             p = np.sort(np.asarray(self.pairs, dtype=np.int64).reshape(-1, 2), axis=1)
@@ -758,17 +757,17 @@ class MissionGraph:
         return cached
 
     def as_sampler(self):
-        """I punti del reticolo cella per cella (get_point_in_cell), per find_best_point_in_cell."""
+        """The lattice points cell by cell (get_point_in_cell), for find_best_point_in_cell."""
         return LatticeSampler(self)
 
-    # -- persistenza e diagnostica -----------------------------------------------------
+    # -- persistence and diagnostics -----------------------------------------------------
     def save_npz(self, path):
         """
-        Salva il reticolo: indici, coordinate LOCALI, coppie, lunghezze, parametri. Le
-        coordinate locali non dipendono dalla posa del robot, quindi il file vale per
-        qualunque missione di quella dimensione: si ricarica con load_npz e si applica solo
-        la rototraslazione. Serve ad avere un reticolo identico fra piu' missioni; per la
-        velocita' non serve (costruire costa ~30 ms, ricaricare ~20).
+        Save the lattice: indices, LOCAL coordinates, pairs, lengths, parameters. The local
+        coordinates do not depend on the robot pose, so the file is valid for any mission of
+        that size: it is reloaded with load_npz and only the roto-translation is applied.
+        Serves to have an identical lattice across several missions; it is not needed for
+        speed (building costs ~30 ms, reloading ~20).
         """
         keys = np.array(list(self.cell_center_ids.keys()), dtype=np.int64).reshape(-1, 2)
         vals = np.array(list(self.cell_center_ids.values()), dtype=np.int64)
@@ -789,7 +788,7 @@ class MissionGraph:
         return path
 
     def report(self):
-        """Il riepilogo da stampare nel log, accanto alle righe [CONFIG]."""
+        """The summary to print in the log, next to the [CONFIG] lines."""
         lo = float(self.lengths.min()) if self.n_edges else float('nan')
         hi = float(self.lengths.max()) if self.n_edges else float('nan')
         uniq = sorted(set(np.round(self.lengths, 3).tolist()))
@@ -799,7 +798,7 @@ class MissionGraph:
                 f"[GRAFO] Missione {self.rows}x{self.cols} celle da {self.cell_size_m:.1f} m "
                 f"= {self.area_m2:.0f} m2; nodi CASUALI, archi fra {self.min_edge_m:.2f} e "
                 f"{self.reach_m:.2f} m",
-                # test_replay legge distribuzione, densita' e seme da questa riga.
+                # test_replay reads distribution, density and seed from this line.
                 f"[GRAFO] Nodi casuali: distribuzione {self.distribution}, densita' "
                 f"{self.density_per_m2:.2f} nodi/m2, seme {self.seed} "
                 f"(per ripetere: --graph casuale --distribution {self.distribution} "
@@ -857,8 +856,8 @@ class MissionGraph:
 
     def preview_png(self, path, show_cells=True, zoom=None):
         """
-        Disegna il grafo e i suoi archi in un PNG, per guardarlo prima di uscire.
-        zoom: (x_min, x_max, y_min, y_max) nel frame della griglia, per i dettagli.
+        Draw the graph and its edges into a PNG, to look at it before going out.
+        zoom: (x_min, x_max, y_min, y_max) in the grid frame, for the details.
         """
         import matplotlib
         matplotlib.use('Agg')
@@ -874,8 +873,8 @@ class MissionGraph:
     def draw(self, ax, show_cells=True, zoom=None, legend=True, title_size=None,
              edge_color='0.78', edge_width=0.45, highlight=None):
         """
-        Disegna nodi, archi, obiettivi di cella e celle su un riquadro matplotlib.
-        highlight: id di un nodo di cui disegnare gli archi in evidenza (i suoi vicini).
+        Draw nodes, edges, cell goals and cells on a matplotlib axes.
+        highlight: id of a node whose edges to highlight (its neighbours).
         """
         import matplotlib.pyplot as plt
         from matplotlib.collections import LineCollection
@@ -925,7 +924,7 @@ class MissionGraph:
 
 
 class LatticeSampler:
-    """I punti del reticolo cella per cella (vedi MissionGraph.as_sampler)."""
+    """The lattice points cell by cell (see MissionGraph.as_sampler)."""
 
     def __init__(self, mg):
         self._points = [(float(x), float(y)) for x, y in mg.xy]
@@ -937,7 +936,7 @@ class LatticeSampler:
         return [self._points[k] for k in self._by_cell.get((int(row), int(col)), ())]
 
 # ========================================================================================
-# LA FUNZIONE DA CHIAMARE
+# THE FUNCTION TO CALL
 # ========================================================================================
 
 def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_SETTINGS,
@@ -950,32 +949,32 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
                         sampling=None, distribution=None, density_per_m2=None, seed=None,
                         poisson_min_dist_m=None):
     """
-    Costruisce il grafo di missione.
+    Build the mission graph.
 
     Args:
-        rows, cols, cell_size_m: la DIMENSIONE DELLA MISSIONE. Se non passati: quelli di
-            mission_settings() (MISSION_*, o i DEFAULT_*). Ignorati se si passa `env`.
-        spacing_m: FLAG DELLA SPAZIATURA, in metri; viene arrotondata a cell_size/n (vedi
-            align_spacing). Puo' essere sotto min_edge_length (vedi SPAZIATURA). Se non
-            passato: quello di mission_settings() (P.MISSION_LATTICE_SPACING_M, o 0.25 m); None =
+        rows, cols, cell_size_m: the MISSION SIZE. If not passed: those of
+            mission_settings() (MISSION_*, or the DEFAULT_*). Ignored if `env` is passed.
+        spacing_m: SPACING FLAG, in metres; it is rounded to cell_size/n (see
+            align_spacing). It can be below min_edge_length (see SPACING). If not passed:
+            the one of mission_settings() (P.MISSION_LATTICE_SPACING_M, or 0.25 m); None =
             suggested_spacing().
-        rings: FLAG DELLE CONNESSIONI -- k = tutti i nodi entro la diagonale del k-esimo
-            anello (k*passo*sqrt(2)), con archi >= min_edge_length (vedi ANELLI). None =
-            tutti quelli entro min(connection_radius, max_edge_length).
-        origin_xy, origin_yaw: posa del robot all'avvio nel frame VISION. Il reticolo e'
-            ancorato qui. Ignorati se si passa `env`.
-        start_cell: cella in cui il robot si accende (come env.start_cell).
-        min_edge_length, max_edge_length, connection_radius: gli stessi parametri del PRM
-            che consumera' il grafo -- devono coincidere con quelli passati a PRM().
-        border_margin_m: margine da lasciare dentro il bordo della missione.
-        env: una EnvironmentMap gia' creata e con set_origin() fatto. Se passata, dimensione
-            e posa vengono da lei: e' il modo di garantire che grafo e mappa delle celle non
-            possano andare fuori sincrono.
-        sampling: 'reticolo' o 'casuale' (vedi NODI CASUALI); None = P.MISSION_GRAPH_SAMPLING. Con
-            'casuale' spacing_m e rings non contano.
-        distribution, density_per_m2, seed, poisson_min_dist_m: i parametri dei nodi
-            casuali; None = P.MISSION_RANDOM_DISTRIBUTION, P.MISSION_RANDOM_DENSITY,
-            P.MISSION_RANDOM_SEED, P.MISSION_POISSON_MIN_DIST_M. Seme None anche li' = estratto a caso (e scritto nel log).
+        rings: CONNECTIONS FLAG -- k = all nodes within the diagonal of the k-th ring
+            (k*spacing*sqrt(2)), with edges >= min_edge_length (see RINGS). None = all those
+            within min(connection_radius, max_edge_length).
+        origin_xy, origin_yaw: robot pose at start-up in the VISION frame. The lattice is
+            anchored here. Ignored if `env` is passed.
+        start_cell: cell where the robot is powered on (like env.start_cell).
+        min_edge_length, max_edge_length, connection_radius: the same parameters as the PRM
+            that will consume the graph -- they must match those passed to PRM().
+        border_margin_m: margin to leave inside the mission border.
+        env: an EnvironmentMap already created and with set_origin() done. If passed, size
+            and pose come from it: it is the way to guarantee that graph and cell map cannot
+            get out of sync.
+        sampling: 'reticolo' or 'casuale' (see RANDOM NODES); None = P.MISSION_GRAPH_SAMPLING. With
+            'casuale' spacing_m and rings do not count.
+        distribution, density_per_m2, seed, poisson_min_dist_m: the parameters of the random
+            nodes; None = P.MISSION_RANDOM_DISTRIBUTION, P.MISSION_RANDOM_DENSITY,
+            P.MISSION_RANDOM_SEED, P.MISSION_POISSON_MIN_DIST_M. Seed None there too = drawn at random (and written in the log).
 
     Returns:
         MissionGraph.
@@ -1021,12 +1020,12 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
         rings = int(rings)
         if rings < 1:
             raise ValueError("rings deve essere almeno 1")
-        ring_reach = rings * spacing_m * math.sqrt(2.0)      # diagonale dell'anello k
+        ring_reach = rings * spacing_m * math.sqrt(2.0)      # diagonal of ring k
         if ring_reach > prm_reach + 1e-9 and verbose:
             print(f"[GRAFO] {rings} anelli arriverebbero a {ring_reach:.2f} m, oltre la "
                   f"portata del PRM {prm_reach:.2f} m: mi fermo li'.")
-        # Tolleranza relativa (1e-6): le distanze del reticolo sono multipli irrazionali del
-        # passo, e senza tolleranza la diagonale dell'anello potrebbe cadere fuori per un ulp.
+        # Relative tolerance (1e-6): the lattice distances are irrational multiples of the
+        # spacing, and without tolerance the ring diagonal could fall outside by one ulp.
         reach_m = min(ring_reach, prm_reach) * (1.0 + 1e-6)
         if reach_m < float(min_edge_length):
             raise ValueError(
@@ -1042,9 +1041,9 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
     pairs, lengths, n_short = _lattice_pairs(spacing_m, ij, xy_local,
                                              float(min_edge_length), reach_m)
 
-    # --- I centri cella sono nodi del reticolo per costruzione (passo = cell_size/n):
-    # qui si verifica che sia davvero cosi' invece di darlo per buono, perche' e' la
-    # proprieta' su cui si regge tutta questa scelta di progetto.
+    # --- The cell centres are lattice nodes by construction (spacing = cell_size/n):
+    # here it is checked that this is really so instead of taking it for granted, because it is
+    # the property this whole design choice rests on.
     cell_center_ids, tol = {}, max(1e-9, spacing_m * 1e-9)
     by_index = {(int(a), int(b)): k for k, (a, b) in enumerate(ij)}
     for r in range(rows):
@@ -1053,7 +1052,7 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
             i = (r - start_cell[0]) * n_div
             k = by_index.get((i, j))
             if k is None:
-                continue                      # cella fuori dal reticolo (margine di bordo)
+                continue                      # cell outside the lattice (border margin)
             if abs(xy_local[k, 0] - (c - start_cell[1]) * cell_size_m) > tol or \
                     abs(xy_local[k, 1] - (r - start_cell[0]) * cell_size_m) > tol:
                 raise AssertionError(
@@ -1064,8 +1063,8 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
         print(f"[GRAFO] {rows * cols - len(cell_center_ids)} centri cella fuori dal reticolo "
               f"(margine di bordo {border_margin_m:.2f} m): quelle celle non hanno obiettivo.")
 
-    # Nodo nell'origine: c'e' per costruzione (il reticolo e' ancorato la', e l'origine e'
-    # anche il centro della cella di partenza), ma lo cerchiamo invece di assumerlo.
+    # Node at the origin: it is there by construction (the lattice is anchored there, and the origin is
+    # also the centre of the starting cell), but we look for it instead of assuming it.
     d0 = np.hypot(xy_local[:, 0], xy_local[:, 1])
     origin_node_id = int(np.argmin(d0)) if d0.min() < 1e-9 else None
 
@@ -1080,7 +1079,7 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
 
 
 def _node_cells_of(xy_local, rows, cols, cell_size_m, start_cell):
-    """Cella (riga, colonna) di ogni nodo: stessa regola di env.get_cell_from_world (round)."""
+    """Cell (row, column) of every node: same rule as env.get_cell_from_world (round)."""
     cols_idx = np.clip(np.round(xy_local[:, 0] / cell_size_m).astype(np.int64) + start_cell[1],
                        0, cols - 1)
     rows_idx = np.clip(np.round(xy_local[:, 1] / cell_size_m).astype(np.int64) + start_cell[0],
@@ -1092,8 +1091,8 @@ def _build_random_graph(rows, cols, cell_size_m, start_cell, origin_xy, origin_y
                         min_edge_m, reach_m, border_margin_m, verbose,
                         distribution, density_per_m2, seed, poisson_min_dist_m):
     """
-    Il grafo con nodi casuali (vedi NODI CASUALI): prima i centri cella, nell'ordine delle
-    righe e delle colonne, poi i nodi della distribuzione. Stesso seme, stesso grafo.
+    The graph with random nodes (see RANDOM NODES): first the cell centres, in the order of
+    rows and columns, then the nodes of the distribution. Same seed, same graph.
     """
     if distribution not in RANDOM_DISTRIBUTIONS:
         raise ValueError(f"distribuzione sconosciuta {distribution!r}: una di {RANDOM_DISTRIBUTIONS}")
@@ -1111,8 +1110,8 @@ def _build_random_graph(rows, cols, cell_size_m, start_cell, origin_xy, origin_y
     if box[1] <= box[0] or box[3] <= box[2]:
         raise ValueError("margine di bordo troppo largo: nessuna area per i nodi")
 
-    # Centri cella: nodi fissi, gli obiettivi dell'esplorazione. Il centro della cella di
-    # partenza e' l'origine, cioe' il punto di accensione.
+    # Cell centres: fixed nodes, the exploration goals. The centre of the starting cell
+    # is the origin, i.e. the power-on point.
     centers, keys = [], []
     for r in range(rows):
         for c in range(cols):
@@ -1147,8 +1146,8 @@ def _build_random_graph(rows, cols, cell_size_m, start_cell, origin_xy, origin_y
 
 def load_npz(path, origin_xy=(0.0, 0.0), origin_yaw=0.0, env=None):
     """
-    Ricarica un reticolo salvato con save_npz e lo riporta nel frame VISION con la posa
-    passata (o quella di `env`): si applica solo la rototraslazione.
+    Reload a lattice saved with save_npz and bring it into the VISION frame with the given
+    pose (or that of `env`): only the roto-translation is applied.
     """
     d = np.load(path, allow_pickle=False)
     if env is not None:
@@ -1164,7 +1163,7 @@ def load_npz(path, origin_xy=(0.0, 0.0), origin_yaw=0.0, env=None):
         d['pairs'], d['lengths'], d['node_cell'], cc_ids, None if oid < 0 else oid,
         float(d['min_edge_m']), float(d['reach_m']), None if rings < 0 else rings,
         int(d['n_short_pairs']),
-        # file salvati prima dei nodi casuali: reticolo
+        # files saved before random nodes: lattice
         **({} if 'sampling' not in d.files else dict(
             sampling=str(d['sampling']), distribution=(str(d['distribution']) or None),
             density_per_m2=(None if float(d['density_per_m2']) < 0 else float(d['density_per_m2'])),
@@ -1177,8 +1176,8 @@ def compare(rows=DEFAULT_MISSION_ROWS, cols=DEFAULT_MISSION_COLS,
             cell_size_m=DEFAULT_CELL_SIZE_M, divisors=(4, 5, 6, 7, 8, 9, 10),
             rings_list=(1, 2, 3, None), **kw):
     """
-    Tabella nodi/archi/copertura al variare del passo (come cell_size/n) e degli anelli:
-    serve a scegliere le flag guardando i numeri.
+    Table of nodes/edges/coverage as the spacing (as cell_size/n) and the rings vary:
+    serves to choose the flags by looking at the numbers.
     """
     print(f"Missione {rows}x{cols} celle da {cell_size_m:.1f} m "
           f"= {rows * cols * cell_size_m ** 2:.0f} m2")
@@ -1207,17 +1206,17 @@ def compare(rows=DEFAULT_MISSION_ROWS, cols=DEFAULT_MISSION_COLS,
 
 def nodes_per_cell(mg):
     """
-    Nodi in ogni cella, (righe, colonne), contando un nodo che sta esattamente sul confine
-    fra due celle per meta' in ognuna (un quarto negli incroci). Il conteggio di node_cell
-    invece assegna quei nodi tutti a una delle due celle (stessa regola della missione), e
-    per il reticolo, che ha intere file sui confini, fa sembrare piu' piene alcune celle.
-    I nodi sul bordo esterno dell'area contano per intero nella loro cella.
+    Nodes in every cell, (rows, columns), counting a node that lies exactly on the boundary
+    between two cells as half in each (a quarter at the crossings). The node_cell count
+    instead assigns those nodes all to one of the two cells (same rule as the mission), and
+    for the lattice, which has whole rows on the boundaries, makes some cells look fuller.
+    The nodes on the outer border of the area count fully in their cell.
     """
     out = np.zeros((mg.rows, mg.cols), dtype=np.float64)
     eps = 1e-9
 
     def owners(u, n):
-        # u: posizione in unita' di cella, con i centri sugli interi; confini a k + 0.5.
+        # u: position in cell units, with the centres on the integers; boundaries at k + 0.5.
         b = u - 0.5
         if abs(b - round(b)) < eps:
             cand = [int(round(b)), int(round(b)) + 1]
@@ -1237,9 +1236,9 @@ def nodes_per_cell(mg):
 
 def lattice_matched_density(**kw):
     """
-    La densita' dei nodi casuali che da' lo STESSO numero totale di nodi del reticolo con
-    questi parametri (bordo esterno compreso, centri cella a parte, come li conta
-    _build_random_graph). Serve a confrontare i metodi a parita' di nodi.
+    The random-node density that gives the SAME total number of nodes as the lattice with
+    these parameters (outer border included, cell centres apart, as _build_random_graph
+    counts them). Serves to compare the methods with the same number of nodes.
     """
     kw = {k: v for k, v in kw.items()
           if k not in ('sampling', 'distribution', 'density_per_m2', 'seed', 'verbose')}
@@ -1253,14 +1252,14 @@ def lattice_matched_density(**kw):
 def compare_methods_png(path, zoom=(-2.0, 2.0, -2.0, 2.0), seed=None,
                         methods=('reticolo',) + RANDOM_DISTRIBUTIONS, verbose=False, **kw):
     """
-    I metodi dei nodi affiancati (default: il reticolo e le quattro distribuzioni casuali),
-    con gli stessi parametri (missione, archi, densita') e lo stesso seme, per vederne la
-    differenza a colpo d'occhio. In fondo la tabella: nodi, archi, grado medio, copertura
-    massima e al 95%. zoom None = tutta l'area. Seme None = estratto a caso, scritto nel
-    titolo. verbose: stampa anche il riepilogo [GRAFO] di ogni grafo.
-    density_per_m2 None = la densita' che da' lo stesso numero di nodi del reticolo
+    The node methods side by side (default: the lattice and the four random distributions),
+    with the same parameters (mission, edges, density) and the same seed, to see the
+    difference at a glance. At the end the table: nodes, edges, mean degree, maximum and
+    95% coverage. zoom None = the whole area. Seed None = drawn at random, written in the
+    title. verbose: also print the [GRAFO] summary of every graph.
+    density_per_m2 None = the density that gives the same number of nodes as the lattice
     (lattice_matched_density).
-    Restituisce (path, grafi).
+    Returns (path, graphs).
     """
     import matplotlib
     matplotlib.use('Agg')
@@ -1283,29 +1282,29 @@ def compare_methods_png(path, zoom=(-2.0, 2.0, -2.0, 2.0), seed=None,
     n_rows = int(math.ceil((len(graphs) + 1) / n_cols))
     if zoom:
         panel_w, panel_h = 5.6, 5.6
-    else:                          # tutta l'area: riquadri con le proporzioni della missione
+    else:                          # whole area: panels with the mission proportions
         g0 = graphs[0]
         ratio = (g0.rows * g0.cell_size_m) / (g0.cols * g0.cell_size_m)
         panel_w, panel_h = 6.4, max(3.0, 6.4 * ratio) + 1.0
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(panel_w * n_cols, panel_h * n_rows + 0.8),
                              squeeze=False)
     for k, (ax, mg) in enumerate(zip(axes.ravel(), graphs)):
-        # Archi grigi, piu' chiari e sottili quando sono tanti; in evidenza quelli che partono
-        # dal nodo di partenza: si vede quali vicini sono collegati.
+        # Grey edges, lighter and thinner when there are many; highlighted those leaving
+        # the starting node: it shows which neighbours are linked.
         many = mg.n_edges > 20000
         mg.draw(ax, zoom=zoom, legend=(k == 0), title_size=10,
                 edge_color='0.88' if many else '0.70', edge_width=0.2 if many else 0.35,
                 highlight=mg.origin_node_id)
     for ax in axes.ravel()[len(graphs) + 1:]:
         ax.axis('off')
-    # Riquadro dopo l'ultimo grafo: la tabella dei numeri.
+    # Panel after the last graph: the table of numbers.
     ax = axes.ravel()[len(graphs)]
     ax.axis('off')
     rows = []
     for mg in graphs:
         name = 'reticolo' if not mg.is_random else mg.distribution
         if mg.covering is None:
-            # Reticolo: la massima dalla formula (la griglia di misura puo' mancarne il punto).
+            # Lattice: the maximum from the formula (the measurement grid may miss its point).
             cov = (mg.covering_m, measured_covering(mg.xy_local, _mission_extent(
                 mg.rows, mg.cols, mg.cell_size_m, mg.start_cell))[1])
         else:
@@ -1338,7 +1337,7 @@ def compare_methods_png(path, zoom=(-2.0, 2.0, -2.0, 2.0), seed=None,
 
 
 def timing(path=None, **kw):
-    """Quanto costa costruire il reticolo da zero contro ricaricarlo da file."""
+    """How much building the lattice from scratch costs compared with reloading it from file."""
     import os
     import tempfile
     import time
@@ -1402,7 +1401,7 @@ def _main():
 
     rings = None if str(a.rings).lower() in ('none', 'tutti', 'all', '-1') else int(a.rings)
     if a.spacing is not None and a.spacing <= 0:
-        a.spacing = None                 # 0 = passo suggerito da suggested_spacing()
+        a.spacing = None                 # 0 = spacing suggested by suggested_spacing()
     common = dict(rows=a.rows, cols=a.cols, cell_size_m=a.cell, min_edge_length=a.min_edge,
                   max_edge_length=a.max_edge, connection_radius=a.radius,
                   border_margin_m=a.margin, sampling=a.graph, distribution=a.distribution,
@@ -1434,18 +1433,18 @@ def _main():
 
 
 # =========================================================================================
-# IL GRAFO DURANTE LA MISSIONE: costruzione del PRM, aggiornamento degli archi, celle
-# ammesse per la pianificazione
+# THE GRAPH DURING THE MISSION: PRM construction, edge update, cells
+# allowed for planning
 # =========================================================================================
 def build_mission_prm(env, verbose=True):
     """
-    Crea il grafo della missione (reticolo o nodi casuali, vedi MISSION_GRAPH_SAMPLING) e il
-    PRM con i suoi nodi, dalla dimensione della missione e dalla posa di partenza che `env`
-    ha gia' dentro (set_origin va fatto PRIMA).
+    Create the mission graph (lattice or random nodes, see MISSION_GRAPH_SAMPLING) and the
+    PRM with its nodes, from the mission size and the starting pose `env` already holds
+    (set_origin must be done BEFORE).
 
-    Restituisce (prm, sampler, mission_lattice): `sampler` da' i nodi cella per cella (vedi
-    mission_graph.LatticeSampler), `mission_lattice` e' il MissionGraph.
-    Gli ARCHI non vengono creati qui: servono i dati di terreno, vedi rebuild_prm_edges.
+    Returns (prm, sampler, mission_lattice): `sampler` gives the nodes cell by cell (see
+    mission_graph.LatticeSampler), `mission_lattice` is the MissionGraph.
+    The EDGES are not created here: they need the terrain data, see rebuild_prm_edges.
     """
     mg = build_mission_graph(
         env=env, spacing_m=P.MISSION_LATTICE_SPACING_M, rings=P.MISSION_LATTICE_RINGS,
@@ -1455,7 +1454,7 @@ def build_mission_prm(env, verbose=True):
         density_per_m2=P.MISSION_RANDOM_DENSITY, seed=P.MISSION_RANDOM_SEED)
     prm = prm_graph.PRM(min_edge_length=P.PRM_MIN_EDGE_M, max_edge_length=mg.reach_m,
                         connection_radius=P.PRM_CONNECTION_RADIUS_M)
-    prm.mission_graph = mg          # lo rilegge rebuild_prm_edges
+    prm.mission_graph = mg          # rebuild_prm_edges reads it again
     prm.set_detour_limit(P.PLAN_MAX_DETOUR_RATIO, P.PLAN_DETOUR_SLACK_M)
     mg.into_prm(prm)
     return prm, mg.as_sampler(), mg
@@ -1463,9 +1462,9 @@ def build_mission_prm(env, verbose=True):
 
 def node_cells(prm, env):
     """
-    {id nodo: (riga, colonna)}. Dal reticolo quando c'e' (mission_graph.node_cell, stessa
-    regola di env.get_cell_from_world), altrimenti da env. In cache sul PRM: i nodi non
-    cambiano durante la missione.
+    {node id: (row, column)}. From the lattice when there is one (mission_graph.node_cell,
+    same rule as env.get_cell_from_world), otherwise from env. Cached on the PRM: the nodes
+    do not change during the mission.
     """
     cache = getattr(prm, '_node_cell_cache', None)
     if cache is None:
@@ -1485,13 +1484,13 @@ def node_cells(prm, env):
 
 def graph_reaches_cell(prm, env, from_xy, row, col, global_map=None):
     """
-    Dal punto from_xy (il waypoint da cui si tenterebbe la cella) il grafo arriva ad almeno un
-    nodo della cella (row, col)? Stesse regole del tentativo: con PLAN_ONLY_EXPLORED_CELLS si
-    passa solo dalle celle visitate, dalla cella di partenza e dalla cella obiettivo; archi e
-    nodi come sono adesso (un nodo con penalita' infinita non conta). E' una condizione
-    NECESSARIA: se e' False il tentativo fallirebbe di sicuro con "GRAFO DISCONNESSO"; se e'
-    True decide il tentativo (punto obiettivo, tetto alla deviazione, fronte).
-    Ricerca in ampiezza, nessun effetto sul grafo. None se il grafo non ha nodi.
+    From the point from_xy (the waypoint the cell would be attempted from) does the graph
+    reach at least one node of cell (row, col)? Same rules as the attempt: with
+    PLAN_ONLY_EXPLORED_CELLS it passes only through the visited cells, the starting cell and
+    the goal cell; edges and nodes as they are now (a node with infinite penalty does not
+    count). It is a NECESSARY condition: if False the attempt would surely fail with "GRAFO
+    DISCONNESSO"; if True the attempt decides (goal point, detour cap, frontier).
+    Breadth-first search, no effect on the graph. None if the graph has no nodes.
     """
     start = prm.anchor_node(float(from_xy[0]), float(from_xy[1]), global_map,
                             geometry.PRM_EDGE_SAFETY_MARGIN_M,
@@ -1524,9 +1523,9 @@ def graph_reaches_cell(prm, env, from_xy, row, col, global_map=None):
 
 def restrict_planning_to_explored_cells(prm, env, target_row, target_col, robot_xy):
     """
-    Limita la ricerca del percorso ai nodi delle celle visitate, della cella del robot e
-    della cella obiettivo (vedi PLAN_ONLY_EXPLORED_CELLS). Da chiamare prima di ogni
-    tentativo di cella: le celle visitate cambiano fra un tentativo e l'altro.
+    Limit the path search to the nodes of the visited cells, of the robot's cell and of the
+    goal cell (see PLAN_ONLY_EXPLORED_CELLS). To be called before every cell attempt: the
+    visited cells change from one attempt to the next.
     """
     if not P.PLAN_ONLY_EXPLORED_CELLS:
         prm.set_allowed_nodes(None)
@@ -1542,17 +1541,17 @@ def restrict_planning_to_explored_cells(prm, env, target_row, target_col, robot_
 
 
 def robot_on_node(prm, node_id, x, y):
-    """True se il robot e' praticamente sul nodo (vedi prm_graph.ANCHOR_ON_NODE_M)."""
+    """True if the robot is practically on the node (see roadmap.ANCHOR_ON_NODE_M)."""
     pos = prm.get_node_position(node_id)
     return pos is not None and float(np.hypot(pos[0] - x, pos[1] - y)) <= prm_graph.ANCHOR_ON_NODE_M
 
 
 def rebuild_prm_edges(prm, global_map, incremental=True):
     """
-    Rivaluta gli archi del PRM sui dati correnti, sulle coppie del reticolo gia' calcolate
-    (vedi mission_graph.MissionGraph.add_edges_to_prm). Veti e pesi li calcola
-    PRM._evaluate_and_add_edge. incremental=False forza la costruzione completa (stesso
-    risultato: test_replay.py lo verifica).
+    Re-evaluate the PRM edges on the current data, on the lattice pairs already computed
+    (see mission_graph.MissionGraph.add_edges_to_prm). Vetoes and weights are computed by
+    PRM._evaluate_and_add_edge. incremental=False forces the full build (same result:
+    test_replay.py checks it).
     """
     return prm.mission_graph.add_edges_to_prm(
         prm, global_map=global_map,

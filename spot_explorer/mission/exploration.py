@@ -1,4 +1,4 @@
-"""La missione cella per cella: Missione, scelta della cella da tentare, viaggi con GraphNav."""
+"""The mission cell by cell: Mission, choice of the cell to attempt, trips with GraphNav."""
 import os
 import time
 import numpy as np
@@ -12,7 +12,7 @@ from spot_explorer.perception import spot_grid
 from spot_explorer.mission import cells as environmentMap
 from spot_explorer.robot import connection as spotUtils
 
-from spot_explorer.planning import mission_graph                   # reticolo dei nodi della missione
+from spot_explorer.planning import mission_graph                   # mission node lattice
 
 from spot_explorer import config as P
 from spot_explorer.records import MISSION_STATS, visualize_grid_with_candidates
@@ -22,24 +22,24 @@ from spot_explorer.mission import recovery
 
 
 # =========================================================================
-# LA MISSIONE: il ciclo cella per cella, avvio e chiusura
+# THE MISSION: the cell-by-cell loop, start-up and closure
 # =========================================================================
 
 
 class Mission:
-    """La missione cella per cella, dopo l'avvio (vedi easy_walk).
+    """The mission cell by cell, after start-up (see run.py).
 
-    La frontiera e' la lista delle celle candidate (riga, colonna, rango sul percorso a
-    serpentina). A ogni giro: se una cella della frontiera confina con quella del robot si
-    tenta di entrarci da qui (_cella_confinante); altrimenti si sceglie la candidata di rango
-    piu' basso, ci si avvicina con GraphNav fino al waypoint della cella visitata piu' vicina
-    e si tenta da li' (_scegli_cella_lontana, _viaggio_e_tentativo). Un tentativo fallito segna
-    il LATO da cui si e' provato (_lato_fallito): la cella si blocca solo quando ogni lato
-    raggiungibile e' stato provato (finalize_or_defer_blocked_cell).
+    The frontier is the list of candidate cells (row, column, rank on the serpentine path).
+    At every turn: if a frontier cell borders the robot's cell, entry is attempted from here
+    (_attempt_adjacent_cell); otherwise the lowest-rank candidate is chosen, the robot
+    approaches it with GraphNav up to the waypoint of the nearest visited cell and attempts
+    from there (_pick_far_cell, _travel_and_attempt). A failed attempt marks the SIDE it was
+    tried from (_mark_side_failed): the cell is blocked only when every reachable side has
+    been tried (finalize_or_defer_blocked_cell).
 
-    A batteria bassa (vedi batteria.py) l'esplorazione si ferma anche con la frontiera non
-    vuota: un tentativo interrotto per il rientro non segna il lato come provato e la cella
-    resta in frontiera, cosi' lo stato salvato dice cosa restava da esplorare.
+    On low battery (see battery.py) exploration stops even with a non-empty frontier: an
+    attempt interrupted for the return does not mark the side as tried and the cell stays
+    in the frontier, so the saved state tells what was left to explore.
     """
 
     def __init__(self, robot_state_client, command_client, recordingInterface, local_grid,
@@ -58,21 +58,21 @@ class Mission:
         self.mobility_kwargs = mobility_kwargs
         self.path = env.generate_serpentine_path(start_cell=env.start_cell)
         self.frontier = []
-        self.visualization_counter = 0   # numero progressivo delle immagini salvate
-        # Avanzamento (vedi _progresso): istante d'inizio, celle chiuse all'inizio e
-        # all'ultima riga stampata, punti del rettangolo della missione per l'area vista.
+        self.visualization_counter = 0   # running number of the saved images
+        # Progress (see _log_progress): start instant, closed cells at the start and
+        # at the last printed line, points of the mission rectangle for the seen area.
         self._t0 = None
         self._closed_at_start = 0
-        self._last_visited = None      # vedi _cella_del_robot
-        self._attempt_count = 0               # tentativi di entrare in una cella (vedi _fine_esplorazione)
-        self._dropped_cells = []            # tolte dalla frontiera senza lati ancora provabili
+        self._last_visited = None      # see _robot_cell
+        self._attempt_count = 0               # attempts to enter a cell (see _explain_end)
+        self._dropped_cells = []            # removed from the frontier with no sides left to try
         self._closed_logged = None
         self._area_points = None
 
-    # --- Pezzi comuni --------------------------------------------------------------------
+    # --- Shared pieces -----------------------------------------------------------------------
 
     def _attempt(self, row, col):
-        """Un tentativo di entrare nella cella (row, col) dalla posizione attuale."""
+        """One attempt to enter cell (row, col) from the current position."""
         check = cell_attempt.attempt_enter_cell_from_position(
             self.local_grid, self.global_grid, self.robot_state_client, self.command_client,
             self.env, row, col, self.sampler, self.prm, self.mission_folder,
@@ -83,25 +83,25 @@ class Mission:
         return check
 
     def _on_visited(self, row, col, x, y):
-        """Cella (row, col) visitata con il robot in (x, y): waypoint GraphNav della cella e
-        nuove candidate attorno a lei."""
+        """Cell (row, col) visited with the robot at (x, y): GraphNav waypoint of the cell and
+        new candidates around it."""
         self.env.update_position(x, y)
         self.recordingInterface.create_default_waypoint(cell_row=row, cell_col=col)
         self.env.mark_cell_visited(row, col)
         self._last_visited = (int(row), int(col))
-        # Le confinanti della cella APPENA VISITATA, non di quella in cui sta il robot: con
-        # l'arrivo appena fuori dalla cella (ARRIVAL_OUTSIDE_CELL_M) il robot puo' essere
-        # ancora nella cella di prima.
+        # The neighbours of the cell JUST VISITED, not of the one the robot is in: with
+        # arrival just outside the cell (ARRIVAL_OUTSIDE_CELL_M) the robot may still be
+        # in the previous cell.
         self.frontier.extend(environmentMap.find_new_borders(
             self.env, row, col, self.path, self.frontier))
 
     def _robot_cell(self):
         """
-        La cella da cui il robot cerca le confinanti e segna i lati provati. Di solito quella
-        in cui sta; ma se l'ultima cella visitata e' stata accettata con il robot appena FUORI
-        (ARRIVAL_OUTSIDE_CELL_M) e il robot e' ancora li', vale quella: il 28-10 13:50 la (7,2)
-        e' stata visitata con il robot 0.29 m fuori, nella (6,3), e la (7,1) che le stava
-        accanto non e' mai stata tentata da li'.
+        The cell from which the robot looks for neighbours and marks the sides tried. Usually
+        the one it is in; but if the last visited cell was accepted with the robot just
+        OUTSIDE (ARRIVAL_OUTSIDE_CELL_M) and the robot is still there, that one counts: on
+        28-10 13:50 (7,2) was visited with the robot 0.29 m outside, in (6,3), and (7,1)
+        next to it was never attempted from there.
         """
         x, y, _, _ = spotUtils.getPosition(self.robot_state_client)
         cell = tuple(int(v) for v in self.env.get_cell_from_world(x, y))
@@ -116,13 +116,14 @@ class Mission:
 
     def _start_cell_for(self, row, col, waypoints_by_cell):
         """
-        La cella visitata (con un waypoint GraphNav) da cui avvicinarsi alla candidata (row,
-        col): fra le CONFINANTI, una il cui lato verso la candidata non e' ancora stato
-        provato, la piu' vicina al robot. Se nessuna confinante ha un lato libero, la regola
-        di sempre (find_nearest_waypoint_cell_to_target), che il chiamante poi salta se quel
-        lato e' gia' provato. Prima si prendeva sempre la prima confinante in ordine fisso
-        (nord, sud, ovest, est): provato quel lato, la cella non veniva piu' tentata dagli
-        altri e usciva dalla frontiera (28-10 13:50, celle (7,0) e (7,1)).
+        The visited cell (with a GraphNav waypoint) from which to approach candidate (row,
+        col): among the NEIGHBOURS, one whose side towards the candidate has not been tried
+        yet, the nearest to the robot. If no neighbour has a free side, the usual rule
+        (find_nearest_waypoint_cell_to_target), which the caller then skips if that side
+        has already been tried. Before, the first neighbour in a fixed order (north, south,
+        west, east) was always taken: once that side was tried, the cell was no longer
+        attempted from the others and dropped out of the frontier (28-10 13:50, cells (7,0)
+        and (7,1)).
         """
         env, ri = self.env, self.recordingInterface
         sides = env.get_cell_sides_status(row, col)
@@ -147,18 +148,18 @@ class Mission:
         return ri.find_nearest_waypoint_cell_to_target((row, col), waypoints_by_cell, env)
 
     def _mark_side_failed(self, row, col, from_row, from_col):
-        """Segna come provato il lato della cella (row, col) che guarda la cella (from_row,
-        from_col). True se ora la cella e' bloccata (nessun lato raggiungibile da provare)."""
+        """Mark as tried the side of cell (row, col) facing cell (from_row, from_col). True if
+        the cell is now blocked (no reachable side left to try)."""
         side_bit = self.env.get_side_bit_facing_origin(from_row, from_col, row, col)
         self.env.mark_cell_side_explored(row, col, side_bit)
         recovery.finalize_or_defer_blocked_cell(self.env, row, col,
                                        self.sampler, self.global_grid.global_occupancy_map)
         return self.env.is_cell_blocked(row, col)
 
-    # --- Il ciclo ------------------------------------------------------------------------
+    # --- The loop --------------------------------------------------------------------------
 
     def explore(self):
-        """Visita le celle finche' la frontiera non e' vuota."""
+        """Visit the cells until the frontier is empty."""
         x, y, z, _ = spotUtils.getPosition(self.robot_state_client)
         robot_row, robot_col = self.env.get_cell_from_world(x, y)
         self.frontier.extend(environmentMap.find_new_borders(
@@ -183,8 +184,8 @@ class Mission:
                 self._attempt_adjacent_cell(min(borders_in_frontier, key=lambda b: b[2]),
                                        robot_row, robot_col)
             else:
-                # Nessuna cella confinante in frontiera: si va con GraphNav verso il waypoint
-                # piu' vicino alla cella di rango piu' basso e si tenta da li'.
+                # No neighbouring cell in the frontier: go with GraphNav towards the waypoint
+                # nearest to the lowest-rank cell and attempt from there.
                 choice = self._pick_far_cell()
                 if choice is not None:
                     if self._travel_and_attempt(*choice) == 'caduta':
@@ -203,9 +204,9 @@ class Mission:
         self._log_progress(finale=True)
 
     def _explain_end(self):
-        """Se l'esplorazione finisce con celle non chiuse, una riga [FINE] che dice perche'
-        (28-10 14:17: partenza in mezzo all'erba alta, nessuna cella raggiungibile, e nel log
-        solo "Frontiera vuota")."""
+        """If exploration ends with cells not closed, a [FINE] line saying why (28-10 14:17:
+        start in the middle of tall grass, no reachable cell, and in the log only
+        "Frontiera vuota")."""
         closed, visited, blocked, total = self._cell_counts()
         if closed >= total or cell_attempt._battery_low():
             return
@@ -220,18 +221,18 @@ class Mission:
                  f"{', '.join(f'({r},{c})' for r, c in self._dropped_cells)}" if self._dropped_cells else "")
               + ". Le altre non sono mai state raggiungibili da una cella visitata.")
 
-    # --- Avanzamento ---------------------------------------------------------------------
+    # --- Progress ------------------------------------------------------------------------
 
     def _cell_counts(self):
-        """(chiuse, visitate, bloccate, totale): chiusa = visitata o bloccata."""
+        """(closed, visited, blocked, total): closed = visited or blocked."""
         vals = [v for row in self.env.map for v in row]
         visited = sum(1 for v in vals if v == 1)
         blocked = sum(1 for v in vals if v == -1)
         return visited + blocked, visited, blocked, len(vals)
 
     def _seen_area_pct(self):
-        """Frazione del rettangolo della missione gia' osservata (libera o ostacolo) nella
-        mappa globale, su punti ogni 0.1 m. None se la mappa non c'e' ancora."""
+        """Fraction of the mission rectangle already observed (free or obstacle) in the global
+        map, on points every 0.1 m. None if there is no map yet."""
         gm = self.global_grid.global_occupancy_map
         if gm is None:
             return None
@@ -253,11 +254,11 @@ class Mission:
 
     def _log_progress(self, finale=False):
         """
-        A che punto e' la missione: una riga [PROGRESSO] quando cambiano le celle chiuse
-        (visitate o bloccate), e una alla fine. Celle chiuse sul totale (il numero
-        principale), area della missione gia' vista nella mappa globale, tempo, stima del
-        tempo che manca dal tempo medio per cella, batteria. Solo log e MISSION_STATS
-        ['progresso'] (rapporto, mission_summary.json): nessuna decisione ne dipende.
+        Where the mission stands: a [PROGRESSO] line when the closed cells change (visited
+        or blocked), and one at the end. Closed cells over the total (the main number),
+        mission area already seen in the global map, time, estimate of the remaining time
+        from the average time per cell, battery. Log and MISSION_STATS['progresso'] only
+        (report, mission_summary.json): no decision depends on it.
         """
         closed, visited, blocked, total = self._cell_counts()
         if not finale and closed == self._closed_logged:
@@ -270,7 +271,7 @@ class Mission:
         minutes = (time.time() - self._t0) / 60.0 if self._t0 is not None else 0.0
         done_here = closed - self._closed_at_start
         per_cell = minutes / done_here if done_here > 0 else None
-        # L'ultima carica letta dal monitor della batteria (batteria.py), senza una lettura in piu'.
+        # The last charge read by the battery monitor (battery.py), without an extra reading.
         battery = MISSION_STATS.get('battery_last_pct')
         pct = 100.0 * closed / total
         area_txt = f"area vista {100.0 * area:.0f}%" if area is not None else "area vista ?"
@@ -294,11 +295,11 @@ class Mission:
             'batteria': battery, 'finale': bool(finale)}
 
     def _attempt_adjacent_cell(self, selected_border, robot_row, robot_col):
-        """Tentativo su una cella della frontiera che confina con quella del robot."""
+        """Attempt on a frontier cell bordering the robot's cell."""
         row, col = selected_border[0], selected_border[1]
-        # Cella da cui si tenta l'ingresso: serve dopo per segnare il LATO provato. Non la
-        # cella in cui il robot si trova DOPO il tentativo, che una ritirata o un passo
-        # parziale possono aver cambiato (lato sbagliato o nullo).
+        # Cell entry is attempted from: needed afterwards to mark the SIDE tried. Not the
+        # cell the robot is in AFTER the attempt, which a retreat or a partial step
+        # may have changed (wrong or null side).
         origin_row, origin_col = robot_row, robot_col
         check = self._attempt(row, col)
         self.frontier.remove(selected_border)
@@ -307,33 +308,33 @@ class Mission:
         robot_row, robot_col = self.env.get_cell_from_world(x_new, y_new)
 
         if check or (row, col) == (robot_row, robot_col):
-            # Fallito ma il robot e' comunque dentro la cella: vale come visitata.
+            # Failed but the robot is inside the cell anyway: it counts as visited.
             self._on_visited(row, col, x_new, y_new)
         elif cell_attempt._battery_low():
-            # Tentativo interrotto per il rientro: la cella resta da esplorare.
+            # Attempt interrupted for the return: the cell is still to be explored.
             self.frontier.append(selected_border)
         else:
             self._retry_after_failure(selected_border, origin_row, origin_col)
 
     def _retry_after_failure(self, selected_border, origin_row, origin_col):
-        """Subito dopo un tentativo fallito su una cella confinante: si riprova una volta se
-        da qui c'e' una strada corta (al massimo COSTO_SOGLIA archi) verso un obiettivo
-        diverso da quello appena fallito; altrimenti il lato si segna come provato.
+        """Right after a failed attempt on a neighbouring cell: retry once if from here there
+        is a short way (at most MAX_RETRY_EDGES edges) to a goal different from the one that
+        just failed; otherwise the side is marked as tried.
 
-        Gli archi scartati nel tentativo fallito (blocchi confermati da vicino, fallimenti
-        fisici) sono gia' nel PRM tramite mark_edge_invalid, e la ricostruzione degli archi
-        li rispetta: Dijkstra non riproporra' la stessa strada."""
+        The edges discarded in the failed attempt (blocks confirmed up close, physical
+        failures) are already in the PRM via mark_edge_invalid, and the edge rebuild
+        respects them: Dijkstra will not propose the same way again."""
         row, col = selected_border[0], selected_border[1]
         prm, global_map = self.prm, self.global_grid.global_occupancy_map
 
-        # Posizione attuale (il fallimento puo' essere in partenza o a meta' strada)
+        # Current position (the failure may be at the start or halfway)
         x_curr, y_curr, _, _ = spotUtils.getPosition(self.robot_state_client)
 
-        # Scansione fresca, per scegliere il punto obiettivo da qui
+        # Fresh scan, to choose the goal point from here
         scan = self.local_grid.fetch_scan(self.robot_state_client)
         if scan is not None:
-            # Senza impronta del corpo ne' maschera degli ostacoli: serve solo il terreno per
-            # il PRM e la scelta dell'obiettivo.
+            # Without body footprint or obstacle mask: only the terrain is needed for
+            # the PRM and the goal choice.
             self.local_grid.process_scan(scan, x_curr, y_curr, 0.0, footprint=False, fuse=False)
             num_x, num_y = scan.num_x, scan.num_y
             grid_origin_x, grid_origin_y = self.local_grid.grid_origin(scan)
@@ -376,13 +377,13 @@ class Mission:
 
         path_ids = prm.find_path_dijkstra(start_id, goal_id)
 
-        # Si riprova subito solo se il percorso ha al massimo COSTO_SOGLIA archi (numero di
-        # nodi - 1)
+        # Retry right away only if the path has at most MAX_RETRY_EDGES edges (number of
+        # nodes - 1)
         MAX_RETRY_EDGES = 4
 
-        # Se l'obiettivo e' lo STESSO del tentativo appena fallito, riprovare subito vorrebbe
-        # dire stesso posto, stesso esito: la cella si rimanda e torna in coda come le altre
-        # (vedi finalize_or_defer_blocked_cell).
+        # If the goal is the SAME as the attempt that just failed, retrying right away would
+        # mean same place, same outcome: the cell is deferred and goes back in the queue like the
+        # others (see finalize_or_defer_blocked_cell).
         last_goal = getattr(self.env, '_last_attempt_goal', None)
         same_goal = (last_goal is not None and float(np.hypot(
             target_x - last_goal[0], target_y - last_goal[1])) <= P.RECOVERY_SAME_GOAL_M)
@@ -412,12 +413,12 @@ class Mission:
                 self.frontier.append(selected_border)
 
     def _pick_far_cell(self):
-        """La candidata di rango piu' basso da cui avvicinarsi con GraphNav:
-        (riga, colonna, rango, cella visitata del waypoint di partenza), None se nessuna.
+        """The lowest-rank candidate to approach with GraphNav:
+        (row, column, rank, visited cell of the starting waypoint), None if none.
 
-        Una cella bloccata (-1) non ha mai lati ancora da provare:
-        finalize_or_defer_blocked_cell() la blocca solo dopo che ogni lato raggiungibile e'
-        stato provato ed e' fallito."""
+        A blocked cell (-1) never has sides left to try:
+        finalize_or_defer_blocked_cell() blocks it only after every reachable side has been
+        tried and has failed."""
         env, recordingInterface = self.env, self.recordingInterface
         already_skipped_this_round = set()
         while True:
@@ -431,8 +432,8 @@ class Mission:
                                                                  waypoints_by_cell)
             if candidate_nearest_cell is None or \
                     recordingInterface.get_manual_waypoint_by_cell(*candidate_nearest_cell) is None:
-                # Nessuna cella visitata con waypoint da cui partire: si passa alla candidata
-                # successiva.
+                # No visited cell with a waypoint to start from: move on to the candidate
+                # next.
                 print(f"[SKIP-ROUND] Cella ({candidate_row},{candidate_col}): nessun waypoint "
                       f"GraphNav da cui avvicinarsi. Provo la successiva.")
                 already_skipped_this_round.add((candidate_row, candidate_col))
@@ -446,9 +447,9 @@ class Mission:
                       f"candidata successiva.")
                 already_skipped_this_round.add((candidate_row, candidate_col))
                 continue
-            # Prima di partire con GraphNav: da quel waypoint il grafo arriva alla cella? Se
-            # no, il tentativo fallirebbe appena arrivati (vedi GRAPHNAV_PRECHECK): il lato si
-            # segna come provato senza muoversi.
+            # Before leaving with GraphNav: does the graph reach the cell from that waypoint? If
+            # not, the attempt would fail right on arrival (see GRAPHNAV_PRECHECK): the side is
+            # marked as tried without moving.
             if P.GRAPHNAV_PRECHECK:
                 cand_wp = recordingInterface.get_manual_waypoint_by_cell(*candidate_nearest_cell)
                 wp_xy = (cand_wp.get('x'), cand_wp.get('y')) if isinstance(cand_wp, dict) else (None, None)
@@ -472,8 +473,8 @@ class Mission:
             return candidate_row, candidate_col, candidate_rank, candidate_nearest_cell
 
     def _travel_and_attempt(self, target_row, target_col, rank, nearest_cell):
-        """Con GraphNav fino al waypoint della cella nearest_cell, poi il tentativo sulla cella
-        (target_row, target_col). 'caduta' se il robot e' caduto durante il viaggio."""
+        """With GraphNav up to the waypoint of cell nearest_cell, then the attempt on cell
+        (target_row, target_col). 'caduta' if the robot fell during the trip."""
         recordingInterface = self.recordingInterface
         x_current, y_current, _, _ = spotUtils.getPosition(self.robot_state_client)
 
@@ -487,8 +488,8 @@ class Mission:
             f"verso il waypoint della cella {nearest_cell} per la cella ({target_row},{target_col})",
             face_xy=self.env.get_world_position_from_cell(target_row, target_col))
 
-        # GraphNav non registra i tratti percorsi: quelli vecchi non descrivono piu' la strada
-        # da cui il robot e' arrivato, la ritirata non deve usarli.
+        # GraphNav does not record the legs travelled: the old ones no longer describe the way
+        # the robot came, the retreat must not use them.
         self.env._traveled_arcs = []
         if movements.check_and_recover_fall(self.robot_state_client, self.command_client,
                                             self.global_grid.global_occupancy_map,
@@ -501,13 +502,13 @@ class Mission:
             return 'caduta'
 
         recordingInterface.start_recording()
-        # Il viaggio puo' essere stato lungo: se la batteria e' scesa sotto soglia non si
-        # tenta la cella, si rientra (la cella resta in frontiera).
+        # The trip may have been long: if the battery dropped below the threshold the cell
+        # is not attempted, the robot returns (the cell stays in the frontier).
         if cell_attempt._battery_return_due("dopo lo spostamento GraphNav"):
             return None
-        # Se GraphNav non e' nemmeno arrivato al waypoint di partenza vale come un tentativo
-        # fallito. Lato segnato come provato; la cella esce dalla frontiera solo se era
-        # l'ULTIMO lato non provato (cella davvero bloccata).
+        # If GraphNav did not even reach the starting waypoint it counts as a failed
+        # attempt. Side marked as tried; the cell leaves the frontier only if it was
+        # the LAST untried side (cell really blocked).
         if navigation_success and self._attempt(target_row, target_col):
             x_final, y_final, _, _ = spotUtils.getPosition(self.robot_state_client)
             self.frontier.remove((target_row, target_col, rank))
@@ -519,7 +520,7 @@ class Mission:
         return None
 
     def final_scan(self):
-        """L'area attorno all'ultima posizione, prima di tornare: entra nelle mappe globali."""
+        """The area around the last position, before going back: it goes into the global maps."""
         print("[FINAL SCAN] Ultima scansione attorno al robot prima di tornare alla partenza...")
         x_final, y_final, z_final, quat_final = spotUtils.getPosition(self.robot_state_client)
         final_yaw = np.arctan2(2.0 * (quat_final.w * quat_final.z + quat_final.x * quat_final.y),
@@ -530,7 +531,7 @@ class Mission:
             print("[FINAL SCAN] ATTENZIONE: griglia locale non ricevuta, proseguo senza scansione finale.")
             return
         self.local_grid.process_scan(scan, x_final, y_final, final_yaw, ground_label="scan-finale")
-        # Anche l'ultima scansione entra nelle mappe globali, come tutte le altre
+        # The last scan goes into the global maps too, like all the others
         global_maps.fold_scan_into_global_maps(
             self.global_grid.global_occupancy_map, self.global_grid.global_terrain_map, scan.pts,
             scan.terrain, scan.obstacle_mask, scan.is_valid, scan.od,

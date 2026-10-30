@@ -1,41 +1,39 @@
 """
-Prova di MISSIONE INTERA: easy_walk.main() vero, dall'avvio alla seduta finale, contro un
-robot finto in un mondo sintetico e un GraphNav finto.
+WHOLE MISSION test: the real run.main(), from start-up to the final sit, against a fake
+robot in a synthetic world and a fake GraphNav.
 
-test_e2e_loop.py prova l'ingresso in UNA cella; qui gira tutto il resto: scelta della cella
-successiva, spostamenti GraphNav fra celle (con il controllo prima dello spostamento e le
-scorciatoie), recupero dopo un tentativo fallito, celle bloccate e rimandate, scansione finale,
-chiusura d'anello e ancoraggio, ritorno a wp_0, scaricamento della mappa.
+test_e2e_loop.py tests entering ONE cell; here everything else runs: choice of the next
+cell, GraphNav moves between cells (with the check before the move and the shortcuts),
+recovery after a failed attempt, blocked and deferred cells, final scan, loop closure and
+anchoring, return to wp_0, map download.
 
-Cosa e' finto, oltre a quanto gia' finto in test_e2e_loop.py (posizione, griglia locale,
-movimento, fronte):
-  - il robot e i suoi client (login, E-Stop, lease, comandi);
-  - GraphNav: un grafo in memoria. I waypoint nascono dove sta il robot, gli archi della
-    registrazione collegano ognuno al precedente, navigate_to porta il robot sul waypoint,
-    la localizzazione e' il waypoint piu' vicino.
-Tutto il resto e' il codice vero, compreso RecordingInterface di spot_explorer.graphnav.map_recording.
+What is fake, besides what is already fake in test_e2e_loop.py (position, local grid,
+motion, frontier):
+  - the robot and its clients (login, E-Stop, lease, commands);
+  - GraphNav: an in-memory graph. Waypoints are created where the robot is, the recording
+    edges link each one to the previous, navigate_to puts the robot on the waypoint,
+    localization is the nearest waypoint.
+Everything else is the real code, including RecordingInterface from spot_explorer.graphnav.map_recording.
 
-    python3 test_missione.py
-    E2E_LOG_DIR=/tmp/prima python3 test_missione.py    # salva il log della missione (vedi
-                                                        # confronta_log.py)
+    python3 tests/test_mission.py
+    E2E_LOG_DIR=/tmp/before python3 tests/test_mission.py   # saves the mission log (see
+                                                             # tools/compare_logs.py)
 
-Due mondi, griglia 3 x 3 celle da 3 m, il robot parte nel centro di (0,0) guardando lungo +x
-(colonne in avanti, righe a sinistra). In entrambi la cella (2,2) e' chiusa da muri su tutti i
-lati e la (1,1) ha un ostacolo nel centro, quindi il suo obiettivo finisce vicino al bordo e
-il robot arriva appena fuori dalla cella.
-  A  un muro fra la colonna 1 e la 2 sulla riga 0: si entra in (0,2) da (1,2); scatta il
-     controllo prima dello spostamento GraphNav.
-  B  il muro piu' lungo e un ostacolo dentro (1,2): blocchi confermati e ritorni con GraphNav.
-  C  il mondo B con fallimenti forzati (vedi _con_fallimenti): tentativi falliti d'ufficio,
-     nessun punto obiettivo, una caduta durante uno spostamento GraphNav, il ritorno a wp_0
-     fermo (STUCK) a 0.60 m dalla partenza. Esercita il nuovo
-     tentativo subito dopo il recupero ([RECOVERY]), riuscito e fallito, e i rami della
-     missione che i mondi veri raggiungono di rado.
-  D  il mondo A con la batteria finta che scende di un punto a lettura, da 36%: sotto il 30%
-     la missione smette di esplorare e chiude come a fine missione (rientro a wp_0).
-Nel mondo A c'e' anche un fiducial (ID 7) dietro il punto di partenza.
-Cio' che nessuno esercita: le trappole e le cadute dentro un tentativo (le prova
-test_e2e_loop.py).
+The worlds have a 3 x 3 grid of 3 m cells, the robot starts in the centre of (0,0) looking
+along +x (columns ahead, rows to the left). In all of them cell (2,2) is closed by walls on
+all sides and (1,1) has an obstacle in the centre, so its goal ends up near the border and
+the robot arrives just outside the cell.
+  A  a wall between column 1 and 2 on row 0: (0,2) is entered from (1,2); the check before
+     the GraphNav move triggers.
+  B  the longer wall and an obstacle inside (1,2): confirmed blocks and returns with GraphNav.
+  C  world B with forced failures (see _with_failures): attempts failed on purpose, no goal
+     point, a fall during a GraphNav move, the return to wp_0 stuck (STUCK) 0.60 m from the
+     start. Exercises the new attempt right after recovery ([RECOVERY]), successful and
+     failed, and the mission branches that real worlds rarely reach.
+  D  world A with the fake battery dropping one point per reading, from 36%: below 30% the
+     mission stops exploring and closes as at the end of a mission (return to wp_0).
+In world A there is also a fiducial (ID 7) behind the starting point.
+What nobody exercises: traps and falls inside an attempt (test_e2e_loop.py tests them).
 """
 import contextlib
 import glob
@@ -50,7 +48,7 @@ from types import SimpleNamespace as NS
 
 import numpy as np
 
-import test_e2e_loop as T          # mondo, robot e griglia locale finti; applica le sue patch
+import test_e2e_loop as T          # fake world, robot and local grid; applies its patches
 import bosdyn.client.lease
 from bosdyn.api import world_object_pb2
 from bosdyn.api.graph_nav import graph_nav_pb2, map_pb2, map_processing_pb2, recording_pb2
@@ -77,8 +75,8 @@ WORLDS = {
     'B': [(5.9, 6.1, 0.0, 4.6)] + _CLOSED_22 + [(4.2, 4.8, 4.2, 4.8), (7.0, 7.4, 3.6, 5.4)],
 }
 WALLS = WORLDS['A']
-# Fiducial del mondo in corso: (ID, x, y), None = nessuno. Nel mondo A un tag 1 m DIETRO il
-# punto di partenza (lo vede la telecamera posteriore).
+# Fiducial of the current world: (ID, x, y), None = none. In world A a tag 1 m BEHIND the
+# starting point (the rear camera sees it).
 FIDUCIAL_TAG = None
 FAILS = []
 
@@ -90,10 +88,10 @@ def check(cond, msg):
 
 
 # ---------------------------------------------------------------------------------------
-# GraphNav finto
+# Fake GraphNav
 # ---------------------------------------------------------------------------------------
 class FakeGraphNav:
-    """Registrazione + GraphNav + elaborazione della mappa, su un grafo in memoria."""
+    """Recording + GraphNav + map processing, on an in-memory graph."""
 
     def __init__(self):
         self.graph = map_pb2.Graph()
@@ -101,15 +99,15 @@ class FakeGraphNav:
         self.recording = False
         self.last_wp = None
         self.n = 0
-        self.trips = []                # (da, a) degli spostamenti
-        self.headings = []             # angoli d'arrivo chiesti (rispetto al waypoint)
-        self.stuck_wp0_m = None        # ritorno a wp_0 fermo (STUCK) a questa distanza
-        self.wp0_offset_m = None       # ritorno a wp_0 "arrivato" ma spostato di tanto (vedi run)
-        self.wp0_returns = 0           # ritorni a wp_0 fatti
-        self.relocated = False         # rilocalizzato sul tag DOPO un ritorno a wp_0
+        self.trips = []                # (from, to) of the moves
+        self.headings = []             # arrival angles requested (relative to the waypoint)
+        self.stuck_wp0_m = None        # return to wp_0 stuck (STUCK) at this distance
+        self.wp0_offset_m = None       # return to wp_0 "arrived" but off by this much (see run)
+        self.wp0_returns = 0           # returns to wp_0 done
+        self.relocated = False         # relocalized on the tag AFTER a return to wp_0
         self.status = graph_nav_pb2.NavigationFeedbackResponse.STATUS_REACHED_GOAL
 
-    # --- registrazione -------------------------------------------------------------
+    # --- recording -----------------------------------------------------------------------
     def _new_waypoint(self, name):
         self.n += 1
         wid = f"wp-finto-{self.n}"
@@ -188,26 +186,26 @@ class FakeGraphNav:
         if (FIDUCIAL_TAG is not None and kw.get('use_fiducial_id') == FIDUCIAL_TAG[0]
                 and kw.get('fiducial_init') == graph_nav_pb2.SetLocalizationRequest.FIDUCIAL_INIT_SPECIFIC):
             if self.wp0_returns > 0:
-                self.relocated = True             # da qui GraphNav sa davvero dov'e' wp_0
+                self.relocated = True             # from here GraphNav really knows where wp_0 is
             return graph_nav_pb2.SetLocalizationResponse(status=graph_nav_pb2.SetLocalizationResponse.STATUS_OK)
         raise RuntimeError("STATUS_NO_MATCHING_FIDUCIAL (finto: nessun fiducial nel mondo)")
 
     def navigate_to(self, waypoint_id, cmd_duration, command_id=None, travel_params=None,
                     destination_waypoint_tform_body_goal=None, **kw):
         x, y, yaw = self.pos[waypoint_id]
-        if destination_waypoint_tform_body_goal is not None:     # arrivo girato (solo l'angolo)
+        if destination_waypoint_tform_body_goal is not None:     # turned arrival (angle only)
             yaw += destination_waypoint_tform_body_goal.angle
             self.headings.append(destination_waypoint_tform_body_goal.angle)
         self.trips.append((self._nearest(), waypoint_id))
         self.status = graph_nav_pb2.NavigationFeedbackResponse.STATUS_REACHED_GOAL
         name = next(w.annotations.name for w in self.graph.waypoints if w.id == waypoint_id)
         if name == 'wp_0' and self.stuck_wp0_m is not None:
-            x += self.stuck_wp0_m                 # fermo prima, sulla strada da +x
+            x += self.stuck_wp0_m                 # stopped short, on the way from +x
             self.status = graph_nav_pb2.NavigationFeedbackResponse.STATUS_STUCK
         if name == 'wp_0':
             self.wp0_returns += 1
             if self.wp0_offset_m is not None and not self.relocated:
-                y += self.wp0_offset_m            # localizzazione sbagliata: "arrivato" di lato
+                y += self.wp0_offset_m            # wrong localization: "arrived" to one side
         T.ROBOT.x, T.ROBOT.y, T.ROBOT.yaw = x, y, yaw
         T.ROBOT.track.append((x, y))
         return 1
@@ -230,7 +228,7 @@ class FakeGraphNav:
     def download_edge_snapshot(self, snapshot_id, **kw):
         return map_pb2.EdgeSnapshot(id=snapshot_id)
 
-    # --- elaborazione della mappa -------------------------------------------------------
+    # --- map processing ------------------------------------------------------------------
     def process_topology(self, params=None, modify_map_on_server=False, **kw):
         return map_processing_pb2.ProcessTopologyResponse(
             status=map_processing_pb2.ProcessTopologyResponse.STATUS_OK)
@@ -243,7 +241,7 @@ class FakeGraphNav:
 
 
 class FakeWorldObjects:
-    """Il servizio degli oggetti visti: il tag FIDUCIAL_TAG, sempre in vista, o nessuno."""
+    """The world-object service: the tag FIDUCIAL_TAG, always in view, or none."""
 
     def list_world_objects(self, object_type=None, **kw):
         resp = world_object_pb2.ListWorldObjectResponse()
@@ -265,8 +263,8 @@ class FakeWorldObjects:
 
 
 def _robot_state_with_odom():
-    """Stato del robot con il solo odom -> corpo alla posa del robot finto (per
-    initialize_with_fiducial: il resto del test vuole uno stato che fallisce)."""
+    """Robot state with only odom -> body at the fake robot's pose (for
+    initialize_with_fiducial: the rest of the test wants a state that fails)."""
     from bosdyn.api import robot_state_pb2
     st = robot_state_pb2.RobotState()
     edges = st.kinematic_state.transforms_snapshot.child_to_parent_edge_map
@@ -331,9 +329,9 @@ class _Tracker(T.FakeTracker):
 
 @contextlib.contextmanager
 def _with_failures():
-    """Fallimenti forzati, sempre gli stessi: il 1o, 4o, 7o... tentativo e il 2o falliscono
-    senza muovere il robot, una scelta dell'obiettivo su 5 non trova punti, il primo
-    spostamento GraphNav finisce con una caduta (finta: il robot e' gia' in piedi)."""
+    """Forced failures, always the same: the 1st, 4th, 7th... attempt and the 2nd fail
+    without moving the robot, one goal choice in 5 finds no points, the first GraphNav
+    move ends with a fall (fake: the robot is already standing)."""
     real_attempt = cell_attempt.attempt_enter_cell_from_position
     real_best = goal.find_best_point_in_cell
     real_fall = movements.check_and_recover_fall
@@ -374,8 +372,8 @@ def _with_failures():
 
 @contextlib.contextmanager
 def _with_battery(from_pct=36.0, points_per_read=1.0):
-    """Batteria finta: ogni lettura (una per giro del ciclo, intervallo 0 s) un punto in
-    meno, da da_pct."""
+    """Fake battery: every reading (one per loop turn, interval 0 s) one point less,
+    from from_pct."""
     real_read, real_s = batteria.read_battery, parametri.BATTERY_SAMPLE_S
     n = {'letture': 0}
 
@@ -412,7 +410,7 @@ def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0_m=None, wp0_offset
     parametri.MISSION_GRAPH_SAMPLING = 'reticolo'
 
     root = tempfile.mkdtemp(prefix="missione_finta_")
-    mission_run.DATA_ROOT = root                                    # cartelle dei dati qui
+    mission_run.DATA_ROOT = root                                    # data folders here
     argv = sys.argv
     sys.argv = ["easy_walk.py", "--rows", str(ROWS), "--cols", str(COLS), "--cell", str(CELL),
                 "--graph", "reticolo", "--spacing", "0.5"]
@@ -498,8 +496,8 @@ def _check_failures(r):
 
 
 def _check_emergency():
-    """Missione interrotta a meta' (eccezione o Ctrl+C): il robot si siede, i motori si spengono e
-    la mappa GraphNav si scarica, poi l'errore risale come prima."""
+    """Mission interrupted halfway (exception or Ctrl+C): the robot sits, the motors power off
+    and the GraphNav map is downloaded, then the error propagates as before."""
     for nome, err in (("eccezione", RuntimeError("guasto finto")), ("Ctrl+C", KeyboardInterrupt())):
         print(f"\nMissione intera nel mondo F: interrotta da {nome} al terzo tentativo.")
         real = cell_attempt.attempt_enter_cell_from_position
@@ -519,7 +517,7 @@ def _check_emergency():
                 rise, r = True, None
         finally:
             cell_attempt.attempt_enter_cell_from_position = real
-        if r is None:      # Ctrl+C: il log e' nella cartella della missione
+        if r is None:      # Ctrl+C: the log is in the mission folder
             logs = sorted(glob.glob(os.path.join(tempfile.gettempdir(), "missione_finta_*", "MissionLogs",
                                                  "*", "mission_log.txt")), key=os.path.getmtime)
             log = open(logs[-1]).read() if logs else ""
@@ -532,10 +530,10 @@ def _check_emergency():
 
 def _check_cell_choice():
     """
-    Il caso del 28-10 13:50, griglia 8 x 7 da 2 m: la (7,2) e' stata visitata con il robot
-    appena fuori, nella (6,3), e la (7,1) era gia' stata provata dal lato della (6,1). Il robot
-    deve cercare le confinanti dalla (7,2), e avvicinarsi alla (7,1) dalla (7,2), non di nuovo
-    dalla (6,1) (prima: salto, poi la cella usciva dalla frontiera).
+    The case of 28-10 13:50, 8 x 7 grid of 2 m: (7,2) was visited with the robot just
+    outside, in (6,3), and (7,1) had already been tried from the side of (6,1). The robot
+    must look for the neighbours from (7,2), and approach (7,1) from (7,2), not again from
+    (6,1) (before: a jump, then the cell dropped out of the frontier).
     """
     print("\nScelta delle celle: il caso delle 13:50 (celle (7,1) e (7,2))")
     from spot_explorer.mission import cells as environmentMap
@@ -554,13 +552,13 @@ def _check_cell_choice():
     m = exploration.Mission.__new__(exploration.Mission)
     m.env, m.recordingInterface, m.robot_state_client = env, ri, None
     m._last_visited = (7, 2)
-    T.ROBOT.x, T.ROBOT.y = 4.0, 12.75                 # 0.25 m fuori dalla (7,2), nella (6,2)
+    T.ROBOT.x, T.ROBOT.y = 4.0, 12.75                 # 0.25 m outside (7,2), in (6,2)
     with contextlib.redirect_stdout(io.StringIO()):
         cell = m._robot_cell()
         start_xy = m._start_cell_for(7, 1, wps)
     check(cell == (7, 2), f"robot appena fuori dalla (7,2) appena visitata: cella del robot {cell}")
     check(start_xy == (7, 2), f"avvicinamento alla (7,1) dal lato non ancora provato: dalla {start_xy}")
-    T.ROBOT.x, T.ROBOT.y = 4.0, 11.5                  # ben dentro la (6,2): vale la cella vera
+    T.ROBOT.x, T.ROBOT.y = 4.0, 11.5                  # well inside (6,2): the real cell counts
     with contextlib.redirect_stdout(io.StringIO()):
         cell = m._robot_cell()
     check(cell == (6, 2), f"robot lontano dalla cella visitata: vale quella in cui sta ({cell})")

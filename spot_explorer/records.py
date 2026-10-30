@@ -1,17 +1,17 @@
 """
-REGISTRO DELLA MISSIONE: statistiche, log e dati salvati su disco.
+MISSION RECORDS: statistics, logs and data saved to disk.
 
-Niente di quello che c'e' qui decide il comportamento del robot: serve a capire dopo cosa e'
-successo (mission_report.py, mission_viewer.py, test_replay.py).
+Nothing here decides the robot's behaviour: it serves to understand afterwards what
+happened (mission_report.py, mission_viewer.py, test_replay.py).
 
-  MISSION_STATS      contatori e tempi per fase, riepilogati a fine missione
-  MISSION_CTX        oggetti della missione in corso per i log che non li ricevono come
-                     argomento (PRM, cartella dei log, quota di riferimento)
-  install_stdout_tee copia di tutto l'output in mission_log.txt
-  BodyTiltRecorder   campiona posizione e inclinazione del corpo durante un movimento
+  MISSION_STATS      counters and times per phase, summarized at the end of the mission
+  MISSION_CTX        objects of the current mission for the logs that do not receive them
+                     as arguments (PRM, log folder, reference height)
+  install_stdout_tee copy of all output into mission_log.txt
+  BodyTiltRecorder   samples body position and tilt during a move
   SegmentLog, append_csv, append_trajectory, TrajectoryLog, log_segment
-                     i CSV della missione (segments.csv, trajectory.csv, drift.csv, ...)
-  save_npz_async     salvataggio dei .npz su un thread di appoggio, senza fermare il ciclo
+                     the mission CSVs (segments.csv, trajectory.csv, drift.csv, ...)
+  save_npz_async     saving of the .npz files on a helper thread, without stopping the loop
 """
 import csv
 import os
@@ -26,58 +26,58 @@ from bosdyn.client.frame_helpers import GROUND_PLANE_FRAME_NAME, VISION_FRAME_NA
 
 from spot_explorer.robot import connection as spotUtils
 
-# Un thread di appoggio per salvare i dati su disco senza fermare il ciclo di navigazione.
+# A helper thread to save data to disk without stopping the navigation loop.
 VIS_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vis_worker")
 
 
 # ==================================================================
-# STATISTICHE DI MISSIONE -- solo diagnostica/log, mai lette per decidere il
-# comportamento del robot. Mai azzerato: una missione per processo (i test che ne fanno
-# girare piu' di una nello stesso processo vedono i conteggi sommati).
-# I contatori sul veto/fonte-pendenza vivono invece sull'istanza PRM stessa
-# (vedi prm_graph.PRM.print_mission_summary), perché il PRM persiste per tutta
-# la missione mentre qui teniamo solo cio' che non ha un posto naturale li'.
+# MISSION STATISTICS -- diagnostics/log only, never read to decide the robot's
+# behaviour. Never reset: one mission per process (tests that run more than one
+# in the same process see the counts summed).
+# The veto/slope-source counters live instead on the PRM instance itself
+# (see roadmap.PRM.print_mission_summary), because the PRM persists for the whole
+# mission while here we only keep what has no natural place there.
 # ==================================================================
 MISSION_STATS = {
     'gait_tier_counts': {'PLAIN': 0, 'MODERATE': 0, 'HARD': 0},
     'replan_count': 0,
     'near_threshold_saves': 0,
     'segments_logged': 0,
-    'last_tier': None,   # tier dell'ultimo segmento, letto per la riga del CSV
-    'time_s': {},        # secondi spesi per fase, vedi timing_add / [TEMPO]
+    'last_tier': None,   # tier of the last segment, read for the CSV row
+    'time_s': {},        # seconds spent per phase, see timing_add / [TEMPO]
     'scan_bundles': 0,
     'frontier_blocks': 0,
     'frontier_aborts': 0,
-    'rotation_refusals': 0,   # rotazioni rifiutate dal controllo sul settore
-    'straight_retreats': 0,   # arretramenti dritti dopo un rifiuto di rotazione
-    'goal_repicks': 0,        # punti obiettivo riscelti dentro il ciclo
-    'goals_refused': 0,       # obiettivi esclusi per il resto della missione (_refuse_goal)
-    'goals_unreachable': 0,   # scelte d'obiettivo senza nessun punto raggiungibile nel grafo
-    'arrivals_near_goal': 0,  # arrivi accettati con il robot appena fuori dalla cella
-    'backtracks_in_place': 0, # ritorni senza movimento: nessuna briciola abbastanza lontana
-    'sdk_loop_calls': 0,      # chiusure d'anello di Spot riuscite (con risposta)
-    'sdk_loop_s': 0.0,        # secondi spesi in quelle chiamate
-    'sdk_loop_edges': 0,      # archi creati da Spot
-    'sdk_loop_partial': 0,    # chiamate finite allo scadere del limite (risultato parziale)
-    'sdk_loop_failures': 0,   # tentativi di chiusura d'anello falliti (errore, nel log)
-    'drift_samples': 0,       # misure della deriva dell'odometria (graphnav_log_drift)
-    'drift_max_m': 0.0,       # deriva massima misurata
-    'drift_last_m': 0.0,      # ultima misura (di solito all'arrivo su wp_0)
-    'graphnav_trips_avoided': 0,  # spostamenti GraphNav evitati: dal waypoint il grafo non arriva alla cella
-    'cone_moves': 0,          # avanzamenti dentro il cono di rotazione possibile
-    'retreats_suppressed': 0,  # arretramenti evitati perche' inutili
-    'early_replans': 0,       # ripianificazioni alla prima cella bloccante
-    'traps_detected': 0,      # trappole riconosciute dal ventaglio a 360 gradi
-    'arrival_refusals': 0,    # passi rifiutati perche' la posa d'arrivo non ha uscite
-    'graphnav_backtracks': 0,     # ritorni di un waypoint riusciti con GraphNav
-    'graphnav_backtrack_fail': 0, # ritorni con GraphNav falliti (ripiego a zampe)
-    'nodes_pruned': 0,            # nodi PRM scartati perche' dentro un ostacolo
-    'idle_loops': 0,              # giri di ciclo a vuoto (guardia anti-stallo)
-    'multinode_cut': 0,           # sequenze multinodo fermate a un nodo intermedio
-    'multinode_moves': 0,         # movimenti che hanno attraversato piu' nodi
-    'multinode_nodes': 0,         # nodi attraversati da quei movimenti
-    'prm_refresh': 0,             # refresh degli archi effettuati
-    'prm_refresh_skipped': 0,     # refresh saltati (nessun evento, robot fermo)
+    'rotation_refusals': 0,   # rotations refused by the sector check
+    'straight_retreats': 0,   # straight back-offs after a rotation refusal
+    'goal_repicks': 0,        # goal points chosen again inside the loop
+    'goals_refused': 0,       # goals excluded for the rest of the mission (_refuse_goal)
+    'goals_unreachable': 0,   # goal choices without any reachable point in the graph
+    'arrivals_near_goal': 0,  # arrivals accepted with the robot just outside the cell
+    'backtracks_in_place': 0, # returns without movement: no breadcrumb far enough
+    'sdk_loop_calls': 0,      # successful Spot loop closures (with an answer)
+    'sdk_loop_s': 0.0,        # seconds spent in those calls
+    'sdk_loop_edges': 0,      # edges created by Spot
+    'sdk_loop_partial': 0,    # calls ended at the time limit (partial result)
+    'sdk_loop_failures': 0,   # failed loop-closure attempts (error, in the log)
+    'drift_samples': 0,       # odometry drift measurements (graphnav_log_drift)
+    'drift_max_m': 0.0,       # maximum drift measured
+    'drift_last_m': 0.0,      # last measurement (usually on arrival at wp_0)
+    'graphnav_trips_avoided': 0,  # GraphNav moves avoided: from the waypoint the graph does not reach the cell
+    'cone_moves': 0,          # advances inside the possible rotation cone
+    'retreats_suppressed': 0,  # back-offs avoided because useless
+    'early_replans': 0,       # replans at the first blocking cell
+    'traps_detected': 0,      # traps recognized by the 360 degree fan
+    'arrival_refusals': 0,    # steps refused because the arrival pose has no exits
+    'graphnav_backtracks': 0,     # one-waypoint returns that succeeded with GraphNav
+    'graphnav_backtrack_fail': 0, # failed GraphNav returns (walked fallback)
+    'nodes_pruned': 0,            # PRM nodes discarded because inside an obstacle
+    'idle_loops': 0,              # idle loop turns (anti-stall guard)
+    'multinode_cut': 0,           # multi-node sequences stopped at an intermediate node
+    'multinode_moves': 0,         # moves that crossed more than one node
+    'multinode_nodes': 0,         # nodes crossed by those moves
+    'prm_refresh': 0,             # edge refreshes performed
+    'prm_refresh_skipped': 0,     # refreshes skipped (no event, robot still)
     'rotation_maneuvers': 0,
     'shortcuts': 0,
     'falls': 0,
@@ -87,25 +87,25 @@ MISSION_STATS = {
 }
 
 
-# Contesto della missione in corso, per i log diagnostici che non hanno modo di ricevere
-# questi oggetti come argomento (attempt_enter_cell_from_position e' chiamata da piu' punti
-# e non vogliamo cambiarne la firma). Riempito in easy_walk(), letto da log_segment() e
-# easy_walk._emit_mission_summary_once(). Solo diagnostica: nessuna decisione del robot lo legge.
+# Context of the current mission, for the diagnostic logs that have no way to receive
+# these objects as arguments (attempt_enter_cell_from_position is called from several
+# places and we do not want to change its signature). Filled in run.easy_walk(), read by
+# log_segment() and summary.emit_mission_summary_once(). Diagnostics only: no robot decision reads it.
 MISSION_CTX = {
     'prm': None,
     'log_folder': None,
     'segment_log': None,
     'summary_done': False,
-    # Quota del suolo all'AVVIO DELLA MISSIONE nel frame VISION. Spot misura le
-    # quote rispetto a dove e' stato ACCESO: se lo si porta alla zona di missione facendo
-    # delle scale, tutte le quote risultano spostate (di metri). x, y e direzione
-    # sono gia' riferiti all'avvio missione (env.set_origin con la posa di partenza); per la
-    # quota si salva questo valore in tutti i dati e nelle mappe, e il viewer mostra le quote
-    # rispetto ad esso. I CALCOLI non ne dipendono: usano solo differenze di quota e il
-    # suolo stimato sotto il robot a ogni scansione (vedi spot_grid.GROUND_HEIGHT_TOLERANCE_M).
+    # Ground height at MISSION START in the VISION frame. Spot measures heights
+    # relative to where it was POWERED ON: if it is taken to the mission area via
+    # stairs, all heights come out shifted (by metres). x, y and heading
+    # are already relative to the mission start (env.set_origin with the starting pose); for
+    # the height this value is saved in all the data and maps, and the viewer shows heights
+    # relative to it. The COMPUTATIONS do not depend on it: they only use height differences and
+    # the ground estimated under the robot at every scan (see spot_grid.GROUND_HEIGHT_TOLERANCE_M).
     'mission_z0': None,
-    # Fiducial visto alla partenza (navGraphUtils.find_fiducials): ID e posizione VISION, per
-    # rivederlo al ritorno su wp_0 (graphnav_check_start_fiducial). None = nessuno.
+    # Fiducial seen at the start (apriltags.find_fiducials): ID and VISION position, to
+    # see it again on return to wp_0 (graphnav_check_start_fiducial). None = none.
     'start_fiducial': None,
 }
 
@@ -125,22 +125,22 @@ _SEGMENT_COLUMNS = [
 _CSV_LOCK = threading.Lock()
 
 
-# Colonne di trajectory.csv. 'move' (2026-10-26) dice che tipo di movimento ha prodotto il
-# campione: 'prm' (tratto del ciclo di navigazione), 'graphnav', 'cono', 'arretramento',
-# 'ritirata'. Fino al 2026-10-26 i movimenti diversi da 'prm' NON finivano nel file: il
-# visualizzatore univa con una retta l'ultimo punto prima di un ritorno GraphNav e il primo
-# dopo, una linea che tagliava gli ostacoli (missione del 22-10, 16:00 circa).
+# trajectory.csv columns. 'move' (2026-10-26) tells what kind of movement produced the
+# sample: 'prm' (navigation loop leg), 'graphnav', 'cono', 'arretramento',
+# 'ritirata'. Until 2026-10-26 movements other than 'prm' did NOT end up in the file: the
+# viewer joined with a straight line the last point before a GraphNav return and the first
+# after, a line that cut through obstacles (mission of 22-10, around 16:00).
 _TRAJECTORY_COLUMNS = ['time', 'iteration', 'cell_row', 'cell_col', 'loop_iter', 'node_from', 'node_to',
                        'x', 'y', 'yaw_deg', 'roll_deg', 'pitch_deg', 'target_x', 'target_y', 'move']
 
 
 def timing_add(phase, seconds):
-    """Accumula il tempo speso in una fase (riepilogo [TEMPO] a fine missione)."""
+    """Accumulate the time spent in a phase ([TEMPO] summary at the end of the mission)."""
     MISSION_STATS['time_s'][phase] = MISSION_STATS['time_s'].get(phase, 0.0) + float(seconds)
 
 
 def save_npz_async(path, **arrays):
-    """Salvataggio compresso nel thread di servizio: il ciclo principale non aspetta il disco."""
+    """Compressed save on the service thread: the main loop does not wait for the disk."""
     def _job():
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -151,16 +151,16 @@ def save_npz_async(path, **arrays):
 
 
 def mission_z0():
-    """Quota di riferimento della missione (NaN finche' non e' fissata), per i file salvati."""
+    """Reference height of the mission (NaN until it is fixed), for the saved files."""
     z0 = MISSION_CTX.get('mission_z0')
     return np.nan if z0 is None else float(z0)
 
 
 def set_mission_z0(robot_state_client, z_body):
     """
-    Fissa la quota di riferimento all'avvio missione: il piano del suolo stimato da Spot
-    sotto i piedi (frame 'gpe'); se non disponibile, la quota del corpo meno l'altezza
-    nominale in piedi. Stampa di quanto la quota di missione differisce da quella di accensione.
+    Fix the reference height at mission start: the ground plane estimated by Spot under
+    the feet ('gpe' frame); if not available, the body height minus the nominal standing
+    height. Prints how much the mission height differs from the power-on one.
     """
     z0, source = None, "piano del suolo di Spot"
     try:
@@ -183,9 +183,9 @@ def set_mission_z0(robot_state_client, z_body):
 
 class _TeeStream:
     """
-    Copia tutto quello che viene stampato su un file, mantenendo anche la stampa normale a
-    schermo. Nel file ogni riga e' preceduta da un'ora (HH:MM:SS.mmm), utile per allineare i
-    log con un eventuale video o con le note prese a mano durante la prova.
+    Copy everything printed to a file, keeping the normal printing on screen too. In the
+    file every line is preceded by a time (HH:MM:SS.mmm), useful to align the logs with a
+    video or with notes taken by hand during the test.
     """
     def __init__(self, original, file_path):
         self._orig = original
@@ -231,12 +231,12 @@ class _TeeStream:
             pass
 
     def __getattr__(self, name):
-        # isatty, encoding, fileno... passano allo stream originale
+        # isatty, encoding, fileno... go to the original stream
         return getattr(self._orig, name)
 
 
 def install_stdout_tee(file_path):
-    """Da qui in poi ogni print finisce anche in file_path. Idempotente."""
+    """From here on every print also goes to file_path. Idempotent."""
     try:
         if not isinstance(sys.stdout, _TeeStream):
             sys.stdout = _TeeStream(sys.stdout, file_path)
@@ -256,9 +256,9 @@ def remove_stdout_tee():
 
 
 def _quat_to_roll_pitch_deg(q):
-    """Roll e pitch (gradi) di un quaternione con attributi w, x, y, z. Nel frame VISION,
-    che e' allineato alla gravita', sono l'inclinazione reale del corpo rispetto
-    all'orizzontale (stessa convenzione con cui il file calcola gia' lo yaw)."""
+    """Roll and pitch (degrees) of a quaternion with attributes w, x, y, z. In the VISION
+    frame, which is aligned with gravity, they are the real tilt of the body relative to
+    the horizontal (same convention the file already uses to compute the yaw)."""
     roll = np.arctan2(2.0 * (q.w * q.x + q.y * q.z), 1.0 - 2.0 * (q.x ** 2 + q.y ** 2))
     pitch = np.arcsin(np.clip(2.0 * (q.w * q.y - q.z * q.x), -1.0, 1.0))
     return float(np.degrees(roll)), float(np.degrees(pitch))
@@ -266,19 +266,19 @@ def _quat_to_roll_pitch_deg(q):
 
 class BodyTiltRecorder:
     """
-    Registra l'inclinazione REALE del corpo di Spot (roll e pitch) mentre esegue un
-    movimento, interrogando lo stato del robot circa 5 volte al secondo in un thread a parte.
-    Serve a confrontare cio' che il pianificatore stimava (pendenza del terreno) con cio' che
-    Spot ha effettivamente sentito: e' il dato che permette di ritarare soglie e pesi.
+    Record the REAL tilt of Spot's body (roll and pitch) while it executes a move,
+    querying the robot state about 5 times per second in a separate thread. Used to
+    compare what the planner estimated (terrain slope) with what Spot actually felt: it is
+    the data that allows thresholds and weights to be retuned.
 
-    Uso:
+    Usage:
         rec = BodyTiltRecorder(robot_state_client); rec.start()
-        ... movimento ...
-        stats = rec.stop()   # dict con inizio, fine, picchi, numero di campioni
+        ... move ...
+        stats = rec.stop()   # dict with start, end, peaks, number of samples
 
-    Nota di lettura: Spot puo' livellare il corpo rispetto al terreno, quindi l'inclinazione
-    del corpo e' un indicatore indiretto della pendenza, non la pendenza stessa. Ogni errore
-    di lettura viene contato e ignorato.
+    Reading note: Spot can level its body relative to the terrain, so the body tilt is an
+    indirect indicator of the slope, not the slope itself. Every reading error is counted
+    and ignored.
     """
     def __init__(self, robot_state_client, period_s=0.2):
         self._client = robot_state_client
@@ -292,9 +292,9 @@ class BodyTiltRecorder:
         self._peak_pitch = 0.0
         self._n = 0
         self._errors = 0
-        # Traiettoria reale campionata: (t, x, y, yaw, roll, pitch). Finisce in
-        # trajectory.csv, per confrontare dove il robot e' andato davvero con cio' che era
-        # stato comandato.
+        # Real sampled trajectory: (t, x, y, yaw, roll, pitch). Ends up in
+        # trajectory.csv, to compare where the robot really went with what was
+        # commanded.
         self.samples = []
 
     def _sample(self):
@@ -350,9 +350,9 @@ class BodyTiltRecorder:
 
 
 class SegmentLog:
-    """CSV con una riga per ogni segmento (da un nodo al successivo) effettivamente
-    percorso o tentato. Si apre in un foglio di calcolo. Una riga viene scritta e scaricata su
-    disco subito, cosi' anche una missione interrotta lascia i dati fino all'ultimo segmento."""
+    """CSV with one row for every segment (from one node to the next) actually travelled
+    or attempted. Opens in a spreadsheet. A row is written and flushed to disk at once, so
+    even an interrupted mission leaves the data up to the last segment."""
     def __init__(self, path):
         self._path = path
         self._lock = threading.Lock()
@@ -375,7 +375,7 @@ class SegmentLog:
 
 
 def append_csv(name, header, rows):
-    """Aggiunge righe a un CSV nella cartella dei log (intestazione alla prima scrittura). Mai eccezioni."""
+    """Append rows to a CSV in the log folder (header on the first write). Never raises."""
     folder = MISSION_CTX.get('log_folder')
     if not folder or not rows:
         return
@@ -394,7 +394,7 @@ def append_csv(name, header, rows):
 
 
 def append_trajectory(samples, move, target_xy=(np.nan, np.nan), seg_id=None):
-    """Campioni di un BodyTiltRecorder in trajectory.csv. seg_id: le 6 colonne da iteration a node_to."""
+    """Samples of a BodyTiltRecorder into trajectory.csv. seg_id: the 6 columns from iteration to node_to."""
     seg_id = list(seg_id) if seg_id is not None else [''] * 6
     append_csv("trajectory.csv", _TRAJECTORY_COLUMNS,
                 [[t] + seg_id + [x, y, yw, r, pt, target_xy[0], target_xy[1], move]
@@ -403,11 +403,11 @@ def append_trajectory(samples, move, target_xy=(np.nan, np.nan), seg_id=None):
 
 class TrajectoryLog:
     """
-    Registra in trajectory.csv dove passa il robot durante un movimento che non e' un tratto
-    del ciclo di navigazione (GraphNav, cono, arretramenti). Mai eccezioni verso chi chiama.
+    Record in trajectory.csv where the robot passes during a move that is not a leg of
+    the navigation loop (GraphNav, cone, back-offs). Never raises to the caller.
 
         with TrajectoryLog(robot_state_client, 'graphnav', (x, y)):
-            ... movimento ...
+            ... move ...
     """
     def __init__(self, robot_state_client, move, target_xy=(np.nan, np.nan)):
         self._client, self._move, self._target = robot_state_client, move, target_xy
@@ -446,9 +446,9 @@ def visualize_grid_with_candidates(pts, terrain_real, obstacle_mask, robot_x, ro
                                    valid_values=None, grad_values=None, rough_values=None,
                                    include_diagnostics=True):
     """
-    Dati di una figura (scansione, candidati, punto scelto, grafo PRM, percorso) salvati in
-    <nome>_vis.npz. Durante la missione non si disegna: le figure le fa mission_viewer.py
-    dopo, da questi file.
+    Data of a figure (scan, candidates, chosen point, PRM graph, path) saved in
+    <name>_vis.npz. Nothing is drawn during the mission: mission_viewer.py makes the
+    figures afterwards, from these files.
     """
     if save_path is None:
         return
@@ -461,9 +461,9 @@ def save_visualization_bundle(save_path, pts, terrain_real, obstacle_mask, robot
                                candidates, chosen_point, iteration, env, prm_graph, chosen_path,
                                cells_obstacle_dist, valid_values, grad_values, rough_values):
     """
-    Al posto di una figura: tutti i dati che la figura avrebbe mostrato, compreso il grafo
-    PRM in quel momento. Viene chiamata quando il grafo cambia (inizio tentativo,
-    ripianificazione, blocco), quindi il grafo si salva qui e non a ogni scansione.
+    Instead of a figure: all the data the figure would have shown, including the PRM graph
+    at that moment. Called when the graph changes (attempt start, replan, block), so the
+    graph is saved here and not at every scan.
     """
     t0 = time.perf_counter()
     try:
@@ -508,8 +508,8 @@ def save_visualization_bundle(save_path, pts, terrain_real, obstacle_mask, robot
             obstacle_distance=_arr(cells_obstacle_dist), terrain_valid=_arr(valid_values),
             gradient=_arr(grad_values), roughness=_arr(rough_values),
             robot_xy=np.array([robot_x, robot_y], dtype=np.float64), mission_z0=mission_z0(),
-            # istante della vista: mission_viewer abbina la vista alle scansioni con questo, non
-            # con la data del file (dopo un git clone o pull e' quella del download)
+            # instant of the view: mission_viewer matches the view to the scans with this, not
+            # with the file date (after a git clone or pull it is the download date)
             time=time.time(),
             chosen_point=np.array([np.nan if v is None else v for v in (chosen_point or (None, None))],
                                   dtype=np.float64),

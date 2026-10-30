@@ -1,4 +1,4 @@
-"""Scorciatoie nel grafo GraphNav: archi nuovi sui tratti visti liberi, scelti sulla strada verso la destinazione."""
+"""Shortcuts in the GraphNav graph: new edges on stretches seen free, chosen on the way to the destination."""
 import time
 import numpy as np
 from spot_explorer import config as P
@@ -9,7 +9,7 @@ from spot_explorer.graphnav.localization import wp_name_by_id
 
 
 def segment_seen_free(global_map, x1, y1, x2, y2, margin_m, step_m=0.05):
-    """True se il segmento e' stato osservato in ogni punto e non passa vicino a celle occupate."""
+    """True if the segment was observed at every point and does not pass near occupied cells."""
     n = max(2, int(np.ceil(np.hypot(x2 - x1, y2 - y1) / step_m)) + 1)
     for t in np.linspace(0.0, 1.0, n):
         x, y = x1 + t * (x2 - x1), y1 + t * (y2 - y1)
@@ -19,7 +19,7 @@ def segment_seen_free(global_map, x1, y1, x2, y2, margin_m, step_m=0.05):
 
 
 def graph_route(adj, start, goal):
-    """Dijkstra su {wp: {vicino: lunghezza}}: (lunghezza, [wp...]) o (None, None)."""
+    """Dijkstra on {wp: {neighbour: length}}: (length, [wp...]) or (None, None)."""
     import heapq
     dist, prev, pq = {start: 0.0}, {}, [(0.0, start)]
     while pq:
@@ -44,18 +44,18 @@ def graph_route(adj, start, goal):
 def plan_graphnav_shortcuts(poses, base_edges, start_id, goal_id, global_map,
                             max_m=None, margin_m=None):
     """
-    Scorciatoie da aggiungere al grafo GraphNav per andare da start_id a goal_id.
-    Funzione pura (niente robot), provata offline sui grafi scaricati: vedi test_replay.py.
+    Shortcuts to add to the GraphNav graph to go from start_id to goal_id.
+    Pure function (no robot), tested offline on the downloaded graphs: see test_replay.py.
 
-    poses: {wp_id: (x, y)} dei waypoint di cui si conosce la posizione (frame della mappa
-        globale); base_edges: [(wp_a, wp_b, lunghezza_m)] gli archi che il grafo ha gia'.
-    Candidate: coppie di waypoint con posizione a meno di max_m, senza arco diretto, la cui
-    linea retta e' stata VISTA libera nella mappa globale con margin_m (segment_seen_free).
-    Si calcola la strada piu' corta col grafo piu' TUTTE le candidate, e si restituiscono solo
-    le candidate che quella strada usa.
+    poses: {wp_id: (x, y)} of the waypoints whose position is known (global map frame);
+        base_edges: [(wp_a, wp_b, length_m)] the edges the graph already has.
+    Candidates: pairs of waypoints less than max_m apart, without a direct edge, whose
+    straight line was SEEN free in the global map with margin_m (segment_seen_free).
+    The shortest path is computed with the graph plus ALL the candidates, and only the
+    candidates that path uses are returned.
 
-    Restituisce (scorciatoie [(a, b, d)], lunghezza oggi, lunghezza con le scorciatoie); le
-    lunghezze sono None se goal non e' raggiungibile.
+    Returns (shortcuts [(a, b, d)], length today, length with the shortcuts); the lengths
+    are None if goal is not reachable.
     """
     max_m = P.GRAPHNAV_SHORTCUT_MAX_M if max_m is None else max_m
     margin_m = P.GRAPHNAV_SHORTCUT_MARGIN_M if margin_m is None else margin_m
@@ -98,22 +98,22 @@ def plan_graphnav_shortcuts(poses, base_edges, start_id, goal_id, global_map,
 def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, loop_closure_s=0.0,
                            target_wp_id=None, robot_xy=None):
     """
-    Aggiunge scorciatoie al grafo GraphNav prima di uno spostamento (vedi GRAPHNAV_SHORTCUTS).
-    Non solleva mai: senza scorciatoie GraphNav funziona lo stesso, sulla catena.
+    Add shortcuts to the GraphNav graph before a move (see GRAPHNAV_SHORTCUTS).
+    Never raises: without shortcuts GraphNav works anyway, along the chain.
 
-    Spot accetta archi nuovi (create_edge) SOLO mentre registra ("NotRecordingError"),
-    mentre la chiusura d'anello (process_topology) va fatta a registrazione ferma, e appena
-    fermata puo' rispondere "MapModifiedError" finche' la mappa non e' finita di elaborare.
-    Quindi:
-      map_edges -- le scorciatoie dalla mappa globale: da chiamare PRIMA di stop_recording
-                   (si saltano da sole se la registrazione e' ferma). Servono
-                   target_wp_id (la destinazione) e, se il localizzatore non dice dove si
-                   trova il robot, robot_xy; si creano solo quelle sulla strada (vedi
+    Spot accepts new edges (create_edge) ONLY while recording ("NotRecordingError"),
+    while loop closure (process_topology) must be done with recording stopped, and right
+    after stopping it may answer "MapModifiedError" until the map has finished processing.
+    So:
+      map_edges -- the shortcuts from the global map: call BEFORE stop_recording
+                   (skipped automatically if recording is stopped). They need
+                   target_wp_id (the destination) and, if the localizer does not say where
+                   the robot is, robot_xy; only those on the way are created (see
                    plan_graphnav_shortcuts).
-      loop_closure_s -- se > 0, la chiusura d'anello completa di Spot con questo limite lato
-                   Spot (s): da chiamare DOPO stop_recording (si salta da sola se si sta
-                   registrando), con un secondo tentativo su MapModifiedError. Si fa una volta
-                   sola, a fine missione (vedi GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S).
+      loop_closure_s -- if > 0, Spot's full loop closure with this limit on Spot's side
+                   (s): call AFTER stop_recording (skipped automatically while
+                   recording), with a second attempt on MapModifiedError. Done only once,
+                   at the end of the mission (see GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S).
     """
     if not P.GRAPHNAV_SHORTCUTS or recordingInterface is None:
         return 0
@@ -162,10 +162,10 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, loop_cl
     n_sdk = 0
     budget = loop_closure_s
     if P.GRAPHNAV_SDK_LOOP_CLOSURE and budget > 0 and recording is not True:
-        # Spot calcola senza scrivere e gli archi li carichiamo noi (upload_result): niente
-        # MapModifiedError a fine elaborazione. Ogni tentativo fallito finisce nel log con la
-        # sua durata, e il tempo riportato e' il TOTALE (il 26-10 15:36 i tentativi falliti non
-        # comparivano e il tempo era solo quello dell'ultimo: 65 s dichiarati su 138).
+        # Spot computes without writing and we upload the edges ourselves (upload_result): no
+        # MapModifiedError at the end of processing. Every failed attempt ends up in the log with
+        # its duration, and the time reported is the TOTAL (on 26-10 15:36 the failed attempts
+        # did not show up and the time was only that of the last one: 65 s reported out of 138).
         what = 'completa'
         t_all = time.perf_counter()
         write_on_spot = False
@@ -180,8 +180,8 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, loop_cl
                 MISSION_STATS['sdk_loop_failures'] += 1
                 retry = attempt == 1 and ('MapModified' in type(e).__name__ or 'modified' in str(e)
                                           or 'LoopClosureUpload' in type(e).__name__)
-                # Caricamento degli archi rifiutato: al secondo tentativo li scrive Spot stesso
-                # (mai provato sul robot con archi da caricare: la serie 3 ne ha trovati 0).
+                # Edge upload rejected: on the second attempt Spot writes them itself
+                # (never tried on the robot with edges to upload: series 3 found 0).
                 write_on_spot = 'LoopClosureUpload' in type(e).__name__
                 print(f"[GRAPHNAV] Chiusura d'anello di Spot ({what}): tentativo {attempt} non riuscito "
                       f"dopo {dt:.1f} s ({type(e).__name__}: {e})"

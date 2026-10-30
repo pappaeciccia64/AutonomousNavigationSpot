@@ -1,38 +1,38 @@
 #!/usr/bin/env python3
 """
-Controllo pre-volo: verifica che i file sulla macchina del robot siano allineati fra
-loro PRIMA di lanciare una missione.
+Pre-flight check: verify that the files on the robot's machine are consistent with each
+other BEFORE launching a mission.
 
-Se sul robot `easy_walk.py` e' aggiornato ma un altro modulo e' una copia vecchia, la
-missione si ferma con un AttributeError appena il robot e' acceso e in piedi: tempo perso,
-e in esterno tempo perso a batteria accesa in mezzo a un campo. Qui lo si scopre prima.
+If on the robot one module is up to date but another is an old copy, the mission stops
+with an AttributeError as soon as the robot is powered and standing: time lost, and
+outdoors time lost on battery in the middle of a field. This finds it out beforehand.
 
-Il controllo e' PURAMENTE STATICO: legge i file, non importa nulla, non tocca il robot,
-non serve l'SDK bosdyn. Si puo' lanciare in qualunque momento.
+The check is PURELY STATIC: it reads the files, imports nothing, does not touch the robot,
+does not need the bosdyn SDK. It can be run at any time.
 
-    python3 tools/preflight.py                 # il progetto che contiene questo file
-    python3 tools/preflight.py /percorso/cartella
+    python3 tools/preflight.py                 # the project containing this file
+    python3 tools/preflight.py /path/to/folder
 
-Cosa controlla:
-  1. ogni file della missione esiste e non ha errori di sintassi;
-  2. IN AUTOMATICO, per ogni file: ogni `modulo.nome` e ogni `from modulo import nome` verso
-     un altro modulo del progetto esiste davvero in quel modulo, e gli argomenti con nome
-     passati a una funzione di un altro modulo sono fra i suoi parametri. Nessuna tabella
-     da aggiornare quando si spostano funzioni o costanti;
-  3. A MANO (METHODS, METHOD_PARAMS): i metodi chiamati sugli OGGETTI (local_grid.xxx(),
-     prm.xxx()) e i loro argomenti, che un controllo statico non puo' attribuire a una classe.
+What it checks:
+  1. every mission file exists and has no syntax errors;
+  2. AUTOMATICALLY, for each file: every `module.name` and every `from module import name`
+     pointing to another project module really exists in that module, and the keyword
+     arguments passed to a function of another module are among its parameters. No table
+     to update when functions or constants move;
+  3. BY HAND (METHODS, METHOD_PARAMS): the methods called on OBJECTS (local_grid.xxx(),
+     prm.xxx()) and their arguments, which a static check cannot attribute to a class.
 
-Uscita 0 = tutto allineato. Uscita 1 = manca qualcosa, NON lanciare la missione.
+Exit 0 = all consistent. Exit 1 = something is missing, do NOT launch the mission.
 """
 
 import ast
 import os
 import sys
 
-# I moduli della missione: tutti quelli del pacchetto spot_explorer (vedi _moduli).
+# The mission modules: all those of the spot_explorer package (see _modules).
 PACKAGE = "spot_explorer"
 
-# Metodi chiamati sugli oggetti: (modulo, classe, metodo).
+# Methods called on objects: (module, class, method).
 METHODS = [
     ("spot_explorer.perception.global_maps", "GlobalGrid", "is_occupied"),
     ("spot_explorer.perception.global_maps", "GlobalGrid", "is_known"),
@@ -83,7 +83,7 @@ METHODS = [
     ("spot_explorer.planning.safe_frontier", "ArcVerificationTracker", "clear_path"),
 ]
 
-# Argomenti con nome passati a quei metodi: (modulo, classe, metodo, parametro).
+# Keyword arguments passed to those methods: (module, class, method, parameter).
 METHOD_PARAMS = [
     ("spot_explorer.perception.spot_grid", "LocalGrid", "correct_terrain", "cell_size"),
     ("spot_explorer.perception.spot_grid", "LocalGrid", "correct_terrain", "unwritten_value"),
@@ -105,7 +105,7 @@ def _parse(path):
 
 
 def _top_names(tree):
-    """Nomi definiti a livello di modulo (anche dentro if/try/with) e importati."""
+    """Names defined at module level (also inside if/try/with) and imported."""
     names, funcs, classes = set(), {}, {}
 
     def scan(body):
@@ -148,14 +148,14 @@ def _locals(fn):
 
 
 def _cross_module(fname, tree, info):
-    """Problemi nei riferimenti di `fname` verso gli altri moduli del progetto."""
+    """Problems in the references from `fname` to the other project modules."""
     ours = {m: m for m in info}
     alias, problems = {}, []
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module:
             for a in node.names:
                 full = f"{node.module}.{a.name}"
-                if full in ours:                     # from spot_explorer.x import modulo as alias
+                if full in ours:                     # from spot_explorer.x import module as alias
                     alias[a.asname or a.name] = full
                 elif node.module in ours and a.name != '*' and a.name not in info[node.module][0]:
                     problems.append(f"{fname}:{node.lineno}: 'from {node.module} import {a.name}' "
@@ -190,7 +190,7 @@ def _cross_module(fname, tree, info):
 
 
 def _modules(root):
-    """{nome del modulo con i punti: percorso del file} per tutto il pacchetto."""
+    """{dotted module name: file path} for the whole package."""
     out = {}
     for dp, _, fs in os.walk(os.path.join(root, PACKAGE)):
         for f in fs:

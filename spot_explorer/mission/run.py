@@ -1,4 +1,4 @@
-"""Avvio e chiusura della missione, chiusura di emergenza, riga di comando (vedi run_mission.py)."""
+"""Mission start-up and shutdown, emergency shutdown, command line (see run_mission.py)."""
 import os
 import sys
 import time
@@ -29,7 +29,7 @@ from spot_explorer.planning import safe_frontier
 from spot_explorer.robot import battery as batteria
 
 from spot_explorer.planning import roadmap as prm_graph
-from spot_explorer.planning import mission_graph                   # reticolo dei nodi della missione
+from spot_explorer.planning import mission_graph                   # mission node lattice
 
 from spot_explorer import config as P
 from spot_explorer import REPO_ROOT
@@ -38,18 +38,18 @@ from spot_explorer.mission import cell_attempt
 from spot_explorer.mission import exploration
 from spot_explorer.mission import summary
 
-# Dove nascono MissionMap/, MissionLogs/ e graph/ (i test la spostano in una cartella temporanea).
+# Where MissionMap/, MissionLogs/ and graph/ are created (the tests move it to a temporary folder).
 DATA_ROOT = REPO_ROOT
 
 
 def _emergency_shutdown(robot, command_client, recordingInterface, exc):
     """
-    Missione interrotta (eccezione o Ctrl+C) con il robot acceso e il lease ancora in mano:
-    fermarlo, farlo sedere e spegnere i motori, poi scaricare la mappa GraphNav, che resta
-    solo sul robot e all'avvio della missione successiva verrebbe cancellata. Prima il
-    programma usciva e basta: robot in piedi finche' l'E-Stop software, non piu' rinnovato,
-    toglieva la potenza (~9 s), e mappa persa. Se il robot e' caduto non lo si fa sedere (e'
-    gia' a terra). Ogni passo e' tentato a se': mai eccezioni da qui.
+    Mission interrupted (exception or Ctrl+C) with the robot powered and the lease still
+    held: stop it, sit it down and power off the motors, then download the GraphNav map,
+    which lives only on the robot and would be erased at the start of the next mission.
+    Before, the program just exited: robot standing until the software E-Stop, no longer
+    renewed, cut the power (~9 s), and map lost. If the robot has fallen it is not sat down
+    (it is already on the ground). Each step is tried on its own: never raises from here.
     """
     fallen = isinstance(exc, movements.RobotFallenError)
     print(f"\n[EMERGENZA] Missione interrotta ({type(exc).__name__}): "
@@ -83,8 +83,8 @@ def _emergency_shutdown(robot, command_client, recordingInterface, exc):
 
 
 def _mission_folders():
-    """Cartelle di missione (graph/, MissionMap/, MissionLogs/ con la data): (grafo, dati e
-    immagini, log)."""
+    """Mission folders (graph/, MissionMap/, MissionLogs/ with the date): (graph, data and
+    images, logs)."""
     mission_timestamp = datetime.now().strftime("Mission_%d-%m-%Y_%H-%M-%S")
     base = DATA_ROOT
     graph_folder = os.path.join(base, "graph", mission_timestamp)
@@ -97,8 +97,8 @@ def _mission_folders():
 
 
 def _print_configuration():
-    """Interruttori e soglie in testa al log, per poterlo leggere sapendo con quali valori e'
-    stato prodotto."""
+    """Switches and thresholds at the top of the log, so it can be read knowing which values
+    produced it."""
     print("[CONFIG] INTERRUTTORI: " + "  ".join(
         f"{k.split('.')[-1]}={v}" for k, v in summary.mission_switches().items()))
     print(f"[CONFIG] SLOPE_THRESHOLD={slopes.SLOPE_THRESHOLD}  "
@@ -161,12 +161,12 @@ def _print_configuration():
 
 
 def _mission_grid(options):
-    """La griglia di missione: EnvironmentMap con colonne davanti e righe a sinistra.
+    """The mission grid: EnvironmentMap with columns ahead and rows to the left.
 
-    Default P.MISSION_GRID_ROWS x P.MISSION_GRID_COLS celle da P.MISSION_CELL_SIZE_M. Si
-    cambiano SENZA toccare il codice, in ordine di precedenza:
-      1. argomenti:  python3 easy_walk.py --rows 2 --cols 4 --cell 5
-      2. variabile:  SPOT_MISSION_GRID="righe,colonne,lato_cella"   es. "2,3,3"
+    Default P.MISSION_GRID_ROWS x P.MISSION_GRID_COLS cells of P.MISSION_CELL_SIZE_M. They
+    can be changed WITHOUT touching the code, in order of precedence:
+      1. arguments:  python3 run_mission.py --rows 2 --cols 4 --cell 5
+      2. variable:   SPOT_MISSION_GRID="rows,cols,cell_side"   e.g. "2,3,3"
     """
     grid_rows, grid_cols, grid_cell = P.MISSION_GRID_ROWS, P.MISSION_GRID_COLS, P.MISSION_CELL_SIZE_M
     _grid_source = "mission_graph.MISSION_*"
@@ -192,8 +192,8 @@ def _mission_grid(options):
     print(f"[CONFIG] Reticolo: passo richiesto "
           f"{'suggerito' if P.MISSION_LATTICE_SPACING_M is None else '%.3f m' % P.MISSION_LATTICE_SPACING_M}, "
           f"anelli {P.MISSION_LATTICE_RINGS if P.MISSION_LATTICE_RINGS is not None else 'tutti'}")
-    # test_replay legge metodo e archi da questa riga; distribuzione, densita' e seme dalla
-    # riga [GRAFO] Nodi casuali, scritta quando il grafo e' costruito.
+    # test_replay reads method and edges from this line; distribution, density and seed from
+    # the [GRAFO] Nodi casuali line, written when the graph is built.
     print(f"[CONFIG] Grafo: nodi {P.MISSION_GRAPH_SAMPLING}"
           + (f" ({P.MISSION_RANDOM_DISTRIBUTION}, {P.MISSION_RANDOM_DENSITY:g} nodi/m2, seme "
              f"{'a caso' if P.MISSION_RANDOM_SEED is None else P.MISSION_RANDOM_SEED})"
@@ -203,9 +203,9 @@ def _mission_grid(options):
 
 
 def _close_mission(robot, robot_state_client, command_client, recordingInterface):
-    """Dopo il riepilogo: chiusura della mappa GraphNav, ritorno a wp_0, seduta, spegnimento,
-    scaricamento della mappa. Non entra in nessuna voce di [TEMPO]: si misura a parte e si
-    stampa in chiusura."""
+    """After the summary: GraphNav map closure, return to wp_0, sit, power off, map
+    download. Not counted in any [TEMPO] entry: it is measured separately and printed
+    at closure."""
     _t_close = {}
     _t = time.perf_counter()
     try:
@@ -218,9 +218,9 @@ def _close_mission(robot, robot_state_client, command_client, recordingInterface
                                          map_edges=True, target_wp_id=_wp0_id, robot_xy=_xy_end)
     recordingInterface.auto_close_loops(True, False)
     recordingInterface.stop_recording()
-    # Chiusura d'anello di Spot una volta sola, PRIMA dell'ancoraggio: i suoi archi,
-    # verificati sulle scansioni, correggono la deriva della mappa scaricata e accorciano il
-    # ritorno (vedi GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S).
+    # Spot's loop closure only once, BEFORE anchoring: its edges, verified on the scans,
+    # correct the drift of the downloaded map and shorten the return
+    # (see GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S).
     map_shortcuts.graphnav_add_shortcuts(recordingInterface, "chiusura della mappa", map_edges=False,
                                          loop_closure_s=P.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S)
     recordingInterface.optimize_anchoring()
@@ -233,10 +233,10 @@ def _close_mission(robot, robot_state_client, command_client, recordingInterface
     _pct0 = MISSION_STATS.get('battery_last_pct')
     wp0_outcome = navigation.graphnav_return_to_start(recordingInterface, robot_state_client, command_client)
     if wp0_outcome in ('arrivato', 'vicino'):
-        # Anche fermo vicino a wp_0 il tag si cerca: e' la misura della deriva di tutta la missione.
+        # Even when stopped near wp_0 the tag is searched: it measures the drift of the whole mission.
         measure = apriltags.graphnav_check_start_fiducial(robot, robot_state_client)
-        # Arrivato secondo GraphNav ma lontano secondo il tag: correzione (vedi
-        # WP0_FIDUCIAL_CORRECTION). Fermo vicino (STUCK) no: la strada e' bloccata.
+        # Arrived according to GraphNav but far according to the tag: correction (see
+        # WP0_FIDUCIAL_CORRECTION). Not when stopped nearby (STUCK): the way is blocked.
         if wp0_outcome == 'arrivato' and measure and measure.get('offset') is not None:
             apriltags.graphnav_correct_wp0_with_fiducial(robot, recordingInterface, robot_state_client,
                                                              command_client, measure['offset'])
@@ -247,7 +247,7 @@ def _close_mission(robot, robot_state_client, command_client, recordingInterface
         monitor.check("fine del ritorno a wp_0")
         _pct1 = MISSION_STATS.get('battery_last_pct')
         if _pct0 is not None and _pct1 is not None:
-            # Quanto costa il ritorno: serve a tarare BATTERY_RETURN_PCT.
+            # What the return costs: used to tune BATTERY_RETURN_PCT.
             MISSION_STATS['battery_wp0_return_pct'] = round(_pct0 - _pct1, 1)
             print(f"[BATTERIA] Ritorno a wp_0: da {_pct0:.0f}% a {_pct1:.0f}% "
                   f"({_pct0 - _pct1:.1f} punti in {_t_close['ritorno a wp_0']:.0f} s)")
@@ -268,23 +268,23 @@ def _close_mission(robot, robot_state_client, command_client, recordingInterface
 
 
 def easy_walk(options):
-    """La missione intera: avvio del robot e di GraphNav, grafo, esplorazione cella per cella
-    (Missione), scansione finale, riepilogo, ritorno alla partenza e spegnimento."""
+    """The whole mission: robot and GraphNav start-up, graph, cell-by-cell exploration
+    (Mission), final scan, summary, return to the start and power-off."""
     robot, lease_client, robot_state_client, client_metadata = spotLogInUtils.setLogInfo(options)
     estop = spotLogInUtils.SimpleEstop(robot, options.name + "_estop")
 
     local_grid = spot_grid.LocalGrid(robot)
     MISSION_CTX['local_grid'] = local_grid
     global_grid = global_maps.GlobalGrid()
-    MISSION_CTX['global_grid'] = global_grid   # per graphnav_add_shortcuts
+    MISSION_CTX['global_grid'] = global_grid   # for graphnav_add_shortcuts
 
     recordingInterface = map_recording.RecordingInterface(robot, options.download_filepath, client_metadata)
     recordingInterface.stop_recording()
     recordingInterface.clear_map()
 
     with bosdyn.client.lease.LeaseKeepAlive(lease_client, must_acquire=True, return_at_exit=True):
-        # Cartelle e log creati subito, cosi' la copia dell'output su file (mission_log.txt)
-        # cattura anche tutto l'avvio e la costruzione del grafo.
+        # Folders and log created at once, so the copy of the output to file (mission_log.txt)
+        # also captures the whole start-up and graph construction.
         graph_folder, mission_folder, mission_log_folder = _mission_folders()
         install_stdout_tee(os.path.join(mission_log_folder, "mission_log.txt"))
         try:
@@ -305,16 +305,16 @@ def easy_walk(options):
         try:
             blocking_stand(command_client)
 
-            # Batteria: prima lettura, poi a ogni giro del ciclo (vedi batteria.py).
+            # Battery: first reading, then at every loop turn (see battery.py).
             MISSION_CTX['batteria'] = batteria.BatteryMonitor(robot_state_client)
             MISSION_CTX['batteria'].check("avvio")
 
-            # Griglie e mappe locali vengono tutte dalle telecamere di Spot (nessun Velodyne).
+            # Grids and local maps all come from Spot's cameras (no Velodyne).
             recordingInterface.clear_map()
             recordingInterface.start_recording()
 
-            # Fiducial di partenza (vedi START_FIDUCIAL_ID): cercato PRIMA di creare wp_0, cosi'
-            # entra nella sua istantanea e la localizzazione sul fiducial ha qualcosa da trovare.
+            # Starting fiducial (see START_FIDUCIAL_ID): searched BEFORE creating wp_0, so that
+            # it is in its snapshot and localization on the fiducial has something to find.
             fiducials = apriltags.find_fiducials(robot, robot_state_client,
                                                      wait_s=P.START_FIDUCIAL_WAIT_S,
                                                      fiducial_id=P.START_FIDUCIAL_ID)
@@ -336,11 +336,11 @@ def easy_walk(options):
 
             env = _mission_grid(options)
 
-            # --- Andatura per tutta la missione ---
-            # Vuoto: andatura, altezza del passo e ground_mu_hint si scelgono TRATTO PER TRATTO in
-            # base al terreno (vedi movements.select_mobility_params). Per imporre un profilo fisso
-            # (per esempio in prova) basta un dict non vuoto qui: TentativoCella lo usa per tutti i
-            # tratti e salta la scelta automatica. Esempio:
+            # --- Gait for the whole mission ---
+            # Empty: gait, step height and ground_mu_hint are chosen LEG BY LEG based on the
+            # terrain (see motion.select_mobility_params). To force a fixed profile
+            # (for example in a test) a non-empty dict here is enough: CellAttempt uses it for all
+            # legs and skips the automatic choice. Example:
             #   mobility_kwargs = dict(
             #       locomotion_hint=spot_command_pb2.HINT_CRAWL,
             #       ground_mu_hint=0.4,
@@ -348,19 +348,19 @@ def easy_walk(options):
             #   )
             mobility_kwargs = {}
 
-            # --- Posa di partenza, PRIMA di costruire il grafo: il reticolo e' riferito a questa ---
+            # --- Starting pose, BEFORE building the graph: the lattice is relative to it ---
             x_boot, y_boot, z_boot, quat_boot = spotUtils.getPosition(robot_state_client)
             yaw_boot = np.arctan2(2.0 * (quat_boot.w * quat_boot.z + quat_boot.x * quat_boot.y),
                                   1.0 - 2.0 * (quat_boot.y ** 2 + quat_boot.z ** 2))
             env.set_origin(x_boot, y_boot, yaw_boot, start_row=start_row, start_col=start_col)
             set_mission_z0(robot_state_client, z_boot)
 
-            # Nodi del PRM: il grafo della missione (vedi mission_graph.build_mission_prm). Il punto
-            # di accensione e i centri cella sono nodi del grafo, con entrambi i metodi. Gli ARCHI
-            # non si creano qui: non c'e' ancora nessun dato di terreno ne' di occupazione. Li crea
-            # TentativoCella alla prima scansione (vedi mission_graph.rebuild_prm_edges).
+            # PRM nodes: the mission graph (see mission_graph.build_mission_prm). The power-on
+            # point and the cell centres are graph nodes, with both methods. The EDGES are not
+            # created here: there is no terrain or occupancy data yet. CellAttempt creates them
+            # at the first scan (see mission_graph.rebuild_prm_edges).
             prm, gb_sampler, mission_lattice = mission_graph.build_mission_prm(env)
-            MISSION_CTX['prm'] = prm  # per il riepilogo di fine missione (anche se interrotta)
+            MISSION_CTX['prm'] = prm  # for the end-of-mission summary (even if interrupted)
 
             verification_tracker = safe_frontier.ArcVerificationTracker(robot)
             MISSION_CTX['tracker'] = verification_tracker
@@ -383,7 +383,7 @@ def easy_walk(options):
 
             mission.final_scan()
 
-            # RIEPILOGO DI MISSIONE -- solo diagnostica, va letto dopo il volo.
+            # MISSION SUMMARY -- diagnostics only, to be read after the run.
             summary._emit_mission_summary_once()
 
             _close_mission(robot, robot_state_client, command_client, recordingInterface)
@@ -394,14 +394,14 @@ def easy_walk(options):
 
 
 # =========================================================================
-# RIGA DI COMANDO
+# COMMAND LINE
 # =========================================================================
 
 
 def _parse_args(argv=None):
     """
-    Argomenti da riga di comando. Tutti facoltativi: senza argomenti la missione usa i
-    valori di parametri.py (MISSION_GRID_ROWS, MISSION_GRID_COLS, MISSION_CELL_SIZE_M,
+    Command-line arguments. All optional: without arguments the mission uses the values
+    of config.py (MISSION_GRID_ROWS, MISSION_GRID_COLS, MISSION_CELL_SIZE_M,
     MISSION_LATTICE_SPACING_M, MISSION_LATTICE_RINGS, MISSION_GRAPH_SAMPLING...).
     """
     import argparse

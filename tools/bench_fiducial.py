@@ -1,22 +1,22 @@
 """
-prova_fiducial.py -- quali fiducial vede Spot adesso, e quale sceglierebbe la missione.
+bench_fiducial.py -- which fiducials Spot sees right now, and which one the mission would pick.
 
-    python3 prova_fiducial.py            # una lettura ogni secondo per 10 s
-    python3 prova_fiducial.py 30         # per 30 s
+    python3 tools/bench_fiducial.py            # one reading per second for 10 s
+    python3 tools/bench_fiducial.py 30         # for 30 s
 
-Solo lettura: niente lease, niente accensione dei motori, il robot non si muove. Va bene
-anche con il robot seduto (serve solo che sia acceso). Usa la stessa funzione della missione
-(apriltags.find_fiducials) e lo stesso criterio di scelta (il piu' vicino, oppure
-parametri.START_FIDUCIAL_ID se e' un numero).
+Read only: no lease, no motor power, the robot does not move. Works with the robot sitting
+too (it only needs to be on). Uses the same function as the mission
+(apriltags.find_fiducials) and the same selection rule (the nearest one, or
+config.START_FIDUCIAL_ID if it is a number).
 
-Spot riconosce solo i fiducial AprilTag 36h11 (quelli di Boston Dynamics), non gli ArUco.
+Spot only recognizes AprilTag 36h11 fiducials (the Boston Dynamics ones), not ArUco.
 """
 import sys
 import time
 from types import SimpleNamespace
 
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # il pacchetto spot_explorer
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # the spot_explorer package
 
 from spot_explorer.graphnav import apriltags
 from spot_explorer import config as P

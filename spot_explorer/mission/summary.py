@@ -1,4 +1,4 @@
-"""Interruttori e riepilogo di fine missione: solo diagnostica, mai eccezioni verso chi chiama."""
+"""Switches and end-of-mission summary: diagnostics only, never raises to the caller."""
 import os
 import json
 
@@ -7,8 +7,8 @@ from spot_explorer.perception import geometry
 from spot_explorer.perception import slopes
 from spot_explorer.perception import spot_grid
 
-from spot_explorer.planning import roadmap as prm_graph_module   # dentro le funzioni `prm_graph` e' spesso il parametro (istanza)
-from spot_explorer.planning import mission_graph                   # reticolo dei nodi della missione
+from spot_explorer.planning import roadmap as prm_graph_module   # inside functions `prm_graph` is often the parameter (instance)
+from spot_explorer.planning import mission_graph                   # mission node lattice
 
 from spot_explorer import config as P
 from spot_explorer.records import MISSION_STATS, MISSION_CTX
@@ -16,17 +16,17 @@ from spot_explorer.records import MISSION_STATS, MISSION_CTX
 
 
 # =========================================================================
-# INTERRUTTORI E RIEPILOGO -- solo diagnostica: nessuna decisione del robot dipende da
-# queste funzioni, e non sollevano mai eccezioni verso il chiamante (un log che fallisce
-# non deve fermare o alterare un movimento). Log e statistiche stanno in registro.py.
+# SWITCHES AND SUMMARY -- diagnostics only: no robot decision depends on these
+# functions, and they never raise to the caller (a failing log must not stop or alter
+# a movement). Logs and statistics live in records.py.
 # =========================================================================
 
 
 def mission_switches():
     """
-    Gli interruttori che cambiano come lavora la missione, con il loro valore adesso. Vanno nel
-    log ([CONFIG] INTERRUTTORI) e in mission_summary.json, cosi' dopo una prova si sa con quali
-    impostazioni e' stata fatta ogni missione (per i confronti acceso/spento).
+    The switches that change how the mission works, with their current value. They go to
+    the log ([CONFIG] INTERRUTTORI) and to mission_summary.json, so after a test it is known
+    which settings each mission ran with (for on/off comparisons).
     """
     return {
         'parametri.MISSION_GRAPH_SAMPLING': P.MISSION_GRAPH_SAMPLING,
@@ -52,9 +52,9 @@ def mission_switches():
 
 
 def _emit_mission_summary_once():
-    """Stampa e salva il riepilogo di missione una sola volta. Viene chiamata sia a fine
-    missione normale sia da main() in un blocco finally, cosi' esce anche se la missione
-    termina per un'eccezione o per una ripresa del controllo."""
+    """Print and save the mission summary only once. Called both at the end of a normal
+    mission and by main() in a finally block, so it comes out even if the mission ends
+    with an exception or because control was taken back."""
     if MISSION_CTX.get('summary_done') or MISSION_CTX.get('prm') is None:
         return
     MISSION_CTX['summary_done'] = True

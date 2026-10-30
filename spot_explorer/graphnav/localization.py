@@ -1,4 +1,4 @@
-"""Dove GraphNav crede che sia il robot: stato della localizzazione, riaggancio quando e' perso, misura della deriva dell'odometria."""
+"""Where GraphNav thinks the robot is: localization state, re-anchoring when lost, odometry drift measurement."""
 import time
 import numpy as np
 from bosdyn.client.frame_helpers import get_odom_tform_body
@@ -13,7 +13,7 @@ _DRIFT_COLUMNS = ['time', 'where', 'waypoint', 'age_s', 'dx', 'dy', 'd', 'gn_x',
 
 
 def graphnav_localization(recordingInterface):
-    """Stato del localizzatore di GraphNav come dict, o None se non leggibile. Non scarica il grafo."""
+    """GraphNav localizer state as a dict, or None if unreadable. Does not download the graph."""
     try:
         st = recordingInterface._graph_nav_client.get_localization_state()
     except Exception as e:
@@ -23,7 +23,7 @@ def graphnav_localization(recordingInterface):
     try:
         has_ld = st.HasField('lost_detector_state')
     except Exception:
-        has_ld = False      # SDK senza rilevatore di perdita
+        has_ld = False      # SDK without a loss detector
     if has_ld:
         ld = st.lost_detector_state
         out.update(is_lost=bool(ld.is_lost),
@@ -37,16 +37,16 @@ def graphnav_localization(recordingInterface):
 
 def graphnav_log_drift(recordingInterface, robot_state_client, where):
     """
-    DERIVA DELL'ODOMETRIA, misurata a ogni arrivo GraphNav. GraphNav si localizza sulle
-    scansioni del waypoint e dice dove sta il corpo rispetto a lui (waypoint_tform_body);
-    componendolo con la posa VISION che il waypoint aveva quando l'abbiamo creato si ottiene
-    dove il robot DOVREBBE essere in VISION senza deriva. La differenza con la posa VISION di
-    adesso e' la deriva accumulata dalla creazione del waypoint: la stessa che sposta, nelle
-    nostre mappe globali (costruite in VISION), cio' che si e' visto molti minuti prima. Il
-    26-10 15:11, all'arrivo su wp_0, lo scarto grezzo era 0.66 m (tolleranza d'arrivo inclusa).
+    ODOMETRY DRIFT, measured at every GraphNav arrival. GraphNav localizes on the
+    waypoint's scans and says where the body is relative to it (waypoint_tform_body);
+    composing it with the VISION pose the waypoint had when we created it gives where the
+    robot SHOULD be in VISION without drift. The difference from the current VISION pose is
+    the drift accumulated since the waypoint was created: the same drift that shifts, in our
+    global maps (built in VISION), what was seen many minutes earlier. On 26-10 15:11, on
+    arrival at wp_0, the raw offset was 0.66 m (arrival tolerance included).
 
-    Solo misura: niente si corregge. Misurabile solo sui waypoint creati da noi (di cella e
-    briciole), di cui si conosce la posa VISION. Mai eccezioni verso chi chiama.
+    Measurement only: nothing is corrected. Only measurable on waypoints we created (cell
+    waypoints and breadcrumbs), whose VISION pose is known. Never raises to the caller.
     """
     try:
         loc = recordingInterface._graph_nav_client.get_localization_state().localization
@@ -87,10 +87,10 @@ def graphnav_is_lost(loc):
 
 def graphnav_log_localization(env, recordingInterface, robot_state_client, where, force=False):
     """
-    Riga [LOCALIZZAZIONE]: stampata solo se lo stato cambia (perso si'/no, localizzazioni
-    rifiutate dall'ultima accettata, archi cattivi di fila) o con force=True. Riporta anche
-    il tier del passo appena fatto e il beccheggio del corpo adesso, per vedere se la perdita
-    scatta in crawl o in salita. Non solleva mai.
+    [LOCALIZZAZIONE] line: printed only if the state changes (lost yes/no, localizations
+    rejected since the last accepted one, bad edges in a row) or with force=True. Also
+    reports the tier of the leg just done and the current body pitch, to see whether the
+    loss happens in crawl or uphill. Never raises.
     """
     if recordingInterface is None:
         return None
@@ -129,9 +129,9 @@ def graphnav_log_localization(env, recordingInterface, robot_state_client, where
 
 def graphnav_relocalize(recordingInterface, robot_state_client, why=""):
     """
-    Riaggancia GraphNav sul waypoint piu' vicino (secondo le nostre pose in visione). La
-    stima iniziale e' waypoint_tform_ko (dal grafo) * ko_tform_body (adesso): la stessa
-    odometria con cui Spot ha registrato il waypoint. True se Spot accetta.
+    Re-anchor GraphNav on the nearest waypoint (according to our vision poses). The
+    initial guess is waypoint_tform_ko (from the graph) * ko_tform_body (now): the same
+    odometry Spot recorded the waypoint with. True if Spot accepts.
     """
     try:
         rx, ry, _, _ = spotUtils.getPosition(robot_state_client)
@@ -179,17 +179,17 @@ def graphnav_relocalize(recordingInterface, robot_state_client, why=""):
 
 
 def _distance_from_waypoint(recordingInterface, robot_state_client, waypoint_id, name):
-    """(distanza del robot dal waypoint, 'da GraphNav' o 'dalle pose VISION'), (None, '') se
-    non si sa. Mai eccezioni."""
+    """(robot distance from the waypoint, 'da GraphNav' or 'dalle pose VISION'), (None, '') if
+    unknown. Never raises."""
     try:
         loc = recordingInterface._graph_nav_client.get_localization_state().localization
         if loc.waypoint_id == waypoint_id:
             p = loc.waypoint_tform_body.position
             return float(np.hypot(p.x, p.y)), 'da GraphNav'
-        # Localizzato su un ALTRO waypoint (per esempio una briciola della partenza, accanto a
-        # wp_0): posa del corpo rispetto a lui, composta con le pose dei due waypoint salvate
-        # alla creazione. La deriva fra le due creazioni e' piccola se sono vicine nel tempo,
-        # molto meno di quella delle pose VISION di adesso (28-10 14:23: ~1 m su wp_0).
+        # Localized on ANOTHER waypoint (for example a breadcrumb at the start, next to
+        # wp_0): body pose relative to it, composed with the poses of the two waypoints saved
+        # at creation. The drift between the two creations is small if they are close in time,
+        # much less than that of the current VISION poses (28-10 14:23: ~1 m on wp_0).
         poses = getattr(recordingInterface, 'waypoint_poses', None) or {}
         by_id = {p.get('waypoint_id'): p for p in poses.values() if p.get('waypoint_id')}
         a, b = by_id.get(loc.waypoint_id), by_id.get(waypoint_id)

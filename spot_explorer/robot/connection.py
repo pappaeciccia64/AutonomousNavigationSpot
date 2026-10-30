@@ -1,4 +1,4 @@
-"""Piccoli strumenti comuni: posizione del robot nel frame VISION, linea di vista sulla griglia."""
+"""Small shared helpers: robot position in the VISION frame, line of sight on the grid."""
 from bosdyn.client.frame_helpers import get_a_tform_b, VISION_FRAME_NAME, BODY_FRAME_NAME, ODOM_FRAME_NAME
 import numpy as np
 
@@ -11,10 +11,10 @@ def getPosition(robot_state_client):
 
 def check_line_of_sight(x1, y1, x2, y2, pts, cells, obstacle_threshold=0.0, max_valid_dist=0.2):
     """
-    Linea di vista fra due punti, campionata ogni 10 cm (almeno 10 campioni) sulla griglia
-    (pts, cells), con cells = obstacle_distance: sotto obstacle_threshold e' ostacolo.
-    Restituisce 'blocked' al primo campione su un ostacolo, 'unseen' se un campione non ha
-    un punto di griglia entro max_valid_dist, altrimenti 'clear'.
+    Line of sight between two points, sampled every 10 cm (at least 10 samples) on the grid
+    (pts, cells), with cells = obstacle_distance: below obstacle_threshold is an obstacle.
+    Returns 'blocked' at the first sample on an obstacle, 'unseen' if a sample has no grid
+    point within max_valid_dist, otherwise 'clear'.
     """
     distance = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
     num_checks = max(10, int(distance * 10))
@@ -24,7 +24,7 @@ def check_line_of_sight(x1, y1, x2, y2, pts, cells, obstacle_threshold=0.0, max_
         check_x = x1 + t * (x2 - x1)
         check_y = y1 + t * (y2 - y1)
 
-        # Punto di griglia piu' vicino
+        # Nearest grid point
         distances = np.sqrt((pts[:, 0] - check_x) ** 2 + (pts[:, 1] - check_y) ** 2)
         nearest_idx = np.argmin(distances)
         min_dist = distances[nearest_idx]
@@ -38,8 +38,8 @@ def check_line_of_sight(x1, y1, x2, y2, pts, cells, obstacle_threshold=0.0, max_
     return 'clear'
 
 
-# --- da spotLogInUtils.py ---
-"""Collegamento al robot (SDK, login, lease, stato) ed E-Stop."""
+# --- robot connection ---
+"""Connection to the robot (SDK, login, lease, state) and E-Stop."""
 import os
 import bosdyn.client
 import bosdyn.client.lease
@@ -75,8 +75,8 @@ def setLogInfo(options):
 
 class SimpleEstop:
     """
-    E-Stop software senza interfaccia. Alla creazione si registra e lascia muovere il robot;
-    stop() lo ferma, allow() lo rilascia.
+    Software E-Stop without a UI. On creation it registers and lets the robot move;
+    stop() stops it, allow() releases it.
     """
 
     def __init__(self, robot, name='simple_estop'):
@@ -88,11 +88,11 @@ class SimpleEstop:
         print(f"[OK] E-Stop '{name}' activated and released")
 
     def stop(self):
-        """Attiva l'E-Stop: il robot si ferma subito."""
+        """Engage the E-Stop: the robot stops at once."""
         self.keepalive.stop()
         print("[ESTOP] Robot fermato")
 
     def allow(self):
-        """Rilascia l'E-Stop: il robot puo' muoversi."""
+        """Release the E-Stop: the robot may move."""
         self.keepalive.allow()
         print("[ESTOP] Robot libero di muoversi")

@@ -1,36 +1,37 @@
 #!/usr/bin/env python3
 """
-Visualizzatore DAL VIVO della missione: una sola figura che si aggiorna da sola, per capire a
-grandi linee che cosa sta facendo il robot. Gira in un terminale a parte, accanto alla
-missione, e legge soltanto i file che la missione scrive gia':
-  MissionMap/Mission_<nome>/scans/*.npz          una per giro del ciclo (scansione, percorso,
-                                                 obiettivo, fronte, decisione)
-  MissionMap/Mission_<nome>/iteration_*_vis.npz  una per tentativo (celle, grafo PRM)
-  MissionLogs/Mission_<nome>/mission_log.txt     il log, riga per riga
-  MissionLogs/Mission_<nome>/trajectory.csv      la traiettoria reale, a fine di ogni tratto
-Non tocca la missione e non usa l'SDK: se si chiude o si blocca, la missione non se ne accorge.
+LIVE mission viewer: a single figure that updates itself, to understand roughly what the
+robot is doing. It runs in a separate terminal, next to the mission, and only reads the
+files the mission already writes:
+  MissionMap/Mission_<name>/scans/*.npz          one per loop turn (scan, path, goal,
+                                                 frontier, decision)
+  MissionMap/Mission_<name>/iteration_*_vis.npz  one per attempt (cells, PRM graph)
+  MissionLogs/Mission_<name>/mission_log.txt     the log, line by line
+  MissionLogs/Mission_<name>/trajectory.csv      the real trajectory, at the end of every leg
+It does not touch the mission and does not use the SDK: if it is closed or hangs, the
+mission does not notice.
 
-    python3 visualizzatore_live.py                       # l'ultima missione, dal vivo
-    python3 visualizzatore_live.py 28-10-2026_14-23-50   # una missione precisa, dal vivo
-    python3 visualizzatore_live.py 28-10-2026_14-23-50 --replay [--speed 20]
-                                                         # missione finita, rigiocata nel tempo
-    python3 visualizzatore_live.py <nome> --png <file.png> [--until HH:MM:SS]
-                                                         # una figura sola, senza finestra
+    python3 tools/live_viewer.py                       # the latest mission, live
+    python3 tools/live_viewer.py 28-10-2026_14-23-50   # a specific mission, live
+    python3 tools/live_viewer.py 28-10-2026_14-23-50 --replay [--speed 20]
+                                                       # finished mission, replayed in time
+    python3 tools/live_viewer.py <name> --png <file.png> [--until HH:MM:SS]
+                                                       # a single figure, no window
 
-Nella figura (un solo strato con tutto sopra):
-  sfondo      mappa vista finora: rosso ostacolo, verde chiaro libero, bianco mai visto
-              (mosaico delle scansioni del ciclo, l'ultima vince); dentro il riquadro azzurro
-              l'ultima scansione, piu' scura
-  celle       verde visitata, rossa bloccata, tratteggio da esplorare, bordo blu = obiettivo
-  grafo PRM   grigio chiaro
-  blu         strada fatta (tratteggio = GraphNav)
-  arancione   percorso pianificato adesso; stella = obiettivo nella cella
-  X           dove si ferma il fronte sicuro (rossa ostacolo, viola fine dei dati, verde fine
-              del percorso); linea verde spessa = avanzamento consentito
-  freccia     il robot
-A destra: stato (cella, decisione, fronte, avanzamento, batteria) e le ultime righe utili del log.
+In the figure (a single layer with everything on top):
+  background  map seen so far: red obstacle, light green free, white never seen
+              (mosaic of the loop scans, the last one wins); inside the light-blue box
+              the latest scan, darker
+  cells       green visited, red blocked, hatched to explore, blue border = goal
+  PRM graph   light grey
+  blue        path taken (dashed = GraphNav)
+  orange      path planned now; star = goal in the cell
+  X           where the safe frontier stops (red obstacle, purple end of data, green end
+              of path); thick green line = allowed advance
+  arrow       the robot
+On the right: status (cell, decision, frontier, advance, battery) and the last useful log lines.
 
-Tasti: f segui il robot / tutta la missione,  spazio pausa,  q esci.
+Keys: f follow the robot / whole mission,  space pause,  q quit.
 """
 import argparse
 import csv
@@ -45,9 +46,9 @@ import numpy as np
 import matplotlib
 import matplotlib.patches as patches
 
-HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # cartella del progetto
-MOSAIC_RES = 0.10           # lato delle celle del mosaico, m
-REFRESH_S = 1.0             # ogni quanto si rilegge, dal vivo
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # project folder
+MOSAIC_RES = 0.10           # side of the mosaic cells, m
+REFRESH_S = 1.0             # how often to re-read, live
 LOG_TAGS = ('[PROGRESSO]', '[TARGET]', '[ATTEMPT]', '[VISITED]', '[BLOCKED]', '[BLOCCO]',
             '[SUBITO]', '[REPLAN]', '[REPLAN FALLITO]', '[ARRIVO]', '[OBIETTIVO]', '[STOP]',
             '[GRAPHNAV]', '[BATTERIA]', '[FINE]', '[FRONTIERA]', '[STALLO]', '[EMERGENZA]',
@@ -58,7 +59,7 @@ REASON_COLORS = {'ostacolo': 'red', 'rugosita': 'darkorange', 'pendenza': 'darko
 
 
 def _folders(nome):
-    """(cartella MissionMap, cartella MissionLogs) della missione; l'ultima se nome e' None."""
+    """(MissionMap folder, MissionLogs folder) of the mission; the latest if name is None."""
     if nome is None:
         cands = [d for d in glob.glob(os.path.join(HERE, "MissionMap", "Mission_*")) if os.path.isdir(d)]
         if not cands:
@@ -73,7 +74,7 @@ def _folders(nome):
 
 
 def _load_npz(path):
-    """npz come dict; None se il file non si legge (per esempio e' ancora in scrittura)."""
+    """npz as a dict; None if the file cannot be read (for example it is still being written)."""
     try:
         with np.load(path, allow_pickle=False) as z:
             return {k: z[k] for k in z.files}
@@ -82,7 +83,7 @@ def _load_npz(path):
 
 
 def _obstacles(d):
-    """Celle ostacolo della scansione: obstacle_mask vale -1 sugli ostacoli, 1 sul libero."""
+    """Obstacle cells of the scan: obstacle_mask is -1 on obstacles, 1 on free space."""
     return np.asarray(d['obstacle_mask']) < 0
 
 
@@ -97,20 +98,20 @@ def _time_of_day(t):
 
 
 class LiveState:
-    """Tutto quello che si sa della missione fino all'istante `fino_a` (None = adesso)."""
+    """Everything known about the mission up to the instant `until` (None = now)."""
 
     def __init__(self, mm, ml):
         self.mm, self.ml = mm, ml
-        self.mosaic = {}            # (ix, iy) -> 1 ostacolo, 0 libero
+        self.mosaic = {}            # (ix, iy) -> 1 obstacle, 0 free
         self.scans_read = set()
-        self.last = None           # ultima scansione del ciclo (dict)
-        self.vis = None              # ultima vista PRM (celle e grafo)
+        self.last = None           # latest loop scan (dict)
+        self.vis = None              # latest PRM view (cells and graph)
         self.vis_path = None
         self.log_lines = []
         self.log_pos = 0
         self.log_state = {}
 
-    # --- scansioni del ciclo ------------------------------------------------------------
+    # --- loop scans ----------------------------------------------------------------------
     def _scans(self):
         return sorted(glob.glob(os.path.join(self.mm, "scans", "scan_*.npz")), key=os.path.getmtime)
 
@@ -126,7 +127,7 @@ class LiveState:
         ix = np.floor((ox + (ii + 0.5) * cs) / MOSAIC_RES).astype(np.int64)
         iy = np.floor((oy + (jj + 0.5) * cs) / MOSAIC_RES).astype(np.int64)
         val = obst[jj, ii]
-        # Per ogni cella del mosaico: ostacolo se lo e' almeno il 30% dei punti della scansione.
+        # For each mosaic cell: obstacle if at least 30% of the scan points are.
         key = ix * 1_000_003 + iy
         order = np.argsort(key)
         key, ix, iy, val = key[order], ix[order], iy[order], val[order]
@@ -143,7 +144,7 @@ class LiveState:
                 continue
             d = _load_npz(p)
             if d is None:
-                continue                      # ancora in scrittura: al prossimo giro
+                continue                      # still being written: next turn
             if until is not None and float(d['time']) > until:
                 continue
             self.scans_read.add(p)
@@ -153,7 +154,7 @@ class LiveState:
             new_count += 1
         return new_count
 
-    # --- viste PRM (celle e grafo) ---------------------------------------------------------
+    # --- PRM views (cells and graph) -------------------------------------------------------
     def update_vis(self, until=None):
         cands = glob.glob(os.path.join(self.mm, "iteration_*_vis.npz"))
         if until is not None:
@@ -181,7 +182,7 @@ class LiveState:
                 pos = f.tell()
                 riga = f.readline()
                 if not riga or not riga.endswith('\n'):
-                    f.seek(pos)               # riga a meta': si rilegge al prossimo giro
+                    f.seek(pos)               # half-written line: re-read next turn
                     break
                 m = re.match(r'(\d\d:\d\d:\d\d\.\d+) (.*)', riga.rstrip('\n'))
                 if m and limit is not None and _hms(m.group(1)) > limit:
@@ -207,7 +208,7 @@ class LiveState:
                 s['batteria'] = m.group(1) + '%'
         elif text.startswith('[GRAPHNAV]'):
             s['graphnav'] = f"{ora} {text[len('[GRAPHNAV] '):]}"
-        # Fase della missione, dall'ultima riga che la dice.
+        # Mission phase, from the last line that states it.
         if text.startswith('[ATTEMPT]'):
             m = re.search(r'cella \((\d+),(\d+)\)', text)
             s['fase'] = f"esplorazione, tentativo sulla cella ({m.group(1)},{m.group(2)})" if m else "esplorazione"
@@ -221,7 +222,7 @@ class LiveState:
             s['fase'] = "EMERGENZA: " + text[len('[EMERGENZA] '):]
         elif text.startswith('[TEMPO] Chiusura della missione'):
             s['fase'] = "missione finita"
-        # Ritorno a wp_0: arrivo, scarto dal tag, correzioni.
+        # Return to wp_0: arrival, offset from the tag, corrections.
         if 'ritorno a wp_0: arrivato' in text:
             s['wp0'] = "arrivato secondo GraphNav"
         elif 'Ritorno a wp_0 NON riuscito' in text:
@@ -237,8 +238,8 @@ class LiveState:
             del self.log_lines[:-N_LOG_LINES]
 
     def trajectory(self, until=None):
-        """Array (t, x, y, tipo) dalla traiettoria registrata: tipo 0 a zampe, 1 GraphNav,
-        2 correzione del ritorno a wp_0."""
+        """Array (t, x, y, kind) from the recorded trajectory: kind 0 walked, 1 GraphNav,
+        2 correction of the return to wp_0."""
         path = os.path.join(self.ml, "trajectory.csv")
         if not os.path.exists(path):
             return np.zeros((0, 4))
@@ -260,7 +261,7 @@ class LiveState:
 
 
 # =========================================================================================
-# DISEGNO
+# DRAWING
 # =========================================================================================
 def _mosaic_image(mosaic):
     keys = np.array(list(mosaic.keys()))
@@ -316,7 +317,7 @@ def draw(fig, ax_map, ax_txt, st, follow, until=None):
     cell = None
     if d is not None:
         cell = (int(d['cell'][0]), int(d['cell'][1]))
-        # Ultima scansione, piu' scura, dentro il suo riquadro.
+        # Latest scan, darker, inside its box.
         ny, nx = d['obstacle_mask'].shape
         ox, oy = (float(v) for v in d['grid_origin'])
         cs = float(d['cell_size'])
@@ -340,7 +341,7 @@ def draw(fig, ax_map, ax_txt, st, follow, until=None):
             xy = tr[:, 1:3].copy()
             xy[(kind != k) | jump] = np.nan
             ax_map.plot(xy[:, 0], xy[:, 1], ls, color=col, lw=lw, zorder=5 if k < 2 else 8)
-        # Partenza: il primo punto registrato (nel frame VISION, quindi con la deriva dentro).
+        # Start: the first recorded point (in the VISION frame, so with the drift in it).
         ax_map.plot(tr[0, 1], tr[0, 2], '^', color='black', mfc='white', ms=10, mew=1.5, zorder=9)
 
     lines = []
@@ -456,7 +457,7 @@ def main():
     fig.canvas.mpl_connect('key_press_event', on_key)
     fig.canvas.mpl_connect('close_event', lambda ev: state.update(esci=True))
 
-    # Istante d'inizio per rigioco e --until: la prima scansione della missione.
+    # Start instant for replay and --until: the first scan of the mission.
     scans = st._scans()
     t_start = None
     if scans:
@@ -492,8 +493,8 @@ def main():
             if args.replay:
                 t_rig += (now - t_wall) * args.speed
                 until = t_rig
-            # Si ridisegna solo se c'e' qualcosa di nuovo (o un tasto): il disegno costa ~0.4 s
-            # di CPU, sullo stesso computer della missione.
+            # Redraw only if there is something new (or a key): drawing costs ~0.4 s
+            # of CPU, on the same computer as the mission.
             changed = st.update_scans(until) > 0
             changed = st.update_vis(until) or changed
             changed = st.update_log(until) or changed

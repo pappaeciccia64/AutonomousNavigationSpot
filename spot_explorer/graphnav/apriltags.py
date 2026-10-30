@@ -1,4 +1,4 @@
-"""Il fiducial (AprilTag) di partenza: ricerca, deriva di fine missione, correzione del ritorno a wp_0."""
+"""The starting fiducial (AprilTag): search, end-of-mission drift, correction of the return to wp_0."""
 import time
 import numpy as np
 from bosdyn.client.frame_helpers import VISION_FRAME_NAME, BODY_FRAME_NAME, get_a_tform_b
@@ -11,10 +11,10 @@ from spot_explorer.graphnav.navigation import graphnav_navigate_to
 
 def find_fiducials(robot, robot_state_client, wait_s=0.0, fiducial_id=None):
     """
-    Fiducial (AprilTag) che Spot vede adesso da una qualunque telecamera, dal piu' vicino:
-    [{'id', 'xy' (frame VISION), 'dist', 'avanti', 'sinistra' (m, nel frame del corpo),
-    'camera'}]. fiducial_id: solo quello. Riprova fino a wait_s secondi se non ne vede.
-    Lista vuota se nessuno, o se il servizio non risponde (mai eccezioni).
+    Fiducials (AprilTags) Spot sees right now from any camera, nearest first:
+    [{'id', 'xy' (VISION frame), 'dist', 'avanti', 'sinistra' (m, in the body frame),
+    'camera'}]. fiducial_id: only that one. Retries for up to wait_s seconds if it sees none.
+    Empty list if none, or if the service does not answer (never raises).
     """
     try:
         from bosdyn.api import world_object_pb2
@@ -55,9 +55,9 @@ def find_fiducials(robot, robot_state_client, wait_s=0.0, fiducial_id=None):
 
 
 def _robot_in_tag_frame(snapshot, frame, vision_tform_tag, robot_state_client):
-    """Posizione del corpo nel frame del tag (x, y, z), o None. Il tag e' fermo, quindi questa
-    posizione non risente della deriva dell'odometria: confrontata con quella della partenza
-    dice di quanto il robot e' davvero lontano dal punto di partenza."""
+    """Body position in the tag frame (x, y, z), or None. The tag does not move, so this
+    position is not affected by odometry drift: compared with the one at the start it
+    tells how far the robot really is from the starting point."""
     try:
         tag_tform_body = get_a_tform_b(snapshot, frame, BODY_FRAME_NAME)
         if tag_tform_body is None:
@@ -70,9 +70,9 @@ def _robot_in_tag_frame(snapshot, frame, vision_tform_tag, robot_state_client):
 
 
 def _offset_from_start(start, now):
-    """Distanza (m) fra la posizione del robot alla partenza e adesso, nel frame del tag di
-    partenza. Senza la posa del tag (None), dalle posizioni VISION del tag rispetto al robot,
-    che risentono della rotazione dell'odometria."""
+    """Distance (m) between the robot position at the start and now, in the frame of the
+    starting tag. Without the tag pose (None), from the VISION positions of the tag relative
+    to the robot, which are affected by the odometry rotation."""
     a, b = start.get('robot_nel_tag'), now.get('robot_nel_tag')
     if a is not None and b is not None:
         return float(np.linalg.norm(np.subtract(a, b)))
@@ -80,7 +80,7 @@ def _offset_from_start(start, now):
 
 
 def describe_fiducial(f):
-    """Una riga di log per un fiducial di find_fiducials."""
+    """One log line for a fiducial from find_fiducials."""
     side = 'davanti' if f['avanti'] >= 0 else 'dietro'
     return (f"tag {f['id']} a {f['dist']:.2f} m, {side} ({f['avanti']:+.2f} m avanti, "
             f"{f['sinistra']:+.2f} m a sinistra), telecamera {f['camera'] or '?'}")
@@ -88,9 +88,9 @@ def describe_fiducial(f):
 
 def graphnav_check_start_fiducial(robot, robot_state_client):
     """
-    Al ritorno su wp_0: rivede il fiducial di partenza (MISSION_CTX['start_fiducial'])? Il
-    tag non si e' mosso, quindi lo spostamento della sua posizione nel frame VISION e' la
-    deriva dell'odometria accumulata in tutta la missione. Solo misura e log.
+    Back on wp_0: does it see the starting fiducial again (MISSION_CTX['start_fiducial'])?
+    The tag has not moved, so the shift of its position in the VISION frame is the odometry
+    drift accumulated over the whole mission. Measurement and log only.
     """
     start = MISSION_CTX.get('start_fiducial')
     if not start:
@@ -116,14 +116,14 @@ def graphnav_check_start_fiducial(robot, robot_state_client):
 def graphnav_correct_wp0_with_fiducial(robot, recordingInterface, robot_state_client, command_client,
                                        offset):
     """
-    CORREZIONE DEL RITORNO A wp_0 (vedi WP0_FIDUCIAL_CORRECTION). GraphNav dice "arrivato",
-    ma il tag di partenza dice che il robot e' a `offset` m dalla partenza: GraphNav si e'
-    localizzato male (29-10 10:57: 1.2 m in un prato con una sola siepe come riferimento).
-    Si rilocalizza GraphNav sul tag (come all'avvio) e si torna di nuovo a wp_0, fino a
-    WP0_FIDUCIAL_MAX_CORRECTIONS volte, finche' lo scarto non scende sotto
-    WP0_FIDUCIAL_TOLERANCE_M. Se il tag non si vede o la rilocalizzazione non riesce, ci si
-    ferma dove si e'. Lo scarto finale, o quello di partenza se non si e' corretto niente.
-    Mai eccezioni.
+    CORRECTION OF THE RETURN TO wp_0 (see WP0_FIDUCIAL_CORRECTION). GraphNav says "arrived",
+    but the starting tag says the robot is `offset` m from the start: GraphNav localized
+    badly (29-10 10:57: 1.2 m on a lawn with a single hedge as reference). GraphNav is
+    relocalized on the tag (as at start-up) and the robot goes back to wp_0 again, up to
+    WP0_FIDUCIAL_MAX_CORRECTIONS times, until the offset drops below
+    WP0_FIDUCIAL_TOLERANCE_M. If the tag is not visible or the relocalization fails, it
+    stops where it is. Returns the final offset, or the starting one if nothing was
+    corrected. Never raises.
     """
     start = MISSION_CTX.get('start_fiducial')
     MISSION_STATS['wp0_offset_m'] = round(offset, 2)

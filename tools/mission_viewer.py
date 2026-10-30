@@ -1,57 +1,57 @@
 #!/usr/bin/env python3
 """
-Visualizzatore dei dati di missione. Gira su qualunque computer: servono solo
-numpy e matplotlib, NON l'SDK di Spot.
+Mission data viewer. Runs on any computer: it only needs numpy and matplotlib, NOT the
+Spot SDK.
 
-Durante la missione il robot non disegna figure (vedi visualize_grid_with_candidates in
-registro.py): salva i dati grezzi, e le figure si fanno qui, dopo.
+During the mission the robot draws no figures (see visualize_grid_with_candidates in
+records.py): it saves the raw data, and the figures are made here, afterwards.
 
-    python3 mission_viewer.py                                  # (o tasto Run) l'ultima missione in MissionMap/
-    python3 mission_viewer.py <cartella_missione>              # interattivo, tutte le scansioni
-    python3 mission_viewer.py 13-10-2026_12-40-38              # oppure solo il nome della missione
-    python3 mission_viewer.py <file.npz>                       # una scansione o una vista PRM
-    python3 mission_viewer.py <cartella_missione> --png <dir>  # esporta tutte le figure in PNG
-    python3 mission_viewer.py <cartella_missione> --overview   # solo il riepilogo della missione
-    ... --background terreno | fusione                             # sfondo iniziale del pannello globale
-    ... --navgraph                                             # nav graph visibile dall'inizio
-    ... --mission-frame                                       # pannello globale nel frame della missione
+    python3 tools/mission_viewer.py                                  # (or Run key) the latest mission in MissionMap/
+    python3 tools/mission_viewer.py <mission_folder>                 # interactive, all scans
+    python3 tools/mission_viewer.py 13-10-2026_12-40-38              # or just the mission name
+    python3 tools/mission_viewer.py <file.npz>                       # a scan or a PRM view
+    python3 tools/mission_viewer.py <mission_folder> --png <dir>     # export all figures as PNG
+    python3 tools/mission_viewer.py <mission_folder> --overview      # only the mission overview
+    ... --background terreno | fusione                               # initial background of the global panel
+    ... --navgraph                                                   # nav graph visible from the start
+    ... --mission-frame                                              # global panel in the mission frame
 
-Tasti (modalita' interattiva):
-    A sinistra la scansione (layer a scelta), a destra la MAPPA GLOBALE in quel momento:
-    mosaico delle scansioni fatte fin li' (rosso ostacolo, verde chiaro libero, bianco mai visto),
-    celle di missione (verde visitata, rossa bloccata), grafo PRM colorato per pendenza
-    (verde in avanti, rosso di traverso), percorso reale, percorso pianificato, finestra
-    attuale (azzurro), blocchi (quadrati rossi).
-    freccia destra / sinistra   scansione successiva / precedente
-    freccia su / giu'            10 scansioni avanti / indietro
-    1..9, 0                      layer del pannello sinistro (vedi LAYERS)
-    i / x                        layer intensita' / no_step di Spot (missioni dal 26-10)
-    l                            layer successivo
-    o                            pannello destro: fine missione <-> momento della scansione
-    g                            grafo PRM sopra la scansione: mostra / nascondi
-    m                            pannello destro: mappa del robot (ostacoli confermati, default)
-                                 <-> mosaico grezzo (l'ultima scansione vince)
-    t                            sfondo del pannello destro: ostacoli -> terreno -> fusione
-                                 (terreno colorato per quota, ostacoli in rosso sopra;
-                                 linea bianca = quota 0, il suolo all'avvio missione, segnata
-                                 anche sulla barra)
-    r                            entrambi i pannelli nel frame della MISSIONE: griglia delle celle
-                                 dritta, partenza nell'origine, muso del robot alla partenza verso
-                                 l'alto (sotto il mouse restano anche le coordinate VISION)
-    b / B                        blocco successivo / precedente
-    c / C                        prima scansione del tentativo (cella) successivo / precedente
-    v / V                        prima scansione dopo il prossimo / precedente spostamento GraphNav
-                                 (o tratto non registrato, nelle missioni prima del 26-10)
-    e                            legende: mostra / nascondi
-    n                            nav graph di GraphNav sul pannello destro: mostra / nascondi
-                                 (serve l'SDK di Spot per leggerlo, vedi NAV GRAPH)
-    lo zoom del pannello destro resta quando si cambia scansione o sfondo
-    il valore sotto il mouse compare in basso a destra, con le coordinate VISION
+Keys (interactive mode):
+    On the left the scan (layer of choice), on the right the GLOBAL MAP at that moment:
+    mosaic of the scans made so far (red obstacle, light green free, white never seen),
+    mission cells (green visited, red blocked), PRM graph coloured by slope
+    (green forward, red sideways), real path, planned path, current window (light
+    blue), blocks (red squares).
+    right / left arrow           next / previous scan
+    up / down arrow              10 scans forward / back
+    1..9, 0                      layer of the left panel (see LAYERS)
+    i / x                        Spot's intensity / no_step layer (missions since 26-10)
+    l                            next layer
+    o                            right panel: end of mission <-> moment of the scan
+    g                            PRM graph over the scan: show / hide
+    m                            right panel: the robot's map (confirmed obstacles, default)
+                                 <-> raw mosaic (the last scan wins)
+    t                            right panel background: obstacles -> terrain -> fusion
+                                 (terrain coloured by height, obstacles in red on top;
+                                 white line = height 0, the ground at mission start, also
+                                 marked on the bar)
+    r                            both panels in the MISSION frame: cell grid straight, start
+                                 at the origin, robot nose at the start pointing up (under the
+                                 mouse the VISION coordinates are still shown)
+    b / B                        next / previous block
+    c / C                        first scan of the next / previous attempt (cell)
+    v / V                        first scan after the next / previous GraphNav move
+                                 (or unrecorded leg, in missions before 26-10)
+    e                            legends: show / hide
+    n                            GraphNav nav graph on the right panel: show / hide
+                                 (needs the Spot SDK to read it, see NAV GRAPH)
+    the zoom of the right panel is kept when the scan or background changes
+    the value under the mouse appears at the bottom right, with the VISION coordinates
 
-File letti:
-    scans/scan_*.npz    un pacchetto per scansione del ciclo di navigazione
-    *_vis.npz           al posto delle vecchie figure: dati + grafo PRM in quel momento
-    *_BLOCKED_*.npz     i dati che hanno deciso un blocco
+Files read:
+    scans/scan_*.npz    one bundle per scan of the navigation loop
+    *_vis.npz           instead of the old figures: data + PRM graph at that moment
+    *_BLOCKED_*.npz     the data that decided a block
 """
 import glob
 import os
@@ -75,23 +75,23 @@ import csv                                            # noqa: E402
 import matplotlib.patheffects as pe                   # noqa: E402
 from matplotlib.transforms import Affine2D            # noqa: E402
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # il pacchetto spot_explorer
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # the spot_explorer package
 
 from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
 from spot_explorer.perception import slopes
 from spot_explorer.perception import spot_grid
 
-SLOPE_THRESHOLD = slopes.SLOPE_THRESHOLD    # serve solo a colorare gli archi
+SLOPE_THRESHOLD = slopes.SLOPE_THRESHOLD    # only used to colour the edges
 
-# MAPPA GLOBALE COME LA COSTRUIVA IL ROBOT. Le regole di global_maps.mask_for_global_map e
-# global_maps.GlobalGrid.update rifatte sui dati salvati (le scansioni di scans/), con le stesse
-# costanti, lette da spotGrid (che si importa anche senza l'SDK di Spot).
-# Prima il pannello di destra mostrava il mosaico "l'ultima scansione vince": un ostacolo
-# letto UNA volta, anche accanto alle zampe, ricopriva le celle su cui il robot era appena
-# passato, e il percorso reale sembrava attraversare gli ostacoli, soprattutto alla fine
-# (missione del 22-10, 16:00 circa). Il robot quelle letture le scartava o le pretendeva
-# confermate. Il tasto 'm' torna al mosaico grezzo.
+# GLOBAL MAP AS THE ROBOT BUILT IT. The rules of global_maps.mask_for_global_map and
+# global_maps.GlobalGrid.update redone on the saved data (the scans in scans/), with the same
+# constants, read from the perception package (which can be imported without the Spot SDK too).
+# Before, the right panel showed the "last scan wins" mosaic: an obstacle
+# read ONCE, even next to the legs, covered the cells the robot had just
+# walked over, and the real path seemed to cross the obstacles, especially at the end
+# (mission of 22-10, around 16:00). The robot discarded those readings or required them
+# confirmed. The 'm' key goes back to the raw mosaic.
 SELF_BODY_LENGTH_M = global_maps.GLOBAL_MAP_SELF_BODY_LENGTH_M
 SELF_BODY_WIDTH_M = global_maps.GLOBAL_MAP_SELF_BODY_WIDTH_M
 SELF_RING_M = global_maps.GLOBAL_MAP_SELF_RING_M
@@ -99,40 +99,40 @@ OCC_CONFIRM_OBS = global_maps.GLOBAL_OCC_CONFIRM_OBS
 OCC_CONFIRM_WALKED = global_maps.GLOBAL_OCC_CONFIRM_WALKED
 OCC_MAX_COUNT = global_maps.GLOBAL_OCC_MAX_COUNT
 
-# Due campioni consecutivi di trajectory.csv piu' lontani di cosi': in mezzo c'e' un
-# movimento non registrato (fino al 2026-10-26 GraphNav, cono e arretramenti non scrivevano
-# il file). Si disegna tratteggiato, non come percorso reale.
+# Two consecutive trajectory.csv samples farther apart than this: in between there is an
+# unrecorded movement (until 2026-10-26 GraphNav, cone and back-offs did not write
+# the file). It is drawn dashed, not as a real path.
 TRAJ_GAP_M = 0.5
 
-# SFONDO DEL PANNELLO GLOBALE (2026-10-26), tasto 't'.
-#   ostacoli -- la mappa di occupazione (rosso ostacolo, verde chiaro libero, bianco mai visto)
-#   terreno  -- la mappa globale della QUOTA, come la teneva il robot (media delle quote
-#               corrette, solo celle attendibili e non ostacolo: vedi spot_grid.slope_usable_mask),
-#               rispetto al suolo all'avvio della missione, con ombreggiatura del rilievo
-#   fusione  -- il terreno, e sopra in rosso gli ostacoli della mappa di occupazione
-# La scala dei colori della quota e' fissa per tutta la missione, cosi' scorrendo le
-# scansioni lo stesso colore vuol dire sempre la stessa quota.
+# BACKGROUND OF THE GLOBAL PANEL (2026-10-26), 't' key.
+#   ostacoli -- the occupancy map (red obstacle, light green free, white never seen)
+#   terreno  -- the global HEIGHT map, as the robot kept it (mean of the corrected
+#               heights, only reliable non-obstacle cells: see spot_grid.slope_usable_mask),
+#               relative to the ground at mission start, with relief shading
+#   fusione  -- the terrain, with the obstacles of the occupancy map in red on top
+# The height colour scale is fixed for the whole mission, so scrolling through the
+# scans the same colour always means the same height.
 BACKGROUNDS = ('ostacoli', 'terreno', 'fusione')
-TERRAIN_CMAP = 'viridis'                # niente rossi: nella fusione il rosso e' solo degli ostacoli
-OBSTACLE_RGB = (0.84, 0.15, 0.16)       # come MOSAIC_CMAP
-NO_TERRAIN_RGB = (0.80, 0.80, 0.80)     # fusione: cella vista libera ma senza quota attendibile
-OBSTACLE_THRESHOLD = geometry.OBSTACLE_THRESHOLD       # maschera del terreno
-TERRAIN_PERCENTILES = (2, 98)           # estremi della scala dei colori della quota (con lo 0 sempre dentro)
-ZERO_LEVEL_COLOR = 'white'              # linea di livello e riga sulla barra a quota 0 (partenza)
-ZERO_LEVEL_SMOOTH_CELLS = 5             # media su 5 celle (15 cm) solo per tracciare quella linea
-HILLSHADE_STRENGTH = 0.45               # 0 = niente ombreggiatura del rilievo
+TERRAIN_CMAP = 'viridis'                # no reds: in the fusion red belongs to obstacles only
+OBSTACLE_RGB = (0.84, 0.15, 0.16)       # like MOSAIC_CMAP
+NO_TERRAIN_RGB = (0.80, 0.80, 0.80)     # fusion: cell seen free but without a reliable height
+OBSTACLE_THRESHOLD = geometry.OBSTACLE_THRESHOLD       # terrain mask
+TERRAIN_PERCENTILES = (2, 98)           # ends of the height colour scale (with 0 always inside)
+ZERO_LEVEL_COLOR = 'white'              # level line and line on the bar at height 0 (start)
+ZERO_LEVEL_SMOOTH_CELLS = 5             # mean over 5 cells (15 cm) only to trace that line
+HILLSHADE_STRENGTH = 0.45               # 0 = no relief shading
 
-# Le mappe si costruiscono scansione per scansione; tornando indietro si riparte dall'ultima
-# copia salvata invece che dalla prima scansione (343 scansioni nella missione del 22-10 16:04).
+# The maps are built scan by scan; going back restarts from the last
+# saved copy instead of from the first scan (343 scans in the mission of 22-10 16:04).
 CHECKPOINT_EVERY = 25
 
-# NAV GRAPH (2026-10-26), tasto 'n'. Il grafo GraphNav scaricato a fine missione in
-# graph/<missione>/Grafo_*/: per ogni waypoint la posizione e' quella del corpo nel frame
-# VISION quando il waypoint e' stato creato (dallo snapshot), cioe' lo stesso frame della
-# mappa. Dagli snapshot (558 MB nella missione del 22-10 16:04, quasi tutto nuvole di punti)
-# si legge solo lo stato del robot, senza decodificare il resto: 0.3 s invece di 51.
-# Leggere il formato di Boston Dynamics richiede l'SDK (bosdyn); senza, il tasto non fa nulla.
-NAVGRAPH_EDGE_STYLE = {    # origine dell'arco -> (colore, spessore, tratto, etichetta)
+# NAV GRAPH (2026-10-26), 'n' key. The GraphNav graph downloaded at the end of the mission in
+# graph/<mission>/Grafo_*/: for every waypoint the position is that of the body in the
+# VISION frame when the waypoint was created (from the snapshot), i.e. the same frame as the
+# map. From the snapshots (558 MB in the mission of 22-10 16:04, almost all point clouds)
+# only the robot state is read, without decoding the rest: 0.3 s instead of 51.
+# Reading the Boston Dynamics format requires the SDK (bosdyn); without it, the key does nothing.
+NAVGRAPH_EDGE_STYLE = {    # edge source -> (colour, width, style, label)
     'EDGE_SOURCE_ODOMETRY': ('#303030', 0.9, '-', 'nav graph: arco registrato'),
     'EDGE_SOURCE_USER_REQUEST': ('deepskyblue', 1.2, '-', 'nav graph: scorciatoia nostra'),
     'EDGE_SOURCE_LOCALIZATION': ('darkviolet', 1.2, '--', "nav graph: chiusura d'anello"),
@@ -144,7 +144,7 @@ NAVGRAPH_OTHER_STYLE = ('gray', 0.9, ':', 'nav graph: altro arco')
 REASON_COLORS = {'fine_percorso': 'tab:green', 'fine_dati': 'tab:blue', 'ostacolo': 'tab:red',
                  'rugosita': 'tab:orange', 'pendenza': 'tab:purple'}
 
-# nome, funzione che estrae la matrice, mappa colori, vmin, vmax, etichetta
+# name, function extracting the matrix, colour map, vmin, vmax, label
 LAYERS = [
     ("quota rispetto al suolo", lambda d: d['terrain_raw'] - _ground(d), 'terrain', -0.5, 0.5,
      "quota grezza - suolo stimato (m)"),
@@ -161,19 +161,19 @@ LAYERS = [
      -2.0, 2.0, "quota corretta - suolo all'avvio missione (m)"),
     ("celle mai scritte", lambda d: d['unwritten'].astype(float) if 'unwritten' in d
      else np.zeros_like(d['terrain_raw']), 'gray_r', 0, 1, "1 = mai scritta: trattata come non vista"),
-    # Layer di Spot salvati dal 26-10 (parametri.SAVE_EXTRA_LAYERS), ognuno sulla sua griglia
-    # (<nome>_origin, <nome>_cell): settimo elemento = nome del campo.
+    # Spot layers saved since 26-10 (config.SAVE_EXTRA_LAYERS), each on its own grid
+    # (<name>_origin, <name>_cell): seventh element = field name.
     ("intensita' (Spot)", lambda d: _extra(d, 'intensity'), 'gray', 0, 255,
      "intensita' del ritorno del sensore", 'intensity'),
     ("no_step (Spot)", lambda d: _extra(d, 'no_step'), 'RdBu', -0.3, 0.3,
      "distanza dal confine no-step (m): < 0 = Spot non ci mette le zampe", 'no_step'),
 ]
-# Tasti dei layer: 1..9, 0 per i primi dieci, poi questi.
+# Layer keys: 1..9, 0 for the first ten, then these.
 LAYER_KEYS = {'i': 10, 'x': 11}
 
 
 def _extra(d, key):
-    """Un layer in piu' di Spot, NaN se la missione non l'ha salvato."""
+    """An extra Spot layer, NaN if the mission did not save it."""
     if key in d:
         return np.asarray(d[key], dtype=float)
     return np.full(np.shape(d['terrain_raw']), np.nan)
@@ -188,13 +188,13 @@ def _ground(d):
 
 
 def _mission_z0(d):
-    """Suolo all'avvio missione; per i file vecchi (senza il campo) il suolo della scansione."""
+    """Ground at mission start; for old files (without the field) the scan's ground."""
     z0 = float(d['mission_z0']) if 'mission_z0' in d else np.nan
     return z0 if np.isfinite(z0) else _ground(d)
 
 
 def _body_masks(d):
-    """Celle sotto il corpo (nucleo) e nell'anello attorno, per la scansione d. Vedi SELF_*."""
+    """Cells under the body (core) and in the ring around it, for scan d. See SELF_*."""
     h, w = d['terrain_raw'].shape
     if 'robot_yaw' not in d:
         z = np.zeros((h, w), bool)
@@ -212,13 +212,13 @@ def _body_masks(d):
     return core, ring
 
 
-# QUOTA SOTTO IL CORPO (2026-10-26). Alla prima scansione di una missione il robot si e'
-# appena alzato e il terreno sotto il corpo e' "mai scritto": nei layer di quota restava una
-# macchia bianca. Il robot quel punto lo rivede dopo, da lontano: nei layer di quota del
-# pannello sinistro e nel terreno del pannello globale quelle celle prendono la quota della
-# mappa del terreno di fine missione, tratteggiate. Missione del 26-10 15:11: tutte le 90
-# celle coperte, 1.5 cm dal terreno attorno. Solo disegno: il robot le tratta come non viste.
-# Layer di quota -> riferimento sottratto (stesso del layer).
+# HEIGHT UNDER THE BODY (2026-10-26). At the first scan of a mission the robot has
+# just stood up and the terrain under the body is "never written": in the height layers a
+# white patch remained. The robot sees that spot again later, from afar: in the height layers
+# of the left panel and in the terrain of the global panel those cells take the height of the
+# end-of-mission terrain map, hatched. Mission of 26-10 15:11: all 90
+# cells covered, 1.5 cm from the surrounding terrain. Drawing only: the robot treats them as not seen.
+# Height layer -> subtracted reference (same as the layer).
 QUOTA_LAYER_REF = {
     "quota rispetto al suolo": lambda d: _ground(d),
     "quota corretta": lambda d: _ground(d),
@@ -258,12 +258,12 @@ def draw_scan(ax, d, layer_idx, title_prefix="", ctx=None):
     mat = np.asarray(fn(d), dtype=float)
     ext = _extent(d)
     if src is not None and f"{src}_origin" in d and src in d:
-        # griglia propria del layer
+        # the layer's own grid
         (lox, loy), lcs = d[f"{src}_origin"], float(d.get(f"{src}_cell", d['cell_size']))
         ext = [lox, lox + mat.shape[1] * lcs, loy, loy + mat.shape[0] * lcs]
     if src is not None and src not in d:
         name += " -- non salvato in questa missione"
-    # quota sotto il corpo vista dopo (vedi QUOTA SOTTO IL CORPO)
+    # height under the body seen later (see HEIGHT UNDER THE BODY)
     hole = None
     if ctx is not None and name in QUOTA_LAYER_REF:
         q, hole = ctx.body_quota(d)
@@ -271,9 +271,9 @@ def draw_scan(ax, d, layer_idx, title_prefix="", ctx=None):
             mat = mat.copy()
             mat[hole] = q[hole] - QUOTA_LAYER_REF[name](d)
     if name == "quota rispetto all'avvio missione" and ctx is not None:
-        # Stessa scala e stessi colori del pannello globale ('t'), fissi per la missione: una
-        # scala fissa da -2 a +2 m mandava fuori scala (bianco) le scansioni in cima a una
-        # salita (29-10 10:57: +2.1 m a fine missione).
+        # Same scale and colours as the global panel ('t'), fixed for the mission: a
+        # fixed scale from -2 to +2 m sent the scans at the top of a climb off scale (white)
+        # (29-10 10:57: +2.1 m at the end of the mission).
         norm = ctx.terrain_norm()
         cmap, vmin, vmax = TERRAIN_CMAP, norm.vmin, norm.vmax
     im = ax.imshow(mat, origin='lower', extent=ext, cmap=cmap, vmin=vmin, vmax=vmax,
@@ -291,9 +291,9 @@ def draw_scan(ax, d, layer_idx, title_prefix="", ctx=None):
         cs_l = (ext[1] - ext[0]) / mat.shape[1]
         ax.contour(ext[0] + (np.arange(mat.shape[1]) + 0.5) * cs_l, ext[2] + (np.arange(mat.shape[0]) + 0.5) * cs_l,
                    mat, levels=[0.0], colors='k', linewidths=0.9)
-    ext = _extent(d)        # da qui in poi la griglia della scansione
+    ext = _extent(d)        # from here on the scan grid
 
-    # contorno della distanza minima dal centro del percorso
+    # contour of the minimum distance from the path centre
     od = d['obstacle_distance']
     clear = float(d.get('frontier_clearance', 0.30))
     xs = np.linspace(ext[0], ext[1], od.shape[1]); ys = np.linspace(ext[2], ext[3], od.shape[0])
@@ -306,18 +306,18 @@ def draw_scan(ax, d, layer_idx, title_prefix="", ctx=None):
     ax.plot(rx, ry, 'o', color='blue', ms=9)
     if np.isfinite(yaw):
         ax.arrow(rx, ry, 0.35 * np.cos(yaw), 0.35 * np.sin(yaw), color='blue', width=0.02)
-    # Ingombro del corpo (come la zona del corpo della mappa globale). Alla prima scansione
-    # di una missione il terreno sotto il corpo e' spesso "mai scritto" (bianco): il robot si
-    # e' appena alzato li' e i sensori non l'hanno mai visto. E' trattato come non visto,
-    # non come ostacolo.
+    # Body footprint (like the body area of the global map). At the first scan
+    # of a mission the terrain under the body is often "never written" (white): the robot has
+    # just stood up there and the sensors have never seen it. It is treated as not seen,
+    # not as an obstacle.
     if np.isfinite(yaw):
         ax.add_patch(patches.Rectangle((rx - SELF_BODY_LENGTH_M / 2, ry - SELF_BODY_WIDTH_M / 2),
                                        SELF_BODY_LENGTH_M, SELF_BODY_WIDTH_M, angle=float(np.degrees(yaw)),
                                        rotation_point=(rx, ry), fill=False, edgecolor='blue', lw=1.2,
                                        ls='--', zorder=6))
-    # Il fronte controlla il percorso PROLUNGATO di mezzo corpo oltre l'obiettivo (il muso,
-    # vedi arcVerification.compute_safe_frontier): la X e' dove finisce il controllo, che con
-    # 'fine_percorso' sta mezzo corpo oltre il punto comandato. Il prolungamento e' tratteggiato.
+    # The frontier checks the path EXTENDED by half a body beyond the goal (the nose,
+    # see safe_frontier.compute_safe_frontier): the X is where the check ends, which with
+    # 'fine_percorso' is half a body beyond the commanded point. The extension is dashed.
     reason = str(d['frontier_reason'])
     sx, sy = d['frontier_stop_xy']
     poly = np.asarray(d['polyline']) if 'polyline' in d else np.zeros((0, 2))
@@ -346,7 +346,7 @@ def draw_scan(ax, d, layer_idx, title_prefix="", ctx=None):
 
 
 def draw_vis_bundle(ax, d):
-    """Le vecchie figure 'Path Visualization': scansione, grafo PRM, percorso, celle."""
+    """The old 'Path Visualization' figures: scan, PRM graph, path, cells."""
     ax.clear()
     pts = d['pts']
     if pts.size:
@@ -360,7 +360,7 @@ def draw_vis_bundle(ax, d):
     trav = [(xy[a], xy[b]) for a, b in d['prm_traversed_edges'] if a in xy and b in xy]
     if trav:
         ax.add_collection(LineCollection(trav, colors='tab:blue', linewidths=2))
-    # nodi di sosta: solo nelle missioni fino al 08-10, prima che il grafo restasse fisso
+    # stop nodes: only in the missions up to 08-10, before the graph stayed fixed
     stops = np.array([xy[int(i)] for i in _arr(d, 'prm_stop_nodes', ()) if int(i) in xy]).reshape(-1, 2)
     if len(stops):
         ax.plot(stops[:, 0], stops[:, 1], 'o', color='tab:orange', ms=5, label='nodi di sosta')
@@ -380,15 +380,15 @@ def draw_vis_bundle(ax, d):
 
 
 # =============================================================================
-# VISTA GLOBALE.
-# Tutto e' ricostruito "com'era in quel momento": la mappa e' il mosaico delle scansioni
-# fatte FINO alla scansione mostrata, il grafo e' l'ultima vista PRM salvata prima.
+# GLOBAL VIEW.
+# Everything is rebuilt "as it was at that moment": the map is the mosaic of the scans
+# made UP TO the scan shown, the graph is the last PRM view saved before.
 # =============================================================================
-MOSAIC_CMAP = ListedColormap(['#ffffff', '#dfe8d8', '#d62728'])   # ignoto, libero, ostacolo
+MOSAIC_CMAP = ListedColormap(['#ffffff', '#dfe8d8', '#d62728'])   # unknown, free, obstacle
 
 
 def _navgraph_folder(folder):
-    """graph/<missione>/Grafo_* piu' recente, cercato accanto a MissionMap/ e a questo file."""
+    """Most recent graph/<mission>/Grafo_*, searched next to MissionMap/ and to this file."""
     name = os.path.basename(os.path.normpath(folder))
     bases = {os.path.dirname(os.path.dirname(os.path.abspath(folder))),
              os.path.dirname(os.path.dirname(os.path.abspath(__file__)))}
@@ -400,9 +400,9 @@ def _navgraph_folder(folder):
 
 def _proto_field(buf, number):
     """
-    Il campo `number` (length-delimited) al primo livello di un messaggio protobuf serializzato,
-    senza decodificare gli altri: negli snapshot dei waypoint permette di saltare le nuvole di
-    punti. None se non c'e'.
+    The `number` field (length-delimited) at the first level of a serialized protobuf
+    message, without decoding the others: in the waypoint snapshots it allows skipping the
+    point clouds. None if absent.
     """
     def varint(i):
         r = sh = 0
@@ -433,9 +433,9 @@ def _proto_field(buf, number):
 
 def load_navgraph(folder):
     """
-    Il nav graph della missione: dict con 'names', 'xy' (N, 2) in VISION, 'time' (N,) istante
-    di creazione (orologio del robot), 'edges' (M, 2) indici, 'source' (M,) origine dell'arco,
-    'folder'. None se il grafo manca o non c'e' l'SDK per leggerlo.
+    The mission nav graph: dict with 'names', 'xy' (N, 2) in VISION, 'time' (N,) creation
+    instant (robot clock), 'edges' (M, 2) indices, 'source' (M,) edge source, 'folder'.
+    None if the graph is missing or there is no SDK to read it.
     """
     gdir = _navgraph_folder(folder)
     if gdir is None:
@@ -497,17 +497,17 @@ _VIS_NAME = re.compile(r'iteration_(\d+)(?:_cell_\d+_\d+)?(?:_replan_(\d+)|_(BLO
 
 def _vis_times(vis, scans):
     """
-    Istante di ogni vista PRM, per abbinarla alle scansioni (vedi vis_before), e lista
-    ordinata. Dal 2026-10-26 la vista ha il campo 'time'. Prima no, e la data del file non
-    serve: dopo un git clone o un pull e' quella del download, uguale per tutte, e si vedeva
-    sempre la prima vista. Allora l'istante si ricostruisce dal nome e dalla posizione:
-      iteration_I_cell_R_C          inizio del tentativo I: poco prima della sua prima scansione
-      ..._replan_K                  ripianificazione durante il giro: la scansione dell'iterazione
-                                    I in cui il robot stava dove dice la vista (robot_xy)
-      ..._BLOCKED                   fine del tentativo bloccato: dopo la sua ultima scansione
-      iteration_I_FINAL_SCAN        scansione finale della missione: dopo tutte
-    Un tentativo senza scansioni (fallito prima di muoversi) va dopo l'ultima scansione
-    precedente. Gli istanti sono resi crescenti nell'ordine dei nomi.
+    Instant of every PRM view, to match it with the scans (see vis_before), and sorted list.
+    Since 2026-10-26 the view has the 'time' field. Before it did not, and the file date is
+    no use: after a git clone or a pull it is the download date, the same for all, and the
+    first view was always shown. So the instant is rebuilt from the name and position:
+      iteration_I_cell_R_C          start of attempt I: shortly before its first scan
+      ..._replan_K                  replan during the turn: the scan of iteration I in which
+                                    the robot was where the view says (robot_xy)
+      ..._BLOCKED                   end of the blocked attempt: after its last scan
+      iteration_I_FINAL_SCAN        final scan of the mission: after all of them
+    An attempt without scans (failed before moving) goes after the last previous scan.
+    The instants are made increasing in the order of the names.
     """
     if not scans:
         return sorted(vis, key=lambda v: v[1])
@@ -541,8 +541,8 @@ def _vis_times(vis, scans):
             elif phase == 2:
                 t = t_sc[idx[-1]] + 0.01
             else:
-                # la scansione dell'iterazione piu' vicina a robot_xy, non prima di quella
-                # della ripianificazione precedente
+                # the scan of the iteration nearest to robot_xy, not before that
+                # of the previous replan
                 idx = idx[idx >= last_match.get(it, -1)]
                 rxy = _arr(d, 'robot_xy').astype(float).ravel()
                 k = idx[int(np.argmin(np.hypot(*(xy_sc[idx] - rxy).T)))] if rxy.size == 2 else idx[0]
@@ -554,25 +554,25 @@ def _vis_times(vis, scans):
     return out
 
 
-# SCANSIONI FUORI DAL CICLO. In scans/ ci sono solo le scansioni del ciclo di navigazione; la
-# scansione d'inizio di ogni tentativo e quella finale entrano nelle mappe del robot ma non
-# in scans/. Se un tentativo fallisce prima di muoversi, la sua scansione d'inizio e' l'unica
-# fatta in quel punto (28-10 10:27: il muro davanti alla cella (0,5) mancava nel pannello
-# globale; 10:51: fra la scansione 11 e la 12 sembrava che il robot non avesse mai guardato
-# dal punto d'arrivo). Quelle scansioni sono pero' nella vista PRM del tentativo
-# (iteration_I_cell_R_C_vis.npz) e in quella finale (iteration_I_FINAL_SCAN_vis.npz): si
-# ricostruiscono da li' e si inseriscono fra le altre, in ordine di tempo, sia nello sfoglio
-# sia nelle mappe. Approssimazioni: la vista non ha le celle "mai scritte", quindi una cella
-# vale come vista se terrain_valid >= spot_grid.TERRAIN_VALID_MIN (sul 28-10 uguale a quella
-# del robot nel 98.8% delle celle); la quota grezza e' quella corretta; l'orientamento viene
-# da trajectory.csv (ultimo campione prima, nello stesso punto) e senza quello manca la zona
-# sotto il corpo. Fronte e decisione non esistono: campi vuoti, e il campo 'extra_kind'.
+# SCANS OUTSIDE THE LOOP. scans/ only has the navigation loop scans; the
+# start scan of every attempt and the final one go into the robot's maps but not
+# into scans/. If an attempt fails before moving, its start scan is the only one
+# made at that point (28-10 10:27: the wall in front of cell (0,5) was missing in the global
+# panel; 10:51: between scan 11 and 12 it seemed the robot had never looked
+# from the arrival point). Those scans are however in the attempt's PRM view
+# (iteration_I_cell_R_C_vis.npz) and in the final one (iteration_I_FINAL_SCAN_vis.npz): they
+# are rebuilt from there and inserted among the others, in time order, both in browsing
+# and in the maps. Approximations: the view does not have the "never written" cells, so a cell
+# counts as seen if terrain_valid >= spot_grid.TERRAIN_VALID_MIN (on 28-10 equal to the robot's
+# in 98.8% of the cells); the raw height is the corrected one; the heading comes
+# from trajectory.csv (last sample before, at the same point) and without it the area
+# under the body is missing. Frontier and decision do not exist: empty fields, and the 'extra_kind' field.
 _VIS_SCAN_NAME = re.compile(r'iteration_(\d+)_(?:cell_(\d+)_(\d+)|FINAL_SCAN)_vis\.npz$')
 
 
 def _scan_from_vis(t, name, v, yaw_at=None):
-    """Una vista PRM d'inizio tentativo o finale come scansione (vedi SCANSIONI FUORI DAL
-    CICLO), None se non basta. yaw_at(t, x, y): orientamento del robot, NaN se ignoto."""
+    """A start-of-attempt or final PRM view as a scan (see SCANS OUTSIDE THE
+    LOOP), None if it is not enough. yaw_at(t, x, y): robot heading, NaN if unknown."""
     m = _VIS_SCAN_NAME.search(name)
     if not m:
         return None
@@ -622,8 +622,8 @@ def _scan_from_vis(t, name, v, yaw_at=None):
 
 
 def _yaw_lookup(folder):
-    """yaw_at(t, x, y) da trajectory.csv: l'ultimo campione prima di t, se entro 0.3 m da
-    (x, y); NaN altrimenti o se il file manca."""
+    """yaw_at(t, x, y) from trajectory.csv: the last sample before t, if within 0.3 m of
+    (x, y); NaN otherwise or if the file is missing."""
     name = os.path.basename(os.path.normpath(folder))
     path = os.path.join(os.path.dirname(os.path.dirname(os.path.normpath(folder))), "MissionLogs",
                         name, "trajectory.csv")
@@ -644,7 +644,7 @@ def _yaw_lookup(folder):
 
 
 class MissionContext:
-    """Dati di tutta la missione, caricati una volta: scansioni, viste PRM, traiettoria."""
+    """Data of the whole mission, loaded once: scans, PRM views, trajectory."""
 
     def __init__(self, folder, scans, scan_files, vis_files):
         self.scans, self.scan_files = scans, scan_files
@@ -655,8 +655,8 @@ class MissionContext:
             except Exception as e:
                 print(f"[viewer] vista PRM non leggibile {os.path.basename(f)}: {e}")
         self.vis = _vis_times(self.vis, scans)
-        # Scansioni fuori dal ciclo (vedi SCANSIONI FUORI DAL CICLO), fra le altre in ordine di
-        # tempo: da qui in poi self.scans e self.scan_files le comprendono.
+        # Scans outside the loop (see SCANS OUTSIDE THE LOOP), among the others in time
+        # order: from here on self.scans and self.scan_files include them.
         t_sc = [_scalar(d, 'time', np.nan) for d in scans]
         if scans and np.isfinite(t_sc).all():
             paths = {os.path.basename(p): p for p in vis_files}
@@ -676,12 +676,12 @@ class MissionContext:
         self._cache = {}
         self._terrain_norm = None
         self._folder = folder
-        self._navgraph = False          # False = non ancora letto, None = non disponibile
+        self._navgraph = False          # False = not read yet, None = not available
         if not scans:
             return
-        # Griglia comune: tutte le scansioni piu' le mappe salvate a fine missione (che
-        # contengono anche le scansioni d'inizio tentativo). L'origine e' un multiplo della
-        # risoluzione, cosi' le celle coincidono con quelle delle mappe del robot (floor(x/res)).
+        # Common grid: all the scans plus the maps saved at the end of the mission (which
+        # also contain the start-of-attempt scans). The origin is a multiple of the
+        # resolution, so the cells coincide with those of the robot's maps (floor(x/res)).
         self.res = float(scans[0]['cell_size'])
         ext = np.array([_extent(d) for d in scans])
         xmin, xmax, ymin, ymax = ext[:, 0].min(), ext[:, 1].max(), ext[:, 2].min(), ext[:, 3].max()
@@ -696,7 +696,7 @@ class MissionContext:
         self.x0, self.y0 = self.kx0 * self.res, self.ky0 * self.res
         self.nx = int(np.ceil((xmax + pad - self.x0) / self.res))
         self.ny = int(np.ceil((ymax + pad - self.y0) / self.res))
-        # Suolo all'avvio della missione: riferimento delle quote.
+        # Ground at mission start: reference for the heights.
         self.z0 = np.nan
         if ter is not None and ter[3] is not None:
             self.z0 = float(ter[3])
@@ -710,9 +710,9 @@ class MissionContext:
     @staticmethod
     def _load_pkl_cells(folder, name, key):
         """
-        Celle di una mappa globale salvata a fine missione (.pkl di easy_walk): (chiavi (N, 2)
-        come (gx, gy), valori, risoluzione, mission_z0). Per l'occupazione i valori sono
-        -1 ostacolo / +1 libero; per il terreno la quota media assoluta. None se manca.
+        Cells of a global map saved at the end of the mission (.pkl from the mission):
+        (keys (N, 2) as (gx, gy), values, resolution, mission_z0). For occupancy the values
+        are -1 obstacle / +1 free; for terrain the absolute mean height. None if missing.
         """
         path = os.path.join(folder, name)
         if not os.path.exists(path):
@@ -735,7 +735,7 @@ class MissionContext:
             return None
 
     def _raster(self, keys, vals, dtype, fill):
-        """Celle (gx, gy) -> matrice sulla griglia comune."""
+        """Cells (gx, gy) -> matrix on the common grid."""
         img = np.full((self.ny, self.nx), fill, dtype=dtype)
         c, r = keys[:, 0] - self.kx0, keys[:, 1] - self.ky0
         ok = (c >= 0) & (c < self.nx) & (r >= 0) & (r < self.ny)
@@ -748,7 +748,7 @@ class MissionContext:
 
     @staticmethod
     def _load_trajectory(folder):
-        """trajectory.csv in MissionLogs/<stessa missione>, se c'e' (le missioni piu' vecchie non l'hanno)."""
+        """trajectory.csv in MissionLogs/<same mission>, if there is one (older missions do not have it)."""
         name = os.path.basename(os.path.normpath(folder))
         for cand in (os.path.join(os.path.dirname(os.path.dirname(os.path.normpath(folder))), "MissionLogs", name,
                                   "trajectory.csv"),
@@ -757,8 +757,8 @@ class MissionContext:
                 try:
                     with open(cand, newline='', encoding='utf-8') as f:
                         rows = list(csv.DictReader(f))
-                    # quarta colonna: 1 spostamento GraphNav (colonna 'move', dal 2026-10-26),
-                    # 2 correzione del ritorno a wp_0 con il fiducial (dal 29-10), 0 il resto
+                    # fourth column: 1 GraphNav move ('move' column, since 2026-10-26),
+                    # 2 correction of the return to wp_0 with the fiducial (since 29-10), 0 the rest
                     kind = {'graphnav': 1.0, 'graphnav_correzione': 2.0}
                     return np.array([(float(r['time']), float(r['x']), float(r['y']),
                                       kind.get(r.get('move'), 0.0)) for r in rows]).reshape(-1, 4)
@@ -767,7 +767,7 @@ class MissionContext:
         return None
 
     def _window(self, d):
-        """Slice della griglia comune e della scansione d per la parte che si sovrappone."""
+        """Slices of the common grid and of scan d for the overlapping part."""
         gox, goy = d['grid_origin']
         r0 = int(np.floor((goy - self.y0) / self.res))
         c0 = int(np.floor((gox - self.x0) / self.res))
@@ -778,8 +778,8 @@ class MissionContext:
     @staticmethod
     def _robot_mask(d):
         """
-        Come global_maps.mask_for_global_map: -1 ostacolo, +1 libero, 0 nessuna informazione;
-        sotto il corpo libero, nell'anello attorno nessun ostacolo. Anche la maschera del corpo.
+        Like global_maps.mask_for_global_map: -1 obstacle, +1 free, 0 no information;
+        free under the body, no obstacle in the ring around it. Also the body mask.
         """
         om = np.asarray(d['obstacle_mask']).reshape(d['terrain_raw'].shape)
         out = np.where(om < 0, -1, np.where(np.asarray(d['is_valid'], bool), 1, 0)).astype(np.int8)
@@ -790,9 +790,9 @@ class MissionContext:
 
     def _build(self, name, upto, init, step):
         """
-        Stato di una mappa dopo le scansioni 0..upto, costruito una scansione alla volta con
-        step(stato, scansione). Avanti si continua da dove si era; indietro si riparte dalla
-        copia salvata piu' vicina (una ogni CHECKPOINT_EVERY scansioni).
+        State of a map after scans 0..upto, built one scan at a time with
+        step(state, scan). Forward it continues from where it was; backward it restarts from
+        the nearest saved copy (one every CHECKPOINT_EVERY scans).
         """
         c = self._cache.setdefault(name, {'upto': -1, 'state': None, 'ckpt': {}})
         if c['state'] is None or upto < c['upto']:
@@ -814,18 +814,18 @@ class MissionContext:
 
     def robot_map(self, upto):
         """
-        Mappa 0/1/2 (ignoto/libero/ostacolo) delle scansioni 0..upto come la teneva il robot:
-        un ostacolo vale solo dopo OCC_CONFIRM_OBS letture consecutive (OCC_CONFIRM_WALKED sulle
-        celle su cui il corpo e' passato), e torna libero quando le letture libere lo pareggiano.
-        Con le scansioni d'inizio tentativo e finale (vedi SCANSIONI FUORI DAL CICLO); mancano
-        i dischi delle cadute e le scansioni del recupero.
+        0/1/2 map (unknown/free/obstacle) of scans 0..upto as the robot kept it: an
+        obstacle counts only after OCC_CONFIRM_OBS consecutive readings (OCC_CONFIRM_WALKED on
+        the cells the body passed over), and becomes free again when the free readings even it out.
+        With the start-of-attempt and final scans (see SCANS OUTSIDE THE LOOP); the fall
+        disks and the recovery scans are missing.
         """
         def step(st_all, d):
             state, count, walked = st_all
             m, core = self._robot_mask(d)
             rs, cs_, sr, sc = self._window(d)
             m, core = m[sr, sc], core[sr, sc]
-            st, cnt, wk = state[rs, cs_], count[rs, cs_], walked[rs, cs_]   # viste: scrivono nelle mappe
+            st, cnt, wk = state[rs, cs_], count[rs, cs_], walked[rs, cs_]   # views: they write into the maps
             wk |= core
             obs, free = m < 0, m > 0
             c_obs = np.minimum(np.where(cnt >= 0, cnt + 1, 1), OCC_MAX_COUNT)
@@ -841,7 +841,7 @@ class MissionContext:
         return self._build('robot', upto, self._zeros(np.uint8, np.int8, bool), step)[0]
 
     def mosaic(self, upto):
-        """Mosaico 0/1/2 (ignoto/libero/ostacolo) delle scansioni 0..upto: l'ultima vince."""
+        """0/1/2 mosaic (unknown/free/obstacle) of scans 0..upto: the last one wins."""
         def step(st_all, d):
             om = np.asarray(d['obstacle_mask']).reshape(d['terrain_raw'].shape)
             known = np.asarray(d['is_valid'], bool) | (om < 0)
@@ -856,9 +856,9 @@ class MissionContext:
 
     def terrain(self, upto):
         """
-        Quota media (m, rispetto al suolo all'avvio missione) delle scansioni 0..upto, come
-        global_maps.GlobalTerrainGrid: quote corrette, solo celle attendibili e non ostacolo
-        (spot_grid.slope_usable_mask). NaN dove non c'e' quota.
+        Mean height (m, relative to the ground at mission start) of scans 0..upto, like
+        global_maps.GlobalTerrainGrid: corrected heights, only reliable non-obstacle cells
+        (spot_grid.slope_usable_mask). NaN where there is no height.
         """
         def step(st_all, d):
             hsum, hn = st_all
@@ -876,13 +876,13 @@ class MissionContext:
             return np.where(hn > 0, hsum / np.maximum(hn, 1), np.nan) - self.z0
 
     def navgraph(self):
-        """Il nav graph (vedi load_navgraph), letto alla prima richiesta."""
+        """The nav graph (see load_navgraph), read at the first request."""
         if self._navgraph is False:
             self._navgraph = load_navgraph(self._folder)
             ng = self._navgraph
             if ng is not None and self.scans:
-                # Se l'orologio del robot non e' confrontabile con quello delle scansioni,
-                # niente filtro per istante: si mostra sempre tutto il grafo.
+                # If the robot clock cannot be compared with that of the scans,
+                # no filter by instant: the whole graph is always shown.
                 t = ng['time']
                 t_scan = [float(d['time']) for d in (self.scans[0], self.scans[-1]) if 'time' in d]
                 if (not np.isfinite(t).any() or len(t_scan) < 2
@@ -891,15 +891,15 @@ class MissionContext:
         return self._navgraph
 
     def walked(self, upto):
-        """Celle su cui il corpo e' passato nelle scansioni 0..upto (dalla mappa del robot)."""
+        """Cells the body passed over in scans 0..upto (from the robot's map)."""
         self.robot_map(upto)
         return self._cache['robot']['state'][2]
 
     def body_quota(self, d):
         """
-        Quota assoluta della mappa del terreno di fine missione sulle celle della scansione d
-        che stanno sotto il corpo e non hanno quota (vedi QUOTA SOTTO IL CORPO), e la loro
-        maschera. (None, None) se non serve o non c'e'.
+        Absolute height of the end-of-mission terrain map on the cells of scan d that lie
+        under the body and have no height (see HEIGHT UNDER THE BODY), and their mask.
+        (None, None) if not needed or not available.
         """
         if self.final_terrain is None:
             return None, None
@@ -922,11 +922,11 @@ class MissionContext:
 
     def events(self):
         """
-        Indici delle scansioni a cui saltare (tasti b, c, v), per tipo:
-          'blocco'   -- scansioni con decisione 'blocked'
-          'cella'    -- prima scansione di ogni tentativo (cambia l'iterazione)
-          'graphnav' -- prima scansione dopo uno spostamento GraphNav (campioni 'graphnav' di
-                        trajectory.csv) o dopo un tratto non registrato (missioni piu' vecchie)
+        Indices of the scans to jump to (keys b, c, v), by kind:
+          'blocco'   -- scans with decision 'blocked'
+          'cella'    -- first scan of every attempt (the iteration changes)
+          'graphnav' -- first scan after a GraphNav move ('graphnav' samples of
+                        trajectory.csv) or after an unrecorded leg (older missions)
         """
         if getattr(self, '_events', None) is None:
             kinds = [str(d['decision_kind']) for d in self.scans]
@@ -939,9 +939,9 @@ class MissionContext:
                 tr = self.traj
                 ends = []
                 gn = tr[:, 3] > 0.5
-                # fine di ogni tratto GraphNav registrato
+                # end of every recorded GraphNav leg
                 ends += list(tr[np.flatnonzero(gn & ~np.r_[gn[1:], False]), 0])
-                # fine di ogni salto (tratto non registrato)
+                # end of every jump (unrecorded leg)
                 jump = np.hypot(np.diff(tr[:, 1]), np.diff(tr[:, 2])) > TRAJ_GAP_M
                 ends += list(tr[np.flatnonzero(jump) + 1, 0])
                 idx = {int(np.searchsorted(t_sc, t)) for t in ends}
@@ -951,9 +951,9 @@ class MissionContext:
 
     def mission_frame(self):
         """
-        (x, y, yaw) del frame della missione: origine nel centro della cella (0, 0), che e' il
-        punto di partenza, e orientamento della griglia delle celle (env_origin_yaw, il muso
-        del robot alla partenza). Dalle viste PRM; senza, dalla prima scansione.
+        (x, y, yaw) of the mission frame: origin at the centre of cell (0, 0), which is the
+        starting point, and orientation of the cell grid (env_origin_yaw, the robot's nose at
+        the start). From the PRM views; without them, from the first scan.
         """
         for _t, _n, vd in self.vis:
             cells = _arr(vd, 'env_cells', (4,))
@@ -965,12 +965,12 @@ class MissionContext:
         return float(d['robot_xyz'][0]), float(d['robot_xyz'][1]), float(d.get('robot_yaw', 0.0))
 
     def terrain_norm(self):
-        """Scala dei colori della quota, fissa per la missione (vedi TERRAIN_PERCENTILES)."""
+        """Height colour scale, fixed for the mission (see TERRAIN_PERCENTILES)."""
         if self._terrain_norm is None:
             h = self.final_terrain if self.final_terrain is not None else self.terrain(len(self.scans) - 1)
             h = h[np.isfinite(h)]
             lo, hi = (np.percentile(h, TERRAIN_PERCENTILES) if h.size else (-0.5, 0.5))
-            # La quota di partenza (0) sta sempre nella scala, cosi' si vede sulla barra.
+            # The starting height (0) is always in the scale, so it shows on the bar.
             lo, hi = min(lo, 0.0), max(hi, 0.0)
             if hi - lo < 0.05:
                 lo, hi = lo - 0.025, hi + 0.025
@@ -978,7 +978,7 @@ class MissionContext:
         return self._terrain_norm
 
     def vis_before(self, t):
-        """Ultima vista PRM salvata entro l'istante t (None se nessuna). Vedi _vis_times."""
+        """Last PRM view saved by instant t (None if none). See _vis_times."""
         best = None
         for mt, name, d in self.vis:
             if t is None or not (mt > t):
@@ -987,7 +987,7 @@ class MissionContext:
 
 
 def _scalar(d, key, default):
-    """Valore scalare da un npz, robusto a campi mancanti, vuoti o NaN (file vecchi o di prova)."""
+    """Scalar value from an npz, robust to missing, empty or NaN fields (old or test files)."""
     try:
         v = np.asarray(d[key], dtype=float).ravel()
         return float(v[0]) if v.size and np.isfinite(v[0]) else default
@@ -996,22 +996,22 @@ def _scalar(d, key, default):
 
 
 def _arr(d, key, shape_tail=None):
-    """Array da un npz, vuoto se manca (file di versioni precedenti)."""
+    """Array from an npz, empty if missing (files from earlier versions)."""
     if key in d:
         return np.asarray(d[key])
     return np.empty((0,) + tuple(shape_tail or ()))
 
 
-# La mappa di colori si prende UNA volta: plt.get_cmap(...)(v) ricostruisce la tavola a ogni
-# chiamata, e con migliaia di archi era quasi tutto il tempo di un ridisegno.
+# The colour map is taken ONCE: plt.get_cmap(...)(v) rebuilds the table at every
+# call, and with thousands of edges it was almost all the time of a redraw.
 _SLOPE_CMAP = plt.get_cmap('RdYlGn_r')
-_SLOPE_LUT_CACHE = {}   # ripiego quando il bundle non accetta attributi
+_SLOPE_LUT_CACHE = {}   # fallback when the bundle does not accept attributes
 
 
 def _slope_colors_many(keys, long_s, lat_s):
     """
-    _slope_color su molti archi in una volta: stessi colori, calcolati con operazioni su
-    array invece che uno per uno.
+    _slope_color on many edges at once: same colours, computed with array operations
+    instead of one by one.
     """
     long_s = np.asarray(long_s, dtype=np.float64)
     lat_s = np.asarray(lat_s, dtype=np.float64)
@@ -1024,23 +1024,23 @@ def _slope_colors_many(keys, long_s, lat_s):
     return rgba
 
 
-# --- ARCHI COME IMMAGINE ------------------------------------------------------------------
-# Gli archi si disegnano UNA volta in un'immagine RGBA (dove si sovrappongono la trasparenza
-# si somma) e la si mostra con imshow, che costa come la mappa: con decine di migliaia di
-# archi, disegnarli come linee rendeva lento ogni ridisegno, compresi trascinamento e zoom.
-# L'immagine si tiene in cache per vista PRM ed estensione.
+# --- EDGES AS AN IMAGE ----------------------------------------------------------------------
+# The edges are drawn ONCE into an RGBA image (where they overlap the transparency
+# adds up) and shown with imshow, which costs as much as the map: with tens of thousands of
+# edges, drawing them as lines made every redraw slow, including dragging and zooming.
+# The image is cached per PRM view and extent.
 _EDGE_RASTER_CACHE = {}
 _EDGE_RASTER_CACHE_MAX = 256
-# Lato massimo dell'immagine degli archi, in pixel: oltre, la risoluzione si allarga.
+# Maximum side of the edge image, in pixels: beyond it, the resolution widens.
 EDGE_RASTER_MAX_PX = 1600
-# Opacita' di un arco in un pixel, tarata a occhio perche' l'immagine somigli a linee da
-# 0.5 punti.
+# Opacity of an edge in a pixel, tuned by eye so the image resembles lines of
+# 0.5 points.
 EDGE_RASTER_COVERAGE = 0.45
-EDGE_RASTER_COVERAGE_GLOBAL = 0.22   # nel globale gli archi per pixel sono molti di piu'
+EDGE_RASTER_COVERAGE_GLOBAL = 0.22   # in the global panel there are many more edges per pixel
 
 
 def _slope_table(vd):
-    """Chiavi (a, b) ordinate come codici interi + valori, per cercare le pendenze con searchsorted."""
+    """Keys (a, b) sorted as integer codes + values, to look up the slopes with searchsorted."""
     tab = getattr(vd, '_slope_tab', None) if not isinstance(vd, dict) else vd.get('_slope_tab')
     if tab is None:
         tab = _SLOPE_LUT_CACHE.get(('tab', id(vd)))
@@ -1059,7 +1059,7 @@ def _slope_table(vd):
 
 
 def _edge_colors(vd, e, grey_rgba, alpha=None):
-    """Colore di ogni arco come _slope_color (grigio se non c'e' la pendenza), tutto vettoriale."""
+    """Colour of every edge like _slope_color (grey if there is no slope), all vectorized."""
     cols = np.tile(np.asarray(grey_rgba, dtype=np.float64), (len(e), 1))
     codes, vals = _slope_table(vd)
     if len(codes) and len(e):
@@ -1077,9 +1077,9 @@ def _edge_colors(vd, e, grey_rgba, alpha=None):
 def _edges_image(segs, cols, x0, x1, y0, y1, max_px=EDGE_RASTER_MAX_PX, min_res=None,
                  coverage=EDGE_RASTER_COVERAGE):
     """
-    Segmenti (N, 2, 2) con colori RGBA (N, 4) -> immagine RGBA (ny, nx, 4) sull'estensione
-    data. Ogni arco si campiona a passo di un pixel; in un pixel toccato da k archi il colore
-    e' la media e l'opacita' 1 - prod(1 - alpha), come sovrapponendo linee trasparenti.
+    Segments (N, 2, 2) with RGBA colours (N, 4) -> RGBA image (ny, nx, 4) over the given
+    extent. Every edge is sampled at one-pixel steps; in a pixel touched by k edges the colour
+    is the mean and the opacity 1 - prod(1 - alpha), as when overlaying transparent lines.
     """
     w, h = max(x1 - x0, 1e-6), max(y1 - y0, 1e-6)
     res = max(w, h) / float(max_px)
@@ -1101,8 +1101,8 @@ def _edges_image(segs, cols, x0, x1, y0, y1, max_px=EDGE_RASTER_MAX_PX, min_res=
     r = np.floor((py - y0) / res).astype(np.int64)
     ok = (c >= 0) & (c < nx) & (r >= 0) & (r < ny)
     flat, idx = r[ok] * nx + c[ok], idx[ok]
-    # un arco conta una volta per pixel: i suoi campioni sono consecutivi, quindi basta
-    # scartare quelli che ricadono nello stesso pixel del precedente (niente ordinamento).
+    # an edge counts once per pixel: its samples are consecutive, so it is enough to
+    # discard those falling in the same pixel as the previous one (no sorting).
     if len(flat) > 1:
         keep = np.empty(len(flat), dtype=bool)
         keep[0] = True
@@ -1115,8 +1115,8 @@ def _edges_image(segs, cols, x0, x1, y0, y1, max_px=EDGE_RASTER_MAX_PX, min_res=
     for ch in range(3):
         sch = np.bincount(flat, weights=cols[idx, ch], minlength=m)
         out[hit, ch] = (sch[hit] / cnt[hit]).astype(np.float32)
-    # coverage: frazione di pixel che una linea sottile (0.5 punti) copre davvero; senza, un
-    # pixel dell'immagine "toccato" diventerebbe pieno e il disegno molto piu' scuro di prima.
+    # coverage: fraction of pixel a thin line (0.5 points) really covers; without it, a
+    # "touched" image pixel would become full and the drawing much darker than before.
     logt = np.bincount(flat, weights=np.log1p(-np.clip(coverage * cols[idx, 3], 0.0, 0.999)),
                        minlength=m)
     out[hit, 3] = (1.0 - np.exp(logt[hit])).astype(np.float32)
@@ -1134,7 +1134,7 @@ def _cached_edges_image(key, build):
 
 
 def _draw_cells(ax, vd):
-    """Griglia di missione: verde = visitata, rosso = bloccata, tratteggio = da esplorare."""
+    """Mission grid: green = visited, red = blocked, hatched = to explore."""
     if vd is None or 'env_cells' not in vd or not len(vd['env_cells']):
         return
     size = _scalar(vd, 'env_cell_size', 5.0)
@@ -1155,7 +1155,7 @@ def _draw_cells(ax, vd):
 
 
 def overlay_prm_local(ax, ctx, i):
-    """Archi e nodi del grafo (ultima vista PRM prima della scansione) sopra la finestra locale."""
+    """Graph edges and nodes (last PRM view before the scan) over the local window."""
     try:
         _overlay_prm_local(ax, ctx, i)
     except Exception as e:
@@ -1169,8 +1169,8 @@ def _overlay_prm_local(ax, ctx, i):
         return
     vd = vis[1]
     x0, x1, y0, y1 = _extent(d)
-    # Si tengono solo gli archi che toccano la finestra, con operazioni su array: gli archi
-    # del PRM sono decine di migliaia e si ricontrollano a ogni ridisegno.
+    # Only the edges touching the window are kept, with array operations: the PRM
+    # edges are tens of thousands and are rechecked at every redraw.
     ids = np.asarray(_arr(vd, 'prm_node_ids', ()), dtype=np.int64).ravel()
     nxy = np.asarray(_arr(vd, 'prm_node_xy', (2,)), dtype=np.float64).reshape(-1, 2)
     edges = np.asarray(_arr(vd, 'prm_edges', (2,)), dtype=np.int64).reshape(-1, 2)
@@ -1189,7 +1189,7 @@ def _overlay_prm_local(ax, ctx, i):
     else:
         e = edges
     if len(e):
-        # Come immagine, vedi ARCHI COME IMMAGINE.
+        # As an image, see EDGES AS AN IMAGE.
         def build():
             segs = np.stack([pos[e[:, 0]], pos[e[:, 1]]], axis=1)
             cols = _edge_colors(vd, e, (0.2, 0.2, 0.2, 0.35), alpha=0.35)
@@ -1206,8 +1206,8 @@ def _overlay_prm_local(ax, ctx, i):
 
 def _global_edges_image(ctx, name, vd):
     """
-    Immagine degli archi del pannello globale per una vista PRM, in cache (vedi ARCHI COME
-    IMMAGINE). Tutti gli archi, senza assottigliamento. (img, extent) o (None, None).
+    Image of the global panel edges for a PRM view, cached (see EDGES AS AN
+    IMAGE). All edges, without thinning. (img, extent) or (None, None).
     """
     gx0, gx1 = ctx.x0, ctx.x0 + ctx.nx * ctx.res
     gy0, gy1 = ctx.y0, ctx.y0 + ctx.ny * ctx.res
@@ -1240,7 +1240,7 @@ def _global_edges_image(ctx, name, vd):
 
 
 def _prebuild_global_images(ctx):
-    """In sottofondo, all'apertura: le immagini di tutte le viste PRM, cosi' scorrere non aspetta."""
+    """In the background, at opening: the images of all PRM views, so scrolling does not wait."""
     for _mt, name, vd in list(ctx.vis):
         try:
             _global_edges_image(ctx, name, vd)
@@ -1250,10 +1250,10 @@ def _prebuild_global_images(ctx):
 
 def _traj_runs(tr):
     """
-    Spezza la traiettoria (t, x, y, tipo) dove fra due campioni consecutivi c'e' un salto
-    oltre TRAJ_GAP_M, e dove cambia il tipo di movimento (0 a zampe, 1 GraphNav, 2 correzione
-    del ritorno a wp_0). Restituisce (tratti registrati come (punti, tipo), salti come coppie
-    di punti).
+    Split the trajectory (t, x, y, kind) where between two consecutive samples there is a
+    jump beyond TRAJ_GAP_M, and where the kind of movement changes (0 walked, 1 GraphNav, 2
+    correction of the return to wp_0). Returns (recorded stretches as (points, kind), jumps
+    as pairs of points).
     """
     if len(tr) == 0:
         return [], []
@@ -1263,7 +1263,7 @@ def _traj_runs(tr):
     runs = []
     for idx in np.split(np.arange(len(tr)), cuts):
         if len(idx):
-            # il tratto parte dall'ultimo punto del precedente, se non c'e' salto in mezzo
+            # the stretch starts from the last point of the previous one, if there is no jump in between
             k = idx[0]
             if k > 0 and not jump[k - 1]:
                 idx = np.concatenate(([k - 1], idx))
@@ -1272,7 +1272,7 @@ def _traj_runs(tr):
     return runs, gaps
 
 def _hillshade(h, res):
-    """Ombreggiatura del rilievo (luce da nord-ovest, 45 gradi): 1 = piano. NaN -> 1."""
+    """Relief shading (light from north-west, 45 degrees): 1 = flat. NaN -> 1."""
     gy, gx = np.gradient(h, res)
     alt, az = np.radians(45.0), np.radians(315.0)
     slope = np.arctan(np.hypot(gx, gy))
@@ -1282,13 +1282,13 @@ def _hillshade(h, res):
 
 
 def _background_rgb(occ, height, mode, norm, res):
-    """Immagine RGB dello sfondo 'terreno' o 'fusione' (vedi BACKGROUNDS)."""
+    """RGB image of the 'terreno' or 'fusione' background (see BACKGROUNDS)."""
     rgb = plt.get_cmap(TERRAIN_CMAP)(norm(np.nan_to_num(height, nan=norm.vmin)))[..., :3]
     if HILLSHADE_STRENGTH > 0:
         shade = 1.0 + HILLSHADE_STRENGTH * (np.clip(_hillshade(height, res), 0.0, 2.0) - 1.0)
         rgb = np.clip(rgb * shade[..., None], 0.0, 1.0)
     has_h = np.isfinite(height)
-    rgb[~has_h] = 1.0                                         # mai visto: bianco
+    rgb[~has_h] = 1.0                                         # never seen: white
     if mode == 'fusione' and occ is not None:
         rgb[~has_h & (occ == 1)] = NO_TERRAIN_RGB
         rgb[occ == 2] = OBSTACLE_RGB
@@ -1296,7 +1296,7 @@ def _background_rgb(occ, height, mode, norm, res):
 
 
 def _box_sum(a, k):
-    """Somma su una finestra k x k centrata (bordi a zero), con le somme cumulate: solo numpy."""
+    """Sum over a centred k x k window (zero borders), with cumulative sums: numpy only."""
     r = k // 2
     p = np.pad(a, ((r + 1, r), (r + 1, r)))
     c = p.cumsum(0).cumsum(1)
@@ -1305,14 +1305,14 @@ def _box_sum(a, k):
 
 def _draw_zero_level(ax, height, extent):
     """
-    Linea di livello a quota 0 (il suolo all'avvio missione) sopra lo sfondo del terreno:
-    separa cio' che sta sotto la partenza da cio' che sta sopra. Niente linea se la quota non
-    attraversa lo zero.
+    Level line at height 0 (the ground at mission start) over the terrain background:
+    separates what lies below the start from what lies above. No line if the height does
+    not cross zero.
     """
     if height is None:
         return
-    # Media su ZERO_LEVEL_SMOOTH_CELLS celle, solo per la linea: sul terreno piatto attorno
-    # alla partenza il rumore della quota (qualche cm) la riempirebbe di piccoli anelli.
+    # Mean over ZERO_LEVEL_SMOOTH_CELLS cells, only for the line: on the flat terrain around
+    # the start the height noise (a few cm) would fill it with small rings.
     k = ZERO_LEVEL_SMOOTH_CELLS
     ok = np.isfinite(height)
     num = _box_sum(np.where(ok, height, 0.0), k)
@@ -1327,8 +1327,8 @@ def _draw_zero_level(ax, height, extent):
     ys = np.linspace(extent[2], extent[3], ny, endpoint=False) + (extent[3] - extent[2]) / ny / 2
     cs = ax.contour(xs, ys, h, levels=[0.0], colors=ZERO_LEVEL_COLOR, linewidths=1.4, zorder=1)
     stroke = [patheffects.withStroke(linewidth=3.0, foreground='black')]
-    # Il bordo nero si mette dopo: contour non accetta path_effects nelle versioni vecchie, e
-    # nelle nuove non ha piu' .collections.
+    # The black border is added afterwards: contour does not accept path_effects in old versions, and
+    # in new ones it no longer has .collections.
     for art in (getattr(cs, 'collections', None) or [cs]):
         art.set_path_effects(stroke)
     ax.plot([], [], '-', color=ZERO_LEVEL_COLOR, lw=1.4,
@@ -1337,21 +1337,21 @@ def _draw_zero_level(ax, height, extent):
 
 
 def _mark_zero(cbar):
-    """Lo zero sulla barra della quota: tacca e riga, se sta nella scala."""
+    """The zero on the height bar: tick and line, if it is in the scale."""
     lo, hi = cbar.mappable.norm.vmin, cbar.mappable.norm.vmax
     if not (lo <= 0.0 <= hi):
         return
     ticks = [t for t in cbar.get_ticks() if lo <= t <= hi and abs(t) > 1e-9 * max(1.0, hi - lo)]
     extra = [0.0]
     if lo < 0.0 and all(abs(t - lo) > 0.25 * (hi - lo) / max(len(ticks), 1) for t in ticks + extra):
-        extra.append(round(lo, 2))      # l'estremo negativo, se non c'e' gia' una tacca vicina
+        extra.append(round(lo, 2))      # the negative end, if there is no tick nearby already
     cbar.set_ticks(sorted(ticks + extra))
     cbar.ax.axhline(0.0, color=ZERO_LEVEL_COLOR, lw=2.0,
                     path_effects=[patheffects.withStroke(linewidth=3.5, foreground='black')])
 
 
 def _hover_global(ax, ctx, occ, height, ng=None):
-    """Coordinate, stato della cella, quota e waypoint vicino sotto il mouse nel pannello globale."""
+    """Coordinates, cell state, height and nearby waypoint under the mouse in the global panel."""
     names = {0: 'mai vista', 1: 'libera', 2: 'OSTACOLO'}
 
     def fmt(x, y):
@@ -1377,7 +1377,7 @@ def _hover_global(ax, ctx, occ, height, ng=None):
 
 
 def draw_navgraph(ax, ng, t_now=None):
-    """Nav graph sul pannello globale; con t_now solo i waypoint gia' creati a quell'istante."""
+    """Nav graph on the global panel; with t_now only the waypoints already created at that instant."""
     shown = np.ones(len(ng['xy']), bool)
     if t_now is not None and np.isfinite(ng['time']).any():
         shown = ~(ng['time'] > t_now + 1.0)
@@ -1405,10 +1405,10 @@ def draw_navgraph(ax, ng, t_now=None):
 
 def _to_mission_frame(ax, ctx, fmt_vision, extent=None):
     """
-    Ruota e trasla tutto cio' che e' disegnato su ax nel frame della missione (vedi
-    MissionContext.mission_frame): x laterale, y avanti, origine nella partenza. I dati
-    restano in VISION; cambia solo la trasformazione del disegno. extent: zona VISION da
-    inquadrare (default tutta la griglia comune).
+    Rotate and translate everything drawn on ax into the mission frame (see
+    MissionContext.mission_frame): x lateral, y forward, origin at the start. The data stay
+    in VISION; only the drawing transform changes. extent: VISION area to frame (default
+    the whole common grid).
     """
     ox, oy, yaw = ctx.mission_frame()
     T = Affine2D().translate(-ox, -oy).rotate(np.pi / 2 - yaw)
@@ -1430,10 +1430,10 @@ def _to_mission_frame(ax, ctx, fmt_vision, extent=None):
 
 def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=False, mframe=False):
     """
-    Vista globale alla scansione i (o a fine missione con final=True). raw: mosaico grezzo.
-    bg: sfondo, vedi BACKGROUNDS. navgraph: disegna il nav graph (vedi load_navgraph).
-    mframe: frame della missione invece di VISION (vedi _to_mission_frame). Restituisce l'oggetto per la barra dei colori della quota
-    (None per lo sfondo 'ostacoli').
+    Global view at scan i (or at the end of the mission with final=True). raw: raw mosaic.
+    bg: background, see BACKGROUNDS. navgraph: draw the nav graph (see load_navgraph).
+    mframe: mission frame instead of VISION (see _to_mission_frame). Returns the object for
+    the height colour bar (None for the 'ostacoli' background).
     """
     ax.clear()
     upto = len(ctx.scans) - 1 if final else i
@@ -1441,8 +1441,8 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=Fals
     t_now = float(d['time']) if 'time' in d else None
     use_final = final and not raw and ctx.final_map is not None
     if use_final:
-        # Fine missione: la mappa globale salvata dal pianificatore, che contiene anche le
-        # scansioni d'inizio tentativo (non salvate in scans/).
+        # End of mission: the global map saved by the planner, which also contains the
+        # start-of-attempt scans (not saved in scans/).
         occ = ctx.final_map
     else:
         occ = ctx.mosaic(upto) if raw else ctx.robot_map(upto)
@@ -1453,7 +1453,7 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=Fals
         else:
             height = ctx.terrain(upto)
             if ctx.final_terrain is not None:
-                # dove il corpo e' passato e la quota manca: quella vista dopo (QUOTA SOTTO IL CORPO)
+                # where the body passed and the height is missing: the one seen later (HEIGHT UNDER THE BODY)
                 fill = np.isnan(height) & ctx.walked(upto) & np.isfinite(ctx.final_terrain)
                 height[fill] = ctx.final_terrain[fill]
     mappable = None
@@ -1479,8 +1479,8 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=Fals
         print(f"[viewer] celle non disegnate: {e}")
     if vd is not None:
         xy = {int(k): tuple(p) for k, p in zip(_arr(vd, 'prm_node_ids', ()), _arr(vd, 'prm_node_xy', (2,)))}
-        # Questo pannello disegna TUTTI gli archi del grafo (fino a ~90 000), come immagine
-        # in cache preparata in sottofondo all'apertura (vedi ARCHI COME IMMAGINE).
+        # This panel draws ALL the graph edges (up to ~90 000), as a cached image
+        # prepared in the background at opening (see EDGES AS AN IMAGE).
         img, gext = _global_edges_image(ctx, vis[0], vd)
         if img is not None:
             ax.imshow(img, origin='lower', interpolation='nearest', zorder=2, extent=gext)
@@ -1491,7 +1491,7 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=Fals
         if cp.size == 2 and np.all(np.isfinite(cp)):
             ax.plot(*cp, '*', color='green', ms=15, mec='k', zorder=6, label='obiettivo cella')
 
-    # traiettoria reale (trajectory.csv) o, se manca, le posizioni alle scansioni
+    # real trajectory (trajectory.csv) or, if missing, the positions at the scans
     if ctx.traj is not None and len(ctx.traj):
         tr = ctx.traj if (final or t_now is None) else ctx.traj[ctx.traj[:, 0] <= t_now + 0.5]
         runs, gaps = _traj_runs(tr)
@@ -1505,7 +1505,7 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=Fals
                     zorder=6 if kind == 2 else 5, path_effects=halo, label=None if lab in labelled else lab)
             labelled.add(lab)
         for k, (a, b) in enumerate(gaps):
-            # senza bordo bianco: sotto un tratteggio il bordo continuo lo fa sembrare una linea piena
+            # no white border: under a dashed line the continuous border makes it look like a solid line
             ax.plot([a[0], b[0]], [a[1], b[1]], linestyle=(0, (1.5, 2.5)), color='navy', lw=1.3, zorder=5,
                     label='tratto non registrato (GraphNav o arretramento)' if k == 0 else None)
     else:
@@ -1549,7 +1549,7 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=Fals
     return mappable
 
 
-# Posizioni [sinistra, basso, larghezza, altezza] in frazioni della finestra (vedi main).
+# Positions [left, bottom, width, height] as fractions of the window (see main).
 LAYOUT = {
     'scan': [0.035, 0.055, 0.405, 0.835],
     'scan_cbar': [0.447, 0.12, 0.008, 0.70],
@@ -1559,7 +1559,7 @@ LAYOUT = {
 
 
 def _maximize_window(fig):
-    """Apre la finestra massimizzata, se il backend lo permette (Qt, Tk, wx)."""
+    """Open the window maximized, if the backend allows it (Qt, Tk, wx)."""
     try:
         mng = fig.canvas.manager
         win = getattr(mng, 'window', None)
@@ -1580,8 +1580,8 @@ def _maximize_window(fig):
 
 def _latest_mission_folder():
     """
-    Senza argomenti (es. tasto Run dell'editor): l'ultima missione in MissionMap/, cercata
-    accanto a questo file e nella cartella corrente. Se non c'e', finestra per sceglierla.
+    Without arguments (e.g. the editor's Run key): the latest mission in MissionMap/,
+    searched next to this file and in the current folder. If there is none, a window to choose it.
     """
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     cands = []
@@ -1611,7 +1611,7 @@ def main():
         print(f"Nessuna cartella indicata: apro l'ultima missione, {found}")
         args = [found]
     target = args[0]
-    # Basta anche il nome della missione (es. 13-10-2026_12-40-38), come per mission_report.py.
+    # The mission name alone is enough too (e.g. 13-10-2026_12-40-38), as for mission_report.py.
     by_name = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "MissionMap",
                            "Mission_" + target.replace("Mission_", ""))
     if not os.path.exists(target) and os.path.isdir(by_name):
@@ -1638,14 +1638,14 @@ def main():
     folder = target if os.path.isdir(target) else os.path.dirname(os.path.dirname(os.path.abspath(target)))
     ctx = MissionContext(folder, scans, scan_files, vis_files) if scans else None
     if ctx is not None:
-        scans, scan_files = ctx.scans, ctx.scan_files     # con le scansioni fuori dal ciclo
+        scans, scan_files = ctx.scans, ctx.scan_files     # with the scans outside the loop
         print(f"  piu' {len(scans) - n_loop} scansioni d'inizio tentativo e finale, dalle viste PRM")
 
     if PNG_MODE:
         os.makedirs(out_dir, exist_ok=True)
         for k, (f, d) in enumerate(zip(scan_files, scans)):
             fig, (axl, axr) = plt.subplots(1, 2, figsize=(20, 9.5))
-            im, label = draw_scan(axl, d, 5, ctx=ctx)          # maschera degli ostacoli
+            im, label = draw_scan(axl, d, 5, ctx=ctx)          # obstacle mask
             overlay_prm_local(axl, ctx, k)
             if mf0:
                 _to_mission_frame(axl, ctx, axl.format_coord, extent=_extent(d))
@@ -1654,7 +1654,7 @@ def main():
             fig.tight_layout()
             png = os.path.basename(f).replace(".npz", ".png")
             m = _VIS_SCAN_NAME.search(os.path.basename(f))
-            if m:                                         # scansione fuori dal ciclo
+            if m:                                         # scan outside the loop
                 png = (f"scan_it{int(m.group(1)):03d}_cell{m.group(2)}_{m.group(3)}_000_inizio.png"
                        if m.group(2) else f"scan_it{int(m.group(1)):03d}_finale.png")
             fig.savefig(os.path.join(out_dir, png), dpi=100)
@@ -1686,19 +1686,19 @@ def main():
         plt.show()
         return 0
 
-    # I tasti del visualizzatore non devono fare anche altro: per matplotlib 'g' e' la griglia,
-    # 'o' lo zoom, 'r' la vista iniziale, 'l' la scala logaritmica, e le frecce e 'c' / 'v' la
-    # vista precedente / successiva dello zoom (scorrendo dopo uno zoom la vista cambiava).
+    # The viewer keys must not do anything else: for matplotlib 'g' is the grid,
+    # 'o' the zoom, 'r' the initial view, 'l' the log scale, and the arrows and 'c' / 'v' the
+    # previous / next zoom view (scrolling after a zoom the view changed).
     ours = {'left', 'right', 'up', 'down', 'g', 'o', 'm', 't', 'n', 'r', 'b', 'B', 'c', 'C', 'v', 'V',
             'e', 'l', *LAYER_KEYS, *[str(k) for k in range(10)]}
     for km in [k for k in plt.rcParams if k.startswith('keymap.')]:
         plt.rcParams[km] = [k for k in plt.rcParams[km] if k not in ours]
     state = {'i': 0, 'layer': 0, 'overview': False, 'prm': True, 'raw': False,
              'bg': bg0, 'nav': ng0, 'rot': mf0, 'auto_lim': None, 'legend': True}
-    # Disposizione fissa (2026-10-26): i due pannelli e le loro barre dei colori in posizioni
-    # date, che usano quasi tutta la finestra. Con plt.subplots e le barre aggiunte "accanto"
-    # a schermo intero (1920 x 1080) i pannelli erano 541 x 541 px; cosi' circa 800 x 800.
-    # Le barre hanno assi propri: ridisegnarle non rimpicciolisce i pannelli.
+    # Fixed layout (2026-10-26): the two panels and their colour bars in given
+    # positions, which use almost the whole window. With plt.subplots and the bars added "next to"
+    # them, full screen (1920 x 1080) the panels were 541 x 541 px; this way about 800 x 800.
+    # The bars have their own axes: redrawing them does not shrink the panels.
     fig = plt.figure(figsize=(18, 9.5))
     ax = fig.add_axes(LAYOUT['scan'])
     cax = fig.add_axes(LAYOUT['scan_cbar'])
@@ -1707,8 +1707,8 @@ def main():
     for a in (ax, axg):
         a.set_anchor('C')
     _maximize_window(fig)
-    # Barra della quota del pannello destro: creata una volta sola e nascosta con lo sfondo
-    # 'ostacoli'.
+    # Height bar of the right panel: created only once and hidden with the
+    # 'ostacoli' background.
     cbar_g = fig.colorbar(plt.cm.ScalarMappable(norm=ctx.terrain_norm(), cmap=TERRAIN_CMAP), cax=cax_g,
                           label="quota rispetto all'avvio missione (m)")
     _mark_zero(cbar_g)
@@ -1724,8 +1724,8 @@ def main():
             overlay_prm_local(ax, ctx, state['i'])
         if state['rot']:
             _to_mission_frame(ax, ctx, ax.format_coord, extent=_extent(d))
-        # Lo zoom del pannello destro resta: se i limiti sono diversi da quelli automatici del
-        # disegno precedente li ha cambiati l'utente, e si rimettono dopo il ridisegno.
+        # The zoom of the right panel is kept: if the limits differ from the automatic ones of the
+        # previous drawing the user changed them, and they are restored after the redraw.
         lim = (axg.get_xlim(), axg.get_ylim())
         zoomed = state['auto_lim'] is not None and lim != state['auto_lim']
         m = draw_global(axg, ctx, state['i'], final=state['overview'], raw=state['raw'], bg=state['bg'],
@@ -1749,7 +1749,7 @@ def main():
         elif ev.key == 'down':
             state['i'] = max(0, state['i'] - 10); state['overview'] = False
         elif ev.key in [str((k + 1) % 10) for k in range(min(len(LAYERS), 10))]:
-            state['layer'] = (int(ev.key) - 1) % 10   # '0' = decimo layer
+            state['layer'] = (int(ev.key) - 1) % 10   # '0' = tenth layer
         elif ev.key in LAYER_KEYS and LAYER_KEYS[ev.key] < len(LAYERS):
             state['layer'] = LAYER_KEYS[ev.key]
         elif ev.key == 'l':
@@ -1780,7 +1780,7 @@ def main():
             state['nav'] = not state['nav']
         elif ev.key == 'r':
             state['rot'] = not state['rot']
-            state['auto_lim'] = None        # coordinate diverse: lo zoom non si conserva
+            state['auto_lim'] = None        # different coordinates: the zoom is not kept
         elif ev.key == 't':
             state['bg'] = BACKGROUNDS[(BACKGROUNDS.index(state['bg']) + 1) % len(BACKGROUNDS)]
         else:
@@ -1801,7 +1801,7 @@ def main():
     print(f"  salti: {len(ev['blocco'])} blocchi, {len(ev['cella'])} tentativi, "
           f"{len(ev['graphnav'])} spostamenti GraphNav")
     redraw()
-    # Le immagini degli archi del pannello globale si preparano in sottofondo.
+    # The edge images of the global panel are prepared in the background.
     threading.Thread(target=_prebuild_global_images, args=(ctx,), daemon=True).start()
     plt.show()
     return 0

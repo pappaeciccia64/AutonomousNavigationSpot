@@ -1,4 +1,4 @@
-"""Scelta del punto obiettivo in una cella (find_best_point_in_cell) e obiettivi esclusi."""
+"""Choice of the goal point in a cell (find_best_point_in_cell) and excluded goals."""
 import numpy as np
 
 from spot_explorer.perception import geometry
@@ -12,12 +12,12 @@ from spot_explorer.records import MISSION_STATS
 
 
 # =========================================================================
-# SCELTA DEL PUNTO OBIETTIVO in una cella
+# CHOICE OF THE GOAL POINT in a cell
 # =========================================================================
 
 
 def _refused_goals(env, row, col):
-    """Gli obiettivi della cella rifiutati dal fronte in questa missione (lista di (x, y))."""
+    """The cell goals refused by the frontier in this mission (list of (x, y))."""
     store = getattr(env, '_refused_goals', None)
     if store is None:
         store = env._refused_goals = {}
@@ -26,9 +26,9 @@ def _refused_goals(env, row, col):
 
 def _refuse_goal(env, row, col, x, y, why):
     """
-    Esclude l'obiettivo (x, y) della cella fino alla fine della missione. Il 22-10 16:04 il
-    nodo 548 della cella (7,4) e' stato riscelto a ogni tentativo e bloccato tre volte nello
-    stesso punto: la mappa globale lo dava libero a 0.28 m, il fronte dal vivo a 0.24.
+    Exclude the goal (x, y) of the cell until the end of the mission. On 22-10 16:04
+    node 548 of cell (7,4) was chosen again at every attempt and blocked three times at the
+    same point: the global map gave it free at 0.28 m, the live frontier at 0.24.
     """
     lst = _refused_goals(env, row, col)
     if any(np.hypot(x - ex, y - ey) < P.RECOVERY_SAME_GOAL_M for ex, ey in lst):
@@ -43,40 +43,40 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
                             sampler, global_map=None, safety_margin=None, exclude=None,
                             reachable=None):
     """
-    Sceglie il punto obiettivo dentro la cella fra il centro geometrico e i nodi del grafo
-    nella cella.
+    Choose the goal point inside the cell among the geometric centre and the graph nodes
+    in the cell.
 
-    Scartati sempre (mai scelti): i punti in `exclude` (gia' provati in questo tentativo),
-    quelli occupati nella mappa globale (con safety_margin) e quelli a meno di
-    geometry.PLAN_CLEARANCE_M (0.28) da un ostacolo nella scansione dal vivo o nello spazio
-    libero imparato. Fra i rimasti, nell'ordine:
-      1. non rifiutati dal fronte in questa missione (_refuse_goal); i rifiutati tornano
-         solo se non c'e' altro;
-      2. RAGGIUNGIBILI dal robot nel grafo (reachable(x, y) -> bool, provato nell'ordine
-         dei criteri seguenti finche' uno risponde si'). Non basta ripiegare sui successivi
-         del piu' vicino al centro quando il grafo non ci arriva: stanno nella stessa zona
-         isolata (il 22-10 16:04 quel ripiego e' fallito 9 volte su 10). Se nessun punto e'
-         raggiungibile si sceglie comunque il migliore, e il tentativo fallisce;
-      3. con almeno TARGET_CLEARANCE_M (0.33) di spazio libero;
-      4. il centro geometrico, libero o ignoto che sia (REGOLA DEL CENTRO: un punto gia'
-         visto libero di solito e' l'ultimo lembo scansionato dalla cella precedente, cioe'
-         sul bordo);
-      5. visti liberi prima che mai visti: se il centro e' scartato la zona e' nota, e
-         tornare a guardare un ignoto accanto all'ostacolo sarebbe un giro a vuoto;
-      6. ad almeno TARGET_CELL_BORDER_M dal bordo della cella;
-      7. piu' vicino al centro (a passi di 0.25 m), poi piu' vicino al robot: a parita',
-         quello dalla sua parte dell'ostacolo.
+    Always discarded (never chosen): the points in `exclude` (already tried in this attempt),
+    those occupied in the global map (with safety_margin) and those closer than
+    geometry.PLAN_CLEARANCE_M (0.28) to an obstacle in the live scan or in the learned
+    free space. Among the rest, in order:
+      1. not refused by the frontier in this mission (_refuse_goal); refused ones come
+         back only if there is nothing else;
+      2. REACHABLE from the robot in the graph (reachable(x, y) -> bool, tried in the order
+         of the following criteria until one answers yes). Falling back on the next ones
+         nearest to the centre when the graph does not get there is not enough: they lie in
+         the same isolated area (on 22-10 16:04 that fallback failed 9 times out of 10). If
+         no point is reachable the best one is chosen anyway, and the attempt fails;
+      3. with at least TARGET_CLEARANCE_M (0.33) of free space;
+      4. the geometric centre, whether free or unknown (CENTRE RULE: a point already seen
+         free is usually the last strip scanned from the previous cell, i.e. on the
+         border);
+      5. seen free before never seen: if the centre is discarded the area is known, and
+         going back to look at an unknown spot next to the obstacle would be a wasted trip;
+      6. at least TARGET_CELL_BORDER_M from the cell border;
+      7. nearest to the centre (in steps of 0.25 m), then nearest to the robot: on a tie,
+         the one on its side of the obstacle.
 
-    Se non resta nessun punto la cella non ha un obiettivo valido e la funzione
-    restituisce (None, None, ...): il chiamante lo tratta gia' come fallimento di
-    ingresso e passa alla logica dei lati non ancora provati.
+    If no point is left the cell has no valid goal and the function returns
+    (None, None, ...): the caller already treats it as an entry failure and moves on to
+    the logic of the sides not yet tried.
 
-    global_map: global_maps.GlobalGrid accumulata, aggiornata con la scansione corrente appena
-    prima di questa chiamata. Se None si usa il centro senza controlli.
+    global_map: accumulated global_maps.GlobalGrid, updated with the current scan right
+    before this call. If None the centre is used without checks.
 
     Returns:
         (target_x, target_y, valid_samples, rejected_samples)
-        Le due liste alimentano la visualizzazione (gialli = ammessi, rossi = scartati).
+        The two lists feed the visualization (yellow = accepted, red = discarded).
     """
     if safety_margin is None:
         safety_margin = geometry.PRM_EDGE_SAFETY_MARGIN_M
@@ -88,13 +88,13 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
     sampled = list(sampler.get_point_in_cell(cell_row, cell_col))
 
     if global_map is None:
-        # Nessuna informazione di occupazione: il centro della cella.
+        # No occupancy information: the centre of the cell.
         return cell_center_x, cell_center_y, sampled, []
 
-    # min_clear e' la distanza con cui si pianificano gli archi (geometry.PLAN_CLEARANCE_M):
-    # un obiettivo piu' vicino agli ostacoli non avrebbe archi. La mappa globale dichiara
-    # occupata una cella solo dopo due osservazioni, quindi un ostacolo appena visto c'e'
-    # solo nella scansione dal vivo (22-10 15:50, cella (0,2)).
+    # min_clear is the distance edges are planned with (geometry.PLAN_CLEARANCE_M):
+    # a goal closer to obstacles would have no edges. The global map declares a cell
+    # occupied only after two observations, so an obstacle just seen is there only
+    # in the live scan (22-10 15:50, cell (0,2)).
     min_clear = geometry.PLAN_CLEARANCE_M
     pref_margin = max(safety_margin, P.TARGET_CLEARANCE_M - geometry.OBSTACLE_THRESHOLD)
     refused = _refused_goals(env, cell_row, cell_col)
@@ -110,7 +110,7 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
             live_od = None
 
     def _live_clearance(px, py):
-        """obstacle_distance dal vivo nel punto, o None se fuori dalla scansione."""
+        """Live obstacle_distance at the point, or None if outside the scan."""
         if live_od is None:
             return None
         d, i = live_od[0].query((px, py))
@@ -137,8 +137,8 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
             center_reason = center_reason or ("occupato nella mappa" if is_center else None)
             continue
         c_live = _live_clearance(px, py)
-        # Per il centro conta la sola scansione dal vivo: lo spazio libero imparato, che
-        # raccoglie anche letture da lontano, cambierebbe il centro piu' del dovuto.
+        # For the centre only the live scan counts: the learned free space, which also
+        # collects readings from far away, would move the centre more than it should.
         c_mem = None if is_center else (global_map.clearance(px, py)
                                         if hasattr(global_map, 'clearance') else None)
         known_c = [c for c in (c_live, c_mem) if c is not None]

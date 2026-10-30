@@ -1,39 +1,39 @@
 """
-Prova della SCELTA DELL'OBIETTIVO DELLA CELLA sulle scansioni vere salvate in missione.
+Test of the CELL GOAL SELECTION on the real scans saved during missions.
 
-test_replay.py rigioca le scansioni ma usa l'obiettivo che la missione aveva scelto. Qui, a
-ogni inizio di tentativo, si rifa' la scelta con il codice di oggi (easy_walk.
-find_best_point_in_cell, con la raggiungibilita' nel grafo e la memoria degli obiettivi
-rifiutati) e la si mette accanto a quella della missione, con le stesse misure:
+test_replay.py replays the scans but uses the goal the mission had chosen. Here, at the
+start of every attempt, the choice is made again with today's code
+(goal.find_best_point_in_cell, with reachability in the graph and the memory of refused
+goals) and put next to the mission's one, with the same measures:
 
-  raggiungibile  -- il grafo, ricostruito come in missione, collega il robot all'obiettivo;
-  rifiutabile    -- in una delle scansioni del tentativo l'obiettivo ha obstacle_distance
-                    (filtrata, quella su cui decide il fronte) sotto FRONTIER_CLEARANCE_M,
-                    oppure il fronte ha confermato un blocco entro REFUSED_GOAL_BLOCK_M da lui:
-                    il robot non ci arriverebbe mai. Si giudica solo dove le scansioni lo
-                    coprono, cioe' lungo la strada fatta in missione (vedi limiti). Molti
-                    rifiutabili sono centri ancora ignoti all'inizio del tentativo: li riscopre
-                    il ciclo di navigazione, nessuna scelta iniziale li puo' evitare;
-  sul bordo      -- a meno di TARGET_CELL_BORDER_M dal bordo della cella;
-  riproposto     -- uguale (entro 0.30 m) a un obiettivo della stessa cella gia' risultato
-                    rifiutabile in un tentativo precedente.
+  reachable      -- the graph, rebuilt as in the mission, connects the robot to the goal;
+  refusable      -- in one of the attempt's scans the goal has obstacle_distance
+                    (filtered, the one the frontier decides on) below FRONTIER_CLEARANCE_M,
+                    or the frontier confirmed a block within REFUSED_GOAL_BLOCK_M of it:
+                    the robot would never get there. Judged only where the scans cover it,
+                    i.e. along the path taken in the mission (see limits). Many refusables
+                    are centres still unknown at the start of the attempt: the navigation
+                    loop rediscovers them, no initial choice can avoid them;
+  on the border  -- less than TARGET_CELL_BORDER_M from the cell border;
+  proposed again -- equal (within 0.30 m) to a goal of the same cell already found
+                    refusable in a previous attempt.
 
-Per il codice di oggi un obiettivo rifiutabile viene escluso per il resto della missione
-(easy_walk._refuse_goal), come farebbe il ciclo di navigazione.
+For today's code a refusable goal is excluded for the rest of the mission
+(goal._refuse_goal), as the navigation loop would do.
 
-Uso:
-    python3 test_obiettivi.py                          # la missione all'aperto del 22-10
-    python3 test_obiettivi.py --missions 13-10-2026_12-40-38 22-10-2026_15-50-23
-    python3 test_obiettivi.py --detail              # una riga per tentativo
+Usage:
+    python3 tests/test_goal_selection.py                     # the outdoor mission of 22-10
+    python3 tests/test_goal_selection.py --missions 13-10-2026_12-40-38 22-10-2026_15-50-23
+    python3 tests/test_goal_selection.py --detail            # one line per attempt
 
-Prima del rigioco, controlli sintetici delle regole su casi costruiti a mano.
+Before the replay, synthetic checks of the rules on hand-built cases.
 
-Limiti: il robot rigiocato fa la strada della missione, non quella verso l'obiettivo nuovo;
-per l'obiettivo nuovo "rifiutabile" si vede solo se le scansioni lo coprono. La scansione presa
-all'inizio del tentativo non e' salvata: la mappa globale rigiocata ne ha meno, e un centro
-che in missione risultava occupato qui puo' risultare libero (22-10 16:04, cella (5,2)). Esce con codice 1
-se un controllo sintetico fallisce, o se il codice di oggi fa peggio della missione su
-raggiungibili, rifiutabili o riproposti.
+Limits: the replayed robot follows the mission's path, not the one towards the new goal;
+for the new goal "refusable" is only seen if the scans cover it. The scan taken at the
+start of the attempt is not saved: the replayed global map has fewer of them, and a centre
+that was occupied in the mission may turn out free here (22-10 16:04, cell (5,2)). Exits
+with code 1 if a synthetic check fails, or if today's code does worse than the mission on
+reachable, refusable or proposed-again goals.
 """
 import argparse
 import math
@@ -46,7 +46,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-import test_replay as tr          # noqa: E402  (importa anche easy_walk in silenzio)
+import test_replay as tr          # noqa: E402  (also imports the mission code quietly)
 from test_replay import goal, P    # noqa: E402
 from spot_explorer.perception import geometry, global_maps   # noqa: E402
 
@@ -54,7 +54,7 @@ DEFAULT = ['22-10-2026_16-04-22']
 
 
 def _od_at(a, x, y):
-    """obstacle_distance filtrata nel punto, None fuori dalla scansione."""
+    """Filtered obstacle_distance at the point, None outside the scan."""
     c = int((x - a['ox']) / a['cs'])
     r = int((y - a['oy']) / a['cs'])
     if 0 <= r < a['ny'] and 0 <= c < a['nx']:
@@ -63,7 +63,7 @@ def _od_at(a, x, y):
 
 
 def _bad(g_):
-    """Il fronte rifiuterebbe l'obiettivo: spazio libero dal vivo sotto soglia, o blocco a ridosso."""
+    """The frontier would refuse the goal: live free space below threshold, or a block right next to it."""
     return g_['xy'] is not None and (
         g_.get('blocked', False) or (bool(g_['od']) and min(g_['od']) < geometry.FRONTIER_CLEARANCE_M))
 
@@ -90,7 +90,7 @@ def replay_goals(name):
         prm.set_global_terrain_map(tm)
     node_cells = None
     done_cells = []
-    attempts = []          # un dict per tentativo
+    attempts = []          # one dict per attempt
     cur = None
     for f in m['scans']:
         d = np.load(f)
@@ -130,8 +130,8 @@ def replay_goals(name):
                 v = _od_at(a, *cur[k]['xy'])
                 if v is not None:
                     cur[k]['od'].append(v)
-        # Blocco confermato a ridosso dell'obiettivo della missione (la strada rigiocata e'
-        # quella verso di lui): vale per l'obiettivo nuovo solo se e' lo stesso punto.
+        # Block confirmed right next to the mission's goal (the replayed path is the one
+        # towards it): it applies to the new goal only if it is the same point.
         if (str(d['decision_kind']) == 'blocked'
                 and str(d['frontier_reason']) in ('ostacolo', 'rugosita', 'pendenza')):
             sxy = tuple(map(float, d['frontier_stop_xy']))
@@ -140,11 +140,11 @@ def replay_goals(name):
                 if (cur['new']['xy'] is not None
                         and math.dist(cur['new']['xy'], cur['old']['xy']) < P.RECOVERY_SAME_GOAL_M):
                     cur['new']['blocked'] = True
-        # L'obiettivo nuovo rifiutabile si esclude per la missione, come fa il ciclo.
+        # The refusable new goal is excluded for the mission, as the loop does.
         if _bad(cur['new']):
             with tr._quiet():
                 goal._refuse_goal(env, rr, cc, *cur['new']['xy'], "rigioco")
-    # Misure
+    # Measures
     out = {}
     for k in ('old', 'new'):
         refused_by_cell = {}
@@ -170,7 +170,7 @@ def replay_goals(name):
 
 
 class _Map:
-    """Mappa globale finta: ostacoli puntiformi, celle occupate entro OBSTACLE_THRESHOLD."""
+    """Fake global map: point obstacles, cells occupied within OBSTACLE_THRESHOLD."""
 
     def __init__(self, obstacles):
         self.obs = [tuple(o) for o in obstacles]
@@ -189,7 +189,7 @@ class _Map:
 
 
 def synthetic_checks():
-    """Le regole di find_best_point_in_cell su casi costruiti a mano. Lista di fallimenti."""
+    """The rules of find_best_point_in_cell on hand-built cases. List of failures."""
     fails = []
 
     def check(cond, msg):

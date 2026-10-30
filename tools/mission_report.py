@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-Rapporto di una missione, da leggere subito dopo una prova.
+Report of a mission, to read right after a test.
 
-Raccoglie in una pagina di testo i numeri che servono a capire com'e' andata: celle, tempi,
-movimento e andature, fermate del fronte e il loro perche', blocchi e ripianificazioni,
-ritorno a wp_0. Legge solo i file che la missione salva; come mission_viewer.py serve solo
-numpy, NON l'SDK di Spot (che se c'e' viene usato per la strada di ritorno nel grafo GraphNav).
+Gathers on one text page the numbers needed to understand how it went: cells, timings,
+motion and gaits, frontier stops and their reason, blocks and replans, return to wp_0.
+It only reads the files the mission saves; like mission_viewer.py it only needs numpy,
+NOT the Spot SDK (which, if present, is used for the return path in the GraphNav graph).
 
-    python3 mission_report.py                         # l'ultima missione in MissionLogs/
-    python3 mission_report.py 13-10-2026_12-40-38     # una missione per nome
-    python3 mission_report.py --all                 # una riga di sintesi per ogni missione
+    python3 tools/mission_report.py                         # the latest mission in MissionLogs/
+    python3 tools/mission_report.py 13-10-2026_12-40-38     # a mission by name
+    python3 tools/mission_report.py --all                   # one summary line per mission
 
-File letti (quelli che mancano vengono saltati: le missioni vecchie ne hanno meno):
-    MissionLogs/Mission_<nome>/mission_log.txt, mission_summary.json, segments.csv, trajectory.csv,
-        drift.csv (dal 26-10 sera), battery.csv (dal 28-10)
-    MissionMap/Mission_<nome>/scans/*.npz       le scansioni del ciclo di navigazione
-    graph/Mission_<nome>/Grafo_*/               il grafo GraphNav scaricato a fine missione
+Files read (missing ones are skipped: older missions have fewer):
+    MissionLogs/Mission_<name>/mission_log.txt, mission_summary.json, segments.csv, trajectory.csv,
+        drift.csv (since the evening of 26-10), battery.csv (since 28-10)
+    MissionMap/Mission_<name>/scans/*.npz       the navigation loop scans
+    graph/Mission_<name>/Grafo_*/               the GraphNav graph downloaded at the end of the mission
 """
 import csv
 import glob
@@ -28,21 +28,21 @@ from collections import Counter
 
 import numpy as np
 
-HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # cartella del progetto
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # project folder
 LOGS = os.path.join(HERE, 'MissionLogs')
 MAPS = os.path.join(HERE, 'MissionMap')
 GRAPHS = os.path.join(HERE, 'graph')
 
-# Come in spotGrid / easy_walk: copiate qui perche' il rapporto non importa il codice di missione.
-INTRUSION_M = 0.25                 # mezza larghezza del corpo (geometry.ROBOT_HALF_WIDTH_M)
+# As in the perception package: copied here because the report does not import the mission code.
+INTRUSION_M = 0.25                 # half body width (geometry.ROBOT_HALF_WIDTH_M)
 
 
 def mission_thresholds(summary, log):
     """
-    (fronte, scarto dal vivo): le distanze dagli ostacoli con cui ha lavorato QUESTA missione,
-    dagli interruttori registrati (dal 21-10). Fronte = 0.25 + geometry.ROBOT_CLEARANCE_AIR_M;
-    scarto dal vivo degli archi = fronte dal 22-10 (quando c'e' PLAN_CLEARANCE_EXTRA_M).
-    Senza interruttori registrati: 0.30 e 0.20, i valori delle missioni di prima.
+    (frontier, live clearance): the obstacle distances THIS mission worked with, from the
+    recorded switches (since 21-10). Frontier = 0.25 + geometry.ROBOT_CLEARANCE_AIR_M;
+    live edge clearance = frontier since 22-10 (when PLAN_CLEARANCE_EXTRA_M is present).
+    Without recorded switches: 0.30 and 0.20, the values of the earlier missions.
     """
     sw = dict((summary or {}).get('interruttori') or {})
     if not sw:
@@ -61,11 +61,11 @@ def mission_thresholds(summary, log):
     live = 0.20 if extra is None else frontier
     return frontier, live
 TERRAIN_VALID_MIN = 0.5            # spot_grid.TERRAIN_VALID_MIN
-PITCH_LIMITS_DEG = (14.0, 18.0)    # tratti "ripidi" per il controllo delle andature
+PITCH_LIMITS_DEG = (14.0, 18.0)    # "steep" legs for the gait check
 
 
 # --------------------------------------------------------------------------------------
-# Lettura
+# Reading
 # --------------------------------------------------------------------------------------
 def mission_files(name):
     log_dir = os.path.join(LOGS, f'Mission_{name}')
@@ -87,7 +87,7 @@ def read_csv(path):
 
 
 def log_time(line):
-    """Secondi del giorno dall'orario hh:mm:ss.mmm a inizio riga, o None."""
+    """Seconds of the day from the hh:mm:ss.mmm time at the start of the line, or None."""
     m = re.match(r'(\d\d):(\d\d):(\d\d(?:\.\d+)?)', line)
     return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3)) if m else None
 
@@ -96,7 +96,7 @@ def log_time(line):
 # Sezioni
 # --------------------------------------------------------------------------------------
 def section_cells(log):
-    # I messaggi delle celle sono in italiano dal 21-10; le missioni prima li hanno in inglese.
+    # The cell messages are in Italian from 21-10; earlier missions have them in English.
     grid = re.search(r'Griglia di missione: (\d+) x (\d+) celle da ([\d.]+) m', log)
     attempts = re.findall(r'\[ATTEMPT\] (?:Trying to enter cell|Provo a entrare nella cella) \((\d+),(\d+)\)', log)
     visited = re.findall(r'\[VISITED\] Cell[a]? \((\d+),(\d+)\) (?:marked as visited|segnata come visitata)', log)
@@ -139,8 +139,8 @@ def section_motion(segments, trajectory):
                     for lim in PITCH_LIMITS_DEG}
     out['max_pitch'] = max((p for p, _ in pitch), default=None)
     out['calm_hard'] = sum(p < 8 and t == 'HARD' for p, t in pitch)
-    # Fluidita': per ogni tratto, il tempo prima che il robot si sposti di 5 cm (rotazione sul
-    # posto e partenza) e il tempo di cammino; velocita' media sul totale dei tratti.
+    # Smoothness: for each leg, the time before the robot moves 5 cm (rotation in place
+    # and start) and the walking time; average speed over all the legs.
     dur = [float(r['duration_s']) for r in segments if r.get('duration_s') not in (None, '')]
     dist = [float(r['dist_traveled_m']) for r in segments if r.get('dist_traveled_m') not in (None, '')]
     if dur and sum(dur) > 0:
@@ -163,7 +163,7 @@ def section_motion(segments, trajectory):
 
 
 def _seen_value(d, x, y):
-    """obstacle_distance filtrata in (x, y) se la scansione d ha visto quel punto, se no None."""
+    """Filtered obstacle_distance at (x, y) if scan d saw that point, otherwise None."""
     if 'obstacle_distance_filtered' not in d.files:
         return None
     z = d['terrain_corrected']
@@ -182,8 +182,8 @@ def _seen_value(d, x, y):
 
 def section_frontier(scans, thresholds=(0.30, 0.20)):
     """
-    Fermate del fronte, dalle scansioni salvate: perche' e, per gli ostacoli, se si vedevano
-    gia'. thresholds = (fronte, scarto dal vivo) della missione (vedi mission_thresholds).
+    Frontier stops, from the saved scans: why and, for obstacles, whether they were already
+    visible. thresholds = (frontier, live clearance) of the mission (see mission_thresholds).
     """
     FRONTIER_CLEARANCE_M, LIVE_PREFILTER_OD_M = thresholds
     if not scans:
@@ -200,7 +200,7 @@ def section_frontier(scans, thresholds=(0.30, 0.20)):
         p = np.asarray(d['frontier_stop_xy'], dtype=float)
         it = int(d['iteration'])
         if last is not None and last[0] == it and np.hypot(*(p - last[1])) < 0.3:
-            continue                                  # stessa fermata, scansione dopo
+            continue                                  # same stop, next scan
         last = (it, p)
         before = next((v for v in (_seen_value(data[j], *p) for j in range(i - 1, -1, -1)) if v is not None), None)
         events.append((float(d['frontier_value']), before))
@@ -220,7 +220,7 @@ def section_frontier(scans, thresholds=(0.30, 0.20)):
 
 
 def section_battery(stats, log):
-    """Carica e consumo (batteria.py, dal 28-10): una riga, None se la missione non li ha."""
+    """Charge and consumption (battery.py, since 28-10): one line, None if the mission does not have them."""
     if 'battery_start_pct' not in stats:
         return ("Batteria: carica mai letta dallo stato del robot"
                 if stats.get('battery_reads_failed') else None)
@@ -230,7 +230,7 @@ def section_battery(stats, log):
         line += f", {stats['battery_pct_per_min']:.2f} %/min"
     if stats.get('battery_pct_per_m') is not None:
         line += f", {stats['battery_pct_per_m']:.3f} %/m"
-    # Il ritorno a wp_0 viene dopo il riepilogo: si legge dal log.
+    # The return to wp_0 comes after the summary: it is read from the log.
     m = re.search(r"\[BATTERIA\] Ritorno a wp_0: da (\d+)% a (\d+)% \(([\d.]+) punti in (\d+) s\)", log)
     if m:
         line += f"; ritorno a wp_0 {m.group(3)} punti in {m.group(4)} s"
@@ -242,10 +242,10 @@ def section_battery(stats, log):
 
 
 def section_arrival_rotation(trajectory):
-    """Dopo ogni arrivo GraphNav, quanto deve girarsi il robot per la prima mossa: angolo fra
-    l'imbardata d'arrivo e la direzione del primo punto da raggiungere, e secondi di rotazione
-    sul posto (posizione entro 0.12 m). Serve a giudicare GRAPHNAV_ARRIVAL_HEADING (28-10).
-    Lista di (gradi, secondi); vuota se trajectory.csv non ha viaggi GraphNav (prima del 26-10)."""
+    """After every GraphNav arrival, how much the robot must turn for the first move: angle
+    between the arrival yaw and the direction of the first point to reach, and seconds of
+    rotation in place (position within 0.12 m). Used to judge GRAPHNAV_ARRIVAL_HEADING (28-10).
+    List of (degrees, seconds); empty if trajectory.csv has no GraphNav trips (before 26-10)."""
     rows = []
     for r in trajectory:
         try:
@@ -269,7 +269,7 @@ def section_arrival_rotation(trajectory):
         if nxt >= len(rows):
             break
         first = rows[nxt]
-        # La prima mossa deve partire da dove GraphNav ha lasciato il robot, con un punto da raggiungere.
+        # The first move must start from where GraphNav left the robot, with a point to reach.
         if math.isnan(first[4]) or math.hypot(first[1] - end[1], first[2] - end[2]) > 0.30:
             continue
         want = math.degrees(math.atan2(first[5] - first[2], first[4] - first[1]))
@@ -286,7 +286,7 @@ def section_return(log, graph_dirs):
     out = {}
     m = re.search(r'ritorno a wp_0: arrivato in (\d+) s', log)
     out['tempo_s'] = int(m.group(1)) if m else None
-    # Dal 28-10 sera: ritorno non riuscito, con il robot fermo vicino a wp_0 o lontano.
+    # Since the evening of 28-10: failed return, with the robot stopped near wp_0 or far away.
     m = re.search(r"Ritorno a wp_0 NON riuscito( ma vicino)?: fermo (?:a ([\d.]+) m da wp_0)?.*?\(motivo: (.*?)(?:; distanza .*)?\)\.", log)
     if m:
         out['fallito'] = dict(vicino=bool(m.group(1)), metri=float(m.group(2)) if m.group(2) else None,
@@ -294,7 +294,7 @@ def section_return(log, graph_dirs):
     m = re.search(r'strada verso wp_0 ([\d.]+) m -> ([\d.]+) m con (\d+) scorciatoie', log)
     if m:
         out['strada_m'] = (float(m.group(1)), float(m.group(2)), int(m.group(3)))
-    # Dal 29-10: scarto vero dalla partenza secondo il tag, e correzioni (WP0_FIDUCIAL_CORRECTION).
+    # Since 29-10: true offset from the start according to the tag, and corrections (WP0_FIDUCIAL_CORRECTION).
     m = re.search(r"\[WP0\] Secondo il tag il robot e' a ([\d.]+) m dal punto di partenza", log)
     if m:
         out['scarto_m'] = float(m.group(1))
@@ -310,7 +310,7 @@ def section_return(log, graph_dirs):
 
 
 def _graph_route(gdir, start_name):
-    """Lunghezza della strada GraphNav da start_name a wp_0 nel grafo scaricato (serve l'SDK)."""
+    """Length of the GraphNav path from start_name to wp_0 in the downloaded graph (needs the SDK)."""
     try:
         from bosdyn.api.graph_nav import map_pb2
     except ImportError:
@@ -345,13 +345,13 @@ def _graph_route(gdir, start_name):
 
 def section_checks(log, segments):
     """
-    Controlli delle novita' mai provate sul robot (vedi PROVA_CAMPO.md): per ognuna
-    (nome, esito, dettaglio). Esito: 'OK', 'DA GUARDARE', 'NON SCATTATO' (la situazione non
-    si e' presentata: ne' bene ne' male) o 'DECISIONE' (un numero su cui decidere).
+    Checks of the features never tried on the robot (see PROVA_CAMPO.md): for each one
+    (name, outcome, detail). Outcome: 'OK', 'DA GUARDARE' (to look at), 'NON SCATTATO'
+    (the situation did not occur: neither good nor bad) or 'DECISIONE' (a number to decide on).
     """
     out = []
 
-    # 1. Aggiornamento locale del grafo e pendenze in blocco: tempi.
+    # 1. Local graph update and slopes in batch: timings.
     upd = [(k, float(s)) for k, s in re.findall(
         r'\[TEMPO\] (aggiornamento locale|costruzione completa) del grafo: ([\d.]+) s', log)]
     loc = [s for k, s in upd if k == 'aggiornamento locale']
@@ -366,7 +366,7 @@ def section_checks(log, segments):
         out.append(("Aggiornamento locale del grafo", 'OK' if ok else 'DA GUARDARE',
                     det + "; atteso: una sola completa all'inizio, poi locali da 1-3 s"))
 
-    # 2. Obiettivo al centro della cella, ripieghi vicino al centro.
+    # 2. Goal at the cell centre, fallbacks near the centre.
     center = len(re.findall(r"\[TARGET\] Cella \(\d+,\d+\): uso il centro geometrico", log))
     moved = [float(d) for d in re.findall(
         r"\[TARGET\] Cella \(\d+,\d+\): centro [^,]+, uso il punto .*?a ([\d.]+) m dal centro", log)]
@@ -381,7 +381,7 @@ def section_checks(log, segments):
         out.append(("Obiettivo al centro della cella", 'OK' if ok else 'DA GUARDARE',
                     det + "; atteso: quasi sempre il centro, ripieghi entro ~1 m"))
 
-    # 3. Pendenza col corpo e andature: i tratti ripidi devono essere HARD.
+    # 3. Slope with the body and gaits: steep legs must be HARD.
     pitch = [(float(r['pitch_peak_abs_deg']), r.get('tier', '?')) for r in segments
              if r.get('pitch_peak_abs_deg') not in (None, '', 'nan')]
     if not pitch:
@@ -396,7 +396,7 @@ def section_checks(log, segments):
         out.append(("Pendenza col corpo e andature", 'OK' if not miss else 'DA GUARDARE',
                     det + "; atteso: tutti i tratti oltre 18 gradi in HARD"))
 
-    # 4. Scorciatoie GraphNav sulla strada.
+    # 4. GraphNav shortcuts on the way.
     roads = [(float(a), float(b), int(n)) for a, b, n in re.findall(
         r'strada verso \S+ ([\d.]+) m -> ([\d.]+) m con (\d+) scorciatoie', log)]
     refused = len(re.findall(r'\[GRAPHNAV\] Scorciatoia \S+ rifiutata', log))
@@ -418,7 +418,7 @@ def section_checks(log, segments):
         out.append(("Scorciatoie GraphNav sulla strada", 'OK' if ret and not refused else 'DA GUARDARE',
                     det + "; atteso: ritorno a wp_0 arrivato, nessuna scorciatoia rifiutata"))
 
-    # 5. Localizzazione di GraphNav: perdite e riagganci.
+    # 5. GraphNav localization: losses and re-anchoring.
     lost = len(re.findall(r'\[LOCALIZZAZIONE\] [^|]*: PERSO', log))
     re_ok = len(re.findall(r'\[LOCALIZZAZIONE\] Riaggancio .*: riuscito su', log))
     re_all = len(re.findall(r'\[LOCALIZZAZIONE\] Riaggancio ', log))
@@ -430,7 +430,7 @@ def section_checks(log, segments):
                     f"perso {lost} volte, riagganci {re_ok} riusciti su {re_all}, spostamenti falliti "
                     f"per perdita {fatal}; atteso: ogni riaggancio riuscito"))
 
-    # 6. Ritorni con memoria e recupero sullo stesso obiettivo.
+    # 6. Returns with memory and recovery on the same goal.
     excl = len(re.findall(r'\[RITORNO\] Arco \d+->\d+ fuori dal piano', log))
     giveup = len(re.findall(r'ritorni in questo tentativo: sono tornato indietro, ma non riprovo', log))
     same = len(re.findall(r"\[RECOVERY\] L'obiettivo .* quello del tentativo appena fallito", log))
@@ -441,11 +441,11 @@ def section_checks(log, segments):
                     f"archi esclusi per il tentativo {excl}, celle rimandate dopo 2 ritorni {giveup}, "
                     f"recuperi rimandati perche' stesso obiettivo {same}; guardare che non ci siano giri ripetuti"))
 
-    # 8. Attesa prima degli spostamenti GraphNav: dalla preparazione (scorciatoie, chiusura
-    #    d'anello di Spot) alla partenza. Il 22-10 16:04 la chiusura d'anello e' andata in
-    #    timeout 20 volte, 30 s l'una: 603 s di attesa contro 257 s di viaggio.
-    #    La chiusura d'anello finale (prima del ritorno a wp_0) ha il suo limite e non conta
-    #    come attesa: si toglie dall'attesa di quel viaggio.
+    # 8. Wait before GraphNav moves: from the preparation (shortcuts, Spot's loop
+    #    closure) to departure. On 22-10 16:04 the loop closure timed out 20 times,
+    #    30 s each: 603 s of waiting against 257 s of travel.
+    #    The final loop closure (before the return to wp_0) has its own limit and does not
+    #    count as waiting: it is subtracted from that trip's wait.
     final_closure = [float(t) for t in re.findall(
         r"Chiusura d'anello di Spot \(completa\): \d+ archi in ([\d.]+) s", log)]
     waits, trips, prep, to_wp0 = [], [], None, False
@@ -464,11 +464,11 @@ def section_checks(log, segments):
         m = re.search(r'\[GRAPHNAV\] .*: arrivato in (\d+) s', line)
         if m:
             trips.append(int(m.group(1)))
-    #    Fra il 26 e il 28-10 c'era anche una chiusura d'anello veloce prima di ogni viaggio,
-    #    con il suo limite lato Spot: un'attesa fino al limite e' normale, oltre no.
+    #    Between 26 and 28-10 there was also a quick loop closure before every trip,
+    #    with its own limit on Spot's side: a wait up to the limit is normal, beyond it not.
     timeouts = len(re.findall(r"Chiusura d'anello di Spot non riuscita \(TimedOut", log))
     loop_fail = len(re.findall(r"Chiusura d'anello di Spot \([^)]*\): tentativo \d+ non riuscito", log))
-    #    Veloce (senza ICP) solo nelle missioni del 26-10; completa a fine missione (limite
+    #    Quick (without ICP) only in the missions of 26-10; full at the end of the mission (limit
     #    GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S).
     loops = [(int(n), float(t), float(b), 'SCADUTO' in rest, mode) for mode, n, t, b, rest in re.findall(
         r"Chiusura d'anello di Spot(?: \(([^)]*)\))?: (\d+) archi in ([\d.]+) s \(limite (\d+) s, ([^)]*)\)", log)]
@@ -495,7 +495,7 @@ def section_checks(log, segments):
                     else 'DA GUARDARE',
                     det + "; atteso: nessun timeout della RPC ne' tentativo fallito, attese entro il limite"))
 
-    # 9. Scelta dell'obiettivo e arrivo appena fuori dalla cella (dal 26-10).
+    # 9. Goal choice and arrival just outside the cell (since 26-10).
     refused = len(re.findall(r'\[TARGET\] Obiettivo .* escluso per il resto della missione', log))
     unreach = len(re.findall(r"NESSUN punto della cella e' raggiungibile dal robot nel grafo", log))
     outside_ok = len(re.findall(r"\[OBIETTIVO\] Il robot e' fuori dalla cella .* vale come arrivo", log))
@@ -524,7 +524,7 @@ def section_checks(log, segments):
                     f"'fuori dalla cella' {outside_no}; atteso: nessun riproposto, pochi rifiuti fuori "
                     f"cella (il 22-10 erano 44)"))
 
-    # 10. Ritorni con GraphNav: quanto si sposta davvero il robot.
+    # 10. Returns with GraphNav: how far the robot really moves.
     d_ret = [float(d) for d in re.findall(r"\[RITORNO\] Torno a \S+, a ([\d.]+) m dal robot", log)]
     in_place = len(re.findall(r"\[RITORNO\] La briciola piu' lontana dietro.*non mi muovo", log))
     if not d_ret and not in_place:
@@ -535,7 +535,7 @@ def section_checks(log, segments):
                     + f", {in_place} senza movimento (briciole tutte a meno di 0.40 m: si ripianifica da "
                     f"fermo)"))
 
-    # 11. Deriva dell'odometria agli arrivi GraphNav (dal 26-10 sera, vedi graphnav_log_drift).
+    # 11. Odometry drift at GraphNav arrivals (since the evening of 26-10, see graphnav_log_drift).
     drift = [(float(a), float(d)) for a, d in re.findall(
         r"\[DERIVA\] .*?creato ([\d.]+) min fa -> l'odometria \(VISION\) e' scostata di ([\d.]+) m", log)]
     if not drift:
@@ -554,7 +554,7 @@ def section_checks(log, segments):
 
 
 # --------------------------------------------------------------------------------------
-# Stampa
+# Printing
 # --------------------------------------------------------------------------------------
 def report(name):
     f = mission_files(name)
@@ -571,8 +571,8 @@ def report(name):
     print(f"Griglia: {f'{g[0]} x {g[1]} celle da {g[2]:.1f} m' if g else 'non indicata nel log'}"
           f" | durata {c['duration_s'] / 60:.1f} min" if c['duration_s'] else "")
     print(f"Celle: {c['visited']} visitate, {c['blocked']} bloccate, {c['attempts']} tentativi")
-    # Avanzamento (dal 28-10): da mission_summary.json, o dall'ultima riga [PROGRESSO] del log
-    # (missione interrotta prima del riepilogo).
+    # Progress (since 28-10): from mission_summary.json, or from the last [PROGRESSO] line of the log
+    # (mission interrupted before the summary).
     pr = ((summary or {}).get('mission_stats') or {}).get('progresso')
     if pr:
         print(f"Avanzamento: {pr['celle_chiuse']}/{pr['celle_totali']} celle chiuse "
@@ -586,14 +586,14 @@ def report(name):
         lines = [l for l in log.splitlines() if '[PROGRESSO]' in l]
         if lines:
             print("Avanzamento (ultima riga del log): " + lines[-1].split('[PROGRESSO]', 1)[1].strip())
-    # Interruttori della missione (dal 21-10): dal riepilogo, o dalla riga [CONFIG] del log.
+    # Mission switches (since 21-10): from the summary, or from the [CONFIG] line of the log.
     sw = (summary or {}).get('interruttori')
     if sw:
         print("Interruttori: " + "  ".join(f"{k.split('.')[-1]}={v}" for k, v in sw.items()))
     else:
         m = re.search(r'\[CONFIG\] INTERRUTTORI: (.*)', log)
         print("Interruttori: " + (m.group(1).strip() if m else "non registrati (missione prima del 21-10)"))
-    # Grafo della missione (dal 22-10): metodo dei nodi e, per i nodi casuali, il seme.
+    # Mission graph (since 22-10): node method and, for random nodes, the seed.
     g = (summary or {}).get('grafo')
     if g:
         extra = (f"{g.get('distribuzione')}, {g.get('densita_nodi_m2'):g} nodi/m2, seme {g.get('seme')}"

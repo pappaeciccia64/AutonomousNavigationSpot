@@ -1,4 +1,4 @@
-"""Registrazione della mappa GraphNav: waypoint di cella e briciole, archi, chiusura d'anello di Spot, ancoraggio, scaricamento."""
+"""GraphNav map recording: cell waypoints and breadcrumbs, edges, Spot's loop closure, anchoring, download."""
 import os
 import time
 import numpy as np
@@ -18,7 +18,7 @@ from spot_explorer.robot import connection as spotUtils
 from spot_explorer.graphnav.localization import graphnav_log_localization
 
 class LoopClosureUploadError(Exception):
-    """Spot ha calcolato gli archi della chiusura d'anello ma il loro caricamento e' fallito."""
+    """Spot computed the loop-closure edges but uploading them failed."""
 
     def __init__(self, n_edges, cause):
         super().__init__(f"{n_edges} archi calcolati ma non caricati nella mappa "
@@ -28,7 +28,7 @@ class LoopClosureUploadError(Exception):
 
 class RecordingInterface(object):
     def __init__(self, robot, download_filepath, client_metadata):
-        # Cartella base: ogni scaricamento della mappa crea una sottocartella
+        # Base folder: every map download creates a subfolder
         self._base_download_filepath = download_filepath
         self._download_filepath = os.path.join(download_filepath, 'downloaded_graph')
 
@@ -41,22 +41,22 @@ class RecordingInterface(object):
         self._map_processing_client = robot.ensure_client(MapProcessingServiceClient.default_service_name)
         self.robot = robot
 
-        # Pose dei waypoint creati da noi: {nome: {'x', 'y', 'z', 'yaw', 'waypoint_id', 'cell_row', 'cell_col'}}
+        # Poses of the waypoints we created: {name: {'x', 'y', 'z', 'yaw', 'waypoint_id', 'cell_row', 'cell_col'}}
         self.waypoint_poses = {}
 
-        # Copia locale del grafo, valida finche' nessuno lo modifica
+        # Local copy of the graph, valid until someone modifies it
         self._cached_graph = None
         self._graph_cache_valid = False
 
-        # Nome e id dell'ultimo waypoint creato (vedi create_default_waypoint): evita di
-        # riscaricare il grafo solo per rileggerli.
+        # Name and id of the last waypoint created (see create_default_waypoint): avoids
+        # downloading the graph again only to re-read them.
         self.last_created_waypoint = None
 
     def optimize_anchoring(self):
         """
-        Ottimizza l'ancoraggio della mappa direttamente sul server del robot.
-        Corregge il drift odometrico e rende il navgraph metricamente coerente,
-        senza usare planimetrie esterne.
+        Optimize the map anchoring directly on the robot's server.
+        Corrects the odometric drift and makes the navgraph metrically consistent,
+        without using external floor plans.
         """
         print(f"\n[{'=' * 40}]")
         print(f"[ANCHORING] Avvio ottimizzazione globale dell'ancoraggio...")
@@ -65,14 +65,14 @@ class RecordingInterface(object):
             from google.protobuf import wrappers_pb2 as wrappers
             from bosdyn.api.graph_nav import map_processing_pb2
 
-            # Chiamiamo il servizio senza alcun "initial_hint"
+            # Call the service without any "initial_hint"
             response = self._map_processing_client.process_anchoring(
                 params=map_processing_pb2.ProcessAnchoringRequest.Params(
-                    # Impostato a False, il robot scarta l'ancoraggio grezzo corrente
-                    # e ne genera uno nuovo globale e ottimizzato da zero
+                    # Set to False, the robot discards the current raw anchoring
+                    # and generates a new global, optimized one from scratch
                     optimize_existing_anchoring=wrappers.BoolValue(value=False)
                 ),
-                modify_anchoring_on_server=True,  # Applica le modifiche alla mappa in memoria
+                modify_anchoring_on_server=True,  # Apply the changes to the map in memory
                 stream_intermediate_results=False
             )
 
@@ -81,7 +81,7 @@ class RecordingInterface(object):
                 f"[ANCHORING] Status: {response.status}, Iterazioni: {response.iteration}, Costo finale: {response.cost:.4f}")
             print(f"[{'=' * 40}]\n")
 
-            # Invalida la cache per forzare il download della mappa aggiornata
+            # Invalidate the cache to force the download of the updated map
             self.invalidate_graph_cache()
             return True
 
@@ -91,7 +91,7 @@ class RecordingInterface(object):
             return False
 
     def auto_close_loops(self, close_fiducial_loops, close_odometry_loops, *args):
-        """Chiusure d'anello di Spot sul grafo (fiducial e/o odometria), senza controllo di collisione."""
+        """Spot's loop closures on the graph (fiducial and/or odometry), without collision checking."""
         response = self._map_processing_client.process_topology(
             params=map_processing_pb2.ProcessTopologyRequest.Params(
                 do_fiducial_loop_closure=wrappers.BoolValue(value=close_fiducial_loops),
@@ -106,34 +106,33 @@ class RecordingInterface(object):
                             icp_iters=None, feature_matching=None, upload_result=False,
                             prune_edges=None):
         """
-        Chiusure d'anello di Spot (fiducial + odometria) DURANTE la missione, con il
-        controllo di collisione di Spot sugli archi nuovi, cosi' il grafo non resta una catena
-        e un ritorno non deve ripercorrere tutta la strada fatta.
+        Spot's loop closures (fiducial + odometry) DURING the mission, with Spot's
+        collision check on the new edges, so the graph does not stay a chain and a return
+        does not have to retrace the whole way.
 
-        timeout_s: tempo massimo di elaborazione LATO SPOT (Params.timeout_seconds). Allo
-        scadere Spot restituisce gli archi trovati fino a li' (timed_out = True) e una
-        chiamata successiva ricomincia (prova al banco del 26-10: non riprende il lavoro).
-        Senza, Spot si ferma da solo dopo ~30 s, insieme alla RPC: il 22-10 la RPC scadeva
-        prima e non arrivava nessun risultato. Il limite di Spot e' approssimativo e dopo ogni
-        modifica della mappa la chiamata si allunga (4 s richiesti -> fino a 12 s; 60 s -> oltre
-        120 s una volta): il limite della RPC qui e' il triplo di timeout_s, almeno + 15 s.
-        max_path_m / min_path_m: limiti sulla distanza fra i due waypoint lungo il grafo
-        (max/min_loop_closure_path_length); None = valori di Spot.
-        modify_map_on_server, check_collision: False solo per le misure al banco
-        (prova_anelli.py): la mappa resta com'era e si confrontano impostazioni diverse.
-        icp_iters (0 = niente ICP) e feature_matching: senza, Spot finisce in pochi secondi ma
-        gli archi non sono corretti sulle scansioni; None = valori di Spot (con ICP). Solo per
-        le misure al banco, come max_path_m, min_path_m e prune_edges.
-        upload_result: Spot calcola SENZA scrivere nella mappa e gli archi li carica questa
-        funzione (upload_graph, che li aggiunge alla mappa in un colpo solo). Scrivendo da se',
-        Spot puo' rispondere MapModifiedError ALLA FINE dell'elaborazione, se la mappa e'
-        cambiata nel frattempo, e l'elaborazione va persa: il 26-10 15:36, appena fermata la
-        registrazione, ~73 s di tentativi falliti prima di quello buono.
-        prune_edges: False = tiene anche gli archi candidati in zone gia' collegate (Spot di
-        default ne tiene uno solo per zona, il "migliore"); None = valore di Spot.
+        timeout_s: maximum processing time ON SPOT'S SIDE (Params.timeout_seconds). When it
+        expires Spot returns the edges found so far (timed_out = True) and a following call
+        starts over (bench test of 26-10: it does not resume the work). Without it, Spot
+        stops by itself after ~30 s, together with the RPC: on 22-10 the RPC expired first
+        and no result arrived. Spot's limit is approximate and after every map change the
+        call gets longer (4 s requested -> up to 12 s; 60 s -> over 120 s once): the RPC
+        limit here is three times timeout_s, at least + 15 s.
+        max_path_m / min_path_m: limits on the distance between the two waypoints along the
+        graph (max/min_loop_closure_path_length); None = Spot's values.
+        modify_map_on_server, check_collision: False only for bench measurements
+        (bench_loop_closure.py): the map stays as it was and different settings are compared.
+        icp_iters (0 = no ICP) and feature_matching: without them, Spot finishes in a few
+        seconds but the edges are not corrected on the scans; None = Spot's values (with
+        ICP). Only for bench measurements, like max_path_m, min_path_m and prune_edges.
+        upload_result: Spot computes WITHOUT writing to the map and this function uploads
+        the edges (upload_graph, which adds them to the map in one go). Writing by itself,
+        Spot can answer MapModifiedError AT THE END of the processing, if the map changed
+        in the meantime, and the processing is lost: on 26-10 15:36, right after stopping
+        the recording, ~73 s of failed attempts before the good one.
+        prune_edges: False = also keeps the candidate edges in areas already connected (by
+        default Spot keeps only one per area, the "best"); None = Spot's value.
 
-        Restituisce (archi creati, timed_out). Solleva in caso di errore: chi chiama decide
-        cosa fare.
+        Returns (edges created, timed_out). Raises on error: the caller decides what to do.
         """
         odo = map_processing_pb2.ProcessTopologyRequest.OdometryLoopClosureParams(
             max_loop_closure_edge_length=wrappers.DoubleValue(value=float(max_edge_length_m)))
@@ -174,7 +173,7 @@ class RecordingInterface(object):
         return n, bool(getattr(response, 'timed_out', False))
 
     def _get_graph(self, force_refresh=False):
-        """Il grafo di GraphNav, dalla copia locale se valida. force_refresh lo riscarica sempre."""
+        """The GraphNav graph, from the local copy if valid. force_refresh always downloads it again."""
         if force_refresh or not self._graph_cache_valid or self._cached_graph is None:
             self._cached_graph = self._graph_nav_client.download_graph()
             self._graph_cache_valid = True
@@ -182,14 +181,14 @@ class RecordingInterface(object):
 
     def invalidate_graph_cache(self):
         """
-        Butta la copia locale del grafo. Da chiamare dopo ogni operazione che lo modifica
-        (waypoint, archi, chiusure d'anello, inizio registrazione).
+        Drop the local copy of the graph. Call after every operation that modifies it
+        (waypoints, edges, loop closures, recording start).
         """
         self._graph_cache_valid = False
         self._cached_graph = None
 
     def set_download_filepath(self, filepath):
-        """Cartella della missione in cui salvare le mappe scaricate (una sottocartella per volta)."""
+        """Mission folder where downloaded maps are saved (one subfolder each time)."""
         self._base_download_filepath = filepath
         self._download_filepath = filepath
         os.makedirs(filepath, exist_ok=True)
@@ -197,8 +196,8 @@ class RecordingInterface(object):
 
     def _generate_unique_map_folder(self, base_name='Grafo'):
         """
-        Percorso di una cartella nuova per lo scaricamento, del tipo
-        "Grafo_10-02-2026_14-30-00" (giorno-mese-anno_ore-minuti-secondi).
+        Path of a new folder for the download, like
+        "Grafo_10-02-2026_14-30-00" (day-month-year_hours-minutes-seconds).
         """
         from datetime import datetime
 
@@ -206,7 +205,7 @@ class RecordingInterface(object):
         unique_folder = f"{base_name}_{timestamp}"
         full_path = os.path.join(self._base_download_filepath, unique_folder)
 
-        # Se esiste gia' (due scaricamenti nello stesso secondo), si aggiunge un contatore
+        # If it already exists (two downloads in the same second), a counter is added
         counter = 1
         original_path = full_path
         while os.path.exists(full_path):
@@ -218,11 +217,11 @@ class RecordingInterface(object):
 
     def initialize_with_fiducial(self, robot_state_client, fiducial_id=None):
         """
-        Localizza il robot sulla mappa di GraphNav usando un fiducial visibile. fiducial_id:
-        un tag preciso; None = il piu' vicino. True se riesce.
+        Localize the robot on the GraphNav map using a visible fiducial. fiducial_id:
+        a specific tag; None = the nearest. True if it succeeds.
 
-        Il fiducial deve essere GIA' nella mappa: in missione si chiama dopo aver creato wp_0
-        con il tag in vista, cosi' e' nella sua istantanea (vedi find_fiducials).
+        The fiducial must ALREADY be in the map: in the mission it is called after creating
+        wp_0 with the tag in view, so it is in its snapshot (see find_fiducials).
         """
         import time
 
@@ -258,7 +257,7 @@ class RecordingInterface(object):
                 do_ambiguity_check=True
             )
 
-            # Un attimo perche' GraphNav applichi la localizzazione
+            # A moment for GraphNav to apply the localization
             time.sleep(0.5)
             print(f"[FIDUCIAL INIT] ✓ RIUSCITO: robot localizzato sul fiducial, che resta nella mappa.")
             print(f"[{'=' * 40}]\n")
@@ -276,7 +275,7 @@ class RecordingInterface(object):
             return False
 
     def _get_transform(self, from_wp, to_wp):
-        """Trasformazione da from_wp a to_wp, dalle loro pose nel frame dell'odometria."""
+        """Transform from from_wp to to_wp, from their poses in the odometry frame."""
 
         from_se3 = from_wp.waypoint_tform_ko
         from_tf = SE3Pose(
@@ -305,19 +304,19 @@ class RecordingInterface(object):
 
     def get_localization_state(self):
         """
-        Dove e' localizzato il robot nel grafo. Restituisce un dict:
-            is_localized         True se il robot e' localizzato su un waypoint
-            waypoint_id          id del waypoint (None se non localizzato)
-            waypoint_name        nome del waypoint (serve il grafo: puo' scaricarlo)
-            waypoint_tform_body  posa del corpo rispetto al waypoint
-            localization_state   l'oggetto LocalizationState completo
-            seed_tform_body      posa nel frame seed, se disponibile
-        oppure None in caso di errore.
+        Where the robot is localized in the graph. Returns a dict:
+            is_localized         True if the robot is localized on a waypoint
+            waypoint_id          waypoint id (None if not localized)
+            waypoint_name        waypoint name (needs the graph: may download it)
+            waypoint_tform_body  body pose relative to the waypoint
+            localization_state   the full LocalizationState object
+            seed_tform_body      pose in the seed frame, if available
+        or None on error.
         """
         try:
             localization_state = self._graph_nav_client.get_localization_state()
 
-            # Localizzato = ha un waypoint_id
+            # Localized = has a waypoint_id
             is_localized = bool(localization_state.localization.waypoint_id)
             waypoint_id = localization_state.localization.waypoint_id if is_localized else None
 
@@ -358,8 +357,8 @@ class RecordingInterface(object):
 
     def create_default_waypoint(self, cell_row=None, cell_col=None):
         """
-        Crea un waypoint di GraphNav nella posizione attuale, con nome progressivo (wp_0,
-        wp_1, ...), e ne salva la posa e, se data, la cella in waypoint_poses.
+        Create a GraphNav waypoint at the current position, with a progressive name (wp_0,
+        wp_1, ...), and save its pose and, if given, the cell in waypoint_poses.
         """
         robot_state_client = self.robot.ensure_client('robot-state')
         x, y, z, quat = spotUtils.getPosition(robot_state_client)
@@ -369,11 +368,11 @@ class RecordingInterface(object):
             1.0 - 2.0 * (quat.y**2 + quat.z**2)
         )
 
-        # Il numero successivo si ricava dai waypoint creati da NOI (waypoint_poses), senza
-        # riscaricare il grafo: create_waypoint invalida la cache a ogni waypoint, e il grafo
-        # cresce con la missione. Siamo gli unici a creare waypoint wp_N, quindi il massimo
-        # che conosciamo e' il massimo che esiste. Se non ne abbiamo ancora creati si guarda
-        # il grafo, che potrebbe arrivare da una sessione precedente.
+        # The next number is derived from the waypoints created by US (waypoint_poses), without
+        # downloading the graph again: create_waypoint invalidates the cache at every waypoint, and
+        # the graph grows with the mission. We are the only ones creating wp_N waypoints, so the
+        # maximum we know is the maximum that exists. If we have not created any yet the graph
+        # is checked, since it might come from a previous session.
         def _wp_number(name):
             try:
                 return int(name.split('_')[-1])
@@ -408,7 +407,7 @@ class RecordingInterface(object):
                 'y': y,
                 'z': z,
                 'yaw': yaw,
-                't': time.time(),        # per la misura della deriva (graphnav_log_drift)
+                't': time.time(),        # for the drift measurement (graphnav_log_drift)
                 'waypoint_id': created_waypoint_id,
                 'cell_row': cell_row,
                 'cell_col': cell_col
@@ -418,9 +417,9 @@ class RecordingInterface(object):
                   + (f", cella ({cell_row},{cell_col})" if cell_row is not None and cell_col is not None else "")
                   + ".")
 
-            # Nome e id dell'ultimo waypoint, dalla risposta del robot: chi li vuole non deve
-            # passare da get_localization_state, che riscaricherebbe il grafo appena
-            # invalidato solo per l'etichetta.
+            # Name and id of the last waypoint, from the robot's answer: whoever wants them does not
+            # have to go through get_localization_state, which would download again the graph just
+            # invalidated only for the label.
             self.last_created_waypoint = {'name': new_name, 'id': created_waypoint_id}
 
             self.invalidate_graph_cache()
@@ -444,7 +443,7 @@ class RecordingInterface(object):
             return
         try:
             status = self._recording_client.start_recording(recording_environment=self._recording_environment)
-            self.invalidate_graph_cache()  # la registrazione aggiungera' waypoint
+            self.invalidate_graph_cache()  # the recording will add waypoints
             print('[REGISTRAZIONE] Registrazione della mappa avviata.')
         except Exception as err:
             print(f'[REGISTRAZIONE] Avvio della registrazione non riuscito: {err}')
@@ -469,8 +468,8 @@ class RecordingInterface(object):
 
     def download_full_graph(self, *args):
         """
-        Scarica il grafo completo, con le istantanee di waypoint e archi, in una cartella
-        nuova (vedi _generate_unique_map_folder). Restituisce il percorso, None se fallisce.
+        Download the full graph, with the waypoint and edge snapshots, into a new folder
+        (see _generate_unique_map_folder). Returns the path, None if it fails.
         """
         graph = self._get_graph(force_refresh=True)
         if graph is None:
@@ -479,7 +478,7 @@ class RecordingInterface(object):
 
         unique_path = self._generate_unique_map_folder()
 
-        # I _download_and_write_* scrivono in self._download_filepath: lo si cambia per ora
+        # The _download_and_write_* methods write into self._download_filepath: it is changed for now
         old_path = self._download_filepath
         self._download_filepath = unique_path
 
@@ -549,8 +548,8 @@ class RecordingInterface(object):
 
     def get_all_manual_waypoints_with_cells(self):
         """
-        I waypoint creati da noi (wp_N) che hanno una cella: {(riga, colonna): dati}, con
-        dati = name, id, x, y, z, yaw, cell_row, cell_col.
+        The waypoints created by us (wp_N) that have a cell: {(row, column): data}, with
+        data = name, id, x, y, z, yaw, cell_row, cell_col.
         """
         waypoints_by_cell = {}
 
@@ -575,15 +574,15 @@ class RecordingInterface(object):
         return waypoints_by_cell
 
     def get_manual_waypoint_by_cell(self, cell_row, cell_col):
-        """I dati del waypoint creato nella cella, None se non c'e'."""
+        """The data of the waypoint created in the cell, None if there is none."""
         waypoints_by_cell = self.get_all_manual_waypoints_with_cells()
         return waypoints_by_cell.get((cell_row, cell_col))
 
     def create_edge_between_waypoint_objs(self, from_wp, to_wp):
         """
-        Crea un arco fra due waypoint gia' letti dal grafo (oggetti map_pb2.Waypoint), senza
-        riscaricare il grafo ne' stampare la trasformazione.  Chi chiama invalida la cache alla fine
-        (invalidate_graph_cache). Solleva in caso di errore.
+        Create an edge between two waypoints already read from the graph (map_pb2.Waypoint
+        objects), without downloading the graph again or printing the transform. The caller
+        invalidates the cache at the end (invalidate_graph_cache). Raises on error.
         """
         new_edge = map_pb2.Edge()
         new_edge.id.from_waypoint = from_wp.id
@@ -593,9 +592,9 @@ class RecordingInterface(object):
 
     def find_nearest_waypoint_cell_to_target(self, target_cell, waypoints_by_cell, env_map):
         """
-        La cella visitata con un waypoint piu' vicina a target_cell: prima una adiacente,
-        altrimenti la piu' vicina in distanza di Manhattan. None se non ce ne sono.
-        waypoints_by_cell come da get_all_manual_waypoints_with_cells.
+        The visited cell with a waypoint nearest to target_cell: an adjacent one first,
+        otherwise the nearest in Manhattan distance. None if there are none.
+        waypoints_by_cell as from get_all_manual_waypoints_with_cells.
         """
         target_row, target_col = target_cell
 
@@ -609,14 +608,14 @@ class RecordingInterface(object):
             if (0 <= adj_row < env_map.rows and
                 0 <= adj_col < env_map.cols and
                 adj_cell in waypoints_by_cell and
-                env_map.map[adj_row][adj_col] == 1):  # visitata
+                env_map.map[adj_row][adj_col] == 1):  # visited
                 adjacent_with_waypoint.append(adj_cell)
 
         if adjacent_with_waypoint:
             print(f"[NEAREST_WP] Waypoint in una cella confinante: {adjacent_with_waypoint[0]}")
             return adjacent_with_waypoint[0]
 
-        # Nessuna adiacente: la piu' vicina fra tutte
+        # No adjacent one: the nearest among all
         min_distance = float('inf')
         nearest_cell = None
 
@@ -639,7 +638,7 @@ class RecordingInterface(object):
 
 
 def graphnav_is_recording(recordingInterface):
-    """True/False dalla registrazione GraphNav, None se non si riesce a saperlo."""
+    """True/False from the GraphNav recording, None if it cannot be known."""
     try:
         return bool(recordingInterface._recording_client.get_record_status().is_recording)
     except Exception:
@@ -649,22 +648,22 @@ def graphnav_is_recording(recordingInterface):
 def graphnav_drop_breadcrumb(env, recordingInterface, robot_state_client, prm_node_id,
                              cell_row, cell_col, force=False):
     """
-    Lascia una briciola: un waypoint GraphNav nel punto in cui si trova il robot,
-    legato al nodo PRM da cui sta passando.
+    Drop a breadcrumb: a GraphNav waypoint at the point where the robot is, linked to the
+    PRM node it is passing through.
 
-    Serve per i ritorni. Camminando ALL'INDIETRO sui tratti registrati
-    (retreat_along_traveled_path) il robot non vede dove mette le zampe, non si
-    rilocalizza, e un errore si accumula. Con una traccia di waypoint il ritorno lo fa
-    GraphNav, che cammina in avanti, con la localizzazione e l'anti-ostacolo di Boston
-    Dynamics (decisione dell'utente).
+    Used for returns. Walking BACKWARDS over the recorded legs
+    (retreat_along_traveled_path) the robot cannot see where it puts its feet, does not
+    relocalize, and an error accumulates. With a trail of waypoints the return is done by
+    GraphNav, which walks forwards, with Boston Dynamics' localization and obstacle
+    avoidance (user's decision).
 
-    Densita': un waypoint solo se il robot e' almeno GRAPHNAV_WAYPOINT_MIN_SPACING_M
-    dall'ultimo lasciato, piu' sempre uno all'ingresso di una cella (force=True). Un
-    waypoint per OGNI posizione di sosta darebbe una mappa troppo densa: i passi parziali
-    lasciano soste a 20-60 cm una dall'altra.
+    Density: a waypoint only if the robot is at least GRAPHNAV_WAYPOINT_MIN_SPACING_M from
+    the last one dropped, plus always one on entering a cell (force=True). A waypoint for
+    EVERY stop position would give a map that is too dense: partial steps leave stops
+    20-60 cm apart.
 
-    La traccia vive su env (_graphnav_trail) perche' deve sopravvivere ai tentativi di cella.
-    Non solleva mai: una briciola mancata e' una briciola, non un motivo per fermare il robot.
+    The trail lives on env (_graphnav_trail) because it must survive the cell attempts.
+    Never raises: a missed breadcrumb is a breadcrumb, not a reason to stop the robot.
     """
     if recordingInterface is None:
         return None
@@ -682,9 +681,9 @@ def graphnav_drop_breadcrumb(env, recordingInterface, robot_state_client, prm_no
             return None
     try:
         recordingInterface.create_default_waypoint(cell_row=cell_row, cell_col=cell_col)
-        # Nome e id dal waypoint appena creato (li porta la risposta del robot), non da
-        # get_localization_state(), che riscarica tutto il grafo solo per leggerli. Ripiego
-        # su get_localization_state() se l'interfaccia non li espone.
+        # Name and id from the waypoint just created (the robot's answer carries them), not from
+        # get_localization_state(), which downloads the whole graph again only to read them.
+        # Falls back on get_localization_state() if the interface does not expose them.
         last = getattr(recordingInterface, 'last_created_waypoint', None)
         if isinstance(last, dict) and last.get('id'):
             wp_id, wp_name = last['id'], last.get('name')
@@ -704,6 +703,6 @@ def graphnav_drop_breadcrumb(env, recordingInterface, robot_state_client, prm_no
     trail.append(crumb)
     print(f"[BRICIOLA] Waypoint {wp_name} in ({x:.2f}, {y:.2f}), nodo PRM {prm_node_id} "
           f"(traccia: {len(trail)} waypoint).")
-    # Stato del localizzatore di GraphNav, stampato solo quando cambia.
+    # GraphNav localizer state, printed only when it changes.
     graphnav_log_localization(env, recordingInterface, robot_state_client, f"briciola {wp_name}")
     return crumb

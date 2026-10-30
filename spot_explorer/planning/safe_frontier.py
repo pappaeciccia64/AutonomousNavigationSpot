@@ -1,4 +1,4 @@
-"""Fronte sicuro: fin dove il percorso pianificato e' confermato libero ADESSO, sulla scansione filtrata; il thread che lo ricalcola durante il movimento."""
+"""Safe frontier: how far the planned path is confirmed free NOW, on the filtered scan; the thread that recomputes it during the move."""
 import threading
 import time
 import logging
@@ -17,20 +17,20 @@ LOGGER = logging.getLogger(__name__)
 
 
 # =========================================================================
-# FILTRO TEMPORALE SU obstacle_distance
+# TEMPORAL FILTER ON obstacle_distance
 #
-# obstacle_distance oscilla di qualche centimetro fra due scansioni anche a robot fermo
-# (1.5 cm in media, 7.3 cm di punta), cioe' quanto il margine d'aria con cui lo si
-# confronta: senza filtro un percorso che sfiora un ostacolo passa da "libero" a "bloccato"
-# e ritorno a ogni scansione. Due rimedi:
-#   - MEDIANA sulle ultime OBSTACLE_MEDIAN_FRAMES letture della stessa cella di mondo: una
-#     punta isolata non decide da sola. Costa al massimo una scansione di ritardo.
-#   - ISTERESI: una cella diventa bloccante sotto FRONTIER_CLEARANCE_M e torna libera solo
-#     sopra FRONTIER_CLEARANCE_M + OBSTACLE_HYSTERESIS_M.
+# obstacle_distance fluctuates by a few centimetres between two scans even with the robot
+# still (1.5 cm on average, 7.3 cm peak), i.e. as much as the air margin it is compared
+# with: without a filter a path grazing an obstacle flips from "free" to "blocked"
+# and back at every scan. Two remedies:
+#   - MEDIAN over the last OBSTACLE_MEDIAN_FRAMES readings of the same world cell: an
+#     isolated spike does not decide alone. Costs at most one scan of delay.
+#   - HYSTERESIS: a cell becomes blocking below FRONTIER_CLEARANCE_M and becomes free again
+#     only above FRONTIER_CLEARANCE_M + OBSTACLE_HYSTERESIS_M.
 #
-# Le origini delle griglie di Spot sono multipli interi della cella, quindi riallineare due
-# scansioni e' uno scorrimento di indici, senza interpolazione. Se lo scorrimento non e'
-# intero o cambia la dimensione della cella, la cronologia si azzera.
+# The origins of Spot's grids are integer multiples of the cell, so realigning two
+# scans is an index shift, without interpolation. If the shift is not
+# integer or the cell size changes, the history is reset.
 # =========================================================================
 OBSTACLE_MEDIAN_FRAMES = 3
 OBSTACLE_HYSTERESIS_M = 0.04
@@ -38,20 +38,20 @@ OBSTACLE_HYSTERESIS_M = 0.04
 
 class _ObstacleHistory:
     """
-    Cronologia di obstacle_distance allineata al mondo, condivisa fra il ciclo principale
-    e il thread del fronte (le scansioni vengono dallo stesso robot a frazioni di secondo
-    di distanza: piu' campioni rendono la mediana migliore, non peggiore).
+    History of obstacle_distance aligned to the world, shared between the main loop and
+    the frontier thread (the scans come from the same robot fractions of a second apart:
+    more samples make the median better, not worse).
 
-    update() restituisce (mediana, latch): la mediana da usare al posto della lettura
-    grezza, e la maschera booleana delle celle che l'isteresi considera bloccanti.
+    update() returns (median, latch): the median to use instead of the raw reading, and
+    the boolean mask of the cells the hysteresis considers blocking.
     """
 
     def __init__(self, frames=OBSTACLE_MEDIAN_FRAMES, hysteresis_m=OBSTACLE_HYSTERESIS_M):
         self._lock = threading.Lock()
         self._frames = max(1, int(frames))
         self._hyst = float(hysteresis_m)
-        self._hist = []          # [(od 2D, ix, iy)] -- ix/iy = origine in CELLE di mondo
-        self._latch = None       # 2D bool, allineata all'ultimo elemento di _hist
+        self._hist = []          # [(od 2D, ix, iy)] -- ix/iy = origin in world CELLS
+        self._latch = None       # 2D bool, aligned to the last element of _hist
         self._latch_ij = None
         self._cell_size = None
 
@@ -65,24 +65,24 @@ class _ObstacleHistory:
     @staticmethod
     def _align(src, dix, diy, shape):
         """
-        src riletta negli indici di una griglia spostata di (dix, diy) celle: il valore
-        che la nuova griglia vede in (r, c) sta in src[r + diy, c + dix]. Fuori da src:
-        NaN per i float, False per i booleani.
+        src re-read in the indices of a grid shifted by (dix, diy) cells: the value the
+        new grid sees at (r, c) is at src[r + diy, c + dix]. Outside src: NaN for floats,
+        False for booleans.
         """
         rows, cols = shape
         fill = False if src.dtype == bool else np.nan
         out = np.full(shape, fill, dtype=src.dtype if src.dtype == bool else np.float64)
-        r0, c0 = max(0, diy), max(0, dix)                       # primo indice valido in src
-        rr0, cc0 = max(0, -diy), max(0, -dix)                   # dove finisce in out
+        r0, c0 = max(0, diy), max(0, dix)                       # first valid index in src
+        rr0, cc0 = max(0, -diy), max(0, -dix)                   # where it ends up in out
         nr = min(src.shape[0] - r0, rows - rr0)
         nc = min(src.shape[1] - c0, cols - cc0)
         if nr > 0 and nc > 0:
             out[rr0:rr0 + nr, cc0:cc0 + nc] = src[r0:r0 + nr, c0:c0 + nc]
         return out
 
-    # Tolleranza sul resto dello scorrimento, in frazione di cella. Lo scorrimento si misura
-    # fra due griglie CONSECUTIVE, mai da un'origine assoluta: cell_size arriva come float32
-    # (0.029999999329447746), e su un'origine lontana l'errore supererebbe la tolleranza.
+    # Tolerance on the remainder of the shift, as a fraction of a cell. The shift is measured
+    # between two CONSECUTIVE grids, never from an absolute origin: cell_size arrives as float32
+    # (0.029999999329447746), and on a distant origin the error would exceed the tolerance.
     _SHIFT_TOL_CELLS = 0.05
 
     def update(self, od, origin_x, origin_y, cell_size):
@@ -91,7 +91,7 @@ class _ObstacleHistory:
         ox, oy = float(origin_x), float(origin_y)
 
         def shift_from(old_ox, old_oy):
-            """(dix, diy) in celle, oppure None se lo scorrimento non e' intero."""
+            """(dix, diy) in cells, or None if the shift is not integer."""
             fx, fy = (ox - old_ox) / cs, (oy - old_oy) / cs
             dix, diy = int(round(fx)), int(round(fy))
             if abs(fx - dix) > self._SHIFT_TOL_CELLS or abs(fy - diy) > self._SHIFT_TOL_CELLS:
@@ -142,11 +142,11 @@ OBSTACLE_HISTORY = _ObstacleHistory()
 
 class GridSnapshot:
     """
-    Una scansione pronta per il fronte. Tutti gli array sono 2D (num_y, num_x), con lo
-    stesso ordinamento usato ovunque nel progetto: riga = y, colonna = x, origine nel
-    vertice in basso a sinistra (vedi slopes._gather_heights).
+    A scan ready for the frontier. All arrays are 2D (num_y, num_x), with the same ordering
+    used everywhere in the project: row = y, column = x, origin at the bottom-left corner
+    (see slopes._gather_heights).
 
-    blocked_latch: maschera dell'isteresi (vedi _ObstacleHistory); None = nessun filtro.
+    blocked_latch: hysteresis mask (see _ObstacleHistory); None = no filter.
     """
     __slots__ = ('obstacle_dist', 'rough_veto', 'seen', 'terrain', 'origin_x', 'origin_y',
                  'cell_size', 'robot_x', 'robot_y', 'time', 'valid', 'blocked_latch', 'robot_yaw')
@@ -154,8 +154,8 @@ class GridSnapshot:
     def __init__(self, obstacle_dist, rough_veto, seen, terrain, origin_x, origin_y, cell_size,
                  robot_x, robot_y, timestamp=None, valid=None, blocked_latch=None, robot_yaw=None):
         self.blocked_latch = blocked_latch
-        # Imbardata del robot nella stessa fotografia, per riconoscere le celle sotto il
-        # corpo (vedi _under_body). None = non nota: si usa il cerchio inscritto.
+        # Robot yaw in the same snapshot, to recognize the cells under the
+        # body (see _under_body). None = unknown: the inscribed circle is used.
         self.robot_yaw = None if robot_yaw is None else float(robot_yaw)
         self.obstacle_dist = obstacle_dist
         self.rough_veto = rough_veto
@@ -167,22 +167,22 @@ class GridSnapshot:
         self.robot_x = float(robot_x)
         self.robot_y = float(robot_y)
         self.time = time.time() if timestamp is None else timestamp
-        self.valid = valid      # is_valid 2D (None = tutte attendibili): per il profilo di pendenza
+        self.valid = valid      # is_valid 2D (None = all reliable): for the slope profile
 
 
 def make_grid_snapshot(cells_obstacle_dist, rough_values, is_valid, terrain_valid_raw,
                        terrain_corrected, num_x, num_y, origin_x, origin_y, cell_size,
                        robot_x, robot_y, unwritten=None, robot_yaw=None):
     """
-    Costruisce la fotografia dai vettori piatti che il codice calcola gia' a ogni scansione.
+    Build the snapshot from the flat vectors the code already computes at every scan.
 
-    - rough_veto: stesso criterio di fuse_obstacle_mask (rugosita' > soglia, su cella valida).
-    - seen: il sensore ha dato una quota per quella cella (terrain_valid grezzo, confrontato
-      con spot_grid.TERRAIN_VALID_MIN e non con 0: dopo scala e offset lo 0 diventa +/-5e-17).
-      Non e' is_valid: is_valid esclude anche le celle scartate dal filtro sull'altezza del
-      suolo (muri), che invece sono state viste; l'ostacolo lo segnala obstacle_distance.
-    - unwritten: celle mai scritte dai sensori (correct_terrain con return_unwritten=True):
-      contano come NON viste, quindi il fronte si ferma li' con 'fine_dati'.
+    - rough_veto: same criterion as fuse_obstacle_mask (roughness > threshold, on a valid cell).
+    - seen: the sensor gave a height for that cell (raw terrain_valid, compared with
+      spot_grid.TERRAIN_VALID_MIN and not with 0: after scale and offset 0 becomes +/-5e-17).
+      It is not is_valid: is_valid also excludes the cells discarded by the ground height
+      filter (walls), which have been seen; obstacle_distance flags the obstacle.
+    - unwritten: cells never written by the sensors (correct_terrain with return_unwritten=True):
+      they count as NOT seen, so the frontier stops there with 'fine_dati'.
     """
     shape = (num_y, num_x)
     rough = np.asarray(rough_values, dtype=np.float64).reshape(shape)
@@ -193,8 +193,8 @@ def make_grid_snapshot(cells_obstacle_dist, rough_values, is_valid, terrain_vali
         seen = np.ones(shape, dtype=bool)
     if unwritten is not None and np.size(unwritten) == num_x * num_y:
         seen = seen & ~np.asarray(unwritten, dtype=bool).reshape(shape)
-    # Filtro temporale + isteresi su obstacle_distance (vedi _ObstacleHistory): fronte e
-    # controllo di rotazione leggono questa fotografia, non la lettura grezza.
+    # Temporal filter + hysteresis on obstacle_distance (see _ObstacleHistory): frontier and
+    # rotation check read this snapshot, not the raw reading.
     od_raw = np.asarray(cells_obstacle_dist, dtype=np.float64).reshape(shape)
     od_filtered, latch = OBSTACLE_HISTORY.update(od_raw, origin_x, origin_y, cell_size)
 
@@ -209,13 +209,13 @@ def make_grid_snapshot(cells_obstacle_dist, rough_values, is_valid, terrain_vali
 
 def _under_body(snap, xs, ys):
     """
-    True per i punti che stanno SOTTO IL CORPO del robot adesso: rettangolo
-    +/-ROBOT_HALF_LENGTH_M x +/-ROBOT_HALF_WIDTH_M attorno alla posa, orientato con
-    l'imbardata della fotografia. Senza imbardata, il cerchio inscritto (raggio mezza
-    larghezza), che sta sotto il corpo in qualunque orientamento.
+    True for the points that lie UNDER THE ROBOT'S BODY now: rectangle
+    +/-ROBOT_HALF_LENGTH_M x +/-ROBOT_HALF_WIDTH_M around the pose, oriented with the
+    snapshot's yaw. Without yaw, the inscribed circle (radius half width), which lies under
+    the body in any orientation.
 
-    Li' c'e' il robot, quindi non c'e' un ostacolo in cui entrare: quei punti non fermano
-    mai il fronte (stesso principio di geometry.rotation_is_clear).
+    The robot is there, so there is no obstacle to enter: those points never stop the
+    frontier (same principle as geometry.rotation_is_clear).
     """
     dx = np.asarray(xs, dtype=np.float64) - snap.robot_x
     dy = np.asarray(ys, dtype=np.float64) - snap.robot_y
@@ -229,7 +229,7 @@ def _under_body(snap, xs, ys):
 
 
 def _cells(snap, xs, ys):
-    """Indici di cella per indicizzazione diretta (niente ricerca del vicino) + maschera 'dentro'."""
+    """Cell indices for direct indexing (no neighbour search) + 'inside' mask."""
     ny, nx = snap.obstacle_dist.shape
     cols = np.floor((xs - snap.origin_x) / snap.cell_size).astype(np.int64)
     rows = np.floor((ys - snap.origin_y) / snap.cell_size).astype(np.int64)
@@ -238,7 +238,7 @@ def _cells(snap, xs, ys):
 
 
 def _polyline_samples(polyline, step):
-    """Campioni equispaziati lungo la spezzata: (xs, ys, s, indice del segmento)."""
+    """Equally spaced samples along the polyline: (xs, ys, s, segment index)."""
     xs, ys, ss, seg = [], [], [], []
     s0 = 0.0
     for k in range(len(polyline) - 1):
@@ -247,7 +247,7 @@ def _polyline_samples(polyline, step):
         if L < 1e-9:
             continue
         n = max(1, int(np.ceil(L / step)))
-        t = np.arange(n) / n                      # l'ultimo punto e' il primo del segmento dopo
+        t = np.arange(n) / n                      # the last point is the first of the next segment
         xs.append(x1 + t * (x2 - x1)); ys.append(y1 + t * (y2 - y1))
         ss.append(s0 + t * L); seg.append(np.full(n, k))
         s0 += L
@@ -263,34 +263,34 @@ def _polyline_samples(polyline, step):
 def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, body=None,
                           air_m=None):
     """
-    Fin dove il percorso e' confermato libero adesso.
+    How far the path is confirmed free now.
 
     Args:
-        polyline: [(x, y), ...] -- il PRIMO punto e' la posizione del robot, poi i waypoint.
-        snap: GridSnapshot della scansione.
-        extend_end_m: prolunga l'ultimo segmento di questa lunghezza oltre l'obiettivo, per
-            verificare anche il terreno sotto il muso quando il robot ci arriva. Default
+        polyline: [(x, y), ...] -- the FIRST point is the robot position, then the waypoints.
+        snap: GridSnapshot of the scan.
+        extend_end_m: extend the last segment by this length beyond the goal, to also check
+            the terrain under the nose when the robot gets there. Default
             FRONTIER_BODY_HALF_LENGTH_M.
-        check_slope: controlla anche la pendenza dei tratti liberi.
-        body: (meta' ingombro lungo la marcia, meta' ingombro di traverso), vedi
-            geometry.body_extents. Default: robot che guarda dove va (0.55, 0.25).
-        air_m: aria fra fianco e ostacolo. None = ROBOT_CLEARANCE_AIR_M (0.05), cioe' la
-            distanza minima 0.30 con cui si DECIDE di partire. Il thread di arresto passa
-            geometry.FRONTIER_ABORT_AIR_M (0.0): a movimento in corso ci si ferma solo per
-            un'intrusione vera, a meno di mezza larghezza (0.25). I 5 cm fra le due soglie
-            evitano di fermarsi su un tratto appena dichiarato libero. Con un'aria diversa
-            dalla nominale l'isteresi non si applica (e' tarata sulla soglia 0.30).
+        check_slope: also check the slope of the free stretches.
+        body: (half footprint along the travel, half footprint across), see
+            geometry.body_extents. Default: robot facing where it goes (0.55, 0.25).
+        air_m: air between flank and obstacle. None = ROBOT_CLEARANCE_AIR_M (0.05), i.e. the
+            minimum distance 0.30 with which it DECIDES to start. The stop thread passes
+            geometry.FRONTIER_ABORT_AIR_M (0.0): while moving it only stops for a real
+            intrusion, closer than half the width (0.25). The 5 cm between the two thresholds
+            avoid stopping on a stretch just declared free. With an air different from the
+            nominal one the hysteresis does not apply (it is tuned on the 0.30 threshold).
 
-        I campioni sotto il corpo del robot adesso non sono mai ostacolo (vedi _under_body).
+        The samples under the robot's body now are never an obstacle (see _under_body).
 
-    Returns: dict con
-        dist        distanza lungo il percorso del primo punto NON libero (m)
-        reason      vedi docstring del modulo
-        stop_xy     dove si ferma il fronte
-        value       il valore che ha fermato il fronte (obstacle_distance, pendenza, ...)
-        path_len    lunghezza del percorso vero, senza prolungamento
-        od_robot    obstacle_distance sotto il robot
-        clearance   distanza minima applicata nel primo tratto
+    Returns: dict with
+        dist        distance along the path of the first NON-free point (m)
+        reason      see the module docstring
+        stop_xy     where the frontier stops
+        value       the value that stopped the frontier (obstacle_distance, slope, ...)
+        path_len    length of the real path, without extension
+        od_robot    obstacle_distance under the robot
+        clearance   minimum distance applied on the first stretch
         robot_xy, time
     """
     half_along, half_across = body if body is not None else (geometry.FRONTIER_BODY_HALF_LENGTH_M,
@@ -301,7 +301,7 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
         extend_end_m = half_along
     pl = [(float(x), float(y)) for x, y in polyline]
 
-    # Lunghezza vera e prolungamento oltre l'obiettivo
+    # Real length and extension beyond the goal
     path_len = float(sum(np.hypot(pl[k + 1][0] - pl[k][0], pl[k + 1][1] - pl[k][1])
                          for k in range(len(pl) - 1)))
     if len(pl) >= 2 and extend_end_m > 0:
@@ -313,7 +313,7 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
     xs, ys, ss, seg, _ = _polyline_samples(pl, geometry.FRONTIER_SAMPLE_STEP_M)
     rows, cols, inside = _cells(snap, xs, ys)
 
-    # obstacle_distance sotto il robot: decide se siamo gia' in uno spazio stretto
+    # obstacle_distance under the robot: decides whether we are already in a tight space
     r0, c0, in0 = _cells(snap, np.array([snap.robot_x]), np.array([snap.robot_y]))
     od_robot = float(snap.obstacle_dist[r0[0], c0[0]]) if in0[0] else np.inf
     clearance_escape = max(geometry.FRONTIER_MIN_CLEARANCE_M,
@@ -326,27 +326,27 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
 
     no_data = ~inside | (~snap.seen[rows, cols] & ~near_robot)
     obstacle = inside & (od < thr) & ~under_body
-    # Isteresi: una cella gia' bloccante resta tale finche' non risale sopra
-    # FRONTIER_CLEARANCE_M + OBSTACLE_HYSTERESIS_M (vedi _ObstacleHistory). Solo dove vale la
-    # soglia nominale: dove la regola di uscita l'ha abbassata il robot sta uscendo da uno
-    # spazio stretto, e l'isteresi lo inchioderebbe li'.
+    # Hysteresis: a cell already blocking stays so until it rises above
+    # FRONTIER_CLEARANCE_M + OBSTACLE_HYSTERESIS_M (see _ObstacleHistory). Only where the
+    # nominal threshold applies: where the exit rule lowered it the robot is getting out of a
+    # tight space, and the hysteresis would pin it there.
     if snap.blocked_latch is not None and use_latch:
         nominal = thr >= clearance_nominal - 1e-9
         obstacle |= inside & nominal & snap.blocked_latch[rows, cols] & ~under_body
-    # Regola di uscita da uno spazio stretto: nel primo metro (FRONTIER_ESCAPE_DIST_M) la
-    # soglia scende a od_robot - 2 cm, ma vale la promessa "non avvicinarsi piu' di quanto
-    # gia' si sia": un campione sotto la soglia nominale e' ammesso solo se non scende sotto
-    # il meglio raggiunto finora lungo il percorso (meno la tolleranza). Allontanarsi si',
-    # riavvicinarsi no: un palo sul fianco poco piu' avanti resta bloccante.
+    # Exit rule from a tight space: in the first metre (FRONTIER_ESCAPE_DIST_M) the
+    # threshold drops to od_robot - 2 cm, but the promise "do not get closer than you
+    # already are" holds: a sample below the nominal threshold is allowed only if it does not
+    # drop below the best reached so far along the path (minus the tolerance). Moving away yes,
+    # getting closer again no: a pole on the flank a bit further ahead stays blocking.
     if clearance_escape < clearance_nominal:
         od_capped = np.minimum(np.where(inside, od, clearance_nominal), clearance_nominal)
-        # Sotto il corpo il riferimento e' la distanza del robot adesso, non le letture sotto
-        # la pancia (che alzerebbero "il meglio raggiunto" senza motivo).
+        # Under the body the reference is the robot's distance now, not the readings under
+        # the belly (which would raise "the best reached" for no reason).
         od_capped = np.where(under_body, min(od_robot, clearance_nominal), od_capped)
         best_so_far = np.maximum.accumulate(od_capped)
         in_escape = inside & (ss < geometry.FRONTIER_ESCAPE_DIST_M) & (od < clearance_nominal) & ~under_body
-        # Tolleranza: almeno 1.5 celle. obstacle_distance va a gradini di una cella (3 cm), e
-        # lungo un muro quasi parallelo al percorso un gradino non deve contare come
+        # Tolerance: at least 1.5 cells. obstacle_distance goes in steps of one cell (3 cm), and
+        # along a wall almost parallel to the path a step must not count as
         # riavvicinamento.
         tol = max(0.02, 1.5 * snap.cell_size)
         obstacle = obstacle | (in_escape & (od < best_so_far - tol))
@@ -363,8 +363,8 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
             reason, value = 'fine_dati', None
         elif obstacle[k]:
             reason, value = 'ostacolo', float(od[k])
-            # La soglia EFFETTIVA in quel punto e se ha deciso l'isteresi, per il log: senza,
-            # "ostacolo a 0.27 m (minimo 0.25 m)" sembrerebbe una contraddizione.
+            # The EFFECTIVE threshold at that point and whether the hysteresis decided, for the log:
+            # without it, "ostacolo a 0.27 m (minimo 0.25 m)" would look like a contradiction.
             result['stop_threshold'] = float(thr[k])
             result['stop_by_latch'] = bool(
                 snap.blocked_latch is not None and use_latch
@@ -376,10 +376,10 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
         reason, value = 'fine_percorso', None
         dist, stop_xy = float(ss[-1]), (float(xs[-1]), float(ys[-1]))
 
-    # Pendenza sui tratti gia' confermati liberi, segmento per segmento: se un tratto e'
-    # troppo ripido il fronte arretra al suo inizio. Stessa funzione e stessa soglia del PRM
-    # sull'arco fra i nodi (il PRM usa in piu' il valore col corpo, quindi e' piu' severo:
-    # il fronte non puo' rifiutare per pendenza un arco che il PRM ha ammesso).
+    # Slope on the stretches already confirmed free, segment by segment: if a stretch is
+    # too steep the frontier moves back to its start. Same function and same threshold as the
+    # PRM on the edge between the nodes (the PRM also uses the value with the body, so it is
+    # stricter: the frontier cannot refuse for slope an edge the PRM has accepted).
     if check_slope and slopes.FRONTIER_SLOPE_MIN_LENGTH_M > 0:
         s_start = 0.0
         for k in range(len(pl) - 1):
@@ -405,12 +405,12 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
 
 def allowed_advance(frontier):
     """
-    Quanto puo' avanzare il CENTRO del robot lungo il percorso.
+    How far the robot CENTRE can advance along the path.
 
-    Se tutto il percorso (prolungamento compreso) e' libero, fino all'obiettivo. Altrimenti
-    il centro si ferma meta' lunghezza del corpo + margine prima del primo punto non libero,
-    cosi' anche il muso resta su terreno confermato. Vale anche per 'fine_dati': il muso
-    non deve finire su terreno mai visto.
+    If the whole path (extension included) is free, up to the goal. Otherwise the centre
+    stops half a body length + margin before the first non-free point, so the nose also
+    stays on confirmed terrain. This also holds for 'fine_dati': the nose must not end up
+    on terrain never seen.
     """
     if frontier['reason'] == 'fine_percorso':
         return frontier['path_len']
@@ -419,7 +419,7 @@ def allowed_advance(frontier):
 
 
 def point_along(polyline, s):
-    """Il punto a distanza s lungo la spezzata (troncato agli estremi) e l'indice del segmento."""
+    """The point at distance s along the polyline (clamped at the ends) and the segment index."""
     s_acc = 0.0
     for k in range(len(polyline) - 1):
         (x1, y1), (x2, y2) = polyline[k], polyline[k + 1]
@@ -432,7 +432,7 @@ def point_along(polyline, s):
 
 
 def describe_frontier(frontier):
-    """Una riga leggibile per il log."""
+    """One readable line for the log."""
     r = frontier['reason']
     adv = allowed_advance(frontier)
     sx, sy = frontier['stop_xy']
@@ -459,19 +459,19 @@ def describe_frontier(frontier):
 
 
 # =============================================================================
-# Verificatore in background: tiene aggiornato il fronte mentre il robot cammina.
+# Background checker: keeps the frontier up to date while the robot walks.
 # =============================================================================
 class ArcVerificationTracker:
     """
-    Thread in background che ricalcola il fronte sicuro sul percorso corrente a ogni
-    scansione (~5 Hz), con dati propri e freschi.
+    Background thread that recomputes the safe frontier on the current path at every scan
+    (~5 Hz), with its own fresh data.
 
-    Serve DURANTE il movimento: il ciclo principale lo interroga per fermare il robot se il
-    fronte si accorcia sotto il punto verso cui sta andando. Prima di partire il ciclo
-    principale calcola il fronte da se', sulla propria scansione.
+    Used DURING the move: the main loop queries it to stop the robot if the frontier gets
+    shorter than the point it is heading to. Before starting the main loop computes the
+    frontier itself, on its own scan.
 
-    Il risultato porta la versione del percorso su cui e' stato calcolato: dopo una
-    ripianificazione un fronte vecchio non puo' essere scambiato per uno nuovo.
+    The result carries the version of the path it was computed on: after a replan an old
+    frontier cannot be mistaken for a new one.
     """
 
     def __init__(self, robot):
@@ -479,20 +479,20 @@ class ArcVerificationTracker:
         self._robot_state_client = self.robot.ensure_client(RobotStateClient.default_service_name)
         self._local_grid = spot_grid.LocalGrid(self.robot)
         self._lock = threading.Lock()
-        self._waypoints = []          # [(x, y), ...] SENZA la posizione del robot
+        self._waypoints = []          # [(x, y), ...] WITHOUT the robot position
         self._extend_end_m = None
         self._body = None
         self._path_version = 0
-        self._latest = None           # ultimo fronte calcolato
+        self._latest = None           # last frontier computed
         self._running = False
         self._thread = None
 
-    # --- interfaccia per il ciclo principale -------------------------------------------
+    # --- interface for the main loop -----------------------------------------------------
     def update_path(self, waypoints_xy, extend_end_m=None, body=None):
         """
-        Imposta il percorso da seguire (solo i waypoint). Restituisce la nuova versione.
-        body: ingombro del corpo rispetto alla marcia (vedi compute_safe_frontier), da passare
-        quando il robot cammina senza girarsi.
+        Set the path to follow (waypoints only). Returns the new version.
+        body: body footprint relative to the travel (see compute_safe_frontier), to pass
+        when the robot walks without turning.
         """
         with self._lock:
             self._waypoints = [(float(x), float(y)) for x, y in waypoints_xy]
@@ -506,7 +506,7 @@ class ArcVerificationTracker:
         self.update_path([])
 
     def get_frontier(self):
-        """Copia dell'ultimo fronte (dict) con 'path_version', oppure None."""
+        """Copy of the last frontier (dict) with 'path_version', or None."""
         with self._lock:
             return None if self._latest is None else dict(self._latest)
 
@@ -522,7 +522,7 @@ class ArcVerificationTracker:
         self._running = False
         print('ArcVerificationTracker stopped.')
 
-    # --- ciclo in background -------------------------------------------------------------
+    # --- background loop -------------------------------------------------------------------
     def _process_loop(self):
         while self._running:
             with self._lock:
@@ -538,14 +538,14 @@ class ArcVerificationTracker:
                 if snap is None:
                     time.sleep(0.2)
                     continue
-                # Questo fronte serve SOLO all'arresto a meta' movimento: soglia d'intrusione
-                # (mezza larghezza, senza aria), vedi geometry.FRONTIER_ABORT_AIR_M.
+                # This frontier is ONLY for the stop halfway through a move: intrusion threshold
+                # (half width, without air), see geometry.FRONTIER_ABORT_AIR_M.
                 frontier = compute_safe_frontier([(snap.robot_x, snap.robot_y)] + waypoints, snap,
                                                  extend_end_m=extend, body=body,
                                                  air_m=geometry.FRONTIER_ABORT_AIR_M)
                 frontier['path_version'] = version
                 with self._lock:
-                    if version == self._path_version:   # nel frattempo non e' cambiato il percorso
+                    if version == self._path_version:   # the path has not changed in the meantime
                         self._latest = frontier
             except Exception as e:
                 LOGGER.error(f"Errore nel calcolo del fronte: {e}")
@@ -566,7 +566,7 @@ class ArcVerificationTracker:
         num_y = main_proto.local_grid.extent.num_cells_y
         cell_size = main_proto.local_grid.extent.cell_size
 
-        # Posa del robot NELLO STESSO istante della griglia (stessa fotografia di trasformate)
+        # Robot pose AT THE SAME instant as the grid (same snapshot of transforms)
         transforms_snapshot = main_proto.local_grid.transforms_snapshot
         vision_tform_body = get_a_tform_b(transforms_snapshot, VISION_FRAME_NAME, BODY_FRAME_NAME)
         robot_x, robot_y = vision_tform_body.position.x, vision_tform_body.position.y
@@ -593,8 +593,8 @@ class ArcVerificationTracker:
 
 def is_arc_in_fov(x1, y1, x2, y2, pts, fov_margin=0.0):
     """
-    True se l'arco sta TUTTO dentro la finestra della griglia locale (~3.8 m). Non e' il
-    campo visivo delle telecamere. Usata dalla ritirata.
+    True if the edge lies ENTIRELY inside the local grid window (~3.8 m). It is not the
+    cameras' field of view. Used by the retreat.
     """
     if len(pts) == 0:
         return False
@@ -611,27 +611,27 @@ def is_arc_in_fov(x1, y1, x2, y2, pts, fov_margin=0.0):
 
 
 def verify_arc_safety(x1, y1, x2, y2, pts, obstacle_mask):
-    """Controllo puntuale di un segmento sulla maschera fusa. Usato dalla ritirata."""
+    """Point check of a segment on the fused mask. Used by the retreat."""
     return spotUtils.check_line_of_sight(x1, y1, x2, y2, pts, obstacle_mask)
 
 
 # =========================================================================================
-# LE DECISIONI SUL FRONTE: cosa fare adesso dato il fronte sicuro e la scansione fresca.
-# Funzioni pure (niente robot, niente I/O), provate dal test end-to-end e dal rigioco.
+# DECISIONS ON THE FRONTIER: what to do now given the safe frontier and the fresh scan.
+# Pure functions (no robot, no I/O), tested by the end-to-end test and the replay.
 # =========================================================================================
 def goal_still_reachable(snap, goal_x, goal_y):
     """
-    Il punto obiettivo e' ancora raggiungibile sui dati FRESCHI?
+    Is the goal point still reachable on the FRESH data?
 
-    Il fronte sicuro pretende che la linea centrale del percorso stia ad almeno
-    FRONTIER_CLEARANCE_M da un ostacolo. Un punto obiettivo con obstacle_distance sotto
-    quella soglia non potra' MAI essere raggiunto, per quante scansioni si facciano: il
-    robot aspetterebbe e dichiarerebbe un blocco. Succede perche' il punto si sceglie da
-    lontano, quando la zona e' ancora ignota.
+    The safe frontier requires the centre line of the path to be at least
+    FRONTIER_CLEARANCE_M from an obstacle. A goal point with obstacle_distance below that
+    threshold can NEVER be reached, however many scans are made: the robot would wait and
+    declare a block. It happens because the point is chosen from afar, when the area is
+    still unknown.
 
     Returns:
-        True se il punto e' raggiungibile o se non lo si puo' giudicare (fuori dalla
-        finestra scansionata: non sappiamo, e non si tocca niente sulla base di nulla).
+        True if the point is reachable or if it cannot be judged (outside the scanned
+        window: we do not know, and nothing is touched on the basis of nothing).
     """
     if snap is None:
         return True
@@ -643,28 +643,28 @@ def goal_still_reachable(snap, goal_x, goal_y):
 
 def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=P.PRM_NODE_MIN_CLEARANCE_M):
     """
-    Scarta dal grafo i nodi che cadono DENTRO un ostacolo.
+    Discard from the graph the nodes that fall INSIDE an obstacle.
 
-    Gli archi che attraversano celle occupate sono vetati (_occupancy_blocked), ma i nodi
-    nascono dal reticolo prima che il robot abbia visto qualcosa: un nodo dentro un
-    ostacolo resterebbe destinazione o punto di passaggio, da scoprire solo sul posto.
+    The edges crossing occupied cells are vetoed (_occupancy_blocked), but the nodes are
+    born from the lattice before the robot has seen anything: a node inside an obstacle
+    would remain a destination or waypoint, to be discovered only on the spot.
 
-    Soglia min_clearance_m = FRONTIER_CLEARANCE_M (0.30): sotto quella il centro del corpo
-    non ci sta e il fronte non ci arrivera' mai, quindi il nodo e' inutile sia come
-    destinazione sia come punto di passaggio.
+    Threshold min_clearance_m = FRONTIER_CLEARANCE_M (0.30): below that the body centre
+    does not fit and the frontier will never get there, so the node is useless both as a
+    destination and as a waypoint.
 
-    Si scarta SOLO dove la cella e' stata davvero osservata: ignoto non e' occupato (e' la
-    stessa regola per cui il fronte distingue 'fine_dati' da 'ostacolo'). Un nodo fuori
-    dalla finestra o mai visto resta dov'e' e verra' giudicato quando lo si vedra'.
+    Discarded ONLY where the cell has really been observed: unknown is not occupied (the
+    same rule by which the frontier tells 'fine_dati' from 'ostacolo'). A node outside the
+    window or never seen stays where it is and will be judged when it is seen.
 
-    Si rivaluta a ogni ciclo, quindi un nodo che si scopre dentro un muro cade subito; e
-    siccome gli archi vengono tolti in modo NON permanente, un nodo giudicato male da una
-    lettura rumorosa torna in gioco quando i dati freschi lo smentiscono.
+    Re-evaluated at every loop, so a node found to be inside a wall drops at once; and
+    since the edges are removed NON-permanently, a node misjudged by a noisy reading comes
+    back into play when the fresh data contradicts it.
 
-    La finestra della scansione contiene solo una piccola parte del grafo (~7%), e lo
-    scarto e' soft: al refresh successivo gli archi tornano.
+    The scan window contains only a small part of the graph (~7%), and the discard is
+    soft: at the next refresh the edges come back.
     """
-    ids = [nid for nid in prm.nodes if prm.edges.get(nid)]   # gia' isolati: niente da togliere
+    ids = [nid for nid in prm.nodes if prm.edges.get(nid)]   # already isolated: nothing to remove
     if not ids:
         return []
     xy = np.array([prm.nodes[nid] for nid in ids], dtype=np.float64)

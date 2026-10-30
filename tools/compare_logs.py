@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Confronta due registrazioni dei log del test end-to-end (E2E_LOG_DIR), ignorando cio' che
-cambia da un'esecuzione all'altra senza cambiare il comportamento: tempi, cartelle
-temporanee, orari. Serve a verificare che una ristrutturazione del codice non cambi niente.
+Compare two recordings of the end-to-end test logs (E2E_LOG_DIR), ignoring what changes
+from one run to the next without changing behaviour: timings, temporary folders, clock
+times. Used to check that a code restructure changes nothing.
 
-    E2E_LOG_DIR=/tmp/prima python3 test_e2e_loop.py
-    ... modifica ...
-    E2E_LOG_DIR=/tmp/dopo  python3 test_e2e_loop.py
-    python3 confronta_log.py /tmp/prima /tmp/dopo
+    E2E_LOG_DIR=/tmp/before python3 tests/test_e2e_loop.py
+    ... change ...
+    E2E_LOG_DIR=/tmp/after  python3 tests/test_e2e_loop.py
+    python3 tools/compare_logs.py /tmp/before /tmp/after
 
-Uscita 0 = identici, 1 = differenze (le prime per ogni scenario sono stampate).
+Exit 0 = identical, 1 = differences (the first ones of each scenario are printed).
 """
 import difflib
 import os
@@ -19,11 +19,11 @@ import sys
 _RULES = [
     (re.compile(r'\d+(\.\d+)?\s*s\b'), '<T>s'),                 # durate
     (re.compile(r'\d+(\.\d+)?\s*ms\b'), '<T>ms'),
-    (re.compile(r'/tmp/[^\s\'",)]+'), '<TMP>'),                  # cartelle temporanee
+    (re.compile(r'/tmp/[^\s\'",)]+'), '<TMP>'),                  # temporary folders
     (re.compile(r'\b\d{2}:\d{2}:\d{2}(\.\d+)?\b'), '<ORA>'),     # orari
-    (re.compile(r'0x[0-9a-f]+'), '<ADDR>'),                      # indirizzi di oggetti
-    (re.compile(r'\d{2}-\d{2}-\d{4}_\d{2}-\d{2}-\d{2}'), '<DATA>'),   # nomi delle cartelle
-    (re.compile(r'\d+(\.\d+)?\s*min\b'), '<T>min'),               # eta' dei waypoint
+    (re.compile(r'0x[0-9a-f]+'), '<ADDR>'),                      # object addresses
+    (re.compile(r'\d{2}-\d{2}-\d{4}_\d{2}-\d{2}-\d{2}'), '<DATA>'),   # folder names
+    (re.compile(r'\d+(\.\d+)?\s*min\b'), '<T>min'),               # waypoint ages
 ]
 
 
@@ -31,11 +31,11 @@ def normalize(text):
     out = []
     for line in text.splitlines():
         if line.startswith('[TEMPO]') or '[TEMPO]' in line:
-            continue                                            # righe di soli tempi
+            continue                                            # timing-only lines
         for rx, rep in _RULES:
             line = rx.sub(rep, line)
         if re.search(r'<T>s\s+\(\s*[\d.]+%\)', line):
-            continue                                            # ripartizione dei tempi
+            continue                                            # timing breakdown
         out.append(line)
     return out
 

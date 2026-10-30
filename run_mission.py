@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Lancia una missione di esplorazione con Spot.
+Run an exploration mission with Spot.
 
-    python3 run_mission.py [--rows R --cols C --cell L --grafo reticolo|casuale ...]
+    python3 run_mission.py [--rows R --cols C --cell L --graph reticolo|casuale ...]
 
-Gli argomenti sono quelli di spot_explorer.mission.run (python3 run_mission.py --help).
+The arguments are those of spot_explorer.mission.run (python3 run_mission.py --help).
 """
 from spot_explorer.mission.run import main
 

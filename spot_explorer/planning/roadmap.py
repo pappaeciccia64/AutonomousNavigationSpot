@@ -1,11 +1,11 @@
 """
-PRM (Probabilistic Road Map) della missione: nodi del reticolo (mission_graph), archi validi
-con il loro costo, ricerca del percorso (Dijkstra).
+Mission PRM (Probabilistic Road Map): lattice nodes (mission_graph), valid edges with
+their cost, path search (Dijkstra).
 
-Un arco e' valido se non passa vicino a ostacoli (scansione dal vivo e mappa globale) e non e'
-troppo ripido; il costo e' 1.0 * lunghezza + 2.0 * pendenza longitudinale + 2.0 * pendenza
-laterale (+ 0 * rugosita'). Gli archi si rivalutano a inizio cella (mission_graph,
-add_edges_to_prm) e durante il movimento attorno al robot (refresh_local_edge_weights).
+An edge is valid if it does not pass near obstacles (live scan and global map) and is not
+too steep; the cost is 1.0 * length + 2.0 * longitudinal slope + 2.0 * lateral slope
+(+ 0 * roughness). Edges are re-evaluated at cell start (mission_graph,
+add_edges_to_prm) and during the move around the robot (refresh_local_edge_weights).
 """
 
 import numpy as np
@@ -17,95 +17,95 @@ from spot_explorer.perception import global_maps
 from spot_explorer.perception import slopes
 try:
     from scipy.spatial import cKDTree
-except Exception:          # scipy c'e' gia' (spotGrid usa scipy.ndimage); ripiego per sicurezza
+except Exception:          # scipy is already there (the perception package uses scipy.ndimage); fallback for safety
     cKDTree = None
 
 
-# Campioni per metro con cui si controlla l'occupazione lungo un arco (minimo 5), uguali
-# ovunque. Ogni campione controlla un disco di raggio geometry.PRM_EDGE_SAFETY_MARGIN_M
-# (0.13): con un campione ogni 10 cm, a meta' fra due campioni il disco copre ancora 0.12 m,
-# cioe' la linea dell'arco resta a ~0.27 m dagli ostacoli (geometry.PLAN_CLEARANCE_M = 0.28;
-# il fronte ne pretende 0.25).
+# Samples per metre with which occupancy is checked along an edge (minimum 5), the same
+# everywhere. Every sample checks a disk of radius geometry.PRM_EDGE_SAFETY_MARGIN_M
+# (0.13): with a sample every 10 cm, halfway between two samples the disk still covers 0.12 m,
+# i.e. the edge line stays ~0.27 m from obstacles (geometry.PLAN_CLEARANCE_M = 0.28;
+# the frontier requires 0.25).
 OCCUPANCY_SAMPLES_PER_M = 10
 OCCUPANCY_SAMPLES_MIN = 5
 
-# --- SCARTO PRELIMINARE SULLA SCANSIONE DAL VIVO ----------------------------------------
-# La mappa globale dichiara occupata una cella solo dopo 2 conferme, quindi alla prima
-# scansione di un posto non sa ancora niente. Prima di tutto il resto, un arco si scarta se
-# un suo campione (ogni 10 cm) cade su una cella VISTA nella scansione attuale con
-# obstacle_distance sotto LIVE_PREFILTER_OD_M e non sotto il corpo del robot.
-#   - La soglia e' la distanza del fronte (geometry.FRONTIER_CLEARANCE_M, 0.25 m): toglie
-#     gli archi che il fronte rifiuterebbe. Con una soglia sotto il fronte (0.20 m) il
-#     pianificatore sceglieva archi a 0.20-0.25 m che il fronte poi rifiutava.
-#   - NON la distanza di pianificazione (0.28, quella della mappa globale): da un punto
-#     stretto gli archi d'uscita passano per forza vicino agli ostacoli, e il fronte li
-#     ammette (nel primo metro basta non avvicinarsi, vedi FRONTIER_ESCAPE_DIST_M). A 0.28
-#     il rigioco della missione 13-10 11:22 perdeva il percorso dall'ultimo inizio di cella.
-#   - E' una lettura vettoriale, costa pochissimo, e viene prima della pendenza.
-#   - Non e' permanente: si rifa' a ogni refresh con la scansione nuova.
-# None = disattivato.
+# --- PRELIMINARY DISCARD ON THE LIVE SCAN -----------------------------------------------
+# The global map declares a cell occupied only after 2 confirmations, so at the first
+# scan of a place it knows nothing yet. Before anything else, an edge is discarded if
+# one of its samples (every 10 cm) falls on a cell SEEN in the current scan with
+# obstacle_distance below LIVE_PREFILTER_OD_M and not under the robot's body.
+#   - The threshold is the frontier distance (geometry.FRONTIER_CLEARANCE_M, 0.25 m): it removes
+#     the edges the frontier would refuse. With a threshold below the frontier (0.20 m) the
+#     planner chose edges at 0.20-0.25 m that the frontier then refused.
+#   - NOT the planning distance (0.28, that of the global map): from a tight
+#     spot the exit edges necessarily pass near obstacles, and the frontier
+#     allows them (in the first metre it is enough not to get closer, see FRONTIER_ESCAPE_DIST_M). At 0.28
+#     the replay of mission 13-10 11:22 lost the path from the last cell start.
+#   - It is a vectorized read, costs very little, and comes before the slope.
+#   - It is not permanent: it is redone at every refresh with the new scan.
+# None = disabled.
 LIVE_PREFILTER_OD_M = geometry.FRONTIER_CLEARANCE_M     # = 0.25
 
-# --- Aggancio della posizione del robot al grafo -------------------------------------------
-# Il grafo non cresce durante la missione: add_stop_node aggancia la posizione al nodo
-# ESISTENTE adatto (vedi anchor_node).
-#   ANCHOR_SEARCH_M: raggio in cui cercare il nodo (lascia spazio per scartare quelli dietro
-#     un ostacolo).
-#   ANCHOR_ON_NODE_M: entro questa distanza il robot e' "sul" nodo: solo allora un blocco o
-#     un fallimento sull'arco che ne parte riguarda davvero quell'arco del grafo.
-#   ANCHOR_IGNORE_NEAR_M: attorno alla posizione del robot la mappa globale non conta per
-#     l'aggancio (li' c'e' il robot); mezza larghezza piu' margine.
+# --- Attaching the robot position to the graph ---------------------------------------------
+# The graph does not grow during the mission: add_stop_node attaches the position to the
+# suitable EXISTING node (see anchor_node).
+#   ANCHOR_SEARCH_M: radius in which to look for the node (leaves room to discard those behind
+#     an obstacle).
+#   ANCHOR_ON_NODE_M: within this distance the robot is "on" the node: only then does a block or
+#     a failure on the edge leaving it really concern that graph edge.
+#   ANCHOR_IGNORE_NEAR_M: around the robot position the global map does not count for
+#     attaching (the robot is there); half width plus margin.
 ANCHOR_SEARCH_M = 1.0
 ANCHOR_ON_NODE_M = 0.15
 ANCHOR_IGNORE_NEAR_M = 0.30
 
-# Attorno al nodo in cui il robot si trova ADESSO, la mappa globale degli ostacoli non si usa
-# per i primi STOP_NODE_MAP_IGNORE_M di ogni arco: li' giudica il fronte sicuro sui dati dal
-# vivo. Serve per esempio a un robot rialzato dopo una caduta, che sta DENTRO il disco
-# pericoloso (0.50 m) segnato attorno al punto: senza, ogni arco in uscita verrebbe scartato.
-# Vale SOLO per il nodo corrente (set_robot_node).
+# Around the node the robot is in NOW, the global obstacle map is not used
+# for the first STOP_NODE_MAP_IGNORE_M of every edge: there the safe frontier judges on the live
+# data. Needed for example by a robot that got up after a fall, which is INSIDE the hazard
+# disk (0.50 m) marked around the spot: without it, every outgoing edge would be discarded.
+# Applies ONLY to the current node (set_robot_node).
 STOP_NODE_MAP_IGNORE_M = 0.70
 
-# Raggio entro cui refresh_local_edge_weights rivaluta gli archi durante il movimento. Il
-# robot nel passo successivo percorre pochi archi vicini; fuori da qui gli archi tengono i
-# pesi dell'ultima valutazione (la sicurezza resta al fronte, sui dati dal vivo). 1.25 m e'
-# la lunghezza massima degli archi: l'arco che il robot sta per percorrere ricade sempre per
-# intero nella zona rivalutata. None = nessun limite.
+# Radius within which refresh_local_edge_weights re-evaluates the edges during the move. The
+# robot travels a few nearby edges in the next step; outside here the edges keep the
+# weights of the last evaluation (safety stays with the frontier, on the live data). 1.25 m is
+# the maximum edge length: the edge the robot is about to travel always falls
+# entirely in the re-evaluated area. None = no limit.
 REFRESH_RADIUS_M = 1.25
 
-# Pendenze delle coppie del refresh calcolate in blocco con le matrici (vedi
-# precompute_arc_slopes), come a inizio cella (mission_graph.BATCH_SLOPES).
-# False = arco per arco; il risultato e' identico.
+# Slopes of the refresh pairs computed in batch with matrices (see
+# precompute_arc_slopes), as at cell start (mission_graph.BATCH_SLOPES).
+# False = edge by edge; the result is identical.
 REFRESH_BATCH_SLOPES = True
 
 
 def body_slope(prof):
     """
-    (long, lat, has) da usare per veto, costo e andatura, dato il risultato di
-    compute_arc_slope_profile: con 6 valori (body=True) quelli col corpo (il peggiore fra arco
-    e arco allungato di mezzo corpo, vedi slopes._body_slope); con 3 valori quelli
-    dell'arco. Se l'arco non ha dati suoi restano quelli dell'arco: l'allungamento non
-    trasforma un arco mai visto in uno misurato.
+    (long, lat, has) to use for veto, cost and gait, given the result of
+    compute_arc_slope_profile: with 6 values (body=True) those with the body (the worse of
+    edge and edge extended by half a body, see slopes._body_slope); with 3 values those of
+    the edge. If the edge has no data of its own the edge values remain: the extension does
+    not turn an edge never seen into a measured one.
     """
     if prof[2] and len(prof) == 6:
         return prof[3], prof[4], True
     return prof[0], prof[1], prof[2]
 
 
-# AGGIORNAMENTO LOCALE DEL GRAFO (vedi mission_graph.MissionGraph.add_edges_to_prm). A inizio
-# cella si rivalutano solo gli archi vicini alle zone con dati nuovi dall'ultima valutazione
-# (dirty_rects: le finestre delle scansioni, l'unico posto in cui cambiano le mappe).
-# DIRTY_MARGIN_M e' fin dove la valutazione di un arco legge i dati oltre il suo rettangolo:
-# mezzo corpo oltre gli estremi, fetta laterale della pendenza, margine d'occupazione, piu'
-# un decimetro di sicurezza. Ridurlo rompe l'uguaglianza con la costruzione completa
-# (test_replay.py lo controlla).
+# LOCAL GRAPH UPDATE (see mission_graph.MissionGraph.add_edges_to_prm). At cell
+# start only the edges near the areas with new data since the last evaluation are re-evaluated
+# (dirty_rects: the scan windows, the only place where the maps change).
+# DIRTY_MARGIN_M is how far the evaluation of an edge reads data beyond its rectangle:
+# half a body beyond the ends, lateral slope slice, occupancy margin, plus
+# a decimetre of safety. Reducing it breaks the equality with the full build
+# (test_replay.py checks it).
 DIRTY_MARGIN_M = (slopes.ARC_BODY_EXTENSION_M + slopes.LATERAL_SLICE_HALF_WIDTH_M
                   + geometry.PRM_EDGE_SAFETY_MARGIN_M + 0.10)
 
 
 class PRM:
     """
-    Grafo della missione: nodi del reticolo, archi validi con il loro costo, Dijkstra.
+    Mission graph: lattice nodes, valid edges with their cost, Dijkstra.
     """
 
     def __init__(self, max_edge_length: float = 2.0, connection_radius: float = 3.0,
@@ -113,120 +113,120 @@ class PRM:
                  beta_lateral: float = None):
         """
         Args:
-            max_edge_length, min_edge_length: lunghezza massima e minima degli archi (m)
-            connection_radius: raggio entro cui cercare i vicini (m)
-            alpha: peso della lunghezza nel costo
-            beta: peso della pendenza LONGITUDINALE (beccheggio)
-            gamma: peso della rugosita' (0: oggi la rugosita' non entra nel costo)
-            beta_lateral: peso della pendenza LATERALE (rollio); None = beta *
+            max_edge_length, min_edge_length: maximum and minimum edge length (m)
+            connection_radius: radius within which to look for neighbours (m)
+            alpha: weight of the length in the cost
+            beta: weight of the LONGITUDINAL slope (pitch)
+            gamma: weight of the roughness (0: today roughness does not enter the cost)
+            beta_lateral: weight of the LATERAL slope (roll); None = beta *
                 slopes.LATERAL_SLOPE_COST_MULTIPLIER
         """
         self.max_edge_length = max_edge_length
         self.connection_radius = connection_radius
         self.min_edge_length = min_edge_length
 
-        # Parametri della funzione di costo
-        self.alpha = alpha  # Peso distanza
-        self.beta = beta  # Peso pendenza longitudinale (beccheggio)
-        self.gamma = gamma  # Peso rugosità (roughness)
+        # Cost function parameters
+        self.alpha = alpha  # Distance weight
+        self.beta = beta  # Longitudinal slope weight (pitch)
+        self.gamma = gamma  # Roughness weight
         self.beta_lateral = (beta_lateral if beta_lateral is not None
-                             else beta * slopes.LATERAL_SLOPE_COST_MULTIPLIER)  # Peso pendenza laterale (rollio)
+                             else beta * slopes.LATERAL_SLOPE_COST_MULTIPLIER)  # Lateral slope weight (roll)
 
         self.nodes = {}  # {point_idx: (x, y)}
-        self.node_gradients = {}  # {point_idx: slope_value} <-- Memorizza la pendenza del nodo
-        self.node_roughness = {}  # <-- Memorizza la rugosità del nodo
+        self.node_gradients = {}  # {point_idx: slope_value} <-- stores the node slope
+        self.node_roughness = {}  # <-- stores the node roughness
         self.edges = {}  # {point_idx: [(neighbor_idx, weight), ...]}
         self.edge_validity = {}  # {(idx1, idx2): bool} - caches edge validity
 
-        # Variabili di appoggio per la griglia locale live
+        # Helper variables for the live local grid
         self.current_grad_2d = None
         self.current_rough_2d = None
-        self.current_terrain_2d = None  # quote corrette della scansione, per la pendenza degli archi
+        self.current_terrain_2d = None  # corrected heights of the scan, for the edge slope
         self.grid_origin_x = None
         self.grid_origin_y = None
         self.cell_size = None
 
-        # Mappa globale delle quote (global_maps.GlobalTerrainGrid): pendenza degli archi fuori
-        # dalla finestra di adesso ma gia' visti prima (vedi set_global_terrain_map).
+        # Global height map (global_maps.GlobalTerrainGrid): slope of the edges outside
+        # the current window but already seen before (see set_global_terrain_map).
         self.global_terrain_map = None
-        # Cache della pendenza dalla mappa globale, per arco: una voce resta valida finche' la
-        # mappa non cambia vicino all'arco (vedi _sync_global_slope_cache).
+        # Cache of the slope from the global map, per edge: an entry stays valid as long as the
+        # map does not change near the edge (see _sync_global_slope_cache).
         self._gslope_cache = {}
         self._gslope_map_id = None
         self._gslope_seen_updates = 0
 
         self.built = False
-        # Zone (xmin, xmax, ymin, ymax) con dati nuovi dall'ultima valutazione degli archi:
-        # vedi DIRTY_MARGIN_M e mission_graph.MissionGraph.add_edges_to_prm(incremental=True).
+        # Areas (xmin, xmax, ymin, ymax) with new data since the last edge evaluation:
+        # see DIRTY_MARGIN_M and mission_graph.MissionGraph.add_edges_to_prm(incremental=True).
         self.dirty_rects = []
         self.hazards_seen = 0
 
-        # Archi bloccati da un blocco confermato o da un fallimento fisico: esclusi per sempre
-        # (vedi mark_edge_invalid).
+        # Edges blocked by a confirmed block or a physical failure: excluded forever
+        # (see mark_edge_invalid).
         self.tracker_blocked_edges = set()
-        # Archi effettivamente percorsi dal robot (liberi per costruzione).
+        # Edges actually travelled by the robot (free by construction).
         self.traversed_edges = set()
-        # Nodo in cui si trova il robot adesso, e raggio entro cui la mappa globale non si usa
-        # per gli archi che ne partono (vedi STOP_NODE_MAP_IGNORE_M).
+        # Node the robot is in now, and radius within which the global map is not used
+        # for the edges leaving it (see STOP_NODE_MAP_IGNORE_M).
         self.robot_node = None
         self.robot_node_ignore_m = 0.0
-        # Nodi su cui la ricerca del percorso puo' passare: None = tutti. Serve a
-        # tenere la pianificazione dentro le celle gia' visitate (vedi set_allowed_nodes).
+        # Nodes the path search may pass through: None = all. Used to
+        # keep planning inside the cells already visited (see set_allowed_nodes).
         self.allowed_nodes = None
-        # Tetto alla deviazione: un percorso piu' lungo di
-        # max_detour_ratio * distanza in linea d'aria + detour_slack_m e' "nessun percorso".
-        # None = nessun tetto. Vedi set_detour_limit.
+        # Detour cap: a path longer than
+        # max_detour_ratio * straight-line distance + detour_slack_m is "no path".
+        # None = no cap. See set_detour_limit.
         self.max_detour_ratio = None
         self.detour_slack_m = 0.0
 
         # ==================================================================
-        # STATISTICHE DI MISSIONE: solo per il riepilogo di fine missione
-        # (print_mission_summary), mai usate per decidere.
+        # MISSION STATISTICS: only for the end-of-mission summary
+        # (print_mission_summary), never used to decide.
         # ==================================================================
         self.slope_source_counts = {'live': 0, 'global_map': 0, 'fallback_nodes': 0}
-        self.last_slope_source = None  # ultima fonte usata, letta da easy_walk.py per il log per-arco
-        # Questi tre contano VALUTAZIONI di veto (lo stesso arco si rivaluta molte volte); gli
-        # archi DIVERSI sono nei set vetoed_arcs_* qui sotto.
-        self.veto_count_longitudinal = 0  # valutazioni di veto per pendenza longitudinale
-        self.veto_count_lateral = 0       # valutazioni di veto per pendenza laterale
-        self.veto_count_occupancy = 0     # valutazioni di veto per occupazione globale (non pendenza)
-        self.vetoed_arcs_longitudinal = set()  # chiavi (min_id, max_id) di archi DISTINTI vetati per long.
-        self.vetoed_arcs_lateral = set()       # idem per laterale
-        self.vetoed_arcs_occupancy = set()     # idem per occupazione
-        self.max_slope_seen = {'long': 0.0, 'lat': 0.0}  # massimi misurati su qualunque arco valutato
-        self.slope_flip_count = 0         # volte in cui un arco vicino soglia ha cambiato stato tra due refresh
-        self.edge_slope_info = {}         # {(idx1,idx2): (long_slope, lat_slope)} -- per visualizzazione, niente ricalcolo
+        self.last_slope_source = None  # last source used, read by the mission code for the per-edge log
+        # These three count veto EVALUATIONS (the same edge is re-evaluated many times); the
+        # DISTINCT edges are in the vetoed_arcs_* sets below.
+        self.veto_count_longitudinal = 0  # veto evaluations for longitudinal slope
+        self.veto_count_lateral = 0       # veto evaluations for lateral slope
+        self.veto_count_occupancy = 0     # veto evaluations for global occupancy (not slope)
+        self.vetoed_arcs_longitudinal = set()  # keys (min_id, max_id) of DISTINCT edges vetoed for long.
+        self.vetoed_arcs_lateral = set()       # same for lateral
+        self.vetoed_arcs_occupancy = set()     # same for occupancy
+        self.max_slope_seen = {'long': 0.0, 'lat': 0.0}  # maxima measured on any evaluated edge
+        self.slope_flip_count = 0         # times an edge near the threshold changed state between two refreshes
+        self.edge_slope_info = {}         # {(idx1,idx2): (long_slope, lat_slope)} -- for visualization, no recomputation
 
-        # Scansione dal vivo per lo scarto preliminare (vedi LIVE_PREFILTER_OD_M e
-        # set_live_obstacles). None = nessuna scansione: nessuno scarto.
+        # Live scan for the preliminary discard (see LIVE_PREFILTER_OD_M and
+        # set_live_obstacles). None = no scan: no discard.
         self.live_obstacles = None
-        self.live_veto_last = 0       # archi scartati dalla scansione all'ultima chiamata
-        self.live_prune_last = 0      # archi validi fuori raggio tolti all'ultimo refresh
+        self.live_veto_last = 0       # edges discarded by the scan at the last call
+        self.live_prune_last = 0      # valid edges outside the radius removed at the last refresh
 
-        # STRATO DEI COSTI: cio' che si impara durante la missione non toglie archi dal grafo,
-        # aggiunge un costo (anche infinito) che Dijkstra somma al peso dell'arco. Oggi si usa
-        # per gli archi di una trappola, vietati per il solo tentativo (_ATTEMPT_MARK).
-        self.edge_penalty_persistent = {}   # (min,max) -> peso aggiuntivo (anche inf)
+        # COST LAYER: what is learned during the mission does not remove edges from the graph,
+        # it adds a cost (possibly infinite) that Dijkstra adds to the edge weight. Today it is used
+        # for the edges of a trap, forbidden for the current attempt only (_ATTEMPT_MARK).
+        self.edge_penalty_persistent = {}   # (min,max) -> additional weight (possibly inf)
         self.edge_penalty_transient = {}
-        self.node_penalty_persistent = {}   # idx -> peso aggiuntivo (anche inf)
+        self.node_penalty_persistent = {}   # idx -> additional weight (possibly inf)
         self.node_penalty_transient = {}
 
     def clear_penalties_for_attempt(self):
         """
-        Fine di un tentativo di cella: le trappole valevano per quel tentativo, non per la
-        missione. Si tolgono SOLO quelle registrate come tali.
+        End of a cell attempt: the traps applied to that attempt, not to the mission.
+        ONLY those recorded as such are removed.
         """
         for k in [k for k, v in self.edge_penalty_persistent.items() if v == self._ATTEMPT_MARK]:
             del self.edge_penalty_persistent[k]
         for k in [k for k, v in self.node_penalty_persistent.items() if v == self._ATTEMPT_MARK]:
             del self.node_penalty_persistent[k]
 
-    # Valore usato per marcare "impercorribile, ma solo per questo tentativo di cella".
-    # E' un infinito distinguibile: si comporta come inf nel costo, e clear_penalties_for_attempt
-    # riconosce proprio queste voci.
+    # Value used to mark "impassable, but only for this cell attempt".
+    # It is a distinguishable infinity: it behaves as inf in the cost, and clear_penalties_for_attempt
+    # recognizes exactly these entries.
     _ATTEMPT_MARK = float('inf')
 
-    # ---- strato dei costi: lettura ---------------------------------------------------
+    # ---- cost layer: reading ---------------------------------------------------------
     def node_penalty(self, idx: int) -> float:
         return (self.node_penalty_persistent.get(idx, 0.0)
                 + self.node_penalty_transient.get(idx, 0.0))
@@ -237,11 +237,11 @@ class PRM:
                 + self.edge_penalty_transient.get(key, 0.0))
 
     def effective_weight(self, idx1: int, idx2: int, weight: float) -> float:
-        """Costo geometrico + penalita' dell'arco + penalita' del nodo di arrivo."""
+        """Geometric cost + edge penalty + arrival node penalty."""
         return weight + self.edge_penalty(idx1, idx2) + self.node_penalty(idx2)
 
     def add_node(self, point_idx: int, x: float, y: float, gradient: float = 0.0, roughness: float = 0.0):
-        """Aggiunge un nodo con la sua pendenza e rugosita' media (usate solo come ultimo ripiego)."""
+        """Add a node with its mean slope and roughness (used only as a last resort)."""
         self.nodes[point_idx] = (x, y)
         self.node_gradients[point_idx] = gradient
         self.node_roughness[point_idx] = roughness
@@ -249,26 +249,26 @@ class PRM:
 
     def set_global_terrain_map(self, global_terrain_map):
         """
-        Inietta la mappa globale persistente delle altezze (global_maps.GlobalTerrainGrid).
-        Va richiamata una volta che l'oggetto esiste (tipicamente subito dopo averlo
-        creato/recuperato in easy_walk.py) -- puo' essere richiamata piu' volte, e'
-        idempotente, serve solo ad aggiornare il riferimento.
+        Inject the persistent global height map (global_maps.GlobalTerrainGrid).
+        To be called once the object exists (typically right after creating or
+        retrieving it in the mission code) -- it can be called more than once, it is
+        idempotent, it only updates the reference.
         """
         self.global_terrain_map = global_terrain_map
 
     def update_local_grid_data(self, grad_values_2d, rough_values_2d, grid_origin_x, grid_origin_y, cell_size,
                                terrain_values_2d=None, valid_2d=None):
         """
-        Salva temporaneamente la mappa locale corrente dei gradienti, delle rugosità e
-        (opzionale) delle altezze del terreno grezze (già corrette, vedi correct_terrain)
-        per permettere il campionamento accurato degli archi -- incluso il profilo di
-        pendenza denso per-arco calcolato direttamente dalle altezze reali.
+        Temporarily store the current local map of gradients, roughness and (optionally)
+        raw terrain heights (already corrected, see correct_terrain) to allow accurate
+        sampling of the edges -- including the dense per-edge slope profile computed
+        directly from the real heights.
         """
         self.current_grad_2d = grad_values_2d
         self.current_rough_2d = rough_values_2d
         self.current_terrain_2d = terrain_values_2d
-        # celle attendibili (is_valid di correct_terrain): le quote riempite non entrano
-        # nel profilo di pendenza -- vedi slopes.compute_arc_slope_profile
+        # reliable cells (is_valid of correct_terrain): filled heights do not enter
+        # the slope profile -- see slopes.compute_arc_slope_profile
         self.current_valid_2d = valid_2d
         self.grid_origin_x = grid_origin_x
         self.grid_origin_y = grid_origin_y
@@ -276,7 +276,7 @@ class PRM:
         self.dirty_rects.extend(self.live_rects())
 
     def live_rects(self):
-        """Rettangoli coperti dai dati dal vivo correnti (griglia locale e scansione degli ostacoli)."""
+        """Rectangles covered by the current live data (local grid and obstacle scan)."""
         out = []
         if self.current_grad_2d is not None and self.grid_origin_x is not None and self.cell_size:
             nr, nc = np.shape(self.current_grad_2d)[:2]
@@ -291,10 +291,10 @@ class PRM:
     def set_live_obstacles(self, obstacle_dist_2d, seen_2d, origin_x, origin_y, cell_size,
                            robot_x, robot_y, robot_yaw=None):
         """
-        La scansione appena fatta, per lo scarto preliminare degli archi (vedi
-        LIVE_PREFILTER_OD_M). Array 2D (num_y, num_x), riga = y. obstacle_dist_2d: nel ciclo di
-        navigazione quella FILTRATA della fotografia del fronte (mediana + isteresi); all'inizio
-        del tentativo quella grezza. seen_2d: celle viste dal sensore.
+        The scan just made, for the preliminary edge discard (see
+        LIVE_PREFILTER_OD_M). 2D arrays (num_y, num_x), row = y. obstacle_dist_2d: in the
+        navigation loop the FILTERED one from the frontier snapshot (median + hysteresis); at
+        the start of the attempt the raw one. seen_2d: cells seen by the sensor.
         """
         if obstacle_dist_2d is None:
             self.live_obstacles = None
@@ -312,9 +312,9 @@ class PRM:
 
     def _live_blocked_samples(self, sx, sy):
         """
-        Campioni (array di qualunque forma) -> True dove la scansione dal vivo dice "qui il
-        fianco del robot entra in un ostacolo": cella dentro la finestra, vista, con
-        obstacle_distance sotto LIVE_PREFILTER_OD_M, fuori dal rettangolo del corpo.
+        Samples (arrays of any shape) -> True where the live scan says "here the robot's
+        flank enters an obstacle": cell inside the window, seen, with obstacle_distance
+        below LIVE_PREFILTER_OD_M, outside the body rectangle.
         """
         lo = self.live_obstacles
         if lo is None or LIVE_PREFILTER_OD_M is None:
@@ -338,7 +338,7 @@ class PRM:
         return hit & ~body
 
     def _live_blocked_many(self, pairs):
-        """[(idx1, idx2, dist), ...] -> array di bool: arco scartato dalla scansione dal vivo."""
+        """[(idx1, idx2, dist), ...] -> bool array: edge discarded by the live scan."""
         n_pairs = len(pairs)
         out = np.zeros(n_pairs, dtype=bool)
         if n_pairs == 0 or self.live_obstacles is None or LIVE_PREFILTER_OD_M is None:
@@ -358,11 +358,11 @@ class PRM:
 
     def live_prune_valid_edges(self, skip_keys=()):
         """
-        Scarto preliminare sugli archi GIA' validi che il refresh non rivaluta (fuori da
-        REFRESH_RADIUS_M ma dentro la finestra della scansione): un arco a 1.3-1.9 m dal robot che
-        attraversa un ostacolo appena visto non resta valido finche' il robot non si avvicina.
-        Si tolgono solo dal grafo (validita' False): alla prossima valutazione piena tornano se i
-        dati lo dicono. Restituisce quanti archi ha tolto.
+        Preliminary discard on the edges ALREADY valid that the refresh does not re-evaluate
+        (outside REFRESH_RADIUS_M but inside the scan window): an edge 1.3-1.9 m from the robot
+        crossing an obstacle just seen does not stay valid until the robot gets closer.
+        They are only removed from the graph (validity False): at the next full evaluation they
+        come back if the data says so. Returns how many edges it removed.
         """
         lo = self.live_obstacles
         if lo is None or LIVE_PREFILTER_OD_M is None:
@@ -400,18 +400,19 @@ class PRM:
 
     def refresh_local_edge_weights(self, global_map=None, edge_safety_margin: float = 0.05):
         """
-        Rivaluta da capo (occupazione, pendenza, peso) gli archi entro REFRESH_RADIUS_M dal robot
-        che hanno almeno UN estremo nella finestra della scansione, anche quelli scartati prima:
-        un arco tolto per una lettura rumorosa torna valido appena i dati lo dicono, e un arco che
-        attraversa un muro appena visto verso un nodo lontano viene riesaminato subito. Gli archi
-        percorsi dal robot (traversed_edges) non si toccano. Restituisce i nodi rivalutati.
+        Re-evaluate from scratch (occupancy, slope, weight) the edges within REFRESH_RADIUS_M of
+        the robot that have at least ONE end in the scan window, including those discarded
+        before: an edge removed for a noisy reading becomes valid again as soon as the data
+        says so, and an edge crossing a wall just seen towards a distant node is re-examined
+        at once. The edges travelled by the robot (traversed_edges) are not touched. Returns
+        the re-evaluated nodes.
         """
         if self.current_grad_2d is None or self.grid_origin_x is None or self.cell_size is None:
             return set()
 
         num_rows, num_cols = self.current_grad_2d.shape
-        # Il centro da cui si misura il raggio e' il nodo del robot; se non e' noto, il centro
-        # della finestra (che e' comunque il robot).
+        # The centre the radius is measured from is the robot node; if unknown, the centre
+        # of the window (which is the robot anyway).
         center = None
         if REFRESH_RADIUS_M is not None:
             if self.robot_node is not None and self.robot_node in self.nodes:
@@ -426,7 +427,7 @@ class PRM:
             if not (0 <= row_idx < num_rows and 0 <= col_idx < num_cols):
                 continue
             if center is not None and np.hypot(x - center[0], y - center[1]) > REFRESH_RADIUS_M:
-                continue        # fuori dal raggio: tiene i pesi dell'ultima valutazione
+                continue        # outside the radius: keeps the weights of the last evaluation
             local_nodes.append(idx)
         local_set = set(local_nodes)
 
@@ -442,20 +443,20 @@ class PRM:
             for j in np.nonzero((d_all >= self.min_edge_length) & (d_all <= reach))[0]:
                 idx2 = all_ids[j]
                 if idx2 == idx1 or (idx2 in local_set and idx2 < idx1):
-                    continue           # coppia locale-locale gia' considerata dall'altro estremo
+                    continue           # local-local pair already considered from the other end
                 pairs.append((idx1, idx2, float(d_all[j])))
 
-        # Occupazione di tutte le coppie in un colpo solo (esito identico a _occupancy_blocked)
-        # e cache della pendenza globale riempita dove certamente non ci sono dati.
+        # Occupancy of all pairs in one go (outcome identical to _occupancy_blocked)
+        # and global slope cache filled where there is certainly no data.
         use_occ = global_map is not None and edge_safety_margin > 0.0
         occ_flags = (self._occupancy_blocked_many(pairs, global_map, edge_safety_margin)
                      if use_occ else np.zeros(len(pairs), dtype=bool))
         self._prefill_global_slope_nodata(pairs)
 
-        # Pendenze dal vivo di tutte le coppie da valutare in un colpo solo (stessi numeri del
-        # calcolo arco per arco). Si saltano quelle che il ciclo sotto non valuta: scartate per
-        # occupazione, bloccate da vicino, percorse dal robot (se una di queste ultime risulta
-        # da rivalutare, il suo profilo si calcola arco per arco).
+        # Live slopes of all the pairs to evaluate in one go (same numbers as the
+        # edge-by-edge computation). Those the loop below does not evaluate are skipped: discarded for
+        # occupancy, blocked up close, travelled by the robot (if one of the latter turns out
+        # to need re-evaluation, its profile is computed edge by edge).
         live_profs = [None] * len(pairs)
         if REFRESH_BATCH_SLOPES and pairs:
             skip = np.array([bool(o) or (min(a, b), max(a, b)) in self.tracker_blocked_edges
@@ -468,17 +469,17 @@ class PRM:
             x2, y2 = self.nodes[idx2]
             key = (min(idx1, idx2), max(idx1, idx2))
             if key in self.tracker_blocked_edges:
-                continue  # blocco confermato da vicino (fronte sicuro) -- mai ricreato
+                continue  # block confirmed up close (safe frontier) -- never recreated
             if key in self.traversed_edges:
                 if self._traversed_edge_ok(idx1, idx2, global_map):
-                    continue  # percorso dal robot: libero per costruzione
-                self.traversed_edges.discard(key)   # ora attraversa il punto di una caduta
+                    continue  # travelled by the robot: free by construction
+                self.traversed_edges.discard(key)   # now crosses the spot of a fall
 
-            old_valid = self.edge_validity.get(key)  # None se l'arco non era mai stato valutato prima
+            old_valid = self.edge_validity.get(key)  # None if the edge had never been evaluated before
 
-            # Inizializzate qui e non dentro `if not blocked:` perche' vengono
-            # rilette piu' sotto per passare il profilo gia' calcolato a
-            # _compute_edge_weight (vedi sample_terrain_between_points).
+            # Initialized here and not inside `if not blocked:` because they are
+            # read again further down to pass the profile already computed to
+            # _compute_edge_weight (see sample_terrain_between_points).
             long_slope, lat_slope, has_slope_data = 0.0, 0.0, False
             prof = (long_slope, lat_slope, has_slope_data)
 
@@ -489,20 +490,20 @@ class PRM:
                     self._record_occupancy_veto(key)
 
             if not blocked:
-                # Una sola lettura del terreno; veto e costo usano lo stesso valore, quello
-                # col corpo (vedi body_slope e slopes.ARC_BODY_EXTENSION_M).
+                # A single terrain reading; veto and cost use the same value, the one
+                # with the body (see body_slope and slopes.ARC_BODY_EXTENSION_M).
                 prof = (live_prof if live_prof is not None
                         else self.compute_arc_slope_profile(x1, y1, x2, y2, body=True))
                 long_slope, lat_slope, has_slope_data = body_slope(prof)
                 if has_slope_data:
-                    self.edge_slope_info[key] = (long_slope, lat_slope)  # per visualizzazione, no ricalcolo
+                    self.edge_slope_info[key] = (long_slope, lat_slope)  # for visualization, no recomputation
                     if self._record_slope_veto(key, long_slope, lat_slope):
                         blocked = True
 
-                    # --- Solo diagnostico: un arco vicino soglia che cambia stato tra due
-                    # refresh consecutivi puo' indicare oscillazione dovuta a rumore del
-                    # sensore piu' che a un cambiamento reale del terreno -- non influisce
-                    # su nessuna decisione, serve solo a farlo emergere nei log.
+                    # --- Diagnostics only: an edge near the threshold that changes state between two
+                    # consecutive refreshes may indicate oscillation due to sensor noise
+                    # rather than a real change in the terrain -- it does not affect
+                    # any decision, it only serves to bring it out in the logs.
                     near_thresh = slopes.SLOPE_THRESHOLD * (1.0 - slopes.NEAR_THRESHOLD_MARGIN_FRACTION)
                     is_near_threshold = (long_slope >= near_thresh) or (lat_slope >= near_thresh)
                     new_valid = not blocked
@@ -516,16 +517,16 @@ class PRM:
             if blocked:
                 self.edge_validity[key] = False
             else:
-                # Il profilo dal vivo e' gia' calcolato (anche quando dice "nessun dato"):
-                # non lo si rifa' dentro il calcolo del peso.
+                # The live profile is already computed (even when it says "no data"):
+                # it is not redone inside the weight computation.
                 weight = self._compute_edge_weight(
                     idx1, idx2, dist, precomputed_slope=prof)
                 self.edges[idx1].append((idx2, weight))
                 self.edges[idx2].append((idx1, weight))
                 self.edge_validity[key] = True
 
-        # Gli archi validi della finestra fuori dal raggio di refresh passano almeno dallo
-        # scarto preliminare sulla scansione dal vivo (live_prune_valid_edges).
+        # The valid edges of the window outside the refresh radius at least go through the
+        # preliminary discard on the live scan (live_prune_valid_edges).
         done = {(min(a, b), max(a, b)) for a, b, _d in pairs}
         self.live_prune_last = self.live_prune_valid_edges(skip_keys=done)
         self.flush_slope_log("refresh")
@@ -535,9 +536,9 @@ class PRM:
     def compute_arc_slope_profile(self, x1: float, y1: float, x2: float, y2: float,
                                    perp_sample_spacing_m: float = 0.10, body: bool = False):
         """
-        slopes.compute_arc_slope_profile sulla griglia dal vivo di questo ciclo (vedi
-        update_local_grid_data). Restituisce (pendenza longitudinale, laterale, has_data);
-        con body=True l'arco e' allungato di mezzo corpo per parte.
+        slopes.compute_arc_slope_profile on the live grid of this loop (see
+        update_local_grid_data). Returns (longitudinal slope, lateral, has_data);
+        with body=True the edge is extended by half a body on each side.
         """
         return slopes.compute_arc_slope_profile(
             self.current_terrain_2d, self.grid_origin_x, self.grid_origin_y, self.cell_size,
@@ -551,26 +552,26 @@ class PRM:
                                        precomputed_slope: Optional[Tuple[float, float, bool]] = None,
                                        need_roughness: bool = True):
         """
-        Difficolta' del tratto (x1, y1) -> (x2, y2): (pendenza longitudinale, pendenza laterale,
-        rugosita'). Serve al costo degli archi e alla scelta dell'andatura.
+        Difficulty of the stretch (x1, y1) -> (x2, y2): (longitudinal slope, lateral slope,
+        roughness). Used for the edge cost and the gait choice.
 
-        Pendenza: direzionale, col corpo (body_slope su compute_arc_slope_profile). Fonti, dalla
-        migliore alla piu' grezza:
-          1. la scansione attuale (self.current_terrain_2d);
-          2. la mappa globale delle quote, per un tratto gia' visto ma ora fuori dalla finestra;
-          3. la media della pendenza dei due nodi, tutta sulla componente longitudinale.
-        precomputed_slope: profilo gia' calcolato dal chiamante (3 o 6 valori), per non rifarlo.
+        Slope: directional, with the body (body_slope on compute_arc_slope_profile). Sources,
+        from the best to the coarsest:
+          1. the current scan (self.current_terrain_2d);
+          2. the global height map, for a stretch already seen but now outside the window;
+          3. the mean slope of the two nodes, all on the longitudinal component.
+        precomputed_slope: profile already computed by the caller (3 or 6 values), so it is not redone.
 
-        Rugosita': 90 percentile del campo per cella lungo il tratto (OCCUPANCY_SAMPLES_PER_M
-        campioni per metro); fuori dalla scansione, la media dei nodi. need_roughness=False la
-        salta (con gamma = 0 non entra nel costo).
+        Roughness: 90th percentile of the per-cell field along the stretch (OCCUPANCY_SAMPLES_PER_M
+        samples per metre); outside the scan, the mean of the nodes. need_roughness=False
+        skips it (with gamma = 0 it does not enter the cost).
 
-        node_idx1/node_idx2: id dei nodi, per la cache della mappa globale e per il ripiego.
+        node_idx1/node_idx2: node ids, for the global map cache and for the fallback.
         """
         dist = float(np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2))
         num_samples = max(OCCUPANCY_SAMPLES_MIN, int(dist * OCCUPANCY_SAMPLES_PER_M))
 
-        # --- Rugosita': isotropa, dal campo per cella della scansione ---
+        # --- Roughness: isotropic, from the per-cell field of the scan ---
         sampled_roughness = []
         has_rough_grid = (need_roughness and self.current_rough_2d is not None
                           and self.grid_origin_x is not None and self.cell_size is not None)
@@ -583,7 +584,7 @@ class PRM:
 
                 dx = cx - self.grid_origin_x
                 dy = cy - self.grid_origin_y
-                col_idx = int(np.floor(dx / self.cell_size))   # floor: int() sbaglia sotto zero
+                col_idx = int(np.floor(dx / self.cell_size))   # floor: int() is wrong below zero
                 row_idx = int(np.floor(dy / self.cell_size))
 
                 if 0 <= row_idx < num_rows and 0 <= col_idx < num_cols:
@@ -596,28 +597,28 @@ class PRM:
             r2 = self.node_roughness.get(node_idx2, 0.0)
             actual_roughness = float((r1 + r2) / 2.0)
 
-        # --- Pendenza: direzionale e col corpo (body_slope), dalla scansione dal vivo ---
+        # --- Slope: directional and with the body (body_slope), from the live scan ---
         if precomputed_slope is None:
             precomputed_slope = self.compute_arc_slope_profile(x1, y1, x2, y2, body=True)
         longitudinal_slope, lateral_slope, has_slope_data = body_slope(precomputed_slope)
         source = 'live'
 
         if not has_slope_data and self.global_terrain_map is not None:
-            # Fuori dalla scansione attuale: la mappa globale, se il tratto era gia' stato visto.
+            # Outside the current scan: the global map, if the stretch had already been seen.
             g_long, g_lat, g_has_data = self._global_slope(x1, y1, x2, y2, node_idx1, node_idx2)
             if g_has_data:
                 longitudinal_slope, lateral_slope, has_slope_data = g_long, g_lat, True
                 source = 'global_map'
 
         if not has_slope_data:
-            # Nessun dato da nessuna fonte: media dei nodi, tutta sul longitudinale.
+            # No data from any source: mean of the nodes, all on the longitudinal.
             grad1 = self.node_gradients.get(node_idx1, 0.0)
             grad2 = self.node_gradients.get(node_idx2, 0.0)
             longitudinal_slope = float((grad1 + grad2) / 2.0)
             lateral_slope = 0.0
             source = 'fallback_nodes'
 
-        # Statistiche: solo per il riepilogo, non decidono niente.
+        # Statistics: only for the summary, they decide nothing.
         self.slope_source_counts[source] += 1
         self.last_slope_source = source
 
@@ -625,9 +626,9 @@ class PRM:
 
     def _record_slope_veto(self, key, long_slope: float, lat_slope: float) -> bool:
         """
-        Veto di pendenza (slopes.SLOPE_THRESHOLD, in entrambe le direzioni) con le statistiche.
-        Restituisce True se l'arco va scartato. I veti si riassumono in una riga [PENDENZE] per
-        costruzione o refresh (flush_slope_log); i valori arco per arco restano nei _vis.npz.
+        Slope veto (slopes.SLOPE_THRESHOLD, in both directions) with the statistics.
+        Returns True if the edge must be discarded. The vetoes are summarized in one [PENDENZE]
+        line per build or refresh (flush_slope_log); the edge-by-edge values stay in the _vis.npz.
         """
         self.max_slope_seen['long'] = max(self.max_slope_seen['long'], long_slope)
         self.max_slope_seen['lat'] = max(self.max_slope_seen['lat'], lat_slope)
@@ -661,8 +662,8 @@ class PRM:
 
     def flush_slope_log(self, where=""):
         """
-        Una riga [PENDENZE] con i veti dall'ultima chiamata, poi azzera.
-        Non stampa niente se non ci sono stati veti.
+        One [PENDENZE] line with the vetoes since the last call, then reset.
+        Prints nothing if there were no vetoes.
         """
         p = self._slope_pending()
         if p['long'] or p['lat'] or p['flip']:
@@ -673,12 +674,12 @@ class PRM:
         self._slope_log_pending = None
 
     def _record_occupancy_veto(self, key):
-        """Conteggio di debug dei veti per occupazione globale (comportamento invariato)."""
+        """Debug count of the global occupancy vetoes (behaviour unchanged)."""
         self.veto_count_occupancy += 1
         self.vetoed_arcs_occupancy.add(key)
 
     def get_mission_summary_dict(self) -> dict:
-        """Le stesse statistiche di print_mission_summary, in forma serializzabile (JSON)."""
+        """The same statistics as print_mission_summary, in serializable form (JSON)."""
         return {
             'slope_source_counts': dict(self.slope_source_counts),
             'veto_evaluations': {
@@ -704,10 +705,10 @@ class PRM:
 
     def print_mission_summary(self):
         """
-        Stampa un riepilogo cumulativo per tutta la missione -- pensato per essere
-        richiamato una volta a fine missione, invece di dover leggere migliaia di righe
-        di log per capire quanto spesso ciascun meccanismo è intervenuto davvero.
-        Puramente diagnostico, non influisce sul comportamento del robot.
+        Print a cumulative summary for the whole mission -- meant to be called once at the
+        end of the mission, instead of having to read thousands of log lines to understand
+        how often each mechanism really stepped in.
+        Purely diagnostic, it does not affect the robot's behaviour.
         """
         total_sources = sum(self.slope_source_counts.values())
         print("\n================ [PRM MISSION SUMMARY] ================")
@@ -732,36 +733,36 @@ class PRM:
     def _compute_edge_weight(self, idx1: int, idx2: int, dist: float,
                              precomputed_slope: Optional[Tuple[float, float, bool]] = None) -> float:
         """
-        Costo dell'arco: alpha * lunghezza + beta * pendenza longitudinale + beta_lateral *
-        pendenza laterale + gamma * rugosita', con le pendenze di sample_terrain_between_points.
-        Il termine di pendenza e' fisso per arco (non per metro): favorisce archi lunghi, che e'
-        voluto (vedi CHANGELOG 2026-10-14). precomputed_slope evita di ricalcolare il profilo.
+        Edge cost: alpha * length + beta * longitudinal slope + beta_lateral * lateral slope
+        + gamma * roughness, with the slopes from sample_terrain_between_points.
+        The slope term is fixed per edge (not per metre): it favours long edges, which is
+        intended (see CHANGELOG 2026-10-14). precomputed_slope avoids recomputing the profile.
         """
         x1, y1 = self.nodes[idx1]
         x2, y2 = self.nodes[idx2]
 
-        # Con gamma = 0 la rugosita' non entra nel costo, quindi non la si campiona (l'andatura
-        # la chiede a sample_terrain_between_points direttamente).
+        # With gamma = 0 roughness does not enter the cost, so it is not sampled (the gait
+        # asks sample_terrain_between_points for it directly).
         longitudinal_slope, lateral_slope, actual_roughness = self.sample_terrain_between_points(
             x1, y1, x2, y2, node_idx1=idx1, node_idx2=idx2,
             precomputed_slope=precomputed_slope, need_roughness=(self.gamma != 0.0)
         )
 
-        # Costo dell'arco
+        # Edge cost
         weight = ((self.alpha * dist) + (self.beta * longitudinal_slope) +
                  (self.beta_lateral * lateral_slope) + (self.gamma * actual_roughness))
         return float(weight)
 
     def _global_slope(self, x1, y1, x2, y2, idx1=None, idx2=None):
         """
-        Pendenza dalla mappa globale, con cache per arco. La cache si usa solo quando i punti
-        sono davvero i due nodi (non per un tratto parziale verso un punto intermedio).
+        Slope from the global map, with a per-edge cache. The cache is used only when the points
+        really are the two nodes (not for a partial stretch towards an intermediate point).
         """
         tm = self.global_terrain_map
 
         def _with_body(x1, y1, x2, y2):
-            # Come per il dal vivo (sample_terrain_between_points): il peggiore fra arco e
-            # arco allungato di mezzo corpo, solo se l'arco ha dati suoi.
+            # As for the live one (sample_terrain_between_points): the worse of edge and
+            # edge extended by half a body, only if the edge has data of its own.
             ext = slopes.ARC_BODY_EXTENSION_M
             if ext <= 0:
                 return tm.compute_arc_slope_profile(x1, y1, x2, y2)
@@ -781,9 +782,9 @@ class PRM:
 
     def _sync_global_slope_cache(self):
         """
-        Butta le voci della cache su cui la mappa globale e' cambiata: gli archi il cui
-        rettangolo (allargato della fetta laterale) interseca una zona aggiornata dopo il
-        calcolo. Se la mappa non registra le zone aggiornate, svuota tutto (sempre corretto).
+        Drop the cache entries on which the global map has changed: the edges whose
+        rectangle (widened by the lateral slice) intersects an area updated after the
+        computation. If the map does not record the updated areas, clear everything (always correct).
         """
         tm = self.global_terrain_map
         if tm is None:
@@ -808,7 +809,7 @@ class PRM:
         if not keys:
             return
         a = np.array([self.nodes[k[0]] for k in keys]); b = np.array([self.nodes[k[1]] for k in keys])
-        # + ARC_BODY_EXTENSION_M: il valore in cache guarda anche oltre gli estremi.
+        # + ARC_BODY_EXTENSION_M: the cached value also looks beyond the ends.
         m = slopes.LATERAL_SLICE_HALF_WIDTH_M + 2 * tm.resolution + slopes.ARC_BODY_EXTENSION_M
         exmin, exmax = np.minimum(a[:, 0], b[:, 0]) - m, np.maximum(a[:, 0], b[:, 0]) + m
         eymin, eymax = np.minimum(a[:, 1], b[:, 1]) - m, np.maximum(a[:, 1], b[:, 1]) + m
@@ -820,10 +821,10 @@ class PRM:
 
     def _traversed_edge_ok(self, a, b, global_map) -> bool:
         """
-        Un arco percorso dal robot resta nel grafo senza controlli (e' libero per costruzione),
-        TRANNE se e' stato bloccato dopo (blocco confermato o fallimento fisico) o se ora passa
-        sopra il punto di una caduta: un arco percorso all'andata e poi bloccato non deve
-        tornare nel grafo alla ricostruzione successiva.
+        An edge travelled by the robot stays in the graph without checks (it is free by
+        construction), EXCEPT if it was blocked afterwards (confirmed block or physical failure)
+        or if it now passes over the spot of a fall: an edge travelled on the way out and then
+        blocked must not come back into the graph at the next rebuild.
         """
         key = (min(a, b), max(a, b))
         if key in self.tracker_blocked_edges:
@@ -835,16 +836,16 @@ class PRM:
         return True
 
     def set_robot_node(self, node_id, ignore_map_within_m: float = STOP_NODE_MAP_IGNORE_M):
-        """Registra il nodo in cui si trova il robot adesso (vedi STOP_NODE_MAP_IGNORE_M)."""
+        """Record the node the robot is in now (see STOP_NODE_MAP_IGNORE_M)."""
         self.robot_node = node_id
         self.robot_node_ignore_m = float(ignore_map_within_m)
 
     def _occupancy_blocked(self, idx1, idx2, dist, global_map, edge_safety_margin,
                            use_live=True) -> bool:
         """
-        True se l'arco e' bloccato per occupazione: dallo scarto preliminare sulla scansione dal
-        vivo (LIVE_PREFILTER_OD_M) o dalla mappa globale, con un campione ogni 10 cm. I campioni
-        entro robot_node_ignore_m dal nodo del robot non contano per la mappa globale.
+        True if the edge is blocked by occupancy: by the preliminary discard on the live scan
+        (LIVE_PREFILTER_OD_M) or by the global map, with a sample every 10 cm. The samples
+        within robot_node_ignore_m of the robot node do not count for the global map.
         """
         x1, y1 = self.nodes[idx1]
         x2, y2 = self.nodes[idx2]
@@ -854,7 +855,7 @@ class PRM:
         ignore_xy = None
         if self.robot_node is not None and self.robot_node in (idx1, idx2) and self.robot_node_ignore_m > 0:
             ignore_xy = self.nodes[self.robot_node]
-        # ceil + 1: passo fra campioni <= 1/OCCUPANCY_SAMPLES_PER_M.
+        # ceil + 1: step between samples <= 1/OCCUPANCY_SAMPLES_PER_M.
         num_samples = max(OCCUPANCY_SAMPLES_MIN, int(np.ceil(dist * OCCUPANCY_SAMPLES_PER_M)) + 1)
         for k in range(num_samples):
             t = k / (num_samples - 1)
@@ -868,19 +869,19 @@ class PRM:
 
     def _occupancy_blocked_many(self, pairs, global_map, edge_safety_margin):
         """
-        _occupancy_blocked per molti archi insieme: [(idx1, idx2, dist), ...] -> array di bool,
-        IDENTICO arco per arco (stessi campioni, stessa deroga attorno al nodo del robot, stesso
-        test di GlobalGrid tramite occupied_many).
+        _occupancy_blocked for many edges together: [(idx1, idx2, dist), ...] -> bool array,
+        IDENTICAL edge by edge (same samples, same exemption around the robot node, same
+        GlobalGrid test through occupied_many).
         """
-        # Scarto preliminare sulla scansione dal vivo (LIVE_PREFILTER_OD_M) e mappa globale:
-        # l'esito e' l'OR dei due.
+        # Preliminary discard on the live scan (LIVE_PREFILTER_OD_M) and global map:
+        # the outcome is the OR of the two.
         live = self._live_blocked_many(pairs)
         self.live_veto_last = int(live.sum())
         out = self._global_occupancy_blocked_many(pairs, global_map, edge_safety_margin)
         return out | live
 
     def _global_occupancy_blocked_many(self, pairs, global_map, edge_safety_margin):
-        """Il controllo sulla mappa globale di _occupancy_blocked_many, senza la scansione dal vivo."""
+        """The global map check of _occupancy_blocked_many, without the live scan."""
         n_pairs = len(pairs)
         out = np.zeros(n_pairs, dtype=bool)
         if n_pairs == 0 or global_map is None or edge_safety_margin <= 0.0:
@@ -920,9 +921,9 @@ class PRM:
 
     def _prefill_global_slope_nodata(self, pairs):
         """
-        Mette in cache (0, 0, False) -- "nessun dato" -- per gli archi su cui la mappa globale del
-        terreno risponderebbe certamente cosi' (GlobalTerrainGrid.certainly_no_slope_data): e' lo
-        stesso valore, nello stesso verso, che _global_slope calcolerebbe alla prima chiamata.
+        Cache (0, 0, False) -- "no data" -- for the edges on which the global terrain map
+        would certainly answer so (GlobalTerrainGrid.certainly_no_slope_data): it is the
+        same value, in the same direction, that _global_slope would compute at the first call.
         """
         tm = self.global_terrain_map
         if tm is None or not hasattr(tm, 'certainly_no_slope_data') or not pairs:
@@ -943,15 +944,15 @@ class PRM:
 
     def precompute_arc_slopes(self, pairs, skip=None):
         """
-        Pendenza di molte coppie in un colpo solo, con le matrici di
-        slopes.arc_slope_profiles_batch: numeri IDENTICI al calcolo arco per arco.
+        Slope of many pairs in one go, with the matrices of
+        slopes.arc_slope_profiles_batch: numbers IDENTICAL to the edge-by-edge computation.
 
-        pairs: [(idx1, idx2, dist)], nel verso in cui verranno valutate; skip: maschera delle
-        coppie da non calcolare (es. gia' scartate per occupazione).
-        Restituisce, per ogni coppia, il profilo dal vivo (6 valori, come
-        compute_arc_slope_profile(..., body=True)) o None se saltata. In piu' riempie la cache
-        della pendenza globale (_gslope_cache) per le coppie senza dati dal vivo, con lo stesso
-        valore e lo stesso verso che _global_slope calcolerebbe alla prima chiamata.
+        pairs: [(idx1, idx2, dist)], in the direction they will be evaluated; skip: mask of
+        the pairs not to compute (e.g. already discarded for occupancy).
+        Returns, for every pair, the live profile (6 values, like
+        compute_arc_slope_profile(..., body=True)) or None if skipped. Also fills the global
+        slope cache (_gslope_cache) for the pairs without live data, with the same value and
+        the same direction _global_slope would compute at the first call.
         """
         n = len(pairs)
         out = [None] * n
@@ -981,15 +982,15 @@ class PRM:
                                                         body_ext_m=ext)
                 for j, r in zip(need, g):
                     a, b = pairs[idx[j]][0], pairs[idx[j]][1]
-                    # come _global_slope._with_body: col corpo se l'arco ha dati suoi
+                    # like _global_slope._with_body: with the body if the edge has data of its own
                     self._gslope_cache[(min(a, b), max(a, b))] = (
                         (float(r[3]), float(r[4]), True) if r[2] else (float(r[0]), float(r[1]), False))
         return out
 
     def _live_slope_certainly_nodata(self, pairs):
         """
-        Per ogni coppia: True se compute_arc_slope_profile sulla scansione dal vivo uscirebbe
-        subito con "nessun dato" (la sua stessa uscita rapida, stessi numeri).
+        For every pair: True if compute_arc_slope_profile on the live scan would exit at once
+        with "no data" (its own quick exit, same numbers).
         """
         n = len(pairs)
         out = np.ones(n, dtype=bool)
@@ -1010,11 +1011,11 @@ class PRM:
 
     def _add_edge_without_data(self, idx1: int, idx2: int, dist: float) -> bool:
         """
-        ZONA SENZA DATI: arco su cui nessuna fonte ha informazione (fuori dalla scansione, mappa
-        globale del terreno certamente senza dati, occupazione libera, non bloccato, gamma = 0).
-        _evaluate_and_add_edge arriverebbe al costo di ripiego (lunghezza + media della pendenza
-        dei nodi): qui lo si calcola direttamente, con la stessa formula e gli stessi contatori,
-        risultato identico al bit. Solo per adiacenze appena svuotate (fresh).
+        AREA WITHOUT DATA: edge on which no source has information (outside the scan, global
+        terrain map certainly without data, occupancy free, not blocked, gamma = 0).
+        _evaluate_and_add_edge would end up at the fallback cost (length + mean slope of the
+        nodes): here it is computed directly, with the same formula and the same counters,
+        result identical to the bit. Only for adjacencies just cleared (fresh).
         """
         grad1 = self.node_gradients.get(idx1, 0.0)
         grad2 = self.node_gradients.get(idx2, 0.0)
@@ -1037,15 +1038,15 @@ class PRM:
                                force: bool = False, occ_blocked=None,
                                fresh: bool = False, live_prof=None) -> bool:
         """
-        Decide se l'arco idx1-idx2 e' ammesso e, se si', lo aggiunge con il suo peso.
-        Controlli in ordine: arco bloccato, occupazione, pendenza col corpo; poi il peso.
+        Decide whether edge idx1-idx2 is allowed and, if so, add it with its weight.
+        Checks in order: edge blocked, occupancy, slope with the body; then the weight.
 
-        force=True salta i veti e aggiunge comunque l'arco: SOLO per il tratto che il robot ha
-        appena percorso con le proprie zampe, libero per costruzione.
-        occ_blocked: esito gia' calcolato da _occupancy_blocked_many (None = lo calcola qui).
-        fresh=True: le adiacenze sono appena state svuotate, non c'e' un arco vecchio da togliere.
-        live_prof: profilo di pendenza gia' calcolato in blocco (precompute_arc_slopes).
-        Restituisce True se l'arco e' stato aggiunto.
+        force=True skips the vetoes and adds the edge anyway: ONLY for the stretch the robot
+        has just travelled on its own legs, free by construction.
+        occ_blocked: outcome already computed by _occupancy_blocked_many (None = computed here).
+        fresh=True: the adjacencies have just been cleared, there is no old edge to remove.
+        live_prof: slope profile already computed in batch (precompute_arc_slopes).
+        Returns True if the edge was added.
         """
         x1, y1 = self.nodes[idx1]
         x2, y2 = self.nodes[idx2]
@@ -1058,7 +1059,7 @@ class PRM:
                 self.edge_validity[key] = False
                 return False
 
-            # Occupazione (scansione dal vivo e mappa globale).
+            # Occupancy (live scan and global map).
             if global_map is not None and edge_safety_margin > 0.0:
                 blocked_now = (bool(occ_blocked) if occ_blocked is not None else
                                self._occupancy_blocked(idx1, idx2, dist, global_map, edge_safety_margin))
@@ -1067,13 +1068,13 @@ class PRM:
                     self.edge_validity[key] = False
                     return False
 
-            # Pendenza col corpo, in avanti o di lato. live_prof = profilo gia' calcolato in
-            # blocco (precompute_arc_slopes).
+            # Slope with the body, forward or sideways. live_prof = profile already computed in
+            # batch (precompute_arc_slopes).
             prof = (live_prof if live_prof is not None
                     else self.compute_arc_slope_profile(x1, y1, x2, y2, body=True))
             long_slope, lat_slope, has_slope_data = body_slope(prof)
             if has_slope_data:
-                self.edge_slope_info[key] = (long_slope, lat_slope)  # per visualizzazione
+                self.edge_slope_info[key] = (long_slope, lat_slope)  # for visualization
                 if self._record_slope_veto(key, long_slope, lat_slope):
                     self.edge_validity[key] = False
                     return False
@@ -1095,18 +1096,18 @@ class PRM:
 
     def set_allowed_nodes(self, node_ids=None):
         """
-        Limita la ricerca del percorso a questi nodi (None = nessun limite). Partenza e arrivo
-        sono sempre ammessi. Usato da mission_graph.restrict_planning_to_explored_cells.
+        Limit the path search to these nodes (None = no limit). Start and end are always
+        allowed. Used by mission_graph.restrict_planning_to_explored_cells.
         """
         self.allowed_nodes = None if node_ids is None else set(node_ids)
 
     def set_detour_limit(self, max_ratio: Optional[float] = None, slack_m: float = 0.0):
-        """Tetto alla lunghezza dei percorsi rispetto alla linea d'aria (None = nessuno)."""
+        """Cap on path length relative to the straight line (None = none)."""
         self.max_detour_ratio = None if max_ratio is None else float(max_ratio)
         self.detour_slack_m = float(slack_m)
 
     def path_length(self, path_ids) -> float:
-        """Lunghezza geometrica di un percorso, in metri."""
+        """Geometric length of a path, in metres."""
         if not path_ids or len(path_ids) < 2:
             return 0.0
         xy = np.array([self.nodes[i] for i in path_ids], dtype=np.float64)
@@ -1115,14 +1116,14 @@ class PRM:
     def anchor_node(self, x: float, y: float, global_map=None, edge_safety_margin: float = 0.0,
                     ignore_near_m: float = 0.0) -> Optional[int]:
         """
-        Il nodo ESISTENTE a cui agganciare la posizione (x, y), senza crearne di nuovi.
+        The EXISTING node to attach the position (x, y) to, without creating new ones.
 
-        Non semplicemente il piu' vicino (dopo un arresto a meta' arco il piu' vicino puo' stare
-        oltre cio' che ha fermato il robot): il piu' vicino, entro ANCHOR_SEARCH_M, che
-          - non ha penalita' infinita;
-          - e' raggiungibile in linea retta senza passare su celle occupate della mappa globale
-            (i primi ignore_near_m attorno a (x, y) non contano: li' sta il robot).
-        Se nessuno passa i controlli, il piu' vicino in assoluto: decide comunque il fronte.
+        Not simply the nearest (after a stop halfway along an edge the nearest may lie beyond
+        what stopped the robot): the nearest, within ANCHOR_SEARCH_M, that
+          - has no infinite penalty;
+          - is reachable in a straight line without passing over occupied cells of the global
+            map (the first ignore_near_m around (x, y) do not count: the robot is there).
+        If none passes the checks, the nearest overall: the frontier decides anyway.
         """
         if not self.nodes:
             return None
@@ -1156,8 +1157,8 @@ class PRM:
     def add_stop_node(self, x: float, y: float, global_map=None, edge_safety_margin: float = 0.0,
                       label: str = "sosta", is_robot: bool = True) -> int:
         """
-        Il nodo ESISTENTE a cui agganciare la posizione (x, y) (vedi anchor_node): il grafo
-        non cresce durante la missione. Se is_robot, diventa anche il nodo del robot.
+        The EXISTING node to attach the position (x, y) to (see anchor_node): the graph does
+        not grow during the mission. If is_robot, it also becomes the robot node.
         """
         nid = self.anchor_node(x, y, global_map, edge_safety_margin,
                                ignore_near_m=(ANCHOR_IGNORE_NEAR_M if is_robot else 0.0))
@@ -1172,14 +1173,14 @@ class PRM:
 
     def mark_edge_invalid(self, idx1: int, idx2: int):
         """
-        Segna un arco come bloccato per il resto della missione: nessuna valutazione lo rimette.
-        La chiama il ciclo principale dopo un blocco confermato DA VICINO dal fronte sicuro o un
-        fallimento fisico del movimento.
+        Mark an edge as blocked for the rest of the mission: no evaluation puts it back.
+        Called by the main loop after a block confirmed UP CLOSE by the safe frontier or a
+        physical failure of the move.
         """
         key = (min(idx1, idx2), max(idx1, idx2))
         self.edge_validity[key] = False
-        self.tracker_blocked_edges.add(key)   # per sempre: nessun refresh lo rimette
-        self.traversed_edges.discard(key)     # percorso in passato non vuol dire percorribile ora
+        self.tracker_blocked_edges.add(key)   # forever: no refresh puts it back
+        self.traversed_edges.discard(key)     # travelled in the past does not mean travelable now
 
         if idx2 in [n[0] for n in self.edges.get(idx1, [])]:
             self.edges[idx1] = [(n, w) for n, w in self.edges[idx1] if n != idx2]
@@ -1188,12 +1189,12 @@ class PRM:
 
     def compute_path_cost(self, path_ids, allow_direct_first_hop: bool = False):
         """
-        Somma dei pesi (con le penalita') lungo una sequenza di nodi.
+        Sum of the weights (with the penalties) along a sequence of nodes.
 
-        allow_direct_first_hop: il primo tratto, dal robot al primo waypoint, puo' non essere un
-        arco del grafo (dopo una SCORCIATOIA il robot va dritto verso un nodo piu' avanti, su un
-        tratto confermato libero dal fronte): lo si conta come alpha * distanza invece che
-        come piano rotto.
+        allow_direct_first_hop: the first stretch, from the robot to the first waypoint, may
+        not be a graph edge (after a SHORTCUT the robot goes straight to a node further
+        ahead, on a stretch confirmed free by the frontier): it is counted as alpha * distance
+        instead of as a broken plan.
         """
         if path_ids is None or len(path_ids) < 2:
             return 0.0
@@ -1208,14 +1209,14 @@ class PRM:
             key = (min(a, b), max(a, b))
             if (weight is None and i == 0 and allow_direct_first_hop and a in self.nodes and b in self.nodes
                     and key not in self.tracker_blocked_edges and self.edge_validity.get(key) is not False):
-                # Solo per un tratto che NON e' mai stato scartato: un arco appena tolto dal
-                # grafo (occupazione, pendenza, pericolo, blocco) deve far ripianificare.
+                # Only for a stretch that has NEVER been discarded: an edge just removed from the
+                # graph (occupancy, slope, hazard, block) must trigger a replan.
                 (xa, ya), (xb, yb) = self.nodes[a], self.nodes[b]
                 weight = self.alpha * float(np.hypot(xb - xa, yb - ya))
             if weight is None:
                 return float('inf')  # edge no longer exists (e.g. invalidated)
-            # Stessi costi usati da find_path_dijkstra: altrimenti il controllo
-            # di stabilita' confronterebbe un piano penalizzato con uno non penalizzato.
+            # Same costs used by find_path_dijkstra: otherwise the stability check
+            # would compare a penalized plan with an unpenalized one.
             total += self.effective_weight(a, b, weight)
         return total
 
@@ -1225,14 +1226,14 @@ class PRM:
                             max_edges: Optional[int] = None,
                             ignore_penalties: bool = False) -> Optional[List[int]]:
         """
-        Percorso piu' corto fra due nodi (Dijkstra), dentro allowed_nodes e col tetto alla
-        deviazione (set_detour_limit). None se non c'e'.
+        Shortest path between two nodes (Dijkstra), inside allowed_nodes and with the detour
+        cap (set_detour_limit). None if there is none.
 
-        Con current_path_ids (il piano che si sta seguendo, che parte da start_idx) e margin > 0,
-        il percorso nuovo si restituisce solo se costa almeno `margin` in meno: evita di
-        oscillare fra strade quasi equivalenti per il rumore dei pesi. Se tiene il piano vecchio
-        restituisce current_path_ids invariato: per il chiamante e' "piano stabile", non "nessun
-        percorso".
+        With current_path_ids (the plan being followed, starting from start_idx) and margin > 0,
+        the new path is returned only if it costs at least `margin` less: avoids oscillating
+        between almost equivalent ways because of weight noise. If it keeps the old plan it
+        returns current_path_ids unchanged: for the caller it is "stable plan", not "no
+        path".
         """
         if start_idx not in self.nodes or goal_idx not in self.nodes:
             return None
@@ -1264,10 +1265,10 @@ class PRM:
             for neighbor, weight in self.edges.get(current, []):
                 if (allowed is not None and neighbor not in allowed
                         and neighbor != goal_idx):
-                    continue          # fuori dalle celle ammesse (vedi set_allowed_nodes)
+                    continue          # outside the allowed cells (see set_allowed_nodes)
                 if neighbor not in visited:
-                    # Costo = geometrico + strato dei costi: un arco o un nodo impercorribile ha
-                    # penalita' infinita e Dijkstra non lo attraversa.
+                    # Cost = geometric + cost layer: an impassable edge or node has
+                    # infinite penalty and Dijkstra does not cross it.
                     w = weight if ignore_penalties else self.effective_weight(current, neighbor, weight)
                     if not np.isfinite(w):
                         continue
@@ -1277,13 +1278,13 @@ class PRM:
                         parents[neighbor] = current
                         heapq.heappush(pq, (new_dist, neighbor))
 
-        # Tetto sul numero di archi, verificato sul percorso TROVATO: se il cammino di costo
-        # minimo e' troppo lungo si risponde "nessun percorso" e si rinuncia alla cella.
+        # Cap on the number of edges, checked on the path FOUND: if the minimum-cost
+        # path is too long the answer is "no path" and the cell is given up.
         if new_path is not None and max_edges is not None and len(new_path) - 1 > max_edges:
             new_path = None
 
-        # Tetto alla deviazione: un giro troppo lungo rispetto alla linea d'aria vale "nessun
-        # percorso"; si rinuncia alla cella e la si riprova piu' tardi da un altro lato.
+        # Detour cap: a loop too long compared with the straight line counts as "no
+        # path"; the cell is given up and retried later from another side.
         if new_path is not None and self.max_detour_ratio is not None:
             (sx, sy), (gx, gy) = self.nodes[start_idx], self.nodes[goal_idx]
             limit = self.max_detour_ratio * float(np.hypot(gx - sx, gy - sy)) + self.detour_slack_m
@@ -1293,11 +1294,11 @@ class PRM:
                       f"il tetto di {limit:.1f} m: lo considero impraticabile.")
                 new_path = None
 
-        # --- Senza controllo di stabilita' ---
+        # --- Without stability check ---
         if current_path_ids is None or margin <= 0.0:
             return new_path
 
-        # --- Controllo di stabilita' ---
+        # --- Stability check ---
         current_cost = self.compute_path_cost(current_path_ids, allow_direct_first_hop=True)
 
         if new_path is None:
@@ -1314,9 +1315,9 @@ class PRM:
 
     def reachable_count(self, start_idx: int, limit: int) -> int:
         """
-        Quanti nodi si raggiungono da start_idx con le stesse regole di find_path_dijkstra
-        (archi con costo finito, dentro allowed_nodes), fermandosi a `limit`. Serve a capire,
-        quando un obiettivo non ha piu' un percorso, se e' isolato l'obiettivo o il robot.
+        How many nodes are reachable from start_idx with the same rules as find_path_dijkstra
+        (edges with finite cost, inside allowed_nodes), stopping at `limit`. Used to understand,
+        when a goal no longer has a path, whether the goal or the robot is isolated.
         """
         if start_idx not in self.nodes:
             return 0
@@ -1334,29 +1335,29 @@ class PRM:
         return min(len(seen), limit)
 
     def get_node_position(self, node_idx: int) -> Optional[Tuple[float, float]]:
-        """Posizione (x, y) del nodo, None se non esiste."""
+        """Node position (x, y), None if it does not exist."""
         return self.nodes.get(node_idx)
 
 
 # =========================================================================================
-# FUNZIONI SUL GRAFO usate dal ciclo di navigazione
+# GRAPH FUNCTIONS used by the navigation loop
 # =========================================================================================
 def mark_edge_blocked_soft(prm, idx1, idx2):
     """
-    Toglie un arco dal grafo ADESSO, senza condannarlo per sempre.
+    Remove an edge from the graph NOW, without condemning it forever.
 
-    prm_graph.mark_edge_invalid() lo mette anche in `tracker_blocked_edges`, che non viene
-    MAI ricreato -- ne' dal refresh ne' dalla ricostruzione degli archi. Giusto per un
-    blocco confermato da tre scansioni ferme; sbagliato per [SUBITO], che scarta dopo UNA
-    scansione: un ostacolo marginale visto una volta isolerebbe un nodo per tutta la missione.
+    PRM.mark_edge_invalid() also puts it in `tracker_blocked_edges`, which is NEVER
+    recreated -- neither by the refresh nor by the edge rebuild. Right for a block
+    confirmed by three still scans; wrong for [SUBITO], which discards after ONE
+    scan: a marginal obstacle seen once would isolate a node for the whole mission.
 
-    Qui si tolgono solo l'arco e la sua validita': alla prossima rivalutazione, se i dati
-    freschi dicono che e' libero, l'arco torna -- che e' esattamente il comportamento di
-    rientro che refresh_local_edge_weights e' stato scritto per avere.
+    Here only the edge and its validity are removed: at the next re-evaluation, if the fresh
+    data says it is free, the edge comes back -- which is exactly the return behaviour
+    refresh_local_edge_weights was written to have.
     """
     key = (min(idx1, idx2), max(idx1, idx2))
-    # Scartare un arco cambia il piano, quindi al prossimo giro il refresh degli archi va
-    # fatto (vedi REFRESH A EVENTI in easy_walk.TentativoCella._scansione_e_grafo).
+    # Discarding an edge changes the plan, so at the next turn the edge refresh must be
+    # done (see EVENT REFRESH in cell_attempt.CellAttempt._scan_and_graph).
     prm.needs_refresh = True
     prm.edge_validity[key] = False
     prm.traversed_edges.discard(key)

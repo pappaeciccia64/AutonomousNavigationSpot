@@ -1,65 +1,64 @@
 """
-Prova di RIGIOCO sulle scansioni vere salvate in missione.
+REPLAY test on the real scans saved during missions.
 
-Rigioca le scansioni di una o piu' missioni (MissionMap/<missione>/scans/*.npz, in ordine di
-tempo) attraverso il codice vero: mappe globali, reticolo della missione, aggiornamento del
-grafo, ripianificazione, scelta dell'andatura. Serve a verificare una modifica SENZA il robot,
-sui dati di campo, in pochi minuti.
+Replays the scans of one or more missions (MissionMap/<mission>/scans/*.npz, in time
+order) through the real code: global maps, mission lattice, graph update, replanning,
+gait choice. Used to check a change WITHOUT the robot, on field data, in a few minutes.
 
-Due tipi di controllo:
+Two kinds of check:
 
-  INVARIANTI -- devono valere sempre, qualunque modifica si faccia. Se uno fallisce c'e' un
-  errore, e la prova esce con codice 1.
-    1. Aggiornamento locale del grafo IDENTICO alla costruzione completa (archi e pesi), a
-       ogni inizio di cella; e l'aggiornamento locale USATO DAVVERO a ogni inizio di cella
-       dopo il primo (senza questo secondo controllo il primo passerebbe anche se il codice
-       ricostruisse sempre tutto). Come in missione, il rigioco registra gli archi percorsi
-       (il nodo del robot cambia fra due scansioni) e i blocchi confermati.
-    2. Pendenze della mappa globale del terreno uguali a quelle dal vivo sugli stessi archi
-       (almeno il 99.5%): le due fonti devono misurare la stessa cosa.
-    3. Andatura: ogni tratto percorso in cui il robot si e' inclinato di piu' di 18 gradi
-       (beccheggio misurato) deve risultare HARD.
-    4. A ogni inizio di cella esiste un percorso dal robot all'obiettivo (in missione le celle
-       sono state raggiunte, quindi il grafo non deve essersi spezzato).
-    5. Ritorno a wp_0 con GraphNav (se c'e' il grafo scaricato in graph/<missione>/): con le
-       scorciatoie scelte da easy_walk.plan_graphnav_shortcuts la strada non e' piu' lunga di
-       quella di oggi, ed e' entro 1.5 volte la linea d'aria piu' 2 m.
+  INVARIANTS -- must always hold, whatever the change. If one fails there is a bug, and
+  the test exits with code 1.
+    1. Local graph update IDENTICAL to the full build (edges and weights), at every cell
+       start; and the local update REALLY USED at every cell start after the first
+       (without this second check the first would pass even if the code always rebuilt
+       everything). As in the mission, the replay records the edges travelled (the robot
+       node changes between two scans) and the confirmed blocks.
+    2. Slopes of the global terrain map equal to the live ones on the same edges (at least
+       99.5%): the two sources must measure the same thing.
+    3. Gait: every leg travelled where the robot tilted more than 18 degrees (measured
+       pitch) must come out HARD.
+    4. At every cell start there is a path from the robot to the goal (in the mission the
+       cells were reached, so the graph must not have broken).
+    5. Return to wp_0 with GraphNav (if the downloaded graph is in graph/<mission>/): with
+       the shortcuts chosen by map_shortcuts.plan_graphnav_shortcuts the path is not longer
+       than today's, and is within 1.5 times the straight line plus 2 m.
 
-  RIFERIMENTO -- i numeri del comportamento (archi validi e scartati, percorsi, andature)
-  confrontati con replay_reference.json. Una differenza NON e' per forza un errore:
-  vuol dire che la modifica cambia cio' che il robot farebbe. La prova la elenca ed esce con
-  codice 1; se il cambiamento e' voluto si accetta con --update-reference, e il file
-  aggiornato va nel commit insieme alla modifica.
+  REFERENCE -- the behaviour numbers (valid and discarded edges, paths, gaits) compared
+  with replay_reference.json. A difference is NOT necessarily a bug: it means the change
+  alters what the robot would do. The test lists it and exits with code 1; if the change
+  is intended it is accepted with --update-reference, and the updated file goes into the
+  commit together with the change.
 
-Uso:
-    python3 test_replay.py                       # 2 missioni di riferimento, controllo completo
-    python3 test_replay.py --all               # tutte le 10 missioni rigiocabili
-    python3 test_replay.py --fast              # invariante 1 solo su 3 inizi di cella sparsi
-    python3 test_replay.py --missions 13-10-2026_12-40-38
-    python3 test_replay.py --update-reference
-    python3 test_replay.py --all --graph casuale --distribution poisson --seed 7
+Usage:
+    python3 tests/test_replay.py                       # 2 reference missions, full check
+    python3 tests/test_replay.py --all                 # all 10 replayable missions
+    python3 tests/test_replay.py --fast                # invariant 1 only on 3 scattered cell starts
+    python3 tests/test_replay.py --missions 13-10-2026_12-40-38
+    python3 tests/test_replay.py --update-reference
+    python3 tests/test_replay.py --all --graph casuale --distribution poisson --seed 7
 
-CONFRONTO FRA GRAFI -- con --graph, --spacing (e --distribution, --density, --seed,
-  --min-edge, --max-edge) le missioni si rigiocano con un grafo diverso da quello che avevano in
-  missione, sulle stesse scansioni. Il confronto col riferimento non ha senso e si salta;
-  gli invarianti valgono ancora. In fondo una tabella per missione (percorsi trovati,
-  lunghezza e numero di archi dei percorsi, tempo del grafo) da mettere accanto a quella
-  dello stesso comando senza --graph. Il robot si aggancia al nodo piu' vicino, l'obiettivo
-  e' il nodo piu' vicino con almeno un arco valido, e i blocchi confermati in missione (dati
-  come archi del reticolo) non si rigiocano.
+GRAPH COMPARISON -- with --graph, --spacing (and --distribution, --density, --seed,
+  --min-edge, --max-edge) the missions are replayed with a graph different from the one
+  they had in the mission, on the same scans. The comparison with the reference makes no
+  sense and is skipped; the invariants still hold. At the end a table per mission (paths
+  found, length and number of edges of the paths, graph time) to put next to the one of
+  the same command without --graph. The robot attaches to the nearest node, the goal is
+  the nearest node with at least one valid edge, and the blocks confirmed in the mission
+  (given as lattice edges) are not replayed.
 
-Le scansioni stanno in MissionMap/ e i log in MissionLogs/, ignorati da git. Dal 26-10 le
-missioni di validazione (le 10 di ALL_MISSIONS, le tre del 22-10 e quella del 26-10 15:11, la
-prima con i layer intensity e no_step) sono nel repository, aggiunte
-a mano: log, scans/, *_vis.npz, le due mappe globali e la mappa GraphNav completa (con le istantanee).
-Una missione che manca su questo PC viene saltata, con un avviso.
+The scans are in MissionMap/ and the logs in MissionLogs/, ignored by git. Since 26-10 the
+validation missions (the 10 of ALL_MISSIONS, the three of 22-10 and the one of 26-10 15:11,
+the first with the intensity and no_step layers) are in the repository, added by hand:
+log, scans/, *_vis.npz, the two global maps and the full GraphNav map (with the snapshots).
+A mission missing on this PC is skipped, with a warning.
 
-Limiti noti del rigioco (non del codice di missione):
-  - in missione il grafo si aggiorna sulla scansione presa all'inizio del tentativo, che non
-    viene salvata; qui si usa la prima scansione salvata del tentativo;
-  - le celle ammesse per il percorso sono quelle dei tentativi precedenti (nelle missioni di
-    riferimento tutte le celle sono state raggiunte);
-  - la mappa dello spazio libero e i nodi di sosta non vengono rigiocati.
+Known limits of the replay (not of the mission code):
+  - in the mission the graph is updated on the scan taken at the start of the attempt,
+    which is not saved; here the first saved scan of the attempt is used;
+  - the cells allowed for the path are those of the previous attempts (in the reference
+    missions all cells were reached);
+  - the free-space map and the stop nodes are not replayed.
 """
 import argparse
 import contextlib
@@ -77,30 +76,30 @@ import time
 from multiprocessing import Pool
 try:
     from zoneinfo import ZoneInfo          # Python 3.9+
-except ImportError:                        # Python 3.8 (il portatile delle missioni)
+except ImportError:                        # Python 3.8 (the mission laptop)
     ZoneInfo = None
 
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)                 # cartella del progetto: dati delle missioni
-sys.path.insert(0, ROOT)                     # il pacchetto spot_explorer
+ROOT = os.path.dirname(HERE)                 # project folder: mission data
+sys.path.insert(0, ROOT)                     # the spot_explorer package
 
 REFERENCE_FILE = os.path.join(HERE, 'replay_reference.json')
 DEFAULT_MISSIONS = ['13-10-2026_12-14-30', '13-10-2026_12-40-38']
-# --all: tutte le missioni su questo PC con scansioni nel formato giusto (dal 12-10, quando
-# sono arrivati il reticolo e il fronte filtrato). Registrate con versioni vecchie del codice:
-# non importa, la prova rigioca le SCANSIONI attraverso il codice di oggi.
+# --all: all missions on this PC with scans in the right format (since 12-10, when the
+# lattice and the filtered frontier arrived). Recorded with old versions of the code:
+# it does not matter, the test replays the SCANS through today's code.
 ALL_MISSIONS = ['12-10-2026_14-10-32', '12-10-2026_14-23-28', '12-10-2026_14-47-06',
                 '12-10-2026_17-16-06', '12-10-2026_17-32-39', '13-10-2026_11-22-40',
                 '13-10-2026_11-56-15', '13-10-2026_12-14-30', '13-10-2026_12-27-12',
                 '13-10-2026_12-40-38']
-GLOBAL_LIVE_MIN_MATCH = 0.995      # invariante 2
-HARD_PITCH_DEG = 18.0              # invariante 3
-ARCS_PER_SCAN = 60                 # archi a caso per scansione, invariante 2
-FAST_FULL_CHECKS = 3               # --fast: confronti con la costruzione completa
-# Ora dei timestamp di segments.csv (quella del portatile in missione). Senza zoneinfo
-# (Python 3.8) si usa l'ora locale della macchina, giusta sul portatile delle missioni.
+GLOBAL_LIVE_MIN_MATCH = 0.995      # invariant 2
+HARD_PITCH_DEG = 18.0              # invariant 3
+ARCS_PER_SCAN = 60                 # random edges per scan, invariant 2
+FAST_FULL_CHECKS = 3               # --fast: comparisons with the full build
+# Time zone of the segments.csv timestamps (that of the laptop in the mission). Without
+# zoneinfo (Python 3.8) the machine's local time is used, right on the mission laptop.
 MISSION_TZ = ZoneInfo('Europe/Rome') if ZoneInfo is not None else None
 
 
@@ -126,11 +125,11 @@ with _quiet():
 
 
 # --------------------------------------------------------------------------------------
-# Lettura della missione
+# Reading the mission
 # --------------------------------------------------------------------------------------
 def mission_setup(name):
-    """Origine, orientamento, griglia e grafo (passo, oppure nodi casuali e seme) dal log;
-    scansioni in ordine."""
+    """Origin, heading, grid and graph (spacing, or random nodes and seed) from the log;
+    scans in order."""
     log_path = os.path.join(ROOT, 'MissionLogs', f'Mission_{name}', 'mission_log.txt')
     scans = glob.glob(os.path.join(ROOT, 'MissionMap', f'Mission_{name}', 'scans', '*.npz'))
     if not os.path.exists(log_path) or not scans:
@@ -142,8 +141,8 @@ def mission_setup(name):
     rows, cols, cell = (int(g.group(1)), int(g.group(2)), float(g.group(3))) if g else (2, 4, 5.0)
     s = re.search(r'Reticolo: passo richiesto ([\d.]+) m', log)
     spacing = float(s.group(1)) if s else 0.25
-    # Dal 22-10: metodo dei nodi e lunghezza degli archi; per i nodi casuali distribuzione,
-    # densita' e seme effettivo. Le missioni precedenti sono tutte a reticolo, archi 0.5-1.25.
+    # Since 22-10: node method and edge length; for random nodes distribution,
+    # density and actual seed. The earlier missions are all lattice, edges 0.5-1.25.
     gr = re.search(r'\[CONFIG\] Grafo: nodi (\w+).*; archi da ([\d.]+) a ([\d.]+) m', log)
     sampling, min_edge, max_edge = ((gr.group(1), float(gr.group(2)), float(gr.group(3)))
                                     if gr else ('reticolo', 0.5, 1.25))
@@ -161,7 +160,7 @@ def mission_setup(name):
 
 
 def scan_arrays(d):
-    """Le grandezze di una scansione salvata, come le usa easy_walk."""
+    """The quantities of a saved scan, as the mission code uses them."""
     z = d['terrain_corrected']
     ny, nx = z.shape
     ox, oy = map(float, d['grid_origin'])
@@ -182,7 +181,7 @@ def scan_arrays(d):
 
 
 def feed_scan(a, prm, gm, tm):
-    """Una scansione nelle mappe globali (con la funzione stessa della missione) e nel PRM."""
+    """One scan into the global maps (with the mission's own function) and into the PRM."""
     rx, ry, ryaw = a['robot']
     global_maps.fold_scan_into_global_maps(gm, tm, a['pts'], a['z'].ravel(), a['obstacle_mask'], a['valid'].ravel(),
                                   a['od_raw'].ravel(), (a['ny'], a['nx']), (rx, ry, ryaw))
@@ -198,7 +197,7 @@ def edges_of(prm):
 
 
 # --------------------------------------------------------------------------------------
-# Rigioco di una missione
+# Replay of a mission
 # --------------------------------------------------------------------------------------
 def replay_mission(job):
     name, fast, override = job
@@ -219,8 +218,8 @@ def replay_mission(job):
             P.MISSION_RANDOM_DISTRIBUTION = g['distribution']
             P.MISSION_RANDOM_DENSITY = g['density']
             P.MISSION_RANDOM_SEED = g['seed']
-        # Confronto fra grafi: il grafo chiesto da riga di comando al posto di quello della
-        # missione. Gli id dei nodi salvati nelle scansioni allora non valgono piu'.
+        # Graph comparison: the graph requested on the command line instead of the mission's
+        # one. The node ids saved in the scans are then no longer valid.
         foreign = bool(override)
         for k, v in (override or {}).items():
             setattr(P, k, v)
@@ -230,10 +229,10 @@ def replay_mission(job):
         tm = global_maps.GlobalTerrainGrid()
         tm.update_rects = []
         prm.set_global_terrain_map(tm)
-    # --fast: il confronto col grafo completo si fa su FAST_FULL_CHECKS inizi di cella
-    # sparsi lungo la missione, ultimo compreso. I primi non bastano: hanno poca storia alle
-    # spalle, e un margine troppo stretto li lascia ancora identici (provato: margine ridotto
-    # a un quinto, primi 3 identici, 7 diversi su 10 nel resto della missione).
+    # --fast: the comparison with the full graph is done on FAST_FULL_CHECKS cell starts
+    # scattered along the mission, the last included. The first ones are not enough: they have
+    # little history behind them, and a margin too narrow leaves them still identical (tried:
+    # margin cut to a fifth, first 3 identical, 7 different out of 10 in the rest of the mission).
     attempts = sorted({int(re.search(r'scan_it(\d+)_', os.path.basename(f)).group(1)) for f in m['scans']})
     later = attempts[1:]
     fast_pick = {later[round(i * (len(later) - 1) / max(FAST_FULL_CHECKS - 1, 1))]
@@ -255,8 +254,8 @@ def replay_mission(job):
             robot_node = int(d['robot_node_id']) if not foreign and int(d['robot_node_id']) in prm.nodes else \
                 min(prm.nodes, key=lambda k: math.hypot(prm.nodes[k][0] - rx, prm.nodes[k][1] - ry))
             prm.set_robot_node(robot_node, 0.0)
-            # Come in missione: arco percorso quando il robot passa da un nodo al vicino
-            # (easy_walk, passo completato), arco bloccato quando il fronte conferma un blocco.
+            # As in the mission: edge travelled when the robot moves from a node to the neighbour
+            # (step completed), edge blocked when the frontier confirms a block.
             if prev_node is not None and prev_node != robot_node:
                 key = (min(prev_node, robot_node), max(prev_node, robot_node))
                 if key in lattice_pairs:
@@ -267,7 +266,7 @@ def replay_mission(job):
                     (min(robot_node, nxt[0]), max(robot_node, nxt[0])) in lattice_pairs:
                 prm.mark_edge_invalid(robot_node, nxt[0])
             if it != prev_it:
-                # --- inizio di un tentativo: aggiornamento del grafo come in missione ----
+                # --- start of an attempt: graph update as in the mission ----
                 do_full = (not fast) or it in fast_pick
                 twin = copy.deepcopy((prm, gm)) if do_full and prev_it is not None else None
                 t_g = time.perf_counter()
@@ -280,16 +279,16 @@ def replay_mission(job):
                     mission_graph.rebuild_prm_edges(twin[0], twin[1], incremental=False)
                     full_checks += 1
                     full_same += edges_of(prm) == edges_of(twin[0])
-                # --- percorso verso l'obiettivo, con le restrizioni della missione ------
+                # --- path towards the goal, with the mission's restrictions ------
                 if node_cells is None:
                     node_cells = mission_graph.node_cells(prm, env)
                 cells = set(done_cells) | {(tr, tc)} | {tuple(int(v) for v in env.get_cell_from_world(rx, ry))}
                 prm.set_allowed_nodes([n for n, c in node_cells.items() if c in cells])
                 gx, gy = map(float, d['goal_xy'])
-                # Con un altro grafo l'obiettivo salvato puo' non essere un nodo: se la missione
-                # l'aveva spostato dal centro (occupato), il nodo piu' vicino puo' stare contro
-                # l'ostacolo, senza archi. In missione il ripiego sceglierebbe fra i nodi di quel
-                # grafo, quindi qui si prende il piu' vicino che ha almeno un arco valido.
+                # With another graph the saved goal may not be a node: if the mission
+                # had moved it from the centre (occupied), the nearest node may be against
+                # the obstacle, without edges. In the mission the fallback would choose among that
+                # graph's nodes, so here the nearest one with at least one valid edge is taken.
                 cand = [k for k in prm.nodes if prm.edges.get(k)] if foreign else prm.nodes
                 goal = min(cand, key=lambda k: math.hypot(prm.nodes[k][0] - gx, prm.nodes[k][1] - gy))
                 path = prm.find_path_dijkstra(robot_node, goal)
@@ -310,11 +309,11 @@ def replay_mission(job):
                 t_g = time.perf_counter()
                 prm.refresh_local_edge_weights(global_map=gm, edge_safety_margin=geometry.PRM_EDGE_SAFETY_MARGIN_M)
                 out['tempo_grafo_s'] += time.perf_counter() - t_g
-        # --- invariante 2: mappa globale contro dal vivo, su archi a caso nella finestra --
+        # --- invariant 2: global map against live, on random edges in the window --
         span = a['nx'] * a['cs']
         usable = spot_grid.slope_usable_mask(a['valid'].ravel(), a['od_raw'].ravel(), (a['ny'], a['nx']))
-        single = global_maps.GlobalTerrainGrid()          # mappa globale fatta di questa sola scansione,
-        global_maps.fold_scan_into_global_maps(           # con la funzione della missione
+        single = global_maps.GlobalTerrainGrid()          # global map made of this scan only,
+        global_maps.fold_scan_into_global_maps(           # with the mission's function
             global_maps.GlobalGrid(), single, a['pts'], a['z'].ravel(), a['obstacle_mask'], a['valid'].ravel(),
             a['od_raw'].ravel(), (a['ny'], a['nx']), a['robot'])
         for _ in range(ARCS_PER_SCAN):
@@ -341,7 +340,7 @@ def replay_mission(job):
 
 
 def return_route_check(name, gm):
-    """Strada di ritorno a wp_0 sul grafo GraphNav scaricato, oggi e con le scorciatoie."""
+    """Return path to wp_0 on the downloaded GraphNav graph, today and with the shortcuts."""
     gdirs = glob.glob(os.path.join(ROOT, 'graph', f'Mission_{name}', 'Grafo_*'))
     log_path = os.path.join(ROOT, 'MissionLogs', f'Mission_{name}', 'mission_log.txt')
     if not gdirs:
@@ -355,8 +354,8 @@ def return_route_check(name, gm):
     by_name = {v: k for k, v in names.items()}
     xy = {}
     for w in g.waypoints:
-        # Come in missione (recordingInterface.waypoint_poses): posizione nota solo per i
-        # waypoint creati dal codice, wp_N; quelli automatici della registrazione no.
+        # As in the mission (RecordingInterface.waypoint_poses): position known only for the
+        # waypoints created by the code, wp_N; not for the automatic recording ones.
         snap = os.path.join(gdir, 'waypoint_snapshots', w.snapshot_id)
         if not re.fullmatch(r'wp_\d+', w.annotations.name) or not os.path.exists(snap):
             continue
@@ -384,7 +383,7 @@ def return_route_check(name, gm):
 
 
 def gait_check(m):
-    """Andatura che il codice di oggi sceglierebbe su ogni tratto percorso dal vivo."""
+    """Gait today's code would choose on every leg travelled live."""
     if m['segments'] is None:
         return None
     times = [(float(np.load(f)['time']), f) for f in m['scans']]
@@ -412,7 +411,7 @@ def gait_check(m):
 
 
 # --------------------------------------------------------------------------------------
-# Verdetto
+# Verdict
 # --------------------------------------------------------------------------------------
 def summary_for_reference(out):
     tiers = {}
@@ -467,7 +466,7 @@ def check_invariants(name, out):
 
 
 def compare_reference(name, now, ref):
-    """Elenca le differenze di comportamento rispetto al riferimento."""
+    """List the behaviour differences from the reference."""
     if ref is None:
         print("  [-- ] nessun riferimento salvato per questa missione")
         return []
@@ -499,7 +498,7 @@ def compare_reference(name, now, ref):
 
 
 def graph_table(names, results):
-    """Una riga per missione: il grafo usato, i percorsi a inizio cella e il tempo del grafo."""
+    """One line per mission: the graph used, the paths at cell start and the graph time."""
     print("\n" + "=" * 70)
     print(f"{'missione':22s}{'nodi':>7}{'coppie':>8}{'percorsi':>10}{'lungh.media':>13}"
           f"{'archi medi':>12}{'tempo grafo':>13}")
@@ -558,7 +557,7 @@ def main():
     if args.max_edge is not None:
         override['PRM_MAX_EDGE_M'] = args.max_edge
     if override and override.get('MISSION_GRAPH_SAMPLING', P.MISSION_GRAPH_SAMPLING) == 'casuale':
-        # Un solo seme per tutte le missioni, scritto qui sotto per poter ripetere il confronto.
+        # A single seed for all missions, written below so the comparison can be repeated.
         override['MISSION_RANDOM_SEED'] = (args.seed if args.seed is not None
                                            else mission_graph.draw_seed())
     if override and args.update_reference:

@@ -1,14 +1,14 @@
 """
-PARAMETRI DELLA MISSIONE: tutti gli interruttori e i numeri che si cambiano sul campo.
+MISSION PARAMETERS: all the switches and numbers that are changed in the field.
 
-Un solo posto da toccare. Ogni parametro ha accanto cosa fa; perche' ha quel valore (le
-prove sul campo che l'hanno deciso) sta in CHANGELOG.md. I parametri propri di un modulo
-(griglie e mappe in spotGrid.py, grafo in prm_graph.py, fronte in arcVerification.py,
-movimento in movements.py) restano in quel modulo.
+A single place to touch. Every parameter has what it does next to it; why it has that
+value (the field tests that decided it) is in CHANGELOG.md. The parameters specific to a
+module (grids and maps in perception/, graph in planning/roadmap.py, frontier in
+planning/safe_frontier.py, motion in robot/motion.py) stay in that module.
 
-Gli argomenti da riga di comando di easy_walk.py (--rows, --graph, --spacing, ...) cambiano
-questi valori per una sola missione. Il codice li legge come parametri.NOME al momento
-dell'uso, quindi anche le prove (test_replay.py, test_e2e_loop.py) li possono cambiare.
+The command-line arguments of run_mission.py (--rows, --graph, --spacing, ...) change
+these values for a single mission. The code reads them as config.NAME at the time of
+use, so the tests (test_replay.py, test_e2e_loop.py) can change them too.
 """
 import numpy as np
 
@@ -16,85 +16,85 @@ from spot_explorer.perception import geometry
 from spot_explorer.perception import spot_grid
 
 # =========================================================================================
-# LA MISSIONE: dimensione, grafo dei nodi, archi
+# THE MISSION: size, node graph, edges
 # =========================================================================================
-# Righe (a sinistra del robot) x colonne (davanti) x lato della cella. Da qui si costruiscono
-# sia la mappa delle celle sia il grafo, quindi restano sempre uguali. Per una sola missione,
-# senza toccare il file: argomenti --rows --cols --cell di easy_walk.py, oppure la variabile
-# SPOT_MISSION_GRID="righe,colonne,lato".
+# Rows (to the robot's left) x columns (ahead) x cell side. Both the cell map and the graph
+# are built from here, so they always stay the same. For a single mission,
+# without touching the file: arguments --rows --cols --cell of run_mission.py, or the variable
+# SPOT_MISSION_GRID="rows,cols,side".
 MISSION_GRID_ROWS = 8
 MISSION_GRID_COLS = 7
 MISSION_CELL_SIZE_M = 2.0
 
-# Come si generano i nodi del grafo (vedi mission_graph.py, NODI CASUALI):
-#   'reticolo' reticolo rettangolare, deterministico; il centro di ogni cella e' un nodo;
-#   'casuale'  nodi sparsi con MISSION_RANDOM_DISTRIBUTION ('uniforme', 'poisson',
-#              'perturbata', 'halton'), centri delle celle sempre compresi.
-# Da riga di comando: --graph --distribution --density --seed.
+# How the graph nodes are generated (see mission_graph.py, RANDOM NODES):
+#   'reticolo' rectangular lattice, deterministic; the centre of every cell is a node;
+#   'casuale'  scattered nodes with MISSION_RANDOM_DISTRIBUTION ('uniforme', 'poisson',
+#              'perturbata', 'halton'), cell centres always included.
+# From the command line: --graph --distribution --density --seed.
 MISSION_GRAPH_SAMPLING = 'casuale'
 MISSION_RANDOM_DISTRIBUTION = 'poisson'
-# Nodi per m2: con 4 il numero di nodi e' quello del reticolo a passo 0.5 m; 5 un po' di
-# piu', per i passaggi stretti.
+# Nodes per m2: with 4 the number of nodes is that of the lattice at 0.5 m spacing; 5 a bit
+# more, for narrow passages.
 MISSION_RANDOM_DENSITY = 9.0
-MISSION_RANDOM_SEED = None              # None = estratto a caso, e scritto nel log
-MISSION_POISSON_MIN_DIST_M = None       # None = 0.75 / sqrt(densita')
+MISSION_RANDOM_SEED = None              # None = drawn at random, and written in the log
+MISSION_POISSON_MIN_DIST_M = None       # None = 0.75 / sqrt(density)
 
-# Reticolo: passo fra i nodi, arrotondato a cell_size/n (None = mission_graph.
-# suggested_spacing()); anelli di vicini collegati (None = tutti i nodi fra PRM_MIN_EDGE_M e
-# PRM_MAX_EDGE_M). Da riga di comando: --spacing --rings.
+# Lattice: spacing between nodes, rounded to cell_size/n (None = mission_graph.
+# suggested_spacing()); rings of linked neighbours (None = all nodes between PRM_MIN_EDGE_M and
+# PRM_MAX_EDGE_M). From the command line: --spacing --rings.
 MISSION_LATTICE_SPACING_M = 0.5
 MISSION_LATTICE_RINGS = None
 
-# Archi: si collegano tutte le coppie di nodi distanti fra PRM_MIN_EDGE_M e PRM_MAX_EDGE_M.
-# Archi lunghi fino a 1.25 m: con archi piu' corti l'ingresso in una cella diventa una catena
-# di molti waypoint, e ogni waypoint e' una rotazione, proprio nei corridoi stretti in cui
-# ruotare non si puo'. PRM_MAX_EDGE_M e' anche il raggio entro cui il refresh del PRM
-# ricostruisce le coppie candidate. Da riga di comando: --min-edge --max-edge.
+# Edges: all pairs of nodes between PRM_MIN_EDGE_M and PRM_MAX_EDGE_M apart are linked.
+# Edges up to 1.25 m long: with shorter edges entering a cell becomes a chain
+# of many waypoints, and every waypoint is a rotation, right in the narrow corridors where
+# rotating is not possible. PRM_MAX_EDGE_M is also the radius within which the PRM refresh
+# rebuilds the candidate pairs. From the command line: --min-edge --max-edge.
 PRM_MIN_EDGE_M = 0.5
 PRM_MAX_EDGE_M = 1.25
 PRM_CONNECTION_RADIUS_M = 3.0
 
-# --- Dove puo' passare il pianificatore ---------------------------------------------------
-# Per entrare in una cella il percorso puo' usare SOLO le celle gia' visitate, la cella in
-# cui si trova il robot e la cella obiettivo: le celle mai esplorate non si attraversano. Se
-# l'unica strada passa da una cella non visitata il tentativo fallisce, il lato viene segnato
-# come provato e la cella si ritenta piu' avanti da un altro lato.
+# --- Where the planner may pass -----------------------------------------------------------
+# To enter a cell the path may use ONLY the cells already visited, the cell
+# the robot is in and the goal cell: cells never explored are not crossed. If
+# the only way goes through an unvisited cell the attempt fails, the side is marked
+# as tried and the cell is retried later from another side.
 PLAN_ONLY_EXPLORED_CELLS = True
-# Tetto alla deviazione: un percorso piu' lungo di RATIO * linea d'aria + SLACK vale "nessun
-# percorso" (vedi PRM.set_detour_limit). None = nessun tetto.
+# Detour cap: a path longer than RATIO * straight line + SLACK counts as "no
+# path" (see PRM.set_detour_limit). None = no cap.
 PLAN_MAX_DETOUR_RATIO = 2.0
 PLAN_DETOUR_SLACK_M = 1.0
 
 
 # ==================================================================
-# NAVIGAZIONE CON IL FRONTE SICURO -- vedi decide_next_move() e il ciclo
-# in attempt_enter_cell_from_position(). Le distanze del fronte stanno in spotGrid
-# (FRONTIER_*), qui solo la logica del ciclo.
-#   MIN_PARTIAL_STEP_M           -- passo minimo: sotto questa lunghezza non vale la pena
-#                                   muoversi (si pagherebbe una scansione per pochi cm).
-#   FRONTIER_BLOCK_CONFIRM_SCANS -- quante scansioni consecutive, a robot FERMO, senza poter
-#                                   avanzare nemmeno del passo minimo, prima di dichiarare
-#                                   un blocco: la conferma "da vicino", invece di
-#                                   condannare un arco al primo scorcio da lontano.
-#   FRONTIER_RESCAN_WAIT_S       -- pausa fra due scansioni di conferma.
-#   MAX_BLOCK_REPLANS            -- dopo un blocco si ripianifica dal punto in cui si e'; se
-#                                   succede piu' di queste volte nello stesso tentativo, ci
-#                                   si arrende (ritirata, cella rimandata). Lo stesso
-#                                   valore limita anche le riscelte del punto obiettivo.
-#   FRONTIER_ABORT_CONFIRM       -- a movimento in corso, quanti fronti consecutivi (~0.2 s
-#                                   l'uno) devono dire "non arrivi dove stai andando" prima
-#                                   di fermare il robot. 2 evita di inchiodare per un singolo
-#                                   fotogramma sporco; a 0.5 m/s sono ~20 cm.
-#   GOAL_REACHED_TOLERANCE_M     -- se il fronte impedisce gli ultimi centimetri verso
-#                                   l'obiettivo (es. un muro appena oltre), ci si accontenta.
-#   MAX_LOOP_ITERATIONS          -- salvaguardia anti-stallo del ciclo.
+# NAVIGATION WITH THE SAFE FRONTIER -- see decide_next_move() and the loop
+# in attempt_enter_cell_from_position(). The frontier distances are in perception.geometry
+# (FRONTIER_*), here only the logic of the loop.
+#   MIN_PARTIAL_STEP_M           -- minimum step: below this length it is not worth
+#                                   moving (a scan would be paid for a few cm).
+#   FRONTIER_BLOCK_CONFIRM_SCANS -- how many consecutive scans, with the robot STILL, without
+#                                   being able to advance even the minimum step, before
+#                                   declaring a block: the "up close" confirmation, instead of
+#                                   condemning an edge at the first glimpse from afar.
+#   FRONTIER_RESCAN_WAIT_S       -- pause between two confirmation scans.
+#   MAX_BLOCK_REPLANS            -- after a block it replans from where it is; if
+#                                   it happens more than this many times in the same attempt,
+#                                   it gives up (retreat, cell deferred). The same
+#                                   value also limits the re-choices of the goal point.
+#   FRONTIER_ABORT_CONFIRM       -- while moving, how many consecutive frontiers (~0.2 s
+#                                   each) must say "you will not get where you are going"
+#                                   before stopping the robot. 2 avoids braking for a single
+#                                   dirty frame; at 0.5 m/s that is ~20 cm.
+#   GOAL_REACHED_TOLERANCE_M     -- if the frontier prevents the last centimetres towards
+#                                   the goal (e.g. a wall just beyond), it settles for it.
+#   MAX_LOOP_ITERATIONS          -- anti-stall safeguard of the loop.
 # ==================================================================
 MIN_PARTIAL_STEP_M = 0.40
-# PASSO FINALE: un passo sotto MIN_PARTIAL_STEP_M (ma almeno FINAL_STEP_MIN_M) si fa
-# comunque se porta il robot entro GOAL_REACHED_TOLERANCE_M dall'obiettivo, con il robot
-# nella cella: e' l'ultimo, dopo il quale l'arrivo vale. Senza, il 28-10 11:36 il robot e'
-# rimasto fermo a 0.85 m dall'obiettivo potendo avanzare di 0.38 m (sarebbe arrivato a 0.47);
-# il 22-10 16:04 e' successo fino a 15 volte, il 26-10 15:11 fino a 8.
+# FINAL STEP: a step below MIN_PARTIAL_STEP_M (but at least FINAL_STEP_MIN_M) is taken
+# anyway if it brings the robot within GOAL_REACHED_TOLERANCE_M of the goal, with the robot
+# in the cell: it is the last one, after which the arrival counts. Without it, on 28-10 11:36
+# the robot stayed still 0.85 m from the goal while able to advance 0.38 m (it would have got to 0.47);
+# on 22-10 16:04 it happened up to 15 times, on 26-10 15:11 up to 8.
 FINAL_STEP_MIN_M = 0.10
 FRONTIER_BLOCK_CONFIRM_SCANS = 3
 FRONTIER_RESCAN_WAIT_S = 0.3
@@ -102,316 +102,316 @@ MAX_BLOCK_REPLANS = 3
 FRONTIER_ABORT_CONFIRM = 2
 FRONTIER_ABORT_TOLERANCE_M = 0.05
 
-# Legata allo scostamento che il fronte stesso impone: allowed_advance() ferma il CENTRO del
-# robot a FRONTIER_BODY_HALF_LENGTH_M + FRONTIER_MARGIN_M = 0.65 m prima del primo punto non
-# libero. Una tolleranza piu' piccola lascerebbe una banda morta in cui il robot non puo' ne'
-# avanzare ne' dichiarare di essere arrivato, e finirebbe per dichiarare un blocco. Le due
-# costanti devono essere la stessa cosa.
+# Tied to the offset the frontier itself imposes: allowed_advance() stops the robot's CENTRE
+# FRONTIER_BODY_HALF_LENGTH_M + FRONTIER_MARGIN_M = 0.65 m before the first non-free
+# point. A smaller tolerance would leave a dead band where the robot can neither
+# advance nor declare it has arrived, and it would end up declaring a block. The two
+# constants must be the same thing.
 GOAL_REACHED_TOLERANCE_M = geometry.FRONTIER_BODY_HALF_LENGTH_M + geometry.FRONTIER_MARGIN_M
 MAX_LOOP_ITERATIONS = 150
 
-# --- GUARDIE ANTI-STALLO ------------------------------------------------------------
-# Il ciclo puo' girare a vuoto con il robot immobile: la rotazione verso il prossimo nodo
-# viene rifiutata, il cono non trova direzioni che avvicinino, ma le direzioni utilizzabili
-# non sono zero (quindi non e' "trappola"); si scarta il tratto, si ripianifica, e al giro
-# dopo il primo waypoint punta da un'altra parte e la rotazione viene rifiutata di nuovo.
-#   MAX_ROTATION_DISCARDS -- scarti di tratto per rifiuto di rotazione ammessi in un
-#       tentativo di cella. Contati per TENTATIVO e non per coppia di nodi: la coppia cambia
-#       a ogni ripianificazione, e un contatore per coppia non scatterebbe mai (e' il
-#       limite di MAX_ROTATION_FAILS_SAME_EDGE).
-#   MAX_IDLE_LOOPS -- giri di ciclo consecutivi senza che il robot si sia spostato di
-#       almeno IDLE_MOVE_M. E' la rete generica: qualunque sia il ramo che gira a vuoto,
-#       dopo tanti giri fermi si rinuncia alla cella in modo ordinato invece di consumare
-#       batteria. Deve stare SOPRA la sequenza legittima piu' lunga a robot fermo,
-#       altrimenti taglia via proprio le reti di ripiego (ritorno con GraphNav) che quella
-#       sequenza deve raggiungere. Calcolata sui limiti del ciclo:
+# --- ANTI-STALL GUARDS --------------------------------------------------------------
+# The loop can spin idle with the robot motionless: the rotation towards the next node
+# is refused, the cone finds no direction that gets closer, but the usable directions
+# are not zero (so it is not a "trap"); the leg is discarded, it replans, and at the next
+# turn the first waypoint points elsewhere and the rotation is refused again.
+#   MAX_ROTATION_DISCARDS -- leg discards for rotation refusal allowed in a
+#       cell attempt. Counted per ATTEMPT and not per pair of nodes: the pair changes
+#       at every replan, and a per-pair counter would never trigger (that is the
+#       limit of MAX_ROTATION_FAILS_SAME_EDGE).
+#   MAX_IDLE_LOOPS -- consecutive loop turns without the robot having moved by
+#       at least IDLE_MOVE_M. It is the generic net: whatever branch is spinning idle,
+#       after this many still turns the cell is given up in an orderly way instead of using up
+#       battery. It must be ABOVE the longest legitimate sequence with the robot still,
+#       otherwise it cuts off exactly the fallback nets (return with GraphNav) that the
+#       sequence must reach. Computed on the limits of the loop:
 #         [SUBITO]                MAX_EARLY_REPLANS              4
-#         obiettivo riscelto      MAX_BLOCK_REPLANS              3
-#         conferme di blocco      FRONTIER_BLOCK_CONFIRM_SCANS x (MAX_BLOCK_REPLANS+1) = 3 x 4 = 12
-#         rifiuti di rotazione    MAX_ROTATION_DISCARDS          4
-#         rifiuti d'arrivo        MAX_ARRIVAL_REFUSALS           3
-#                                                        totale 26  -> 30
-#       A ~0.7 s per giro fermo sono ~20 s. Il giro a vuoto sulla rotazione lo prende
-#       prima MAX_ROTATION_DISCARDS; questa e' la rete per tutto il resto.
+#         goal chosen again      MAX_BLOCK_REPLANS              3
+#         block confirmations    FRONTIER_BLOCK_CONFIRM_SCANS x (MAX_BLOCK_REPLANS+1) = 3 x 4 = 12
+#         rotation refusals      MAX_ROTATION_DISCARDS          4
+#         arrival refusals       MAX_ARRIVAL_REFUSALS           3
+#                                                        total 26  -> 30
+#       At ~0.7 s per still turn that is ~20 s. The idle spin on the rotation is caught
+#       first by MAX_ROTATION_DISCARDS; this is the net for everything else.
 MAX_ROTATION_DISCARDS = 4
 MAX_IDLE_LOOPS = 30
 IDLE_MOVE_M = 0.05
 
 # ==================================================================
-# ROTAZIONE E ARRETRAMENTO.
+# ROTATION AND BACK-OFF.
 #
-# Decisione dell'utente: il robot punta SEMPRE il muso verso il punto da raggiungere.
-# Niente marcia obliqua. Di traverso Spot e' largo 1.10 m invece di 0.50, quindi il
-# fronte pretende 0.59 m di obstacle_distance invece di 0.30: andare di lato quando non
-# si riesce a ruotare renderebbe il robot PIU' LARGO proprio dove lo spazio e' poco.
+# User's decision: the robot ALWAYS points its nose towards the point to reach.
+# No oblique walking. Sideways Spot is 1.10 m wide instead of 0.50, so the
+# frontier requires 0.59 m of obstacle_distance instead of 0.30: going sideways when it
+# cannot rotate would make the robot WIDER exactly where space is tight.
 #
-# Quando la rotazione non e' possibile il robot ARRETRA IN LINEA RETTA lungo l'asse
-# del corpo -- che non e' marcia obliqua: l'ingombro resta 0.50 m e la soglia del
-# fronte resta 0.30 -- e al giro dopo riprova da li'. Alla seconda volta sullo stesso
-# tratto il tratto si scarta e si ripianifica.
-#   ROTATION_RETREAT_M        -- quanto si tenta di arretrare (il fronte puo' concederne meno)
-#   ROTATION_RETREAT_MIN_M    -- sotto questo arretramento non vale la pena muoversi
-#   MAX_ROTATION_FAILS_SAME_EDGE -- tentativi di arretramento sullo stesso tratto prima di scartarlo
+# When rotation is not possible the robot BACKS UP IN A STRAIGHT LINE along the body
+# axis -- which is not oblique walking: the footprint stays 0.50 m and the frontier
+# threshold stays 0.30 -- and at the next turn it tries again from there. The second time on
+# the same leg the leg is discarded and it replans.
+#   ROTATION_RETREAT_M        -- how far it tries to back up (the frontier may allow less)
+#   ROTATION_RETREAT_MIN_M    -- below this back-off it is not worth moving
+#   MAX_ROTATION_FAILS_SAME_EDGE -- back-off attempts on the same leg before discarding it
 # ==================================================================
 ROTATION_RETREAT_M = 0.60
 ROTATION_RETREAT_MIN_M = 0.20
 MAX_ROTATION_FAILS_SAME_EDGE = 2
 
-# --- Ventaglio dentro il cono di rotazione possibile -- vedi plan_cone_move.
-CONE_SWEEP_MAX_DEG = 90.0      # quanto in la' si guarda, a destra e a sinistra del muso
-CONE_SWEEP_STEP_DEG = 10.0     # passo della scansione angolare (9 direzioni per lato)
-CONE_MIN_GAIN_M = 0.20         # una direzione vale solo se avvicina all'obiettivo di tanto
-# Il cono punta al punto del PERCORSO a questa distanza dal robot, non all'obiettivo della
-# cella in linea d'aria: se il percorso gira attorno a un blocco, "avvicinarsi" all'obiettivo
-# in linea d'aria puo' portare il robot dentro un vicolo cieco, dalla parte opposta al
-# percorso. Se quel punto e' dietro, nessuna direzione del cono avvicina, e si passa
-# all'arretramento -- che e' la mossa giusta.
+# --- Fan inside the possible rotation cone -- see plan_cone_move.
+CONE_SWEEP_MAX_DEG = 90.0      # how far it looks, to the right and left of the nose
+CONE_SWEEP_STEP_DEG = 10.0     # step of the angular sweep (9 directions per side)
+CONE_MIN_GAIN_M = 0.20         # a direction counts only if it gets closer to the goal by this much
+# The cone aims at the point of the PATH at this distance from the robot, not at the cell
+# goal in a straight line: if the path goes around a block, "getting closer" to the goal
+# in a straight line can take the robot into a dead end, on the side opposite to the
+# path. If that point is behind, no direction of the cone gets closer, and it moves on
+# to the back-off -- which is the right move.
 CONE_PATH_LOOKAHEAD_M = 1.5
-# Durante la rotazione sul posto un fronte "fine dati" piu' corto non interrompe il movimento:
-# ruotando la zona vista si sposta e il bordo dei dati si accorcia di qualche centimetro senza
-# alcun ostacolo. Vale finche'
-# il robot non si e' spostato di almeno tanto; un fronte accorciato da un OSTACOLO interrompe
-# sempre.
+# During the rotation in place a shorter "fine dati" frontier does not interrupt the move:
+# while rotating the seen area shifts and the data edge gets a few centimetres shorter without
+# any obstacle. It holds until
+# the robot has moved by at least this much; a frontier shortened by an OBSTACLE always
+# interrupts.
 ABORT_IGNORE_DATA_EDGE_UNTIL_M = 0.15
 
-# Arretramenti consecutivi ammessi, CONTATI PER SEQUENZA e non per arco:
-# MAX_ROTATION_FAILS_SAME_EDGE e' indicizzato su (nodo_robot, nodo_successivo), e dopo un
-# arretramento il robot puo' trovarsi agganciato a un altro nodo, quindi da solo non ferma
-# una catena di arretramenti.
+# Consecutive back-offs allowed, COUNTED PER SEQUENCE and not per edge:
+# MAX_ROTATION_FAILS_SAME_EDGE is indexed on (robot_node, next_node), and after a
+# back-off the robot may find itself attached to another node, so on its own it does not stop
+# a chain of back-offs.
 MAX_STRAIGHT_RETREATS_IN_A_ROW = 2
 
-# --- Ventaglio a 360 gradi: riconoscere la trappola -- vedi scan_escape_directions.
-ESCAPE_FAN_STEP_DEG = 15.0        # 24 direzioni; 24 valutazioni del fronte, ~frazione di scansione
-ESCAPE_FAN_MIN_ADVANCE_M = 0.30   # sotto questo spazio una direzione non e' una via d'uscita
-# Controllo preventivo sulla posa d'arrivo (vedi arrival_has_exit): si paga solo dove serve,
-# cioe' sui passi corti e verso spazi stretti, che sono i casi in cui si entra negli angoli.
+# --- 360 degree fan: recognizing the trap -- see scan_escape_directions.
+ESCAPE_FAN_STEP_DEG = 15.0        # 24 directions; 24 frontier evaluations, ~a fraction of a scan
+ESCAPE_FAN_MIN_ADVANCE_M = 0.30   # below this space a direction is not a way out
+# Preventive check on the arrival pose (see arrival_has_exit): paid only where needed,
+# i.e. on short steps and towards tight spaces, which are the cases where corners are entered.
 ARRIVAL_EXIT_CHECK_MAX_STEP_M = 0.40
 ARRIVAL_EXIT_CHECK_OD_M = 0.50
-MAX_ARRIVAL_REFUSALS = 3          # per tentativo di cella, per non avvitarsi sul rifiuto
+MAX_ARRIVAL_REFUSALS = 3          # per cell attempt, so as not to spiral on the refusal
 
-# --- Ritorni con GraphNav invece che camminando all'indietro ------------------------------
-# Tornare indietro a zampe, all'indietro, sui tratti registrati e' la manovra piu' rischiosa
-# che facciamo: il robot non vede dove va e non si rilocalizza. GraphNav cammina in avanti,
-# con la localizzazione e l'anti-ostacolo di Boston Dynamics. Si lascia una traccia di
-# waypoint lungo la strada (vedi graphnav_drop_breadcrumb) e si torna su quella.
-GRAPHNAV_WAYPOINT_MIN_SPACING_M = 0.75   # distanza minima fra due briciole
-GRAPHNAV_MAX_BACKTRACK_HOPS = 3          # poi si rimanda la cella e si passa alla priorita' dopo
+# --- Returns with GraphNav instead of walking backwards ----------------------------------
+# Going back on foot, backwards, over the recorded legs is the riskiest manoeuvre
+# we make: the robot cannot see where it goes and does not relocalize. GraphNav walks forwards,
+# with Boston Dynamics' localization and obstacle avoidance. A trail of waypoints is
+# left along the way (see graphnav_drop_breadcrumb) and the robot goes back along it.
+GRAPHNAV_WAYPOINT_MIN_SPACING_M = 0.75   # minimum distance between two breadcrumbs
+GRAPHNAV_MAX_BACKTRACK_HOPS = 3          # then the cell is deferred and the next priority is taken
 
-# --- Scorciatoie nel grafo GraphNav -----------------------------------------------------
-# Ogni waypoint si collega solo al precedente: il grafo GraphNav e' una CATENA che ricalca la
-# strada fatta, e GraphNav cammina solo sugli archi. Senza scorciatoie, tornare a un waypoint
-# a un metro di distanza ma registrato molti passi prima vuol dire ripercorrere tutta la
-# catena. Prima di ogni spostamento con GraphNav (graphnav_add_shortcuts) si aggiungono
-# scorciatoie NOSTRE, scelte SULLA STRADA (vedi plan_graphnav_shortcuts): si calcola la
-# strada piu' corta verso la destinazione considerando TUTTE le coppie di waypoint a meno di
-# GRAPHNAV_SHORTCUT_MAX_M, senza arco diretto, la cui linea retta e' stata VISTA libera nella
-# mappa globale con GRAPHNAV_SHORTCUT_MARGIN_M di margine, e si creano solo quelle che la
-# strada usa. Mai attraverso zone mai viste. A fine missione si aggiungono anche le chiusure
-# d'anello di Spot (GRAPHNAV_SDK_LOOP_CLOSURE). GraphNav conserva comunque il suo
-# anti-ostacolo durante il movimento.
-# GRAPHNAV_SHORTCUT_MARGIN_M: margine dalle celle occupate (che sono gia' a obstacle_distance
-# <= 0.15): 0.30 + 0.15 = 0.45 m dall'ostacolo, largo perche' gli archi sono lunghi.
+# --- Shortcuts in the GraphNav graph ------------------------------------------------------
+# Every waypoint links only to the previous one: the GraphNav graph is a CHAIN that traces the
+# way taken, and GraphNav only walks on the edges. Without shortcuts, going back to a waypoint
+# one metre away but recorded many steps earlier means retracing the whole
+# chain. Before every move with GraphNav (graphnav_add_shortcuts) OUR shortcuts are added,
+# chosen ON THE WAY (see plan_graphnav_shortcuts): the shortest
+# way to the destination is computed considering ALL the pairs of waypoints less than
+# GRAPHNAV_SHORTCUT_MAX_M apart, without a direct edge, whose straight line was SEEN free in the
+# global map with GRAPHNAV_SHORTCUT_MARGIN_M of margin, and only those the way uses
+# are created. Never through areas never seen. At the end of the mission Spot's loop closures
+# are added too (GRAPHNAV_SDK_LOOP_CLOSURE). GraphNav still keeps its
+# obstacle avoidance during the move.
+# GRAPHNAV_SHORTCUT_MARGIN_M: margin from the occupied cells (which are already at obstacle_distance
+# <= 0.15): 0.30 + 0.15 = 0.45 m from the obstacle, wide because the edges are long.
 GRAPHNAV_SHORTCUTS = True
 GRAPHNAV_SDK_LOOP_CLOSURE = True
-# Chiusura d'anello di Spot, completa (con ICP), una volta sola a fine missione, prima
-# dell'ancoraggio e del ritorno a wp_0: i suoi archi, corretti sulle scansioni, sono gli unici
-# che correggono la deriva della mappa scaricata. GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S e' il tempo
-# massimo di elaborazione LATO SPOT (Params.timeout_seconds): allo scadere Spot restituisce gli
-# archi trovati fino a li'. Spot sfora il limite di 10-20 s (28-10: 16 archi in 55 s, 20 in
-# 66 s). Durante la missione non si chiama: i viaggi usano le nostre scorciatoie (22-10: 23
-# viaggi riusciti su 23 con quelle sole). Misure al banco: prova_anelli.py e CHANGELOG 26-10.
+# Spot's loop closure, full (with ICP), only once at the end of the mission, before
+# anchoring and the return to wp_0: its edges, corrected on the scans, are the only ones
+# that correct the drift of the downloaded map. GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S is the maximum
+# processing time ON SPOT'S SIDE (Params.timeout_seconds): when it expires Spot returns the
+# edges found so far. Spot overruns the limit by 10-20 s (28-10: 16 edges in 55 s, 20 in
+# 66 s). It is not called during the mission: the trips use our shortcuts (22-10: 23
+# successful trips out of 23 with those alone). Bench measurements: bench_loop_closure.py and CHANGELOG 26-10.
 GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S = 45.0
 GRAPHNAV_SHORTCUT_MAX_M = 3.0
 GRAPHNAV_SHORTCUT_MARGIN_M = 0.30
-# Lunghezza massima degli archi che crea la chiusura d'anello di Spot.
+# Maximum length of the edges Spot's loop closure creates.
 GRAPHNAV_SDK_LOOP_MAX_M = 2.0
-# Un nodo PRM con meno di questo spazio libero non e' raggiungibile dal fronte: si scarta.
+# A PRM node with less free space than this cannot be reached by the frontier: discarded.
 PRM_NODE_MIN_CLEARANCE_M = geometry.FRONTIER_CLEARANCE_M   # 0.30
-# Ripianificazioni "precoci" (alla prima cella bloccante, senza aspettare la conferma da
-# ferma) ammesse per tentativo di cella. Vedi il ramo 'wait'.
+# "Early" replans (at the first blocking cell, without waiting for the confirmation while
+# still) allowed per cell attempt. See the 'wait' branch.
 MAX_EARLY_REPLANS = 4
-# Ogni ritorno indietro ha memoria per il tentativo (vedi _trap_backtrack): l'arco su cui il
-# robot si e' fermato diventa impercorribile fino alla fine del tentativo, e al
-# MAX_BACKTRACKS_PER_ATTEMPT-esimo ritorno il robot torna indietro e rinuncia alla cella da
-# questo lato. Senza memoria, dalla briciola precedente il pianificatore ritroverebbe lo
-# stesso percorso e il robot rientrerebbe nella stessa trappola.
+# Every going back has memory for the attempt (see _trap_backtrack): the edge on which the
+# robot stopped becomes impassable until the end of the attempt, and at the
+# MAX_BACKTRACKS_PER_ATTEMPT-th return the robot goes back and gives up the cell from
+# this side. Without memory, from the previous breadcrumb the planner would find the
+# same path again and the robot would walk back into the same trap.
 MAX_BACKTRACKS_PER_ATTEMPT = 2
-# Entro questa distanza l'obiettivo del recupero e' "lo stesso" di quello appena fallito.
+# Within this distance the recovery goal is "the same" as the one that just failed.
 RECOVERY_SAME_GOAL_M = 0.30
 
-# --- SCELTA DELL'OBIETTIVO DELLA CELLA (vedi find_best_point_in_cell) -----------------
-# TARGET_CLEARANCE_M: spazio libero PREFERITO attorno all'obiettivo, sulla mappa globale e
-# sulla scansione dal vivo. Il fronte pretende FRONTIER_CLEARANCE_M (0.25) e l'isteresi del
-# fronte e' 0.04 m: un obiettivo scelto a 0.28 (PLAN_CLEARANCE_M, che resta il minimo
-# assoluto) oscilla attorno alla soglia. All'aperto (22-10 16:04) gli obiettivi scelti a
-# 0.28 sono stati rifiutati dal vivo a 0.24, al bordo dell'erba.
+# --- CHOICE OF THE CELL GOAL (see find_best_point_in_cell) -----------------------------
+# TARGET_CLEARANCE_M: PREFERRED free space around the goal, on the global map and
+# on the live scan. The frontier requires FRONTIER_CLEARANCE_M (0.25) and the frontier's
+# hysteresis is 0.04 m: a goal chosen at 0.28 (PLAN_CLEARANCE_M, which stays the absolute
+# minimum) oscillates around the threshold. Outdoors (22-10 16:04) the goals chosen at
+# 0.28 were refused live at 0.24, at the edge of the grass.
 TARGET_CLEARANCE_M = 0.33
-# TARGET_CELL_BORDER_M: l'obiettivo si sceglie preferibilmente ad almeno questa distanza dal
-# bordo della cella. Un obiettivo sul bordo lascia il robot, fermo entro la tolleranza
-# d'arrivo, fuori dalla cella ("Mancano 0.06 m ... ancora fuori dalla cella", 44 volte il
+# TARGET_CELL_BORDER_M: the goal is preferably chosen at least this distance from the
+# cell border. A goal on the border leaves the robot, stopped within the arrival
+# tolerance, outside the cell ("Mancano 0.06 m ... ancora fuori dalla cella", 44 times on
 # 22-10 16:04).
 TARGET_CELL_BORDER_M = 0.30
-# Arrivo per tolleranza con il robot appena FUORI dalla cella: vale se il centro e' fuori di
-# al massimo ARRIVAL_OUTSIDE_CELL_M (il muso, 0.55 m avanti, e' comunque dentro). E' la
-# tolleranza d'arrivo meno il margine dal bordo: un obiettivo scelto a TARGET_CELL_BORDER_M
-# dentro la cella, con il robot fermo a GOAL_REACHED_TOLERANCE_M da lui, vale sempre. Il
-# 22-10 16:04, a ogni rifiuto "fuori dalla cella" il robot era a 0.5-0.65 m dall'obiettivo,
-# fuori di 0.01-0.61 m.
+# Arrival by tolerance with the robot just OUTSIDE the cell: it counts if the centre is outside by
+# at most ARRIVAL_OUTSIDE_CELL_M (the nose, 0.55 m ahead, is inside anyway). It is the
+# arrival tolerance minus the margin from the border: a goal chosen TARGET_CELL_BORDER_M
+# inside the cell, with the robot stopped GOAL_REACHED_TOLERANCE_M from it, always counts. On
+# 22-10 16:04, at every "outside the cell" refusal the robot was 0.5-0.65 m from the goal,
+# outside by 0.01-0.61 m.
 ARRIVAL_OUTSIDE_CELL_M = GOAL_REACHED_TOLERANCE_M - TARGET_CELL_BORDER_M      # = 0.35
-# Un obiettivo rifiutato dal fronte (spazio libero dal vivo sotto la soglia, o blocco
-# confermato entro questa distanza da lui) resta escluso per la sua cella fino alla fine
-# della missione: vedi _refuse_goal. Vale gia' alla PRIMA fermata del fronte: se il fronte si
-# ferma per un ostacolo entro questa distanza dall'obiettivo, o oltre la fine del percorso
-# (nel prolungamento di mezzo corpo per il muso), e' l'obiettivo a non andare, non la strada,
-# e se ne sceglie subito un altro (TentativoCella._riscegli_obiettivo). Prima si scartavano
-# i tratti uno per uno ([SUBITO]): il 22-10 16:04, 45 [SUBITO] su 58 avevano l'ostacolo a
-# ridosso dell'obiettivo; il 26-10 15:11, 18 su 22.
+# A goal refused by the frontier (live free space below the threshold, or a block
+# confirmed within this distance of it) stays excluded for its cell until the end
+# of the mission: see _refuse_goal. It already applies at the FIRST frontier stop: if the frontier
+# stops for an obstacle within this distance of the goal, or beyond the end of the path
+# (in the half-body extension for the nose), it is the goal that does not work, not the way,
+# and another one is chosen at once (CellAttempt._repick_goal). Before, the legs were
+# discarded one by one ([SUBITO]): on 22-10 16:04, 45 [SUBITO] out of 58 had the obstacle
+# right next to the goal; on 26-10 15:11, 18 out of 22.
 REFUSED_GOAL_BLOCK_M = 0.35
-# Quando si sceglie un altro obiettivo nella cella, quanti candidati provare prima di
-# rinunciare se nessuno ha un percorso nel grafo (TentativoCella._riscegli_obiettivo).
+# When another goal in the cell is chosen, how many candidates to try before
+# giving up if none has a path in the graph (CellAttempt._repick_goal).
 GOAL_REPICK_CANDIDATES = 3
-# Ripianificazione fallita (il grafo aggiornato non ha piu' un percorso verso l'obiettivo):
-# se dal robot il grafo arriva ancora ad almeno REPLAN_FAIL_ROBOT_FREE_NODES nodi, isolato
-# e' l'obiettivo, non il robot, e se ne sceglie subito un altro con un percorso
-# (TentativoCella._riscegli_obiettivo). Prima si teneva il piano rotto e decideva il fronte:
-# il 28-10 14:23, 20 [REPLAN FALLITO]; alle 14:37, 14:41 e 14:48 tre scansioni ferme, blocco
-# e cella rimandata con 19-21 direzioni libere su 24; alle 14:27 e 14:34 un passo in piu'
-# sul piano rotto. False = come prima.
+# Failed replan (the updated graph no longer has a path to the goal):
+# if from the robot the graph still reaches at least REPLAN_FAIL_ROBOT_FREE_NODES nodes, the
+# goal is isolated, not the robot, and another one with a path is chosen at once
+# (CellAttempt._repick_goal). Before, the broken plan was kept and the frontier decided:
+# on 28-10 14:23, 20 [REPLAN FALLITO]; at 14:37, 14:41 and 14:48 three still scans, block
+# and cell deferred with 19-21 free directions out of 24; at 14:27 and 14:34 one more step
+# on the broken plan. False = as before.
 REPICK_ON_REPLAN_FAIL = True
 REPLAN_FAIL_ROBOT_FREE_NODES = 6
 
 # ==================================================================
-# DATI DI MISSIONE.
-#   Durante la missione non si disegna nulla: ogni figura viene salvata come dati in un
-#   <nome>_vis.npz (vedi visualize_grid_with_candidates) e le figure si fanno dopo con
-#   mission_viewer.py.
-#   SAVE_SCAN_BUNDLES -- un .npz per ogni scansione del ciclo di navigazione, nella
-#       sottocartella scans/: layer GREZZI come arrivano da Spot (terrain, terrain_valid,
-#       obstacle_distance), i derivati usati per decidere, la georeferenziazione (origine,
-#       cella, posa del robot, suolo stimato), percorso, fronte e decisione. E' cio' che usano
-#       mission_viewer.py, mission_report.py e test_replay.py. ~0.3 MB a scansione.
+# MISSION DATA.
+#   Nothing is drawn during the mission: every figure is saved as data in a
+#   <name>_vis.npz (see visualize_grid_with_candidates) and the figures are made afterwards with
+#   tools/mission_viewer.py.
+#   SAVE_SCAN_BUNDLES -- one .npz for every scan of the navigation loop, in the
+#       scans/ subfolder: RAW layers as they arrive from Spot (terrain, terrain_valid,
+#       obstacle_distance), the derived ones used to decide, the georeferencing (origin,
+#       cell, robot pose, estimated ground), path, frontier and decision. It is what
+#       mission_viewer.py, mission_report.py and test_replay.py use. ~0.3 MB per scan.
 # ==================================================================
 SAVE_SCAN_BUNDLES = True
-# Layer di Spot salvati in piu' nei pacchetti, con una richiesta a parte che non tocca la
-# navigazione (spot_grid.LocalGrid.extra_layers): per capire l'erba alta (22-10 16:04), cioe'
-# se intensita' e no_step distinguono la vegetazione da un ostacolo solido. Ogni layer ha
-# accanto <nome>_origin e <nome>_cell, perche' la sua griglia puo' non coincidere con le
-# altre. () = spento.
+# Extra Spot layers saved in the bundles, with a separate request that does not touch
+# navigation (spot_grid.LocalGrid.extra_layers): to understand tall grass (22-10 16:04), i.e.
+# whether intensity and no_step tell vegetation from a solid obstacle. Every layer has
+# <name>_origin and <name>_cell next to it, because its grid may not coincide with the
+# others. () = off.
 SAVE_EXTRA_LAYERS = ('intensity', 'no_step')
 
-# Raggio del disco segnato come pericoloso nella mappa globale attorno al punto di una
-# caduta (vedi movements.check_and_recover_fall e GlobalGrid.mark_hazard).
+# Radius of the disk marked as dangerous in the global map around the point of a
+# fall (see motion.check_and_recover_fall and GlobalGrid.mark_hazard).
 FALL_HAZARD_RADIUS_M = 0.5
 
 # ==================================================================
-# RITIRATA (vedi retreat_along_traveled_path).
-#   RETREAT_MAX_SEGMENTS  -- quanti tratti gia' percorsi ripercorrere a ritroso al
-#                            massimo. Pochi: serve a uscire da una tasca, non a
-#                            tornare al punto di partenza.
-#   RETREAT_MIN_SEGMENT_M -- sotto questa lunghezza il tratto si salta (non vale un
-#                            comando di movimento a se').
+# RETREAT (see retreat_along_traveled_path).
+#   RETREAT_MAX_SEGMENTS  -- how many legs already travelled to retrace backwards at
+#                            most. Few: it serves to get out of a pocket, not to
+#                            go back to the starting point.
+#   RETREAT_MIN_SEGMENT_M -- below this length the leg is skipped (not worth a
+#                            motion command of its own).
 # ==================================================================
 RETREAT_MAX_SEGMENTS = 3
 RETREAT_MIN_SEGMENT_M = 0.20
-#   RETREAT_CONTINUITY_M  -- si arretra lungo un tratto registrato solo se il robot sta
-#                            davvero dove quel tratto finiva. Dopo uno spostamento con GraphNav
-#                            fra celle (che non registra tratti) l'ultimo tratto registrato puo'
-#                            stare a molti metri, e il robot ci andrebbe camminando
-#                            all'indietro, alla cieca.
-#   RETREAT_MAX_SEGMENT_M -- tratto piu' lungo di cosi': non lo si ripercorre all'indietro.
+#   RETREAT_CONTINUITY_M  -- it backs up along a recorded leg only if the robot really is
+#                            where that leg ended. After a move with GraphNav
+#                            between cells (which records no legs) the last recorded leg may
+#                            be many metres away, and the robot would go there walking
+#                            backwards, blind.
+#   RETREAT_MAX_SEGMENT_M -- leg longer than this: it is not retraced backwards.
 RETREAT_CONTINUITY_M = 0.50
 RETREAT_MAX_SEGMENT_M = 2.50
 
 # ==================================================================
-# SPOSTAMENTI CON GRAPHNAV -- fra celle lontane, per i ritorni e per il ritorno a wp_0.
-# Tutti passano da navGraphUtils.graphnav_navigate_to, che:
-#   - ha un tempo massimo (GRAPHNAV_TIMEOUT_S), cosi' un robot caduto o senza percorso non
-#     blocca la missione;
-#   - limita la velocita' (GRAPHNAV_MAX_*_VEL): gli spostamenti con GraphNav sono i piu'
-#     lunghi della missione;
-#   - tratta STATUS_LOST come fallimento, a robot fermo, dopo i tentativi di riaggancio: non
-#     forza la localizzazione sul waypoint di destinazione dichiarando "arrivato" quando il
-#     robot potrebbe trovarsi altrove.
+# MOVES WITH GRAPHNAV -- between distant cells, for going back and for the return to wp_0.
+# They all go through navigation.graphnav_navigate_to, which:
+#   - has a time limit (GRAPHNAV_TIMEOUT_S), so a fallen robot or one without a path does not
+#     block the mission;
+#   - limits the speed (GRAPHNAV_MAX_*_VEL): the moves with GraphNav are the
+#     longest of the mission;
+#   - treats STATUS_LOST as a failure, with the robot still, after the re-anchoring attempts: it does not
+#     force the localization on the destination waypoint declaring "arrived" when the
+#     robot could be elsewhere.
 # ==================================================================
-MAX_FALLS_PER_MISSION = 3      # alla terza caduta il robot si rialza e la missione si ferma
+MAX_FALLS_PER_MISSION = 3      # at the third fall the robot gets up and the mission stops
 
-# BATTERIA (vedi batteria.py). La carica si legge a ogni giro del ciclo e prima/dopo gli
-# spostamenti GraphNav, e va in battery.csv con il consumo per minuto e per metro. Sotto
-# BATTERY_RETURN_PCT, confermato su BATTERY_RETURN_CONFIRM letture di fila, la missione smette
-# di esplorare e chiude come a fine missione: scansione finale, salvataggi, ritorno a wp_0
-# con GraphNav. 30% e' provvisorio: va tarato sui consumi misurati (battery.csv, e la carica
-# spesa nel ritorno a wp_0, riga [BATTERIA] della chiusura). 0 = rientro spento (si misura
-# comunque).
+# BATTERY (see battery.py). The charge is read at every loop turn and before/after the
+# GraphNav moves, and goes into battery.csv with the consumption per minute and per metre. Below
+# BATTERY_RETURN_PCT, confirmed over BATTERY_RETURN_CONFIRM readings in a row, the mission stops
+# exploring and closes as at the end of a mission: final scan, saving, return to wp_0
+# with GraphNav. 30% is provisional: it must be tuned on the measured consumption (battery.csv, and the charge
+# spent on the return to wp_0, [BATTERIA] line at closure). 0 = return off (it is measured
+# anyway).
 BATTERY_RETURN_PCT = 30.0
-BATTERY_RETURN_CONFIRM = 2     # letture di fila sotto soglia (contro un valore isolato)
-BATTERY_SAMPLE_S = 5.0         # al massimo una lettura ogni tanti secondi nel ciclo
+BATTERY_RETURN_CONFIRM = 2     # readings in a row below threshold (against an isolated value)
+BATTERY_SAMPLE_S = 5.0         # at most one reading every this many seconds in the loop
 GRAPHNAV_TIMEOUT_S = 240.0
-# Ritorno a wp_0 fermo entro questa distanza (STUCK, tempo scaduto): resta un ritorno NON
-# riuscito, ma fiducial e deriva si misurano lo stesso (vedi graphnav_return_to_start).
+# Return to wp_0 stopped within this distance (STUCK, timeout): it stays a return that did NOT
+# succeed, but fiducial and drift are measured anyway (see graphnav_return_to_start).
 GRAPHNAV_RETURN_NEAR_M = 1.0
 
-# Un tratto del ciclo il cui comando finisce male (tempo scaduto, Spot che non si assesta)
-# senza un arresto del fronte, con il robot entro questa distanza dal punto d'arrivo, vale
-# come riuscito invece che come fallimento fisico (arco scartato per sempre). 0 = spento.
+# A loop leg whose command ends badly (timeout, Spot not settling)
+# without a frontier stop, with the robot within this distance of the arrival point, counts
+# as successful instead of as a physical failure (edge discarded forever). 0 = off.
 MOVE_NEAR_GOAL_M = 0.10
 GRAPHNAV_MAX_LINEAR_VEL_MPS = 0.5
 GRAPHNAV_MAX_ANGULAR_VEL_RPS = 0.6
 
-# --- LOCALIZZAZIONE DI GRAPHNAV --------------------------------------------------------
-# All'aperto il localizzatore dal vivo di GraphNav si puo' perdere anche quando la mappa e'
-# sana (odometria delle zampe e visione d'accordo entro ~15 cm su decine di metri), e un
-# robot perso si vede rifiutare ogni spostamento. Quindi:
-#   1. riga [LOCALIZZAZIONE] a ogni briciola, solo quando qualcosa cambia, per vedere QUANDO
-#      e PERCHE' si perde (rilevatore di perdita di Spot);
-#   2. riaggancio: se GraphNav risulta perso, si rilocalizza sul waypoint piu' vicino secondo
-#      le nostre pose, con la stima iniziale dall'odometria (waypoint_tform_ko del grafo per
-#      ko_tform_body di adesso: esatta a meno della deriva), poi la rifinisce l'ICP di Spot.
-#      NON si dichiara "arrivato": si riprova a navigare.
-#   3. rilevatore di perdita PERMISSIVO negli spostamenti GraphNav.
-GRAPHNAV_LOST_DETECTOR_STRICTNESS = 'LOST_DETECTOR_STRICTNESS_PERMISSIVE'   # None = quella di Spot
+# --- GRAPHNAV LOCALIZATION -------------------------------------------------------------
+# Outdoors GraphNav's live localizer can get lost even when the map is
+# sound (leg odometry and vision agreeing within ~15 cm over tens of metres), and a
+# lost robot has every move rejected. So:
+#   1. [LOCALIZZAZIONE] line at every breadcrumb, only when something changes, to see WHEN
+#      and WHY it gets lost (Spot's loss detector);
+#   2. re-anchoring: if GraphNav is lost, it relocalizes on the nearest waypoint according to
+#      our poses, with the initial guess from odometry (waypoint_tform_ko of the graph times
+#      ko_tform_body now: exact up to the drift), then Spot's ICP refines it.
+#      It does NOT declare "arrived": it tries to navigate again.
+#   3. PERMISSIVE loss detector in GraphNav moves.
+GRAPHNAV_LOST_DETECTOR_STRICTNESS = 'LOST_DETECTOR_STRICTNESS_PERMISSIVE'   # None = Spot's one
 
-# ORIENTAMENTO ALL'ARRIVO dei viaggi GraphNav fra celle e dei ritorni sulle briciole (il
-# ritorno finale a wp_0 tiene sempre l'orientamento di partenza):
-#   'verso_obiettivo'  arriva girato verso il centro della cella da tentare (viaggi fra celle)
-#                      o verso l'obiettivo del tentativo (ritorni): la prima mossa dopo
-#                      l'arrivo parte quasi dritta;
-#   'waypoint'         l'orientamento che il robot aveva quando ha creato il waypoint (come
-#                      fino al 28-10);
-#   'libero'           GraphNav non si gira alla fine (ignore_final_yaw).
-# Il 26-10 15:11 (8 arrivi): dopo l'arrivo il robot ruotava sul posto in media di 79 gradi
-# (38 s in tutto); lasciandolo libero sarebbero stati 82, girato verso l'obiettivo 22.
+# HEADING ON ARRIVAL of the GraphNav trips between cells and of the returns to breadcrumbs (the
+# final return to wp_0 always keeps the starting heading):
+#   'verso_obiettivo'  arrives facing the centre of the cell to attempt (trips between cells)
+#                      or the goal of the attempt (returns): the first move after
+#                      arrival starts almost straight;
+#   'waypoint'         the heading the robot had when it created the waypoint (as
+#                      until 28-10);
+#   'libero'           GraphNav does not turn at the end (ignore_final_yaw).
+# On 26-10 15:11 (8 arrivals): after arrival the robot rotated in place 79 degrees on average
+# (38 s in all); left free it would have been 82, facing the goal 22.
 GRAPHNAV_ARRIVAL_HEADING = 'verso_obiettivo'
-GRAPHNAV_ARRIVAL_HEADING_MIN_M = 0.5   # obiettivo piu' vicino di cosi' al waypoint: direzione non affidabile, si usa quella del waypoint
-GRAPHNAV_MAX_RELOCALIZATIONS = 3       # riagganci per singolo spostamento GraphNav
-GRAPHNAV_RELOC_MAX_DIST_M = 0.5        # raggio di ricerca dell'ICP attorno alla stima
+GRAPHNAV_ARRIVAL_HEADING_MIN_M = 0.5   # goal closer than this to the waypoint: direction not reliable, the waypoint's is used
+GRAPHNAV_MAX_RELOCALIZATIONS = 3       # re-anchorings per single GraphNav move
+GRAPHNAV_RELOC_MAX_DIST_M = 0.5        # ICP search radius around the guess
 GRAPHNAV_RELOC_MAX_YAW_RAD = float(np.radians(20.0))
-GRAPHNAV_RELOC_MAX_WP_DIST_M = 3.0     # oltre questa distanza dal waypoint piu' vicino non si prova
+GRAPHNAV_RELOC_MAX_WP_DIST_M = 3.0     # beyond this distance from the nearest waypoint it is not tried
 
-# Prima di spostarsi con GraphNav al waypoint da cui tentare una cella, si controlla sul grafo
-# che da li' si possa arrivare alla cella (vedi graph_reaches_cell). Nella prova del 22-10
-# 15:24, tre spostamenti su sei finivano in un tentativo fallito in meno di un secondo per
-# "GRAFO DISCONNESSO", che il grafo sapeva gia' prima di partire: ~25 s su 3 minuti.
-# False = si parte comunque e decide il tentativo.
+# Before moving with GraphNav to the waypoint from which to attempt a cell, the graph is checked
+# to reach the cell from there (see graph_reaches_cell). In the test of 22-10
+# 15:24, three moves out of six ended in an attempt failed in less than a second with
+# "GRAFO DISCONNESSO", which the graph already knew before leaving: ~25 s out of 3 minutes.
+# False = it leaves anyway and the attempt decides.
 GRAPHNAV_PRECHECK = True
 
-# FIDUCIAL DI PARTENZA. All'avvio si cerca un fiducial visto da una qualunque telecamera
-# (anche quella posteriore) e lo si ricorda: entra nell'istantanea di wp_0, ci si localizza
-# sopra, e al ritorno su wp_0 lo si cerca di nuovo per misurare la deriva dell'odometria di
-# tutta la missione. Spot riconosce solo i fiducial AprilTag (famiglia 36h11, quelli di Boston
-# Dynamics), non gli ArUco.
-#   START_FIDUCIAL_ID     -- None = il piu' vicino, qualunque ID; un numero = solo quello.
-#   START_FIDUCIAL_WAIT_S -- quanto aspettare che Spot lo veda (appena in piedi ci mette un po').
+# STARTING FIDUCIAL. At start-up a fiducial seen by any camera is searched for
+# (the rear one too) and remembered: it goes into the snapshot of wp_0, the robot localizes
+# on it, and on return to wp_0 it is searched again to measure the odometry drift of
+# the whole mission. Spot only recognizes AprilTag fiducials (family 36h11, the Boston
+# Dynamics ones), not ArUco.
+#   START_FIDUCIAL_ID     -- None = the nearest, any ID; a number = only that one.
+#   START_FIDUCIAL_WAIT_S -- how long to wait for Spot to see it (right after standing up it takes a while).
 START_FIDUCIAL_ID = None
 START_FIDUCIAL_WAIT_S = 3.0
-# CORREZIONE DEL RITORNO A wp_0 con il fiducial di partenza (graphnav_correct_wp0_with_fiducial).
-# GraphNav puo' dire "arrivato" essendo lontano dalla partenza: si localizza confrontando le
-# scansioni con quelle del waypoint, e in un posto povero di riferimenti sbaglia (29-10 10:57:
-# 1.2 m, prato con una sola siepe; la deriva dell'odometria era 2.8 m). Il tag di partenza e'
-# fermo: la posizione del robot nel suo frame dice lo scarto vero. Oltre
-# WP0_FIDUCIAL_TOLERANCE_M ci si rilocalizza sul tag e si torna a wp_0, al massimo
-# WP0_FIDUCIAL_MAX_CORRECTIONS volte. False = solo la misura, come prima.
+# CORRECTION OF THE RETURN TO wp_0 with the starting fiducial (graphnav_correct_wp0_with_fiducial).
+# GraphNav can say "arrived" while far from the start: it localizes by comparing the
+# scans with those of the waypoint, and in a place poor in references it gets it wrong (29-10 10:57:
+# 1.2 m, lawn with a single hedge; the odometry drift was 2.8 m). The starting tag does not
+# move: the robot position in its frame tells the true offset. Beyond
+# WP0_FIDUCIAL_TOLERANCE_M the robot relocalizes on the tag and goes back to wp_0, at most
+# WP0_FIDUCIAL_MAX_CORRECTIONS times. False = measurement only, as before.
 WP0_FIDUCIAL_CORRECTION = True
 WP0_FIDUCIAL_TOLERANCE_M = 0.30
 WP0_FIDUCIAL_MAX_CORRECTIONS = 2
 
-SHORTCUT_MAX_DIST_M = 2.5          # oltre, il tratto non sta comunque nella finestra
+SHORTCUT_MAX_DIST_M = 2.5          # beyond it, the leg does not fit in the window anyway

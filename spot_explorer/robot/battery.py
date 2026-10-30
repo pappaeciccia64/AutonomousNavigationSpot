@@ -1,24 +1,24 @@
 """
-BATTERIA: carica, consumo durante la missione e rientro anticipato a batteria bassa.
+BATTERY: charge, consumption during the mission and early return on low battery.
 
-  leggi_batteria      una lettura dallo stato del robot (carica, autonomia stimata da Spot,
-                      tensione, corrente, temperatura), None se lo stato non la contiene
-  MonitorBatteria     campiona la carica nei punti fissi della missione (a ogni giro del
-                      ciclo di navigazione, prima e dopo gli spostamenti GraphNav, a fine
-                      missione), la scrive in battery.csv, ricava il consumo per minuto e per
-                      metro e decide il RIENTRO: sotto P.BATTERY_RETURN_PCT, confermato su
-                      P.BATTERY_RETURN_CONFIRM letture di fila, la missione smette di
-                      esplorare e chiude come a fine missione (scansione finale, riepilogo,
-                      chiusura della mappa, ritorno a wp_0 con GraphNav, salvataggi).
+  read_battery        one reading from the robot state (charge, runtime estimated by Spot,
+                      voltage, current, temperature), None if the state does not contain it
+  BatteryMonitor      samples the charge at fixed points of the mission (at every turn of
+                      the navigation loop, before and after GraphNav moves, at the end of
+                      the mission), writes it to battery.csv, derives consumption per minute
+                      and per metre and decides the RETURN: below P.BATTERY_RETURN_PCT,
+                      confirmed over P.BATTERY_RETURN_CONFIRM readings in a row, the mission
+                      stops exploring and closes as at the end of a mission (final scan,
+                      summary, map closure, return to wp_0 with GraphNav, saving).
 
-Il monitor non muove il robot e non solleva mai eccezioni verso chi lo chiama: una lettura
-che fallisce vale "carica sconosciuta" e non fa scattare il rientro. Le letture si fanno
-nel thread della missione, al massimo una ogni P.BATTERY_SAMPLE_S secondi (tranne quelle
-con etichetta, che si fanno sempre): niente thread in piu'.
+The monitor does not move the robot and never raises to its caller: a failed reading
+counts as "charge unknown" and does not trigger the return. Readings are made in the
+mission thread, at most one every P.BATTERY_SAMPLE_S seconds (except labelled ones,
+which are always made): no extra thread.
 
-La distanza percorsa e' la somma degli spostamenti in linea retta fra una lettura e la
-successiva (posa VISION): sui tratti a zampe e' quasi esatta, sugli spostamenti GraphNav
-lunghi la sottostima, quindi il consumo per metro e' per eccesso.
+The distance travelled is the sum of the straight-line moves between one reading and the
+next (VISION pose): on walked legs it is almost exact, on long GraphNav moves it
+underestimates, so the consumption per metre is an overestimate.
 """
 import time
 
@@ -34,9 +34,9 @@ _BATTERY_COLUMNS = ['t_s', 'wall_time', 'charge_pct', 'spot_runtime_min', 'volta
 
 
 def read_battery(robot_state_client):
-    """Una lettura della batteria: dict con charge_pct (0-100) e, quando ci sono,
-    spot_runtime_min (autonomia stimata da Spot), voltage_v, current_a, temp_max_c.
-    None se lo stato del robot non dice la carica. Mai eccezioni."""
+    """One battery reading: dict with charge_pct (0-100) and, when available,
+    spot_runtime_min (runtime estimated by Spot), voltage_v, current_a, temp_max_c.
+    None if the robot state does not report the charge. Never raises."""
     try:
         st = robot_state_client.get_robot_state()
     except Exception:
@@ -57,7 +57,7 @@ def read_battery(robot_state_client):
             if len(b.temperatures):
                 out['temp_max_c'] = float(max(b.temperatures))
             return out
-        # Ripiego: la carica "di locomozione" nello stato di alimentazione.
+        # Fallback: the "locomotion" charge in the power state.
         ps = st.power_state
         if ps.HasField('locomotion_charge_percentage'):
             out['charge_pct'] = float(ps.locomotion_charge_percentage.value)
@@ -71,11 +71,11 @@ def read_battery(robot_state_client):
 
 
 class BatteryMonitor:
-    """Carica e consumo della missione, e la decisione di rientrare (vedi il modulo).
+    """Mission charge and consumption, and the decision to return (see the module).
 
-    controlla(where)  una lettura (se e' passato abbastanza tempo, o sempre con where);
-                      True se la missione deve rientrare
-    rientro           True da quando la soglia e' stata superata (non torna mai False)
+    check(where)      one reading (if enough time has passed, or always with where);
+                      True if the mission must return
+    return_due        True once the threshold has been crossed (never goes back to False)
     """
 
     def __init__(self, robot_state_client, threshold_pct=None, confirmations=None, interval_s=None):
@@ -89,16 +89,16 @@ class BatteryMonitor:
         self._t_last = None
         self._xy_last = None
         self._dist_m = 0.0
-        self._samples = []         # (t_s, carica, distanza)
-        self._below_count = 0            # letture di fila sotto la soglia
-        self._printed_pct = None  # ultima carica intera stampata nel log
+        self._samples = []         # (t_s, charge, distance)
+        self._below_count = 0            # readings in a row below the threshold
+        self._printed_pct = None  # last whole charge printed in the log
         self._failed_reads = 0
 
     # --- Consumi ---------------------------------------------------------------------
 
     def consumption(self):
-        """(percento al minuto, percento al metro) dalla prima lettura all'ultima, positivi
-        quando la carica scende; None dove non si puo' ancora dire."""
+        """(percent per minute, percent per metre) from the first reading to the last, positive
+        when the charge drops; None where it cannot be told yet."""
         if len(self._samples) < 2:
             return None, None
         t0, c0, d0 = self._samples[0]
@@ -108,17 +108,17 @@ class BatteryMonitor:
         return per_min, per_m
 
     def minutes_to_threshold(self):
-        """Minuti stimati prima di arrivare alla soglia, al consumo medio finora."""
+        """Estimated minutes before reaching the threshold, at the average consumption so far."""
         per_min, _ = self.consumption()
         if not self._samples or not per_min or per_min <= 0:
             return None
         return max(0.0, (self._samples[-1][1] - self.threshold_pct) / per_min)
 
-    # --- Lettura ---------------------------------------------------------------------
+    # --- Reading -----------------------------------------------------------------------
 
     def check(self, where=None):
-        """Una lettura della batteria. Senza etichetta si salta se l'ultima e' piu' recente
-        di intervallo_s. True se la missione deve rientrare. Mai eccezioni."""
+        """One battery reading. Without a label it is skipped if the last one is more recent
+        than interval_s. True if the mission must return. Never raises."""
         try:
             now = time.time()
             if where is None and self._t_last is not None and now - self._t_last < self.interval_s:
@@ -169,7 +169,7 @@ class BatteryMonitor:
                      '' if per_min is None else round(per_min, 3),
                      '' if per_m is None else round(per_m, 3), int(below)]])
 
-        # Nel log solo quando la carica scende di un punto intero, o con un'etichetta.
+        # In the log only when the charge drops by a whole point, or with a label.
         pct_int = int(np.floor(c))
         if where != 'ciclo' or self._printed_pct is None or pct_int < self._printed_pct:
             self._printed_pct = pct_int
@@ -187,7 +187,7 @@ class BatteryMonitor:
                   f"GraphNav.")
 
     def describe(self, b=None):
-        """Una riga leggibile: carica, consumi, autonomia stimata da Spot, minuti alla soglia."""
+        """One readable line: charge, consumption, runtime estimated by Spot, minutes to the threshold."""
         if not self._samples:
             return "nessuna lettura"
         c = self._samples[-1][1]
@@ -205,7 +205,7 @@ class BatteryMonitor:
         return ", ".join(parts)
 
     def summary(self):
-        """La riga del riepilogo di fine missione."""
+        """The end-of-mission summary line."""
         if not self._samples:
             return "Batteria: carica mai letta" + (
                 f" ({self._failed_reads} letture fallite)" if self._failed_reads else "")

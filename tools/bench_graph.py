@@ -1,59 +1,60 @@
 """
-prova_grafo.py -- guardare i grafi di missione possibili, senza robot, e sceglierne uno.
+bench_graph.py -- look at the possible mission graphs, without the robot, and pick one.
 
-    python3 prova_grafo.py
+    python3 tools/bench_graph.py
 
-Di default usa GLI STESSI parametri della missione (parametri.py): area, archi, passo del
-reticolo, densita' e seme dei nodi casuali. Fa un'immagine con i metodi affiancati (stessa
-area, stessi archi, stesso seme), una tabella con nodi, archi, grado medio e copertura, e la
-apre. Nel terminale stampa il riepilogo [GRAFO] di ogni grafo, come nel log di missione, i
-nodi per cella e, in fondo, COME USARE IN MISSIONE ciascuno dei grafi visti.
+By default it uses THE SAME parameters as the mission (config.py): area, edges, lattice
+spacing, density and seed of the random nodes. It makes an image with the methods side by
+side (same area, same edges, same seed), a table with nodes, edges, mean degree and
+coverage, and opens it. In the terminal it prints the [GRAFO] summary of each graph, as in
+the mission log, the nodes per cell and, at the end, HOW TO USE IN A MISSION each of the
+graphs shown.
 
-Per provare valori diversi senza toccare parametri.py, si cambia il blocco PROVA qui sotto
-(None = il valore di parametri.py). Valgono solo per l'immagine.
+To try different values without touching config.py, change the TEST block below
+(None = the value from config.py). They only apply to the image.
 
-Il grafo e' riferito alla posa del robot all'accensione: stessi parametri e stesso seme danno
-lo stesso grafo, nella stessa posizione rispetto al punto di partenza.
+The graph is relative to the robot's pose at power-on: same parameters and same seed give
+the same graph, in the same position relative to the starting point.
 """
 import os
 import subprocess
 
 import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # il pacchetto spot_explorer
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # the spot_explorer package
 
 from spot_explorer.planning import mission_graph
 from spot_explorer import config as P
 
 # ======================================================================================
-# PROVA: None = come in parametri.py
+# TEST: None = as in config.py
 # ======================================================================================
-# Area: righe (a sinistra del robot) x colonne (davanti) x lato della cella.
-ROWS = None                 # parametri.MISSION_GRID_ROWS
-COLS = None               # parametri.MISSION_GRID_COLS
-CELL_SIZE_M = None          # parametri.MISSION_CELL_SIZE_M
+# Area: rows (to the robot's left) x columns (ahead) x cell side.
+ROWS = None                 # config.MISSION_GRID_ROWS
+COLS = None               # config.MISSION_GRID_COLS
+CELL_SIZE_M = None          # config.MISSION_CELL_SIZE_M
 
-# Archi: tutte le coppie di nodi distanti fra ARCO_MIN_M e ARCO_MAX_M.
-EDGE_MIN_M = None            # parametri.PRM_MIN_EDGE_M
-EDGE_MAX_M = None            # parametri.PRM_MAX_EDGE_M
+# Edges: all pairs of nodes between EDGE_MIN_M and EDGE_MAX_M apart.
+EDGE_MIN_M = None            # config.PRM_MIN_EDGE_M
+EDGE_MAX_M = None            # config.PRM_MAX_EDGE_M
 
-# Reticolo: passo fra i nodi, arrotondato a LATO_CELLA_M / n; anelli di vicini collegati.
-LATTICE_SPACING_M = None      # parametri.MISSION_LATTICE_SPACING_M
-RINGS = None                # parametri.MISSION_LATTICE_RINGS (None anche li' = tutti)
+# Lattice: spacing between nodes, rounded to CELL_SIZE_M / n; rings of linked neighbours.
+LATTICE_SPACING_M = None      # config.MISSION_LATTICE_SPACING_M
+RINGS = None                # config.MISSION_LATTICE_RINGS (None there too = all)
 
-# Nodi casuali: nodi per m2 ('come_reticolo' = stesso numero di nodi del reticolo) e seme.
-# Seme None (anche in parametri.py) = estratto a caso: e' scritto nel titolo dell'immagine e
-# in fondo, per rifare in missione lo stesso grafo.
-NODE_DENSITY_M2 = None       # parametri.MISSION_RANDOM_DENSITY
-SEED = None                  # parametri.MISSION_RANDOM_SEED
+# Random nodes: nodes per m2 ('come_reticolo' = same number of nodes as the lattice) and seed.
+# Seed None (also in config.py) = drawn at random: it is written in the image title and
+# at the end, to rebuild the same graph in a mission.
+NODE_DENSITY_M2 = None       # config.MISSION_RANDOM_DENSITY
+SEED = None                  # config.MISSION_RANDOM_SEED
 
-# Quali metodi mettere a confronto: togli quelli che non vuoi vedere.
+# Which methods to compare: remove the ones you don't want to see.
 METHODS = ['reticolo', 'uniforme', 'poisson', 'perturbata', 'halton']
 
-# Riquadro da disegnare: None = tutta l'area; oppure (x_min, x_max, y_min, y_max) in metri,
-# con il robot in (0, 0), x in avanti e y a sinistra. Esempio: (-2, 2, -2, 2).
+# Region to draw: None = the whole area; or (x_min, x_max, y_min, y_max) in metres,
+# with the robot at (0, 0), x forward and y to the left. Example: (-2, 2, -2, 2).
 ZOOM = None
 
-# Immagine da salvare, e se aprirla alla fine.
+# Image to save, and whether to open it at the end.
 IMAGE = 'grafi.png'
 OPEN = True
 # ======================================================================================
@@ -88,7 +89,7 @@ def main():
         spacing_m=spacing, rings=rings,
         min_edge_length=e_min, max_edge_length=e_max,
         density_per_m2=None if density == 'come_reticolo' else density)
-    # Nodi per cella, con i nodi sui confini contati a meta' (vedi nodes_per_cell).
+    # Nodes per cell, with nodes on the borders counted as half (see nodes_per_cell).
     print("\nNodi per cella (righe dall'alto, come nell'immagine; i nodi sui confini fra "
           "celle contano a meta'):")
     for g in graphs:
@@ -98,7 +99,7 @@ def main():
         for r in reversed(range(counts.shape[0])):
             print("              " + " ".join(f"{v:6.1f}" for v in counts[r]))
 
-    # Come usare in missione ciascun grafo
+    # How to use each graph in a mission
     area = (rows, cols, cell) != (P.MISSION_GRID_ROWS, P.MISSION_GRID_COLS, P.MISSION_CELL_SIZE_M)
     edges = (e_min, e_max) != (P.PRM_MIN_EDGE_M, P.PRM_MAX_EDGE_M)
     print("\nPER USARE IN MISSIONE UNO DI QUESTI GRAFI")
