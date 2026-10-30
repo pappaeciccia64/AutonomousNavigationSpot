@@ -449,10 +449,10 @@ def _special_pairs(prm):
 
 
 def _prm_dirty_margin():
-    """roadmap.DIRTY_MARGIN_M, imported only when needed (this module also runs without the SDK)."""
+    """edge_evaluation.DIRTY_MARGIN_M, imported only when needed (this module also runs without the SDK)."""
     try:
-        from spot_explorer.planning import roadmap as prm_graph
-        return prm_graph.DIRTY_MARGIN_M
+        from spot_explorer.planning import edge_evaluation
+        return edge_evaluation.DIRTY_MARGIN_M
     except Exception:
         return 1.2
 
@@ -609,7 +609,7 @@ class MissionGraph:
         geometric pairing is redone.
 
         incremental: re-evaluate ONLY the pairs near the areas with new data since the last
-        evaluation (prm.dirty_rects, see roadmap.DIRTY_MARGIN_M); the others keep the edge
+        evaluation (prm.dirty_rects, see edge_evaluation.DIRTY_MARGIN_M); the others keep the edge
         and weight they have. The result is the same as the full build: outside those areas
         no data entering the evaluation has changed. It falls back to the full build when it
         cannot be known what changed (see _dirty_pairs).
@@ -717,7 +717,7 @@ class MissionGraph:
     def _dirty_pairs(self, prm, global_map, todo):
         """
         Mask of the pairs to re-evaluate (edge rectangle, widened by
-        roadmap.DIRTY_MARGIN_M, touching an area of prm.dirty_rects), or None when the full
+        edge_evaluation.DIRTY_MARGIN_M, touching an area of prm.dirty_rects), or None when the full
         build is needed: graph never built, terrain map reloaded from file (updated areas
         unknown), a new fall (mark_hazard does not go through a scan).
 

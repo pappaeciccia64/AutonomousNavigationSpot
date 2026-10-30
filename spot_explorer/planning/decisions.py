@@ -1,7 +1,7 @@
 """Decisions on the frontier: the step to take (decide_next_move), the rotation, the fan of exit directions, cone, back-off, exits on arrival, shortcuts."""
 import numpy as np
 from spot_explorer import config as P
-from spot_explorer.planning import roadmap as prm_graph
+from spot_explorer.planning import edge_evaluation
 from spot_explorer.perception import geometry
 from spot_explorer.planning.safe_frontier import (GridSnapshot, allowed_advance, compute_safe_frontier, point_along)
 
@@ -167,7 +167,7 @@ def shortcut_index(robot_xy, path_waypoints, snap, global_map=None, prm=None, ro
         if d > P.SHORTCUT_MAX_DIST_M:
             continue
         if global_map is not None:
-            n = max(prm_graph.OCCUPANCY_SAMPLES_MIN, int(np.ceil(d * prm_graph.OCCUPANCY_SAMPLES_PER_M)) + 1)
+            n = max(edge_evaluation.OCCUPANCY_SAMPLES_MIN, int(np.ceil(d * edge_evaluation.OCCUPANCY_SAMPLES_PER_M)) + 1)
             if any(global_map.is_occupied(rx + t * (wx - rx), ry + t * (wy - ry),
                                           safety_margin=geometry.PRM_EDGE_SAFETY_MARGIN_M)
                    for t in np.linspace(0.0, 1.0, n)[1:]):

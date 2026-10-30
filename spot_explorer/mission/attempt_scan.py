@@ -12,6 +12,7 @@ from spot_explorer.perception import global_maps
 from spot_explorer.perception import spot_grid
 from spot_explorer.planning import safe_frontier
 from spot_explorer.planning import roadmap as prm_graph_module   # inside functions `prm_graph` is often the parameter (instance)
+from spot_explorer.planning import edge_evaluation
 from spot_explorer.planning import mission_graph                   # mission node lattice
 from spot_explorer import config as P
 from spot_explorer.records import (MISSION_STATS, MISSION_CTX, mission_z0, save_npz_async, timing_add, visualize_grid_with_candidates)
@@ -150,7 +151,7 @@ class ScanSteps:
                     self.prm_graph.node_roughness[node_id] = 0.0
 
         # The scan just made also goes into the preliminary edge discard
-        # (roadmap.LIVE_PREFILTER_OD_M): at build time the global map has not yet
+        # (edge_evaluation.LIVE_PREFILTER_OD_M): at build time the global map has not yet
         # confirmed anything about this place, and the edges crossing the obstacles just
         # seen would stay valid. Here obstacle_distance is the raw one: the filtered
         # snapshot is born in the navigation loop.
@@ -175,7 +176,7 @@ class ScanSteps:
               f"of the graph: {time.perf_counter() - t_build:.2f} s")
         if getattr(self.prm_graph, 'live_veto_last', 0):
             print(f"[EDGES] {self.prm_graph.live_veto_last} edges discarded at once by the live "
-                  f"scan (they pass less than {prm_graph_module.LIVE_PREFILTER_OD_M:.2f} m from an "
+                  f"scan (they pass less than {edge_evaluation.LIVE_PREFILTER_OD_M:.2f} m from an "
                   f"obstacle just seen), before the slope.")
         # A new attempt: the traps of the previous attempt no longer apply (see
         # _trap_backtrack). The penalties are a layer separate from the edges, so
@@ -326,7 +327,7 @@ class ScanSteps:
         )
 
         # Snapshot of the scan just made: it is needed already here -- by the preliminary edge
-        # discard in the refresh (see roadmap.LIVE_PREFILTER_OD_M), by that of the nodes
+        # discard in the refresh (see edge_evaluation.LIVE_PREFILTER_OD_M), by that of the nodes
         # in obstacles -- and then by the safe frontier. It must be created ONLY ONCE per scan:
         # make_grid_snapshot also updates the temporal obstacle filter.
         self.snap = safe_frontier.make_grid_snapshot(

@@ -116,6 +116,7 @@ with _quiet():
     from spot_explorer.perception import slopes
     from spot_explorer.perception import spot_grid
     from spot_explorer.planning import roadmap as prm_graph
+    from spot_explorer.planning import edge_evaluation
     from spot_explorer.mission import cells as environmentMap
     from spot_explorer.planning import mission_graph
     from spot_explorer.graphnav import map_shortcuts
@@ -401,7 +402,7 @@ def gait_check(m):
         seg = [float(x[k]) for k in ('x_from', 'y_from', 'x_to', 'y_to')]
         prof = slopes.compute_arc_slope_profile(a['z'], a['ox'], a['oy'], a['cs'], *seg, valid_2d=usable,
                                             body_ext_m=slopes.ARC_BODY_EXTENSION_M)
-        lo, la, has = prm_graph.body_slope(prof)
+        lo, la, has = edge_evaluation.body_slope(prof)
         if not has:
             continue
         with _quiet():

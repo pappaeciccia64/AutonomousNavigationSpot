@@ -7,7 +7,7 @@ from spot_explorer.perception import geometry
 from spot_explorer.perception import slopes
 from spot_explorer.perception import spot_grid
 
-from spot_explorer.planning import roadmap as prm_graph_module   # inside functions `prm_graph` is often the parameter (instance)
+from spot_explorer.planning import edge_evaluation
 from spot_explorer.planning import mission_graph                   # mission node lattice
 
 from spot_explorer import config as P
@@ -31,7 +31,7 @@ def mission_switches():
     return {
         'parametri.MISSION_GRAPH_SAMPLING': P.MISSION_GRAPH_SAMPLING,
         'mission_graph.BATCH_SLOPES': mission_graph.BATCH_SLOPES,
-        'prm_graph.REFRESH_BATCH_SLOPES': prm_graph_module.REFRESH_BATCH_SLOPES,
+        'prm_graph.REFRESH_BATCH_SLOPES': edge_evaluation.REFRESH_BATCH_SLOPES,
         'parametri.PLAN_ONLY_EXPLORED_CELLS': P.PLAN_ONLY_EXPLORED_CELLS,
         'parametri.GRAPHNAV_SHORTCUTS': P.GRAPHNAV_SHORTCUTS,
         'parametri.GRAPHNAV_PRECHECK': P.GRAPHNAV_PRECHECK,
