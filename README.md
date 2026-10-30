@@ -22,7 +22,7 @@ The history of the changes, with the measurements of the missions that motivated
    ```
    The robot address is in `main()` of `spot_explorer/mission/run.py` (`192.168.80.3`). The credentials are handled by the SDK (`bosdyn.client.util.authenticate`): with the original SDK they are given with the variables `BOSDYN_CLIENT_USERNAME` and `BOSDYN_CLIENT_PASSWORD`, otherwise it asks for them in the terminal. Careful: on the development computer that SDK file was modified to use fixed credentials; on a new computer, with a freshly installed SDK, the variables are needed.
 
-**Parameters.** All the numbers and switches that are changed in the field are in `spot_explorer/config.py`; those specific to a module (terrain thresholds in `perception/`, graph in `planning/roadmap.py`, frontier in `planning/safe_frontier.py`, speeds in `robot/motion.py`) stay there.
+**Parameters.** All the numbers and switches that are changed in the field are in `spot_explorer/config.py`; those specific to a module (terrain thresholds in `perception/`, graph in `planning/roadmap.py` and `planning/edge_evaluation.py`, frontier in `planning/safe_frontier.py`, speeds in `robot/motion.py`) stay there.
 
 **Mission size.** The default is in `config.py` (`MISSION_GRID_ROWS`, `MISSION_GRID_COLS`, `MISSION_CELL_SIZE_M`): today 8 rows × 7 columns of 2 m, i.e. 16 m to the left and 14 m ahead of the robot. For a single mission, without touching the code (in order of precedence):
 ```bash
@@ -47,8 +47,8 @@ python3 run_mission.py --graph lattice --spacing 0.5                            
 
 With random nodes the cell centres and the starting point are still nodes. The coverage (how far a point of the area can be from the nearest node) is measured and written in the log. To look at the graphs before going out: `python3 tools/bench_graph.py`. It uses the same parameters as the mission (`config.py`) and opens an image with the methods side by side and a table; at the end it prints, for each graph, the lines to put in `config.py` (or the arguments of `run_mission.py`) to use exactly that one in a mission, seed included. To try other values without touching `config.py`, change the TEST block at the top of the file. From the command line, with the same defaults as the mission:
 ```bash
-python3 -m spot_explorer.planning.mission_graph --compare-methods methods.png --seed 7 --zoom -2 2 -2 2       # the five methods side by side, with the numbers
-python3 -m spot_explorer.planning.mission_graph --graph random --distribution halton --seed 7 --preview halton.png --zoom -2 2 -2 2   # just one
+python3 tools/bench_graph.py --compare-methods methods.png --seed 7 --zoom -2 2 -2 2       # the five methods side by side, with the numbers
+python3 tools/bench_graph.py --graph random --distribution halton --seed 7 --preview halton.png --zoom -2 2 -2 2   # just one
 ```
 
 ---
@@ -59,10 +59,10 @@ python3 -m spot_explorer.planning.mission_graph --graph random --distribution ha
 The area is a grid of cells (`mission/cells.py`) relative to the robot pose at start-up: the **columns** go forward, the **rows** to the left. The cells are visited in a serpentine; at every step the neighbouring frontier cell with the lowest rank is chosen. If none borders the current position, the robot goes with GraphNav to the waypoint nearest to the lowest-rank one and tries from there. A cell that failed from one side stays a candidate and is retried later from another side; it becomes blocked only when all sides have been tried, or at once if the goal turns out to be inside an obstacle (`mission/exploration.py`, `mission/recovery.py`).
 
 ### A cell attempt (`CellAttempt` in `mission/cell_attempt.py`)
-The attempt prepares scan, maps, graph and path (`_prepare`), then repeats a turn of phases (`_guards`, `_scan_and_graph`, `_frontier_and_decision`, `_rotation`, `_node_or_arrival`, `_wait`, `_block`, `_execute_legs`) until the robot arrives or the attempt fails.
+The attempt prepares scan, maps, graph and path (`_prepare`), then repeats a turn of phases (`_guards`, `_scan_and_graph`, `_frontier_and_decision`, `_rotation`, `_node_or_arrival`, `_wait`, `_block`, `_execute_legs`) until the robot arrives or the attempt fails. The loop and the decision are in `cell_attempt.py`; the scan phases in `attempt_scan.py`, rotation, wait and block in `attempt_obstacles.py`, the legs in `attempt_legs.py`.
 1. **Scan** of Spot's local grid (obstacle_distance, terrain, terrain_valid): corrected terrain, never-written cells discarded, slope and roughness, obstacle mask (`perception/spot_grid.py`).
 2. **Global maps** accumulated over the whole mission: occupancy (an obstacle counts only after several observations), terrain, free space (`perception/global_maps.py`).
-3. **Graph** (`planning/mission_graph.py`, `planning/roadmap.py`): the nodes are random nodes with the cell centres included, or a regular deterministic lattice at 0.5 m spacing with the centre of every cell as a node (see *Mission graph*); the edges go from 0.5 to 1.25 m. Every edge is vetoed or weighted with occupancy, longitudinal and lateral slope (also measured beyond the nodes, by half a body on each side) and a preliminary discard on the live scan. At cell start only the edges near the new data are re-evaluated.
+3. **Graph** (`planning/mission_graph.py`, `planning/graph_nodes.py`, `planning/roadmap.py`, `planning/edge_evaluation.py`): the nodes are random nodes with the cell centres included, or a regular deterministic lattice at 0.5 m spacing with the centre of every cell as a node (see *Mission graph*); the edges go from 0.5 to 1.25 m. Every edge is vetoed or weighted with occupancy, longitudinal and lateral slope (also measured beyond the nodes, by half a body on each side) and a preliminary discard on the live scan. At cell start only the edges near the new data are re-evaluated.
 4. **Goal** (`planning/goal.py`): among the points of the cell not inside obstacles, first those reachable from the robot in the graph, with at least 0.33 m of free space and 0.30 m from the cell border; a goal refused by the frontier stays excluded for the whole mission. Arrival also counts with the robot up to 0.35 m outside the cell. **Path** with Dijkstra, only over the cells already visited, with a cap on the detour.
 5. **Navigation loop** with the **safe frontier** (`planning/safe_frontier.py`, `planning/decisions.py`): at every turn a fresh scan tells how far the path is free now, and the robot advances up to there, even over several nodes in a row. During the move a thread recomputes the frontier about 5 times per second and stops the robot if it gets shorter.
    - The robot always points its nose at the point to reach (no sideways walking). If it cannot rotate: it advances inside the possible rotation cone, or backs up straight if from there the rotation becomes possible, otherwise it discards the leg.
@@ -90,12 +90,12 @@ It gets here when the frontier is empty, or earlier if the battery drops below t
 | `spot_explorer/config.py` | All the mission parameters and switches, read as `P.NAME` |
 | `spot_explorer/records.py` | Statistics, logs and saved data (CSV, scan bundles, views); nothing here decides the movement |
 | `spot_explorer/legacy.py` | Old Italian names of tags, values and keys, so the tools still read missions recorded before 30-10-2026 |
-| `spot_explorer/mission/` | `run.py` start-up, closure and command line; `exploration.py` the cell-by-cell loop (`Mission`); `cell_attempt.py` one entry into a cell (`CellAttempt`); `recovery.py` going back, retreat, blocked cells; `cells.py` the cell grid; `summary.py` switches and end-of-mission summary |
-| `spot_explorer/planning/` | `mission_graph.py` nodes and candidate pairs; `roadmap.py` the PRM (vetoes, weights, Dijkstra); `goal.py` goal choice in a cell; `safe_frontier.py` the safe frontier and its thread; `decisions.py` what to do given the frontier (step, rotation, cone, back-off, traps) |
+| `spot_explorer/mission/` | `run.py` start-up, closure and command line; `exploration.py` the cell-by-cell loop (`Mission`); `cell_attempt.py` one entry into a cell (`CellAttempt`), with its phases in `attempt_scan.py`, `attempt_obstacles.py`, `attempt_legs.py` and `attempt_common.py`; `mission_prm.py` the graph during the mission (build, edge update, allowed cells); `recovery.py` going back, retreat, blocked cells; `cells.py` the cell grid; `summary.py` switches and end-of-mission summary |
+| `spot_explorer/planning/` | `mission_graph.py` the mission graph and its edge update; `graph_nodes.py` lattice and random nodes; `roadmap.py` the PRM (graph, penalties, Dijkstra); `edge_evaluation.py` edge vetoes and weights; `edge_stats.py` veto statistics; `goal.py` goal choice in a cell; `safe_frontier.py` the safe frontier and its thread; `decisions.py` what to do given the frontier (step, rotation, cone, back-off, traps) |
 | `spot_explorer/perception/` | `spot_grid.py` the local grid and its processing; `global_maps.py` global maps; `slopes.py` edge slope; `geometry.py` robot footprint and clearances; `gait.py` gait thresholds |
 | `spot_explorer/graphnav/` | `map_recording.py` recording, waypoints, breadcrumbs, loop closure, download; `navigation.py` GraphNav moves and return to `wp_0`; `localization.py` localization, re-anchoring, drift; `map_shortcuts.py` shortcuts; `apriltags.py` starting fiducial and correction of the return |
 | `spot_explorer/robot/` | `connection.py` robot connection and E-Stop; `motion.py` motion commands, gait, falls; `battery.py` charge and early return |
-| `tools/` | `mission_report.py`, `mission_viewer.py`, `live_viewer.py` (no SDK needed); `preflight.py`, `compare_logs.py`; `bench_graph.py`, `bench_loop_closure.py`, `bench_fiducial.py` bench tests |
+| `tools/` | `mission_report.py`, `mission_viewer.py`, `live_viewer.py` (no SDK needed); `preflight.py`, `compare_logs.py`; `bench_graph.py` (also the graph command line), `bench_loop_closure.py`, `bench_fiducial.py` bench tests |
 | `tests/` | `test_e2e_loop.py`, `test_mission.py`, `test_replay.py` (+ `replay_reference.json`), `test_goal_selection.py` |
 
 ---
@@ -108,7 +108,7 @@ Each one allows an on/off comparison in the field; the log reports them in the `
 |---|---|---|
 | `config.MISSION_GRAPH_SAMPLING` | `random` | How the nodes are generated: `lattice` or `random` (see *Mission graph*) |
 | `mission_graph.BATCH_SLOPES` | `True` | Slopes at cell start computed in batch (same result, faster) |
-| `roadmap.REFRESH_BATCH_SLOPES` | `True` | Slopes of the refresh computed in batch (same result, faster) |
+| `edge_evaluation.REFRESH_BATCH_SLOPES` | `True` | Slopes of the refresh computed in batch (same result, faster) |
 | `geometry.ROBOT_CLEARANCE_AIR_M` | `0.0` | Air between body and obstacles: the path line stays 0.25 m + this value from the obstacles (frontier and edge veto). 0.05 = with margin |
 | `geometry.PLAN_CLEARANCE_EXTRA_M` | `0.03` | On the global map and in the goal choice, the planner keeps the edges at (frontier distance + this value) from obstacles, so the scan noise does not make the frontier refuse the legs just chosen. 0 = same distance as the frontier |
 | `config.PLAN_ONLY_EXPLORED_CELLS` | `True` | Paths only go through the cells already visited |

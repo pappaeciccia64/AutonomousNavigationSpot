@@ -8,6 +8,18 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-10-30 (largest modules split by role, behaviour unchanged)
+
+The three largest modules are split by role, so each file can be read on its own. The robot's behaviour does not change: after every step the logs of the end-to-end tests and of the fake missions are identical line by line, the replay of the reference missions and the goal-selection replay are unchanged, and the mission graphs are the same for 12 sets of parameters (lattice and random, errors included).
+
+- **`CellAttempt`** keeps the current scan as one `Scan` object (before, ~20 attributes `pts_up`, `terrain_up`, `grad_up`, ...) and is split by phase: `mission/cell_attempt.py` the loop, guards, decision and shared actions; `attempt_scan.py` scan, maps, graph update and replan; `attempt_obstacles.py` rotation refused, wait and block; `attempt_legs.py` the legs; `attempt_common.py` the phase outcomes and the battery checks (`battery_return_due`, `battery_low`).
+- **PRM**: `planning/roadmap.py` the graph, the penalties, anchoring and the path search (`find_path_dijkstra` = `_dijkstra`, `_within_caps`, `_stable_plan`); `edge_evaluation.py` occupancy, slope, weight and the refresh around the robot (`refresh_local_edge_weights` = `_refresh_nodes`, `_refresh_pairs`, `_refresh_edge`), with the constants `LIVE_PREFILTER_OD_M`, `REFRESH_RADIUS_M`, `REFRESH_BATCH_SLOPES`, `DIRTY_MARGIN_M`; `edge_stats.py` the veto statistics and the `[SLOPES]` line.
+- **Mission graph**: `planning/graph_nodes.py` lattice and random nodes, pairs, coverage (with the reasons for the lattice); `mission_graph.py` `MissionGraph` and `build_mission_graph`, with `add_edges_to_prm` and the lattice build in steps; `mission/mission_prm.py` the graph during the mission (`build_mission_prm`, `rebuild_prm_edges`, `restrict_planning_to_explored_cells`, `graph_reaches_cell`, `node_cells`, `robot_on_node`). The command line moves to `tools/bench_graph.py` (`python3 tools/bench_graph.py --compare`, `--timings`, `--preview`, ...); `--compare` failed on a wrong attribute name since the translation, now it works.
+- **Imports by the module's own name**: `motion`, `cells`, `connection`, `roadmap`, `records`, `config`, `battery` instead of the old aliases `movements`, `environmentMap`, `spotUtils`, `prm_graph`, `registro`, `parametri`, `batteria`. In `mission_summary.json` the switch keys become `config.X`, `motion.X`, `edge_evaluation.REFRESH_BATCH_SLOPES`; the tools read only the last part of the key, so old and new summaries read the same.
+- `tools/preflight.py` follows the PRM methods into `edge_evaluation.py`.
+
+---
+
 ## 2026-10-30 (package, English, behaviour unchanged)
 
 The code becomes the `spot_explorer` package and everything is in English: identifiers, command-line options, comments, docstrings, log messages and tags, internal values and data keys. The robot's behaviour does not change. Every step was checked without the robot: end-to-end and whole-mission test logs identical line by line (up to the step that changed the log text; after it, the same lines with the same numbers on every line), replay of the 10 reference missions identical to the reference, goal-selection replay identical, reports of four field missions with the same numbers, tools run on old and new missions.

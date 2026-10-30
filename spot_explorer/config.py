@@ -3,8 +3,9 @@ MISSION PARAMETERS: all the switches and numbers that are changed in the field.
 
 A single place to touch. Every parameter has what it does next to it; why it has that
 value (the field tests that decided it) is in CHANGELOG.md. The parameters specific to a
-module (grids and maps in perception/, graph in planning/roadmap.py, frontier in
-planning/safe_frontier.py, motion in robot/motion.py) stay in that module.
+module (grids and maps in perception/, graph in planning/roadmap.py and
+planning/edge_evaluation.py, frontier in planning/safe_frontier.py, motion in robot/motion.py)
+stay in that module.
 
 The command-line arguments of run_mission.py (--rows, --graph, --spacing, ...) change
 these values for a single mission. The code reads them as config.NAME at the time of

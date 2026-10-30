@@ -70,9 +70,7 @@ Not decided yet: first it must be said what exactly they do and how to prove the
 
 ## Code structure
 
-Done (see CHANGELOG, 27-10 to 30-10): the `spot_explorer` package (`mission/`, `planning/`, `perception/`, `graphnav/`, `robot/`), parameters in `config.py`, records in `records.py`, tools in `tools/`, tests in `tests/`; everything in English, with `legacy.py` so the tools still read the Italian missions.
+Done (see CHANGELOG, 27-10 to 30-10): the `spot_explorer` package (`mission/`, `planning/`, `perception/`, `graphnav/`, `robot/`), parameters in `config.py`, records in `records.py`, tools in `tools/`, tests in `tests/`; everything in English, with `legacy.py` so the tools still read the Italian missions; the largest modules split by role (`CellAttempt` by phase, the PRM into graph, edge evaluation and statistics, `mission_graph` into nodes, graph and mission use).
 
 Still possible, not urgent:
-- split the largest modules further: `mission/cell_attempt.py` (~1750 lines, one class), `planning/mission_graph.py` (~1550), `planning/roadmap.py` (~1350);
-- in `CellAttempt` the ~20 scan attributes (`pts_up`, `terrain_up`, `grad_up`, …) gathered into a single `Scan` object;
 - also save in `scans/` the start-of-attempt, recovery and final scans as full bundles (today the viewer rebuilds them from the PRM views).
