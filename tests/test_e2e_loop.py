@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.dirname(HERE))   # the spot_explorer package
 
 import matplotlib  # noqa: E402
 matplotlib.use("Agg")
-from spot_explorer.mission import cell_attempt     # noqa: E402
+from spot_explorer.mission import attempt_legs, attempt_obstacles, attempt_scan, cell_attempt     # noqa: E402
 from spot_explorer import config as parametri     # noqa: E402
 from spot_explorer import records as registro      # noqa: E402
 from spot_explorer.perception import geometry
@@ -128,7 +128,7 @@ def window():
 
 
 def fake_get_a_tform_b(snapshot, a, b):
-    if b == cell_attempt.BODY_FRAME_NAME:
+    if b == attempt_legs.BODY_FRAME_NAME:
         x, y, yaw = snapshot.robot
         return NS(position=NS(x=x, y=y, z=-2.7), rotation=quat(yaw))
     ox, oy = snapshot.origin
@@ -325,7 +325,7 @@ class FakeSampler:
 
 
 # ---- patches: only the boundaries with the robot ----------------------------------------
-cell_attempt.get_a_tform_b = spot_grid.get_a_tform_b = fake_get_a_tform_b
+attempt_scan.get_a_tform_b = attempt_obstacles.get_a_tform_b = attempt_legs.get_a_tform_b = spot_grid.get_a_tform_b = fake_get_a_tform_b
 spotUtils.getPosition = lambda rsc: (ROBOT.x, ROBOT.y, -2.7, quat(ROBOT.yaw))
 movements.navigate_to = fake_navigate_to
 movements.move_to_world_point_without_turning = fake_move_no_turn
@@ -342,7 +342,7 @@ class _NoTilt:
                     pitch_peak_abs=0, samples=0, errors=0)
 
 
-cell_attempt.BodyTiltRecorder = registro.BodyTiltRecorder = _NoTilt
+attempt_legs.BodyTiltRecorder = registro.BodyTiltRecorder = _NoTilt
 
 
 def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, second_attempt=False,

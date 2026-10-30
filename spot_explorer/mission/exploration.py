@@ -16,7 +16,7 @@ from spot_explorer.planning import mission_graph                   # mission nod
 
 from spot_explorer import config as P
 from spot_explorer.records import MISSION_STATS, visualize_grid_with_candidates
-from spot_explorer.mission import cell_attempt
+from spot_explorer.mission import attempt_common, cell_attempt
 from spot_explorer.planning import goal
 from spot_explorer.mission import recovery
 
@@ -169,7 +169,7 @@ class Mission:
 
         while (True):
             self._log_progress()
-            if cell_attempt._battery_return_due():
+            if attempt_common.battery_return_due():
                 MISSION_STATS['battery_return_cells_left'] = len(self.frontier)
                 print(f"[BATTERY] End of exploration for low battery: "
                       f"{len(self.frontier)} cells left in the frontier {[(f[0], f[1]) for f in self.frontier]}.")
@@ -208,7 +208,7 @@ class Mission:
         start in the middle of tall grass, no reachable cell, and in the log only
         "Frontiera vuota")."""
         closed, visited, blocked, total = self._cell_counts()
-        if closed >= total or cell_attempt._battery_low():
+        if closed >= total or attempt_common.battery_low():
             return
         if visited <= 1:
             print(f"[END] No cell reachable from the start: {self._attempt_count} attempts "
@@ -310,7 +310,7 @@ class Mission:
         if check or (row, col) == (robot_row, robot_col):
             # Failed but the robot is inside the cell anyway: it counts as visited.
             self._on_visited(row, col, x_new, y_new)
-        elif cell_attempt._battery_low():
+        elif attempt_common.battery_low():
             # Attempt interrupted for the return: the cell is still to be explored.
             self.frontier.append(selected_border)
         else:
@@ -404,7 +404,7 @@ class Mission:
         if self._attempt(row, col):
             x_final, y_final, _, _ = spotUtils.getPosition(self.robot_state_client)
             self._on_visited(row, col, x_final, y_final)
-        elif cell_attempt._battery_low():
+        elif attempt_common.battery_low():
             self.frontier.append(selected_border)
         else:
             print(
@@ -504,7 +504,7 @@ class Mission:
         recordingInterface.start_recording()
         # The trip may have been long: if the battery dropped below the threshold the cell
         # is not attempted, the robot returns (the cell stays in the frontier).
-        if cell_attempt._battery_return_due("after the GraphNav move"):
+        if attempt_common.battery_return_due("after the GraphNav move"):
             return None
         # If GraphNav did not even reach the starting waypoint it counts as a failed
         # attempt. Side marked as tried; the cell leaves the frontier only if it was
@@ -513,7 +513,7 @@ class Mission:
             x_final, y_final, _, _ = spotUtils.getPosition(self.robot_state_client)
             self.frontier.remove((target_row, target_col, rank))
             self._on_visited(target_row, target_col, x_final, y_final)
-        elif cell_attempt._battery_low():
+        elif attempt_common.battery_low():
             pass
         elif self._mark_side_failed(target_row, target_col, nearest_cell[0], nearest_cell[1]):
             self.frontier.remove((target_row, target_col, rank))

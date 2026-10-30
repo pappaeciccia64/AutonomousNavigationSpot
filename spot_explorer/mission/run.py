@@ -33,7 +33,7 @@ from spot_explorer.planning import mission_graph                   # mission nod
 from spot_explorer import config as P
 from spot_explorer import REPO_ROOT
 from spot_explorer.records import (MISSION_STATS, MISSION_CTX, SegmentLog, install_stdout_tee, remove_stdout_tee, set_mission_z0)
-from spot_explorer.mission import cell_attempt
+from spot_explorer.mission import attempt_common
 from spot_explorer.mission import exploration
 from spot_explorer.mission import summary
 
@@ -373,7 +373,7 @@ def easy_walk(options):
             mission.explore()
 
             env.print_map()
-            if cell_attempt._battery_low():
+            if attempt_common.battery_low():
                 print("[BATTERY] Mission closed before finishing the exploration: the closure is "
                       "the normal one (final scan, summary, return to wp_0, map downloaded).")
             x_final, y_final, _, _ = connection.getPosition(robot_state_client)

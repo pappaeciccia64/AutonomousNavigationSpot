@@ -56,7 +56,7 @@ from bosdyn.client.math_helpers import Quat, SE3Pose
 
 from spot_explorer.planning import safe_frontier
 from spot_explorer.robot import battery as batteria
-from spot_explorer.mission import cell_attempt, exploration
+from spot_explorer.mission import attempt_legs, cell_attempt, exploration
 from spot_explorer.mission import run as mission_run
 from spot_explorer.planning import goal
 from spot_explorer.robot import motion as movements
@@ -406,7 +406,7 @@ def run(walls=None, name='MISSION', fiducial=None, stuck_wp0_m=None, wp0_offset_
     mission_run.blocking_stand = lambda *a, **k: None
     spot_grid.LocalGrid = lambda r: T.FakeLocalGrid()
     safe_frontier.ArcVerificationTracker = lambda r: _Tracker()
-    cell_attempt.BodyTiltRecorder = registro.BodyTiltRecorder = _NoTilt
+    attempt_legs.BodyTiltRecorder = registro.BodyTiltRecorder = _NoTilt
     parametri.MISSION_GRAPH_SAMPLING = 'lattice'
 
     root = tempfile.mkdtemp(prefix="fake_mission_")
