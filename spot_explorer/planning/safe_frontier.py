@@ -364,7 +364,7 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
         elif obstacle[k]:
             reason, value = 'obstacle', float(od[k])
             # The EFFECTIVE threshold at that point and whether the hysteresis decided, for the log:
-            # without it, "ostacolo a 0.27 m (minimo 0.25 m)" would look like a contradiction.
+            # without it, an obstacle at 0.27 m stopping the robot with a 0.25 m minimum would look like a contradiction.
             result['stop_threshold'] = float(thr[k])
             result['stop_by_latch'] = bool(
                 snap.blocked_latch is not None and use_latch

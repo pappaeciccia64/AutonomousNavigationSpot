@@ -341,7 +341,7 @@ MAX_FALLS_PER_MISSION = 3      # at the third fall the robot gets up and the mis
 # BATTERY_RETURN_PCT, confirmed over BATTERY_RETURN_CONFIRM readings in a row, the mission stops
 # exploring and closes as at the end of a mission: final scan, saving, return to wp_0
 # with GraphNav. 30% is provisional: it must be tuned on the measured consumption (battery.csv, and the charge
-# spent on the return to wp_0, [BATTERIA] line at closure). 0 = return off (it is measured
+# spent on the return to wp_0, [BATTERY] line at closure). 0 = return off (it is measured
 # anyway).
 BATTERY_RETURN_PCT = 30.0
 BATTERY_RETURN_CONFIRM = 2     # readings in a row below threshold (against an isolated value)

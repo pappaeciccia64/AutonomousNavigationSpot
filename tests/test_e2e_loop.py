@@ -19,7 +19,6 @@ import shutil
 import sys
 import tempfile
 import time
-import types
 from types import SimpleNamespace as NS
 
 import numpy as np

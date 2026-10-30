@@ -12,7 +12,7 @@ records.py): it saves the raw data, and the figures are made here, afterwards.
     python3 tools/mission_viewer.py <file.npz>                       # a scan or a PRM view
     python3 tools/mission_viewer.py <mission_folder> --png <dir>     # export all figures as PNG
     python3 tools/mission_viewer.py <mission_folder> --overview      # only the mission overview
-    ... --background terreno | fusione                               # initial background of the global panel
+    ... --background terrain | fusion                               # initial background of the global panel
     ... --navgraph                                                   # nav graph visible from the start
     ... --mission-frame                                              # global panel in the mission frame
 
@@ -106,14 +106,14 @@ OCC_MAX_COUNT = global_maps.GLOBAL_OCC_MAX_COUNT
 TRAJ_GAP_M = 0.5
 
 # BACKGROUND OF THE GLOBAL PANEL (2026-10-26), 't' key.
-#   ostacoli -- the occupancy map (red obstacle, light green free, white never seen)
-#   terreno  -- the global HEIGHT map, as the robot kept it (mean of the corrected
+#   obstacles -- the occupancy map (red obstacle, light green free, white never seen)
+#   terrain  -- the global HEIGHT map, as the robot kept it (mean of the corrected
 #               heights, only reliable non-obstacle cells: see spot_grid.slope_usable_mask),
 #               relative to the ground at mission start, with relief shading
-#   fusione  -- the terrain, with the obstacles of the occupancy map in red on top
+#   fusion   -- the terrain, with the obstacles of the occupancy map in red on top
 # The height colour scale is fixed for the whole mission, so scrolling through the
 # scans the same colour always means the same height.
-BACKGROUNDS = ('ostacoli', 'terreno', 'fusione')
+BACKGROUNDS = ('obstacles', 'terrain', 'fusion')
 TERRAIN_CMAP = 'viridis'                # no reds: in the fusion red belongs to obstacles only
 OBSTACLE_RGB = (0.84, 0.15, 0.16)       # like MOSAIC_CMAP
 NO_TERRAIN_RGB = (0.80, 0.80, 0.80)     # fusion: cell seen free but without a reliable height
@@ -152,7 +152,7 @@ LAYERS = [
     ("raw terrain_valid", lambda d: d['terrain_valid_raw'], 'gray_r', 0, 1, "1 = valid"),
     ("obstacle_distance", lambda d: d['obstacle_distance'], 'plasma', 0, 1.0, "distance from the obstacle (m)"),
     ("roughness", lambda d: d['roughness'], 'coolwarm', 0, 0.3, "standard deviation (m)"),
-    ("gradient", lambda d: d['gradient'], 'viridis', 0, 1.0, "tan(pendenza)"),
+    ("gradient", lambda d: d['gradient'], 'viridis', 0, 1.0, "tan(slope)"),
     ("fused mask", lambda d: d['obstacle_mask'], 'RdYlGn', -1, 1, "-1 = obstacle"),
     ("cells used (is_valid)", lambda d: d['is_valid'].astype(float), 'gray_r', 0, 1,
      "0 = filled/discarded"),
@@ -301,7 +301,7 @@ def draw_scan(ax, d, layer_idx, title_prefix="", ctx=None):
     ax.contour(xs, ys, od, levels=[clear], colors='white', linewidths=0.8, linestyles='--')
 
     pl = d['polyline']
-    ax.plot(pl[:, 0], pl[:, 1], '-', color='magenta', lw=2, label='percorso')
+    ax.plot(pl[:, 0], pl[:, 1], '-', color='magenta', lw=2, label='path')
     rx, ry = d['robot_xyz'][:2]
     yaw = float(d['robot_yaw']) if 'robot_yaw' in d else np.nan
     ax.plot(rx, ry, 'o', color='blue', ms=9)
@@ -370,7 +370,7 @@ def draw_vis_bundle(ax, d):
         ax.plot(cp[:, 0], cp[:, 1], '-', color='magenta', lw=2.5, label='chosen path')
     ax.plot(*d['robot_xy'], 'o', color='blue', ms=10, label='robot')
     if np.all(np.isfinite(d['chosen_point'])):
-        ax.plot(*d['chosen_point'], '*', color='green', ms=16, label='obiettivo')
+        ax.plot(*d['chosen_point'], '*', color='green', ms=16, label='goal')
     for (r, c, x, y), st in zip(d['env_cells'], d['env_cell_status']):
         ax.text(x, y, f"{int(r)},{int(c)}", fontsize=7, ha='center')
     ax.set_aspect('equal'); ax.grid(alpha=0.3); ax.autoscale_view()
@@ -1283,14 +1283,14 @@ def _hillshade(h, res):
 
 
 def _background_rgb(occ, height, mode, norm, res):
-    """RGB image of the 'terreno' or 'fusione' background (see BACKGROUNDS)."""
+    """RGB image of the 'terrain' or 'fusion' background (see BACKGROUNDS)."""
     rgb = plt.get_cmap(TERRAIN_CMAP)(norm(np.nan_to_num(height, nan=norm.vmin)))[..., :3]
     if HILLSHADE_STRENGTH > 0:
         shade = 1.0 + HILLSHADE_STRENGTH * (np.clip(_hillshade(height, res), 0.0, 2.0) - 1.0)
         rgb = np.clip(rgb * shade[..., None], 0.0, 1.0)
     has_h = np.isfinite(height)
     rgb[~has_h] = 1.0                                         # never seen: white
-    if mode == 'fusione' and occ is not None:
+    if mode == 'fusion' and occ is not None:
         rgb[~has_h & (occ == 1)] = NO_TERRAIN_RGB
         rgb[occ == 2] = OBSTACLE_RGB
     return rgb
@@ -1353,7 +1353,7 @@ def _mark_zero(cbar):
 
 def _hover_global(ax, ctx, occ, height, ng=None):
     """Coordinates, cell state, height and nearby waypoint under the mouse in the global panel."""
-    names = {0: 'never seen', 1: 'free', 2: 'OSTACOLO'}
+    names = {0: 'never seen', 1: 'free', 2: 'OBSTACLE'}
 
     def fmt(x, y):
         out = _fmt_cell(x, y)
@@ -1429,12 +1429,12 @@ def _to_mission_frame(ax, ctx, fmt_vision, extent=None):
     ax.set_ylabel("forward [m]")
 
 
-def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=False, mframe=False):
+def draw_global(ax, ctx, i, final=False, raw=False, bg='obstacles', navgraph=False, mframe=False):
     """
     Global view at scan i (or at the end of the mission with final=True). raw: raw mosaic.
     bg: background, see BACKGROUNDS. navgraph: draw the nav graph (see load_navgraph).
     mframe: mission frame instead of VISION (see _to_mission_frame). Returns the object for
-    the height colour bar (None for the 'ostacoli' background).
+    the height colour bar (None for the 'obstacles' background).
     """
     ax.clear()
     upto = len(ctx.scans) - 1 if final else i
@@ -1448,7 +1448,7 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=Fals
     else:
         occ = ctx.mosaic(upto) if raw else ctx.robot_map(upto)
     height = None
-    if bg != 'ostacoli':
+    if bg != 'obstacles':
         if final and ctx.final_terrain is not None:
             height = ctx.final_terrain
         else:
@@ -1458,7 +1458,7 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=Fals
                 fill = np.isnan(height) & ctx.walked(upto) & np.isfinite(ctx.final_terrain)
                 height[fill] = ctx.final_terrain[fill]
     mappable = None
-    if bg == 'ostacoli':
+    if bg == 'obstacles':
         ax.imshow(occ, origin='lower', cmap=MOSAIC_CMAP, vmin=0, vmax=2, interpolation='nearest',
                   extent=ctx.extent, zorder=0)
     else:
@@ -1537,9 +1537,9 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='ostacoli', navgraph=Fals
         title += (" -- raw mosaic, the last scan wins ('m')" if raw
                   else " -- the robot's map, confirmed obstacles ('m')")
     legend = {
-        'ostacoli': "red = obstacle seen, light green = free, white = never seen",
-        'terreno': "background: terrain height relative to the mission start; white = no height",
-        'fusione': "background: terrain height, red = obstacle, grey = free without height, white = never seen",
+        'obstacles': "red = obstacle seen, light green = free, white = never seen",
+        'terrain': "background: terrain height relative to the mission start; white = no height",
+        'fusion': "background: terrain height, red = obstacle, grey = free without height, white = never seen",
     }[bg]
     ax.set_title(f"{title}\n{legend} ('t'); red squares = blocks ({n_blk})"
                  + (f"\ngraph: {vis[0]}" if vis else ""), fontsize=8)
@@ -1618,11 +1618,12 @@ def main():
     if not os.path.exists(target) and os.path.isdir(by_name):
         target = by_name
     out_dir = sys.argv[sys.argv.index("--png") + 1] if PNG_MODE else None
-    bg0 = 'ostacoli'
+    bg0 = 'obstacles'
     ng0 = "--navgraph" in sys.argv
     mf0 = "--mission-frame" in sys.argv
     if "--background" in sys.argv:
         bg0 = sys.argv[sys.argv.index("--background") + 1]
+        bg0 = {'ostacoli': 'obstacles', 'terreno': 'terrain', 'fusione': 'fusion'}.get(bg0, bg0)   # old names
         if bg0 not in BACKGROUNDS:
             print(f"--background: one of {', '.join(BACKGROUNDS)}")
             return 1
@@ -1657,7 +1658,7 @@ def main():
             m = _VIS_SCAN_NAME.search(os.path.basename(f))
             if m:                                         # scan outside the loop
                 png = (f"scan_it{int(m.group(1)):03d}_cell{m.group(2)}_{m.group(3)}_000_start.png"
-                       if m.group(2) else f"scan_it{int(m.group(1)):03d}_finale.png")
+                       if m.group(2) else f"scan_it{int(m.group(1)):03d}_final.png")
             fig.savefig(os.path.join(out_dir, png), dpi=100)
             plt.close(fig)
         for f in vis_files:
@@ -1670,7 +1671,7 @@ def main():
             m = draw_global(ax, ctx, len(scans) - 1, final=True, bg=bg, navgraph=ng0, mframe=mf0)
             if m is not None:
                 _mark_zero(fig.colorbar(m, ax=ax, label="height relative to the mission start (m)", shrink=0.7))
-            fig.savefig(os.path.join(out_dir, "overview.png" if bg == 'ostacoli' else f"overview_{bg}.png"),
+            fig.savefig(os.path.join(out_dir, "overview.png" if bg == 'obstacles' else f"overview_{bg}.png"),
                         dpi=110)
             plt.close(fig)
         print(f"Figures saved in {out_dir}")
@@ -1709,7 +1710,7 @@ def main():
         a.set_anchor('C')
     _maximize_window(fig)
     # Height bar of the right panel: created only once and hidden with the
-    # 'ostacoli' background.
+    # 'obstacles' background.
     cbar_g = fig.colorbar(plt.cm.ScalarMappable(norm=ctx.terrain_norm(), cmap=TERRAIN_CMAP), cax=cax_g,
                           label="height relative to the mission start (m)")
     _mark_zero(cbar_g)
@@ -1760,7 +1761,7 @@ def main():
             lst = ctx.events()[kind]
             fwd = ev.key.islower()
             cand = [k for k in lst if (k > state['i'] if fwd else k < state['i'])]
-            what = {'block': 'block', 'cell': 'tentativo', 'graphnav': 'GraphNav move'}[kind]
+            what = {'block': 'block', 'cell': 'cell attempt', 'graphnav': 'GraphNav move'}[kind]
             if not cand:
                 print(f"[viewer] no {what} {'after' if fwd else 'before'} this scan "
                       f"({len(lst)} in all).")

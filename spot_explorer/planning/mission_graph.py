@@ -116,7 +116,7 @@ class MissionGraph:
         self.cell_center_ids = cell_center_ids    # {(row, col): id of the node at the centre}
         self.origin_node_id = origin_node_id      # node under the robot at start-up
         self.n_short_pairs = int(n_short_pairs)
-        # How the nodes were generated (see RANDOM NODES). For random nodes ij is
+        # How the nodes were generated (see RANDOM NODES in graph_nodes.py). For random nodes ij is
         # -1 and spacing_m is the mean spacing 1/sqrt(density); the coverage is measured.
         self.sampling = str(sampling)
         self.distribution = distribution
@@ -553,11 +553,11 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
         rows, cols, cell_size_m: the MISSION SIZE. If not passed: those of
             mission_settings() (MISSION_*, or the DEFAULT_*). Ignored if `env` is passed.
         spacing_m: SPACING FLAG, in metres; it is rounded to cell_size/n (see
-            align_spacing). It can be below min_edge_length (see SPACING). If not passed:
+            align_spacing). It can be below min_edge_length (see SPACING in graph_nodes.py). If not passed:
             the one of mission_settings() (P.MISSION_LATTICE_SPACING_M, or 0.25 m); None =
             suggested_spacing().
         rings: CONNECTIONS FLAG -- k = all nodes within the diagonal of the k-th ring
-            (k*spacing*sqrt(2)), with edges >= min_edge_length (see RINGS). None = all those
+            (k*spacing*sqrt(2)), with edges >= min_edge_length (see RINGS in graph_nodes.py). None = all those
             within min(connection_radius, max_edge_length).
         origin_xy, origin_yaw: robot pose at start-up in the VISION frame. The lattice is
             anchored here. Ignored if `env` is passed.
@@ -568,7 +568,7 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
         env: an EnvironmentMap already created and with set_origin() done. If passed, size
             and pose come from it: it is the way to guarantee that graph and cell map cannot
             get out of sync.
-        sampling: 'lattice' or 'random' (see RANDOM NODES); None = P.MISSION_GRAPH_SAMPLING. With
+        sampling: 'lattice' or 'random' (see RANDOM NODES in graph_nodes.py); None = P.MISSION_GRAPH_SAMPLING. With
             'random' spacing_m and rings do not count.
         distribution, density_per_m2, seed, poisson_min_dist_m: the parameters of the random
             nodes; None = P.MISSION_RANDOM_DISTRIBUTION, P.MISSION_RANDOM_DENSITY,
@@ -711,7 +711,7 @@ def _build_random_graph(rows, cols, cell_size_m, start_cell, origin_xy, origin_y
                         min_edge_m, reach_m, border_margin_m, verbose,
                         distribution, density_per_m2, seed, poisson_min_dist_m):
     """
-    The graph with random nodes (see RANDOM NODES): first the cell centres, in the order of
+    The graph with random nodes (see RANDOM NODES in graph_nodes.py): first the cell centres, in the order of
     rows and columns, then the nodes of the distribution. Same seed, same graph.
     """
     if distribution not in RANDOM_DISTRIBUTIONS:

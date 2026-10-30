@@ -29,6 +29,17 @@ OLD_KEYS = {
     'metodo': 'method', 'nodi': 'nodes', 'coppie': 'pairs', 'arco_min_m': 'edge_min_m',
     'arco_max_m': 'edge_max_m', 'copertura_m': 'coverage_m', 'distribuzione': 'distribution',
     'densita_nodi_m2': 'node_density_m2', 'seme': 'seed', 'passo_m': 'spacing_m', 'anelli': 'rings',
+    # phases of MISSION_STATS['time_s'] (timing_add)
+    'movimento': 'motion', 'scansione': 'scan', 'PRM e ripianificazione': 'PRM and replanning',
+    'costruzione grafo': 'graph construction', 'elaborazione griglia': 'grid processing',
+    'mappe globali': 'global maps', 'fronte e decisione': 'frontier and decision',
+    'dati figure': 'figure data',
+}
+
+# Phases of the [TIMING] Mission closure block of the log.
+OLD_CLOSURE_PHASES = {
+    'chiusura mappa e ancoraggio': 'map closure and anchoring', 'ritorno a wp_0': 'return to wp_0',
+    'seduta e spegnimento': 'sit and power off', 'scaricamento della mappa': 'map download',
 }
 
 # Log tags, longest first so that '[GRAFO DISCONNESSO]' is not read as '[GRAFO]'.

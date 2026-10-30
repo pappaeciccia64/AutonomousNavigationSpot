@@ -254,10 +254,10 @@ class Mission:
 
     def _log_progress(self, final=False):
         """
-        Where the mission stands: a [PROGRESSO] line when the closed cells change (visited
+        Where the mission stands: a [PROGRESS] line when the closed cells change (visited
         or blocked), and one at the end. Closed cells over the total (the main number),
         mission area already seen in the global map, time, estimate of the remaining time
-        from the average time per cell, battery. Log and MISSION_STATS['progresso'] only
+        from the average time per cell, battery. Log and MISSION_STATS['progress'] only
         (report, mission_summary.json): no decision depends on it.
         """
         closed, visited, blocked, total = self._cell_counts()
@@ -530,7 +530,7 @@ class Mission:
         if scan is None:
             print("[FINAL SCAN] CAREFUL: local grid not received, carrying on without the final scan.")
             return
-        self.local_grid.process_scan(scan, x_final, y_final, final_yaw, ground_label="scan-finale")
+        self.local_grid.process_scan(scan, x_final, y_final, final_yaw, ground_label="scan-final")
         # The last scan goes into the global maps too, like all the others
         global_maps.fold_scan_into_global_maps(
             self.global_grid.global_occupancy_map, self.global_grid.global_terrain_map, scan.pts,

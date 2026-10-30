@@ -100,28 +100,6 @@ class GlobalGrid:
         n = self.clear_all_n.get(key, 0)
         return (self.clear_all_sum[key] / n) if n else None
 
-    def clearance_many(self, xs, ys):
-        """clearance() on many points: float array, NaN where never observed."""
-        xs = np.asarray(xs, dtype=np.float64)
-        ys = np.asarray(ys, dtype=np.float64)
-        out = np.full(xs.shape, np.nan)
-        if xs.size == 0 or not self.clear_all_n:
-            return out
-        gx = np.floor(xs / self.resolution).astype(np.int64)
-        gy = np.floor(ys / self.resolution).astype(np.int64)
-        ns, na = self.clear_near_sum, self.clear_near_n
-        as_, an = self.clear_all_sum, self.clear_all_n
-        flat = out.ravel()
-        for i, k in enumerate(zip(gx.ravel().tolist(), gy.ravel().tolist())):
-            n = na.get(k, 0)
-            if n:
-                flat[i] = ns[k] / n
-            else:
-                n = an.get(k, 0)
-                if n:
-                    flat[i] = as_[k] / n
-        return out
-
     def update_clearance(self, pts, obstacle_distance, usable, near=None):
         """
         Learn the free space per cell. Called next to update().

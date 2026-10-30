@@ -30,7 +30,7 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # project folder
 sys.path.insert(0, HERE)                                     # the spot_explorer package
-from spot_explorer.legacy import modern, modern_keys, modern_log_line   # noqa: E402
+from spot_explorer.legacy import OLD_CLOSURE_PHASES, modern, modern_keys, modern_log_line   # noqa: E402
 LOGS = os.path.join(HERE, 'MissionLogs')
 MAPS = os.path.join(HERE, 'MissionMap')
 GRAPHS = os.path.join(HERE, 'graph')
@@ -122,7 +122,7 @@ def section_times(log, summary):
     block = re.search(r'\[(?:TEMPO|TIMING)\] (?:Chiusura della missione|Mission closure).*?\n((?:.*\n){1,8})', log)
     if block:
         for name, s in re.findall(r'\]?\s{2,}([a-z][a-z0-9_ \']+?)\s{2,}([\d.]+) s', block.group(1)):
-            closing[name.strip()] = float(s)
+            closing[OLD_CLOSURE_PHASES.get(name.strip(), name.strip())] = float(s)
     out['closure'] = closing
     return out
 

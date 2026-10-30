@@ -1,5 +1,5 @@
 """Small shared helpers: robot position in the VISION frame, line of sight on the grid."""
-from bosdyn.client.frame_helpers import get_a_tform_b, VISION_FRAME_NAME, BODY_FRAME_NAME, ODOM_FRAME_NAME
+from bosdyn.client.frame_helpers import get_a_tform_b, VISION_FRAME_NAME, BODY_FRAME_NAME
 import numpy as np
 
 def getPosition(robot_state_client):
