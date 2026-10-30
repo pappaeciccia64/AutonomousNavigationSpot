@@ -1,86 +1,78 @@
-# Da fare
+# To do
 
-Idee, problemi aperti e decisioni rimandate, con i dati che servono per prenderli. Quando
-una cosa è fatta o una decisione è presa si toglie da qui e va nel `CHANGELOG.md`, con il
-perché: lì si leggono i progressi, qui solo ciò che manca.
-
----
-
-## Per le missioni del 29-10 e la versione su `main` (entro fine settimana)
-
-Dalle prove all'aperto del 28-10 (13:50, 14:17, 14:19, 14:23). Correzioni piccole, ognuna con
-la sua prova senza robot, prima di portare il branch su `main`.
-
-**Codice**: fatto il 28-10 sera (vedi CHANGELOG): `[SUBITO]` ripetuti sullo stesso tratto, ritorno a wp_0 con tre esiti, tratto non concluso ma arrivato (`[QUASI]`), codice superfluo. Accensione con `KeepaliveMotorsOffError`: non si fa, il traceback va bene e si riavvia a mano. Resta facoltativo spostare gli strumenti da riga di comando di `mission_graph.py` in `prova_grafo.py`.
-
-**Prima di `main`**: una giornata di missioni con il codice di oggi (scelta delle celle corretta, arrivo GraphNav girato, `[FINE]`, le correzioni sopra) su terreno senza erba alta; se vanno come la 14:23, il branch va su `main`. Da aggiungere alle validazioni su GitHub la missione del 28-10 14:23.
-
-**Sul campo** (finché l'erba non è sistemata)
-
-- Partire su terreno basso o nudo, mai dentro l'erba alta: 13:50 (ritorno bloccato), 14:17 (nessuna cella raggiungibile, 21 s), 14:19 (3 celle). Ora il log lo dice: `[FINE] Nessuna cella raggiungibile dalla partenza`.
-- Batteria piena: la 14:23 è partita al 66% ed è finita al 37%, a pochi minuti dal rientro automatico al 30% (consumo 1.15–1.19 %/min, 0.18–0.19 %/m).
-- Marker a 1–2 m dalla partenza, fermo per tutta la missione.
-
-**Missione di validazione del 29-10 10:57** (8 x 5 celle da 2 m, prato in salita di ~8 gradi, cespugli e una siepe lungo il lato sinistro): 40/40 celle al primo tentativo, nessun blocco, stallo o errore; il nuovo obiettivo dopo una ripianificazione fallita e' scattato una volta e ha funzionato. Ctrl+C di emergenza ancora da provare.
-
-**Ritorno a wp_0 spostato di ~1.2 m (29-10 10:57)**: correzione con il fiducial fatta il 29-10 pomeriggio (vedi CHANGELOG), da verificare sul campo. Analisi: GraphNav ha detto "arrivato", ma il tag di partenza visto all'arrivo (1.59 m, +1.03 m a sinistra, contro 1.08 m e -0.13 m alla partenza) dice che il robot era ~1.2 m alla destra della partenza; confermato a vista. Deriva dell'odometria 2.82 m in 15 min (salita, erba); GraphNav ne ha corretti 1.86 m, il residuo (~1.3 m) e' tutto lungo la siepe, l'unico riferimento lungo e dritto: l'ICP sa la distanza dalla siepe ma non la posizione lungo di lei. Il grafo (archi di odometria, comprese le 9 scorciatoie nostre) porta con se' tutta la deriva da wp_153 a wp_0. Il tag era nell'istantanea di wp_0 e visibile all'arrivo, ma GraphNav non l'ha usato per correggere, e noi lo usiamo solo per misurare. Anomalia da capire: subito dopo l'inizializzazione sul fiducial il rilevatore di perdita di GraphNav diceva PERSO fino al riaggancio delle 11:06 (nessun effetto sull'esplorazione).
+Ideas, open problems and postponed decisions, with the data needed to take them. When
+something is done or a decision is taken it is removed from here and goes into `CHANGELOG.md`,
+with the reason: progress is read there, here only what is missing.
 
 ---
 
-## Decisioni con i dati del 28-10
+## State at the move to `main` (30-10-2026)
 
-| Questione | Dati del 28-10 | Decisione |
+**Field tests of 29-10.**
+- *10:57, validation* (8 x 5 cells of 2 m, lawn sloping ~8 degrees uphill, bushes and a hedge along the left side): 40/40 cells at the first attempt, no block, stall or error; the new goal after a failed replan triggered once and worked. The return to wp_0 stopped ~1.2 m from the start (see below).
+- *Afternoon* (15:13, 15:27, 16:32; same 8 x 5 grid, in a strip ~3.5 m wide between a wall or hedge ~3 m to the left of the start and another edge on the right): 8–10 cells each, the rest correctly left out (the wall cuts the grid; the cells behind it were never seen, `[FINE] ... Le altre non sono mai state raggiungibili`). Returns to wp_0 0.04–0.08 m from the start according to the tag: the correction with the fiducial did not need to trigger, so it has **never triggered on the robot** yet. 15:31: Ctrl+C halfway through the mission, the robot sat down, motors off, GraphNav map downloaded: the **emergency shutdown works**. 15:27: `KeepaliveMotorsOffError` at power-on (known: restart by hand).
+
+**Return to wp_0 off by ~1.2 m (29-10 10:57)**: correction with the fiducial done on 29-10 afternoon (see CHANGELOG), still to be seen triggering in the field. Analysis: GraphNav said "arrived", but the starting tag seen on arrival (1.59 m, +1.03 m to the left, against 1.08 m and -0.13 m at the start) said the robot was ~1.2 m to the right of the start; confirmed by eye. Odometry drift 2.82 m in 15 min (uphill, grass); GraphNav corrected 1.86 m of it, the residue (~1.3 m) is all along the hedge, the only long straight reference: ICP knows the distance from the hedge but not the position along it. The graph (odometry edges, including our 9 shortcuts) carries all the drift from wp_153 to wp_0. The tag was in the snapshot of wp_0 and visible on arrival, but GraphNav did not use it to correct. Anomaly to understand: right after the initialization on the fiducial GraphNav's loss detector said LOST until the re-anchoring at 11:06 (no effect on the exploration).
+
+**In the field** (until the grass is handled)
+
+- Start on low or bare ground, never inside tall grass: 28-10 13:50 (return blocked), 14:17 (no cell reachable, 21 s), 14:19 (3 cells). The log now says so: `[END] No cell reachable from the start`.
+- Full battery: on 28-10 14:23 it started at 66% and ended at 37%, a few minutes from the automatic return at 30% (consumption 1.15–1.19 %/min, 0.18–0.19 %/m).
+- Marker 1–2 m from the start, not moved during the whole mission.
+
+---
+
+## Decisions with the data of 28-10
+
+| Question | Data of 28-10 | Decision |
 |---|---|---|
-| **Chiusura d'anello finale** (solo completa a fine missione, limite 45 s) | 16 archi in 55.5 s (13:50), 20 in 65.6 s (14:23); caricati con `upload_graph` senza errori né secondo tentativo | Resta così. Spot sfora il limite di 10–20 s, crescendo con il grafo: da tenere d'occhio, eventualmente limite più basso. |
-| **Rientri senza chiusura veloce** | Tutti i viaggi GraphNav riusciti (3 e 8), scorciatoie 116 -> 27 m e 132 -> 70 m | Tolta dal codice il 29-10. |
-| **Deriva dell'odometria** | 14:23: **1.09 m in 26 min sul tag**, 0.92 m su GraphNav; 13:50: 0.19 m dopo 4 min | Supera di molto la soglia di 0.3 m: la correzione delle mappe globali va fatta (lavori principali, punto 3). |
-| **Soglia di rientro a batteria bassa** (30%) | 1.15–1.19 %/min, 0.18–0.19 %/m; ritorno a wp_0 di 14–21 m costato 1 punto | Il ritorno costa poco: 30% ha margine ampio, si potrebbe scendere a 20–25%. Da decidere con missioni più grandi. |
-| **`CLEARANCE_MAP_DECIDES`** | Disaccordo mediano 7–9% degli archi; nessun varco riproposto più volte | Tolto dal codice il 29-10: decide la mappa binaria; la mappa dello spazio libero resta per la scelta dell'obiettivo. |
-| **Andature** | HARD su tratti tranquilli (sotto 8°): 6 (13:50), 9 (14:23) | Poco tempo perso; da rivedere insieme al movimento fluido. |
-| **Briciole GraphNav ogni 0.75 m** | Scaricamento della mappa 76–94 s a fine missione | Da provare 1.0–1.5 m quando si lavora sul movimento. |
-| **Missione nelle validazioni** | 14:23: 56/56 celle, ritorno e fiducial riusciti | Da aggiungere alle missioni di validazione su GitHub. |
+| **Final loop closure** (full only, at the end of the mission, limit 45 s) | 16 edges in 55.5 s (13:50), 20 in 65.6 s (14:23); uploaded with `upload_graph` without errors or a second attempt | Stays like this. Spot overruns the limit by 10–20 s, growing with the graph: to keep an eye on, possibly a lower limit. |
+| **Returns without the quick closure** | All GraphNav trips successful (3 and 8), shortcuts 116 -> 27 m and 132 -> 70 m | Removed from the code on 29-10. |
+| **Odometry drift** | 14:23: **1.09 m in 26 min on the tag**, 0.92 m on GraphNav; 13:50: 0.19 m after 4 min | Far above the 0.3 m threshold: the correction of the global maps must be done (main work, point 3). |
+| **Low-battery return threshold** (30%) | 1.15–1.19 %/min, 0.18–0.19 %/m; return to wp_0 of 14–21 m cost 1 point | The return costs little: 30% has a wide margin, it could go down to 20–25%. To be decided with bigger missions. |
+| **`CLEARANCE_MAP_DECIDES`** | Median disagreement 7–9% of the edges; no gap proposed more than once | Removed from the code on 29-10: the binary map decides; the free-space map stays for the goal choice. |
+| **Gaits** | HARD on calm legs (below 8°): 6 (13:50), 9 (14:23) | Little time lost; to be reviewed together with the smooth motion. |
+| **GraphNav breadcrumbs every 0.75 m** | Map download 76–94 s at the end of the mission | To try 1.0–1.5 m when working on the motion. |
 
 ---
 
-## Decisioni del ciclo: cosa scatta davvero (conteggio del 29-10)
+## Loop decisions: what really triggers (count of 29-10)
 
-Sulle 15 missioni dal 22-10 (~420 tentativi): ritirata a zampe 0 volte dal 12-10 (resta come ultima rete e dopo le cadute); cadute e stallo 0; trappola 2; gamba multinodo interrotta 3; cono 8, arretramento dritto 18, tratto scartato per rotazione 19; `[SUBITO]` ~100, blocchi confermati 36, ritorni con GraphNav ~30; recupero di missione 10 (2 riusciti). Semplificazioni possibili che CAMBIANO il comportamento, da provare con il robot dopo `main`: cono, arretramento e trappola come un solo ventaglio di direzioni d'uscita (il cono sono le direzioni vicine a quella voluta, l'arretramento quella a 180 gradi); una sola scala di escalation con un contatore (scarta il tratto, riguarda da fermo, direzione d'uscita, ritorno con GraphNav, rinuncia al lato) al posto di una decina di contatori separati; un solo controllo "l'obiettivo va ancora bene?" a inizio giro.
+Over the 15 missions since 22-10 (~420 attempts): walked retreat 0 times since 12-10 (it stays as the last net and after falls); falls and stall 0; trap 2; multi-node leg interrupted 3; cone 8, straight back-off 18, leg discarded for rotation 19; `[EARLY]` ~100, confirmed blocks 36, returns with GraphNav ~30; mission recovery 10 (2 successful). Possible simplifications that CHANGE the behaviour, to try with the robot after `main`: cone, back-off and trap as a single fan of exit directions (the cone is the directions close to the wanted one, the back-off the one at 180 degrees); a single escalation ladder with one counter (discard the leg, look again standing still, exit direction, return with GraphNav, give up the side) instead of a dozen separate counters; a single "is the goal still fine?" check at the start of the turn.
 
-## Lavori principali, dopo la versione su `main`
+## Main work, after the version on `main`
 
-1. **Erba e ostacoli che "si muovono"** di scansione in scansione. Il problema principale del 28-10: la vegetazione è vista come muro, nella nostra mappa e nell'evitamento ostacoli di GraphNav.
-   - *Dati etichettati del 28-10* (il robot sapeva dov'era l'erba alta):
-     - 13:50, partenza in una chiazza d'erba e celle (7,0)-(7,1) d'erba. Ostacoli attorno alla partenza: altezza mediana 0.11 m sul suolo (95% sotto 0.48), intensità 19 contro 54 del suolo libero. Nell'angolo 0.06 m e intensità 19 anche sul "libero" (tutto prato). Nel resto della missione 0.18 m (95% sotto 0.99), intensità 21 contro 70. Primo tentativo bloccato accanto alla partenza (122 celle su 800 sotto il corpo diventate ostacolo appena il robot si è girato).
-     - 14:17, partenza in mezzo all'erba: ostacoli sul 54–67% delle celle viste attorno al robot, alti 4–15 cm, intensità uguale al suolo; nessuna cella raggiungibile.
-     - 14:19, erba davanti (cella (0,3): ostacoli 34%, 0.12 m di mediana) e cespugli a sinistra ((1,0)-(1,1): 58–76%, 0.5–0.7 m di mediana, 90% oltre 1.1 m). Sulla mappa finale, con 0.25 m di margine (quello del fronte) nessun passaggio verso la (0,3); con 0.15 m il 74% della cella diventa raggiungibile. Non era la densità del grafo.
-   - *Obiettivo*: la vegetazione bassa (pochi cm, intensità bassa) attraversabile o con margine ridotto; i cespugli sopra ~0.5 m restano ostacoli. Una regola dietro un interruttore, provata sul rigioco di queste missioni. Anche il 26-10: il 24% degli ostacoli bassi aveva l'intensità del suolo, contro il 5% di quelli alti.
-2. **Movimento più fluido e ciclo non bloccante.**
-   - *Dati del 28-10* (13:50, 14:23, da `trajectory.csv`): durante i tratti il robot avanza il 74–75% del tempo, ruota sul posto l'8%, ed è **fermo il 17–18% (~165 s a missione)**, in pezzetti brevi: ~0.6 s a tratto a metà avanzamento, in tutte le andature, e ~0.45 s a tratto alla fine, ad aspettare `BODY_STATUS_SETTLED` (i passi di assestamento: il "camminare sul posto"). I tratti sono di ~0.9 m: la velocità media per tratto è 0.17 m/s in PLAIN con limite 0.5, 0.11 m/s in MODERATE e HARD. Il robot non arriva mai in crociera: si gira, accelera, rallenta, si assesta, si ferma.
-   - *Primo stadio*: percorsi continui invece di punti con fermata (traiettorie a più punti, girarsi camminando), niente assestamento sui tratti intermedi.
-   - *Secondo stadio*: movimento, scansioni più frequenti, aggiornamento dei pesi e del grafo che girano mentre il robot cammina, invece del ciclo sequenziale di oggi (l'unica cosa in parallelo è il fronte sicuro). Cambia la struttura del ciclo: dopo il primo stadio, con il test end-to-end a confronto riga per riga. Entrambi dietro un interruttore, poi poche celle sul campo prima di lasciarli accesi.
-   - Nella stessa occasione: il pianificatore ignora le rotazioni (inversioni a U impossibili nei corridoi stretti, 28-10 11:36 e scenario "imbuto" del test end-to-end).
-3. **Correzione della deriva nelle mappe globali**, con `drift.csv` e il fiducial di partenza (1.09 m in 26 minuti il 28-10): riallineare la mappa globale con le localizzazioni di GraphNav, oppure dimenticare più in fretta le osservazioni vecchie quando il robot ci ripassa.
-4. **Servono ancora le celle?** Vedi l'idea 5 sotto. Il 28-10 hanno pesato: l'arrivo "appena fuori" rende ambiguo dove sia il robot (celle (7,0)-(7,1) mai tentate alle 13:50, corretto); i lati fanno saltare tentativi; un angolo d'erba resta "da fare" solo perché la griglia lo divide in due celle.
-
----
-
-## Idee da valutare (28-10)
-
-Non ancora decise: prima serve dire cosa fanno esattamente e come si prova che funzionano.
-
-1. ~~**Percentuale di esplorazione completata.**~~ Fatta il 28-10 (vedi CHANGELOG): riga `[PROGRESSO]` con celle chiuse sul totale, area vista, stima del tempo che manca e batteria; nel rapporto e in `mission_summary.json`.
-2. ~~**Rientro con GraphNav: evitare la rotazione inutile.**~~ Fatta il 28-10 (vedi CHANGELOG): all'arrivo il robot è girato verso la cella da tentare (`GRAPHNAV_ARRIVAL_HEADING`). Da confermare sul campo con la riga "Rotazione dopo gli arrivi GraphNav" del rapporto. Il ritorno finale a wp_0 tiene ancora l'orientamento del waypoint (14:23: arrivato girato di 90°, tag visto dalla telecamera di destra): per wp_0 è giusto, è la posa di partenza.
-3. **Obiettivo scelto da noi sul grafo globale, a esplorazione finita.** Oggi l'obiettivo è sempre il punto di una cella da esplorare. Serve un modo per dire al robot «vai lì» su una mappa già costruita, usando il grafo e le mappe globali invece di rifare l'esplorazione. È un modo d'uso nuovo, non una modifica al ciclo attuale: probabilmente uno script a parte.
-4. **Infittire il grafo nelle zone strette, in modo locale e dinamico.** Oggi la densità dei nodi è decisa una volta per tutta l'area (`MISSION_RANDOM_DENSITY`). Nei varchi stretti servono più nodi, altrove sono tempo sprecato. Da definire come si riconosce «zona stretta» (lo spazio libero misurato è già disponibile) e se i nodi nuovi si aggiungono al grafo esistente o se si ricostruisce la zona. Si prova sul rigioco prima che sul robot. (Il 28-10 14:19 il collo di bottiglia era l'erba, non la densità.) Prova a tappeto del 28-10 sera, caso 65: varco di 0.7 m fra due muri senza nodi sulla sua linea, cella mancata. Caso 88: robot fermo sotto lo spigolo di un ostacolo, da li' nessun arco del grafo verso la cella (3 direzioni utilizzabili su 24), cella mancata pur essendo raggiungibile all'87%. Con il nuovo obiettivo dopo una ripianificazione fallita (28-10 sera) i casi 65 e 88 riescono. Prova a tappeto delle missioni intere (40 mondi difficili): le celle lasciate aperte erano tutte irraggiungibili con 0.30 m di margine, tranne quelle del caso 8: robot in un corridoio di 0.65 m fra due muri, i nodi della griglia ogni 0.5 m cadono troppo vicini ai muri e il grafo non ne esce (tre celle mancate).
-5. **Ricontrollare `find_best_point_in_cell`**, e poi la domanda grossa: **servono ancora le celle?** Se l'obiettivo diventa una traiettoria decisa prima, la griglia di celle e tutta la logica di tentativo/frontiera/rank diventano un'impalcatura di cui si può fare a meno. È il cambiamento più grande dell'elenco: prima il controllo della funzione (c'è già `test_obiettivi.py`), poi una valutazione scritta di cosa si guadagna e cosa si perde, poi semmai il codice.
+1. **Grass and obstacles that "move"** from scan to scan. The main problem of 28-10: vegetation is seen as a wall, in our map and in GraphNav's obstacle avoidance.
+   - *Labelled data of 28-10* (the robot knew where the tall grass was):
+     - 13:50, start in a patch of grass and cells (7,0)-(7,1) of grass. Obstacles around the start: median height 0.11 m above the ground (95% below 0.48), intensity 19 against 54 of the free ground. In the corner 0.06 m and intensity 19 on the "free" too (all lawn). In the rest of the mission 0.18 m (95% below 0.99), intensity 21 against 70. First attempt blocked next to the start (122 cells out of 800 under the body became obstacle as soon as the robot turned).
+     - 14:17, start in the middle of the grass: obstacles on 54–67% of the cells seen around the robot, 4–15 cm high, intensity equal to the ground; no cell reachable.
+     - 14:19, grass ahead (cell (0,3): obstacles 34%, median 0.12 m) and bushes on the left ((1,0)-(1,1): 58–76%, median 0.5–0.7 m, 90% above 1.1 m). On the final map, with a 0.25 m margin (the frontier's) no passage to (0,3); with 0.15 m 74% of the cell becomes reachable. It was not the density of the graph.
+   - *Goal*: low vegetation (a few cm, low intensity) crossable or with a reduced margin; bushes above ~0.5 m stay obstacles. A rule behind a switch, tested on the replay of these missions. Also on 26-10: 24% of the low obstacles had the intensity of the ground, against 5% of the tall ones.
+2. **Smoother motion and non-blocking loop.**
+   - *Data of 28-10* (13:50, 14:23, from `trajectory.csv`): during the legs the robot advances 74–75% of the time, rotates in place 8%, and is **still 17–18% (~165 s per mission)**, in short pieces: ~0.6 s per leg halfway through the advance, in all gaits, and ~0.45 s per leg at the end, waiting for `BODY_STATUS_SETTLED` (the settling steps: the "walking in place"). The legs are ~0.9 m: the mean speed per leg is 0.17 m/s in PLAIN with a 0.5 limit, 0.11 m/s in MODERATE and HARD. The robot never reaches cruising speed: it turns, accelerates, slows down, settles, stops.
+   - *First stage*: continuous paths instead of points with a stop (multi-point trajectories, turning while walking), no settling on intermediate legs.
+   - *Second stage*: motion, more frequent scans, update of weights and graph running while the robot walks, instead of today's sequential loop (the only thing in parallel is the safe frontier). It changes the structure of the loop: after the first stage, with the end-to-end test compared line by line. Both behind a switch, then a few cells in the field before leaving them on.
+   - On the same occasion: the planner ignores rotations (U-turns impossible in narrow corridors, 28-10 11:36 and the "funnel" scenario of the end-to-end test).
+3. **Drift correction in the global maps**, with `drift.csv` and the starting fiducial (1.09 m in 26 minutes on 28-10, 2.8 m in 15 minutes on 29-10): realign the global map with GraphNav's localizations, or forget old observations faster when the robot passes there again.
+4. **Are the cells still needed?** See idea 5 below. On 28-10 they weighed: the "just outside" arrival makes it ambiguous where the robot is (cells (7,0)-(7,1) never attempted at 13:50, fixed); the sides make attempts skip; a corner of grass stays "to do" only because the grid splits it into two cells.
 
 ---
 
-## Ristrutturazione del codice
+## Ideas to evaluate (28-10)
 
-Fatto (vedi CHANGELOG, 27-10): parametri in `parametri.py`, registro in `registro.py`, scansione e mappe in `spotGrid.py`, movimento in `movements.py`, grafo in `mission_graph.py`, celle in `environmentMap.py`, decisioni in `arcVerification.py`, GraphNav in `navGraphUtils.py`; in `easy_walk.py` le classi `TentativoCella` e `Missione`.
+Not decided yet: first it must be said what exactly they do and how to prove they work.
 
-Ancora possibile, non urgente:
-- in `TentativoCella` i circa 20 attributi della scansione (`pts_up`, `terrain_up`, `grad_up`, …) raccolti in un solo oggetto `Scan`;
-- `mission_switches` e il riepilogo di fine missione restano in `easy_walk.py`: in `registro.py` creerebbero un ciclo di import (`movements` importa `registro`);
-- salvare in `scans/` anche le scansioni d'inizio tentativo, del recupero e finale come pacchetti completi (oggi il visualizzatore le ricostruisce dalle viste PRM).
+1. **Goal chosen by us on the global graph, once exploration is over.** Today the goal is always the point of a cell to explore. A way is needed to tell the robot "go there" on a map already built, using the graph and the global maps instead of exploring again. It is a new way of use, not a change to the current loop: probably a separate script.
+2. **Densify the graph in narrow areas, locally and dynamically.** Today the node density is decided once for the whole area (`MISSION_RANDOM_DENSITY`). Narrow gaps need more nodes, elsewhere they are time wasted. To be defined how a "narrow area" is recognized (the measured free space is already available) and whether the new nodes are added to the existing graph or the area is rebuilt. Tested on the replay before the robot. (On 28-10 14:19 the bottleneck was the grass, not the density.) Sweep test of 28-10 evening, case 65: 0.7 m gap between two walls without nodes on its line, cell missed. Case 88: robot stopped under the corner of an obstacle, from there no graph edge towards the cell (3 usable directions out of 24), cell missed although 87% reachable. With the new goal after a failed replan (28-10 evening) cases 65 and 88 succeed. Sweep test of the whole missions (40 hard worlds): the cells left open were all unreachable with a 0.30 m margin, except those of case 8: robot in a 0.65 m corridor between two walls, the grid nodes every 0.5 m fall too close to the walls and the graph does not get out (three cells missed).
+3. **Recheck `find_best_point_in_cell`**, and then the big question: **are the cells still needed?** If the goal becomes a trajectory decided beforehand, the cell grid and all the attempt/frontier/rank logic become scaffolding that can be done without. It is the biggest change of the list: first the check of the function (there is already `tests/test_goal_selection.py`), then a written evaluation of what is gained and what is lost, then if anything the code.
+
+---
+
+## Code structure
+
+Done (see CHANGELOG, 27-10 to 30-10): the `spot_explorer` package (`mission/`, `planning/`, `perception/`, `graphnav/`, `robot/`), parameters in `config.py`, records in `records.py`, tools in `tools/`, tests in `tests/`; everything in English, with `legacy.py` so the tools still read the Italian missions.
+
+Still possible, not urgent:
+- split the largest modules further: `mission/cell_attempt.py` (~1750 lines, one class), `planning/mission_graph.py` (~1550), `planning/roadmap.py` (~1350);
+- in `CellAttempt` the ~20 scan attributes (`pts_up`, `terrain_up`, `grad_up`, …) gathered into a single `Scan` object;
+- also save in `scans/` the start-of-attempt, recovery and final scans as full bundles (today the viewer rebuilds them from the PRM views).

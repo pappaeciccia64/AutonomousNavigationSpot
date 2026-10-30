@@ -348,7 +348,7 @@ def _graph_route(gdir, start_name):
 
 def section_checks(log, segments):
     """
-    Checks of the features never tried on the robot (see PROVA_CAMPO.md): for each one
+    Checks of the features never tried on the robot (see FIELD_TEST.md): for each one
     (name, outcome, detail). Outcome: 'OK', 'DA GUARDARE' (to look at), 'NON SCATTATO'
     (the situation did not occur: neither good nor bad) or 'DECISION' (a number to decide on).
     """
@@ -694,7 +694,7 @@ def report(name):
               f"mean {np.mean([a for a, _ in ar]):.0f} degrees, {sum(s for _, s in ar):.0f} s in place in all "
               f"(26-10 15:11, waypoint heading: 79 degrees, 38 s over 8 arrivals)")
 
-    print("\nTest checks (features never tried on the robot, see PROVA_CAMPO.md):")
+    print("\nTest checks (features never tried on the robot, see FIELD_TEST.md):")
     for check_name, outcome, det in section_checks(log, read_csv(f['segments'])):
         print(f"  [{outcome:^12s}] {check_name}: {det}")
 
