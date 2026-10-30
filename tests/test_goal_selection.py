@@ -84,7 +84,7 @@ def replay_goals(name):
             P.MISSION_RANDOM_DISTRIBUTION = g['distribution']
             P.MISSION_RANDOM_DENSITY = g['density']
             P.MISSION_RANDOM_SEED = g['seed']
-        prm, sampler, mg = tr.mission_graph.build_mission_prm(env, verbose=False)
+        prm, sampler, mg = tr.mission_prm.build_mission_prm(env, verbose=False)
         gm = global_maps.GlobalGrid()
         tm = global_maps.GlobalTerrainGrid()
         tm.update_rects = []
@@ -102,9 +102,9 @@ def replay_goals(name):
             tr.feed_scan(a, prm, gm, tm)
         if cur is None or cur['it'] != it:
             with tr._quiet():
-                tr.mission_graph.rebuild_prm_edges(prm, gm)
+                tr.mission_prm.rebuild_prm_edges(prm, gm)
                 if node_cells is None:
-                    node_cells = tr.mission_graph.node_cells(prm, env)
+                    node_cells = tr.mission_prm.node_cells(prm, env)
                 cells = set(done_cells) | {(rr, cc)} | {tuple(int(v) for v in env.get_cell_from_world(rx, ry))}
                 prm.set_allowed_nodes([n for n, c in node_cells.items() if c in cells])
                 robot_node = prm.anchor_node(rx, ry, gm, geometry.PRM_EDGE_SAFETY_MARGIN_M,

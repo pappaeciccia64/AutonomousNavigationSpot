@@ -14,7 +14,7 @@ from spot_explorer.perception import slopes
 from spot_explorer.robot import connection as spotUtils
 from spot_explorer.planning import decisions
 from spot_explorer.planning import safe_frontier
-from spot_explorer.planning import mission_graph                   # mission node lattice
+from spot_explorer.mission import mission_prm
 from spot_explorer import config as P
 from spot_explorer.records import (MISSION_STATS, BodyTiltRecorder, append_csv, append_trajectory, log_segment, timing_add, visualize_grid_with_candidates)
 from spot_explorer.mission.attempt_common import CONTINUE, FAILED
@@ -361,7 +361,7 @@ class LegSteps:
             else:
                 # Edge "travelled" only if the robot started from the node: otherwise the leg
                 # walked is not the graph edge (see add_stop_node, no new node).
-                if mission_graph.robot_on_node(self.prm_graph, self.robot_node_id, self.robot_x, self.robot_y):
+                if mission_prm.robot_on_node(self.prm_graph, self.robot_node_id, self.robot_x, self.robot_y):
                     self.prm_graph.traversed_edges.add((min(self.robot_node_id, self.next_node_id),
                                                    max(self.robot_node_id, self.next_node_id)))
                 self.robot_node_id = self.next_node_id
@@ -392,7 +392,7 @@ class LegSteps:
                 self._walked_path(self.robot_x, self.robot_y)
 
             # If the robot did not start from the node, the failed leg is not the graph edge.
-            on_node = mission_graph.robot_on_node(self.prm_graph, self.robot_node_id, self.robot_x, self.robot_y)
+            on_node = mission_prm.robot_on_node(self.prm_graph, self.robot_node_id, self.robot_x, self.robot_y)
             self._drop_edge(self.robot_node_id, self.next_node_id, 'mission' if on_node else 'now')
             print(f"[INFO] Leg {self.robot_node_id}-{self.next_node_id} discarded after a physical failure.")
             if self._go_back((self.robot_node_id, self.next_node_id),

@@ -13,7 +13,7 @@ from spot_explorer.perception import spot_grid
 from spot_explorer.planning import safe_frontier
 from spot_explorer.planning import roadmap as prm_graph_module   # inside functions `prm_graph` is often the parameter (instance)
 from spot_explorer.planning import edge_evaluation
-from spot_explorer.planning import mission_graph                   # mission node lattice
+from spot_explorer.mission import mission_prm
 from spot_explorer import config as P
 from spot_explorer.records import (MISSION_STATS, MISSION_CTX, mission_z0, save_npz_async, timing_add, visualize_grid_with_candidates)
 from spot_explorer.planning import goal
@@ -167,9 +167,9 @@ class ScanSteps:
         t_build = time.perf_counter()
         # CAREFUL WITH THE NAMES: here `self.prm_graph` is the PRM instance, not the module of the
         # same name (imported as prm_graph_module). The candidate pairs are those of the mission
-        # graph (see mission_graph.build_mission_prm); vetoes and weights are computed by
+        # graph (see mission_prm.build_mission_prm); vetoes and weights are computed by
         # PRM._evaluate_and_add_edge.
-        mission_graph.rebuild_prm_edges(self.prm_graph, self.global_map)
+        mission_prm.rebuild_prm_edges(self.prm_graph, self.global_map)
         timing_add('graph construction', time.perf_counter() - t_build)
         _upd = getattr(getattr(self.prm_graph, 'mission_graph', None), 'last_update', None)
         print(f"[TIMING] {'local update' if _upd and _upd[2] else 'full build'} "
@@ -194,7 +194,7 @@ class ScanSteps:
                                  f"iteration_{self.iteration}_cell_{self.target_row}_{self.target_col}.png") if self.mission_folder else None
 
         # Only visited cells + robot cell + goal cell (see PLAN_ONLY_EXPLORED_CELLS).
-        mission_graph.restrict_planning_to_explored_cells(self.prm_graph, self.env, self.target_row, self.target_col,
+        mission_prm.restrict_planning_to_explored_cells(self.prm_graph, self.env, self.target_row, self.target_col,
                                              (self.robot_x, self.robot_y))
 
         # --- Start and arrival nodes: EXISTING graph nodes ------------------------------------

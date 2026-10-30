@@ -118,7 +118,8 @@ with _quiet():
     from spot_explorer.planning import roadmap as prm_graph
     from spot_explorer.planning import edge_evaluation
     from spot_explorer.mission import cells as environmentMap
-    from spot_explorer.planning import mission_graph
+    from spot_explorer.mission import mission_prm
+    from spot_explorer.planning import graph_nodes
     from spot_explorer.graphnav import map_shortcuts
     from spot_explorer.robot import motion as movements
     from spot_explorer.planning import goal
@@ -225,7 +226,7 @@ def replay_mission(job):
         foreign = bool(override)
         for k, v in (override or {}).items():
             setattr(P, k, v)
-        prm, _sampler, mg = mission_graph.build_mission_prm(env, verbose=False)
+        prm, _sampler, mg = mission_prm.build_mission_prm(env, verbose=False)
         out['graph'] = mg.describe()
         gm = global_maps.GlobalGrid()
         tm = global_maps.GlobalTerrainGrid()
@@ -272,18 +273,18 @@ def replay_mission(job):
                 do_full = (not fast) or it in fast_pick
                 twin = copy.deepcopy((prm, gm)) if do_full and prev_it is not None else None
                 t_g = time.perf_counter()
-                mission_graph.rebuild_prm_edges(prm, gm)
+                mission_prm.rebuild_prm_edges(prm, gm)
                 out['graph_time_s'] += time.perf_counter() - t_g
                 if prev_it is not None:
                     local_expected += 1
                     local_used += bool(mg.last_update and mg.last_update[2])
                 if twin is not None:
-                    mission_graph.rebuild_prm_edges(twin[0], twin[1], incremental=False)
+                    mission_prm.rebuild_prm_edges(twin[0], twin[1], incremental=False)
                     full_checks += 1
                     full_same += edges_of(prm) == edges_of(twin[0])
                 # --- path towards the goal, with the mission's restrictions ------
                 if node_cells is None:
-                    node_cells = mission_graph.node_cells(prm, env)
+                    node_cells = mission_prm.node_cells(prm, env)
                 cells = set(done_cells) | {(tr, tc)} | {tuple(int(v) for v in env.get_cell_from_world(rx, ry))}
                 prm.set_allowed_nodes([n for n, c in node_cells.items() if c in cells])
                 gx, gy = map(float, d['goal_xy'])
@@ -534,10 +535,10 @@ def main():
                     help=f"comparison with the full graph only on {FAST_FULL_CHECKS} scattered cell starts")
     ap.add_argument('--update-reference', action='store_true',
                     help="save the current behaviour as the new reference")
-    from spot_explorer.planning import mission_graph
-    ap.add_argument('--graph', choices=mission_graph.GRAPH_SAMPLINGS,
+    from spot_explorer.planning import graph_nodes
+    ap.add_argument('--graph', choices=graph_nodes.GRAPH_SAMPLINGS,
                     help="replay with this node method (see GRAPH COMPARISON)")
-    ap.add_argument('--distribution', choices=mission_graph.RANDOM_DISTRIBUTIONS)
+    ap.add_argument('--distribution', choices=graph_nodes.RANDOM_DISTRIBUTIONS)
     ap.add_argument('--density', type=float, help="random nodes per m2")
     ap.add_argument('--spacing', type=float, help="lattice spacing in m")
     ap.add_argument('--seed', type=int, help="seed of the random nodes (default: drawn at random)")
@@ -561,7 +562,7 @@ def main():
     if override and override.get('MISSION_GRAPH_SAMPLING', P.MISSION_GRAPH_SAMPLING) == 'random':
         # A single seed for all missions, written below so the comparison can be repeated.
         override['MISSION_RANDOM_SEED'] = (args.seed if args.seed is not None
-                                           else mission_graph.draw_seed())
+                                           else graph_nodes.draw_seed())
     if override and args.update_reference:
         ap.error("--update-reference is not used with a graph different from the mission's")
 

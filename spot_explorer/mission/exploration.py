@@ -12,7 +12,7 @@ from spot_explorer.perception import spot_grid
 from spot_explorer.mission import cells as environmentMap
 from spot_explorer.robot import connection as spotUtils
 
-from spot_explorer.planning import mission_graph                   # mission node lattice
+from spot_explorer.mission import mission_prm
 
 from spot_explorer import config as P
 from spot_explorer.records import MISSION_STATS, visualize_grid_with_candidates
@@ -347,7 +347,7 @@ class Mission:
                 grid_origin_y=grid_origin_y,
                 cell_size=scan.cell_size
             )
-            mission_graph.rebuild_prm_edges(prm, global_map)
+            mission_prm.rebuild_prm_edges(prm, global_map)
 
             target_x, target_y, _, _ = goal.find_best_point_in_cell(
                 x_curr, y_curr, self.env, row, col, scan.pts, scan.od, self.sampler,
@@ -365,7 +365,7 @@ class Mission:
                 self.frontier.append(selected_border)
             return
 
-        mission_graph.restrict_planning_to_explored_cells(prm, self.env, row, col, (x_curr, y_curr))
+        mission_prm.restrict_planning_to_explored_cells(prm, self.env, row, col, (x_curr, y_curr))
         start_id = prm.add_stop_node(
             x_curr, y_curr, global_map,
             geometry.PRM_EDGE_SAFETY_MARGIN_M, label="recovery check (robot)")
@@ -453,7 +453,7 @@ class Mission:
             if P.GRAPHNAV_PRECHECK:
                 cand_wp = recordingInterface.get_manual_waypoint_by_cell(*candidate_nearest_cell)
                 wp_xy = (cand_wp.get('x'), cand_wp.get('y')) if isinstance(cand_wp, dict) else (None, None)
-                reach = (mission_graph.graph_reaches_cell(self.prm, env, wp_xy, candidate_row, candidate_col,
+                reach = (mission_prm.graph_reaches_cell(self.prm, env, wp_xy, candidate_row, candidate_col,
                                                           self.global_grid.global_occupancy_map)
                          if wp_xy[0] is not None else None)
                 if reach is False:

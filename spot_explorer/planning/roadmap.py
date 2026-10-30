@@ -154,7 +154,7 @@ class PRM(EdgeEvaluation, EdgeStats):
     def set_allowed_nodes(self, node_ids=None):
         """
         Limit the path search to these nodes (None = no limit). Start and end are always
-        allowed. Used by mission_graph.restrict_planning_to_explored_cells.
+        allowed. Used by mission_prm.restrict_planning_to_explored_cells.
         """
         self.allowed_nodes = None if node_ids is None else set(node_ids)
 

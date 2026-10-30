@@ -9,7 +9,7 @@ from spot_explorer.robot import motion as movements
 from spot_explorer.perception import geometry
 from spot_explorer.planning import decisions
 from spot_explorer.planning import safe_frontier
-from spot_explorer.planning import mission_graph                   # mission node lattice
+from spot_explorer.mission import mission_prm
 from spot_explorer import config as P
 from spot_explorer.records import MISSION_STATS, TrajectoryLog, visualize_grid_with_candidates
 from spot_explorer.planning import goal
@@ -326,7 +326,7 @@ class ObstacleSteps:
             # mark_edge_blocked_soft). Exception: on the first leg, if the robot
             # is not on the node it is attached to, the blocked leg is robot->node, not
             # the graph edge: the edge is discarded only for now.
-            on_node = k > 0 or mission_graph.robot_on_node(self.prm_graph, edge_a, self.robot_x, self.robot_y)
+            on_node = k > 0 or mission_prm.robot_on_node(self.prm_graph, edge_a, self.robot_x, self.robot_y)
             self._drop_edge(edge_a, edge_b, 'mission' if on_node else 'now')
             self.block_replans += 1
             self.no_progress = 0

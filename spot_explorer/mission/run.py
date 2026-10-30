@@ -28,7 +28,8 @@ from spot_explorer.planning import safe_frontier
 from spot_explorer.robot import battery
 
 from spot_explorer.planning import roadmap as prm_graph
-from spot_explorer.planning import mission_graph                   # mission node lattice
+from spot_explorer.mission import mission_prm
+from spot_explorer.planning import graph_nodes
 
 from spot_explorer import config as P
 from spot_explorer import REPO_ROOT
@@ -354,11 +355,11 @@ def easy_walk(options):
             env.set_origin(x_boot, y_boot, yaw_boot, start_row=start_row, start_col=start_col)
             set_mission_z0(robot_state_client, z_boot)
 
-            # PRM nodes: the mission graph (see mission_graph.build_mission_prm). The power-on
+            # PRM nodes: the mission graph (see mission_prm.build_mission_prm). The power-on
             # point and the cell centres are graph nodes, with both methods. The EDGES are not
             # created here: there is no terrain or occupancy data yet. CellAttempt creates them
-            # at the first scan (see mission_graph.rebuild_prm_edges).
-            prm, gb_sampler, mission_lattice = mission_graph.build_mission_prm(env)
+            # at the first scan (see mission_prm.rebuild_prm_edges).
+            prm, gb_sampler, mission_lattice = mission_prm.build_mission_prm(env)
             MISSION_CTX['prm'] = prm  # for the end-of-mission summary (even if interrupted)
 
             verification_tracker = safe_frontier.ArcVerificationTracker(robot)
@@ -417,9 +418,9 @@ def _parse_args(argv=None):
                         f"0 = suggested)")
     p.add_argument('--rings', default=None,
                    help=f"rings of linked neighbours, or 'all' (default {P.MISSION_LATTICE_RINGS})")
-    p.add_argument('--graph', choices=mission_graph.GRAPH_SAMPLINGS, default=None,
+    p.add_argument('--graph', choices=graph_nodes.GRAPH_SAMPLINGS, default=None,
                    help=f"how the nodes are generated (default {P.MISSION_GRAPH_SAMPLING})")
-    p.add_argument('--distribution', choices=mission_graph.RANDOM_DISTRIBUTIONS, default=None,
+    p.add_argument('--distribution', choices=graph_nodes.RANDOM_DISTRIBUTIONS, default=None,
                    help=f"random nodes: distribution (default {P.MISSION_RANDOM_DISTRIBUTION})")
     p.add_argument('--density', type=float, default=None,
                    help=f"random nodes: nodes per m2 (default {P.MISSION_RANDOM_DENSITY:g})")
