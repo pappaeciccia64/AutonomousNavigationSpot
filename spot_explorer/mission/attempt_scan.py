@@ -7,6 +7,7 @@ import numpy as np
 from bosdyn.client.frame_helpers import BODY_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b
 from spot_explorer.graphnav import map_recording
 from spot_explorer.robot import motion
+from spot_explorer.robot import photos
 from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
 from spot_explorer.perception import spot_grid
@@ -539,5 +540,6 @@ class ScanSteps:
                     ground_z=np.nan if self.local_grid.last_ground_filter.get('ground_z') is None
                     else self.local_grid.last_ground_filter['ground_z'])
                 print(f"[DATA SAVE] Block data saved in {os.path.basename(npz_blocked)}")
+                photos.capture(os.path.splitext(os.path.basename(npz_blocked))[0])
             except Exception as e:
                 print(f"[DATA SAVE] Could not save the block data: {e}")
