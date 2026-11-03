@@ -8,6 +8,12 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-03 (why GraphNav stops, behaviour unchanged)
+
+`[GRAPHNAV]` gives the reason when GraphNav stops: `stuck_reason` (e.g. `OBSTACLE`, `GOAL_BLOCKED`), `blockage_status`, `route_following_status` and the metres left; while moving it prints the changes of route and blockage status (e.g. `RETURNING_TO_ROUTE`, `ROUTE_BLOCKED_TEMPORARILY` before a `STUCK`). Why: the return to wp_0 of 28-10 13:50 stopped in the grass at 0.63 m with only `bloccato (STUCK)` in the log, and GraphNav walks with Spot's default mobility parameters (foot obstacle avoidance on, our edges carry no `mobility_params`, see TODO, grass): without the reason we cannot tell if that is the cause.
+
+---
+
 ## 2026-11-03 (log messages and report times, behaviour unchanged)
 
 From the indoor mission of 03-11 11:07 (room of about 10 x 3 m, 7 cells closed, all the rest behind the walls), messages that contradicted each other or gave the wrong reason. The robot's behaviour does not change.

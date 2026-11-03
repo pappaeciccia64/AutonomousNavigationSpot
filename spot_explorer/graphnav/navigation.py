@@ -18,6 +18,23 @@ from spot_explorer.graphnav.map_shortcuts import graphnav_add_shortcuts
 # =========================================================================================
 _GN = _graph_nav_pb2.NavigationFeedbackResponse
 
+def _feedback_details(fb):
+    """route_following_status / blockage_status / stuck_reason of a NavigationFeedbackResponse,
+    as short names ('-' if the SDK lacks the field). STATUS_STUCK alone does not say WHY
+    GraphNav stopped (28-10 13:50: stuck in the grass at 0.63 m from wp_0, cause unknown)."""
+    out = []
+    for name, prefix in (('route_following_status', 'ROUTE_FOLLOWING_STATUS_'),
+                         ('blockage_status', 'BLOCKAGE_STATUS_'), ('stuck_reason', 'STUCK_REASON_')):
+        desc = getattr(fb, 'DESCRIPTOR', None)
+        f = desc.fields_by_name.get(name) if desc is not None else None
+        if f is None:
+            out.append('-')
+            continue
+        v = f.enum_type.values_by_number.get(getattr(fb, name))
+        out.append(v.name.replace(prefix, '') if v else str(getattr(fb, name)))
+    return out
+
+
 _GRAPHNAV_FAIL_STATUSES = {
     _GN.STATUS_STUCK: "blocked (STUCK)", _GN.STATUS_NO_ROUTE: "no path in the graph",
     _GN.STATUS_NO_LOCALIZATION: "not localized", _GN.STATUS_ROBOT_IMPAIRED: "robot impaired (fallen?)",
@@ -114,6 +131,7 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
         relocs += 1
         graphnav_relocalize(recordingInterface, robot_state_client, f"before '{label}'")
     t0, cmd_id, fb_errors, nav_errors = time.time(), None, 0, 0
+    last_details = None
     while time.time() - t0 < timeout_s:
         try:
             cmd_id = client.navigate_to(waypoint_id, 1.0, command_id=cmd_id, travel_params=tp,
@@ -140,7 +158,8 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
             continue
         time.sleep(0.5)
         try:
-            status = client.navigation_feedback(cmd_id).status
+            fb = client.navigation_feedback(cmd_id)
+            status = fb.status
             fb_errors = 0
         except Exception as e:
             fb_errors += 1
@@ -152,6 +171,12 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
             cmd_id = None      # the command may no longer be valid: send a new one
             time.sleep(0.5)
             continue
+        details = _feedback_details(fb)
+        if last_details is not None and details[:2] != last_details[:2]:
+            # Only changes, not every 0.5 s: e.g. RETURNING_TO_ROUTE or ROUTE_BLOCKED_TEMPORARILY before a STUCK.
+            print(f"[GRAPHNAV] {label}: route {details[0]}, blockage {details[1]} "
+                  f"after {time.time() - t0:.0f} s, {getattr(fb, 'remaining_route_length', 0.0):.1f} m to go.")
+        last_details = details
         if status == _GN.STATUS_REACHED_GOAL:
             print(f"[GRAPHNAV] {label}: arrived in {time.time() - t0:.0f} s.")
             MISSION_STATS['graphnav_ok'] += 1
@@ -178,7 +203,9 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
             cmd_id = None          # command expired: send a new one
             continue
         if status in _GRAPHNAV_FAIL_STATUSES:
-            print(f"[GRAPHNAV] {label}: interrupted -- {_GRAPHNAV_FAIL_STATUSES[status]}.")
+            print(f"[GRAPHNAV] {label}: interrupted -- {_GRAPHNAV_FAIL_STATUSES[status]} "
+                  f"(reason {details[2]}, route {details[0]}, blockage {details[1]}, "
+                  f"{getattr(fb, 'remaining_route_length', 0.0):.1f} m to go).")
             _stop_graphnav(command_client, reason=f"GraphNav: {_GRAPHNAV_FAIL_STATUSES[status]}")
             MISSION_STATS['graphnav_fail'] += 1
             return False
