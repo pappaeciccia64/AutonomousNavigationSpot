@@ -218,11 +218,13 @@ def main():
     check(r['oks'] == [True, True], "both cells entered")
     check(r['stats'].get('cruise_handoffs', 0) >= 1, f"next cell while walking ({r['stats'].get('cruise_handoffs', 0)})")
 
-    r = run("three cells in a row: hand-offs and big turns", [(1.0, 6.0, 5.9, 6.1)], (2.0, 2.0, 0.785),
+    # The wall ends 0.5 m before the border between the cells. With its end ON the border
+    # (x = 6.0, the first version of this scenario) going around it with 0.30 m of clearance
+    # enters cell (1,1), forbidden by PLAN_ONLY_EXPLORED_CELLS: whether a way inside the allowed
+    # cells exists depended on a few cm of the robot pose (1 run out of 6 failed; from a
+    # standing robot under the wall end 0/6 with the restriction, 6/6 without, stop-and-go only).
+    r = run("three cells in a row: hand-offs and big turns", [(1.0, 5.5, 5.9, 6.1)], (2.0, 2.0, 0.785),
             [(0, 1), (1, 0), (1, 1)])
-    # Known (1 time out of 6 on 03-11): the cruise stops before the end of the wall because the
-    # rotation there is not clear, and the stop-and-go does not get into (1,0) from that pose;
-    # here there are no retries nor GraphNav as in the mission. The log of the scenario says why.
     check(r['oks'] == [True, True, True], "three cells entered")
     check(r['stats'].get('cruise_handoffs', 0) >= 2, f"hand-offs while walking ({r['stats'].get('cruise_handoffs', 0)})")
     big = [l for l in r['log'].splitlines() if 'inside the new command, without stopping first' in l]
