@@ -184,21 +184,23 @@ def stima_tracciato(local_grid, robot_state_client, dist):
         local_grid.process_scan(scan, x, y, yaw)
         shape = (scan.num_y, scan.num_x)
         terrain_2d = scan.terrain.reshape(shape)
-        valid_2d = np.asarray(scan.is_valid).reshape(shape)
-        obst_2d = (np.asarray(scan.obstacle_mask).reshape(shape)
-                   if scan.obstacle_mask is not None else None)
+        # Stesse celle della missione (easy_walk): attendibili come TERRENO, cioe' valide e non
+        # ostacolo per obstacle_distance (spotGrid.slope_usable_mask).
+        valid_2d = spotGrid.slope_usable_mask(scan.is_valid, scan.od, shape)
         ox, oy = local_grid.grid_origin(scan)
         L = min(dist, STIMA_MAX_M)
         x2, y2 = x + L * np.cos(yaw), y + L * np.sin(yaw)
         prof = spotGrid.compute_arc_slope_profile(
             terrain_2d, ox, oy, scan.cell_size, x, y, x2, y2, valid_2d=valid_2d,
-            obstacle_2d=obst_2d, body_ext_m=spotGrid.ARC_BODY_EXTENSION_M)
+            body_ext_m=spotGrid.ARC_BODY_EXTENSION_M)
         lo, la, has = prm_graph.body_slope(prof)
-        t = np.linspace(0.0, 1.0, max(2, int(L / scan.cell_size) + 1))
+        # Rugosita' come la missione (PRM.sample_terrain_between_points): 90° percentile dei
+        # campioni lungo la linea, OCCUPANCY_SAMPLES_PER_M per metro.
+        k = max(prm_graph.OCCUPANCY_SAMPLES_MIN, int(L * prm_graph.OCCUPANCY_SAMPLES_PER_M))
+        t = np.linspace(0.0, 1.0, k)
         r, inside = spotGrid._gather_heights(np.asarray(scan.rough).reshape(shape), ox, oy,
-                                             scan.cell_size, x + t * (x2 - x), y + t * (y2 - y),
-                                             valid_2d=valid_2d)
-        rough = float(np.nanmean(r[inside])) if inside.any() else np.nan
+                                             scan.cell_size, x + t * (x2 - x), y + t * (y2 - y))
+        rough = float(spotGrid.p90(r[inside])) if inside.any() else np.nan
         print(f"[STIMA] Primi {L:.1f} m: pendenza long {lo:.3f} ({np.degrees(np.arctan(lo)):.1f}°), "
               f"lat {la:.3f} ({np.degrees(np.arctan(la)):.1f}°), rugosita' {rough:.3f}, "
               f"{'con dati' if has else 'SENZA DATI SUFFICIENTI'}")
