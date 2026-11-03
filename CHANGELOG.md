@@ -17,6 +17,13 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-03 (calibration tools ported from the old code; grass work of the online sessions)
+
+- **`tools/calibration.py`** and **`tools/gait_trial.py`**: `taratura.py` and `prova_andatura.py`, written in the online sessions on the old code (branch `AdL-version`, 03-11, commits 0cbd1fd and 1694e8f), ported to the `spot_explorer` package and to English. Same computations; the track trial also records the local-plane estimate before starting and the ground plane of the legs (`gpe`) during the pass, and the calibration compares the inclinometer with edges, plane and gpe. Never tried on the robot: the first time indoors (FIELD_TEST.md, "Gait calibration"). On the 904 stop-and-go legs since 22-10: beta 1.8 [1.1; 3.0] per unit of slope with the level separated (today 2), beta_lat 0.7 [-0.2; 1.9] (today 2), the HARD threshold 0.25 catches 61% of the legs with pitch above 12 deg (0.20: 84%).
+- From the `grass` branch (online sessions): photos at the blocks and GraphNav stops (`robot/photos.py`, `SAVE_BLOCK_PHOTOS`), standing scene capture (`tools/capture_scene.py`), the reason why GraphNav stops in the log (entry "why GraphNav stops" below).
+
+---
+
 ## 2026-11-03 (why GraphNav stops, behaviour unchanged)
 
 `[GRAPHNAV]` gives the reason when GraphNav stops: `stuck_reason` (e.g. `OBSTACLE`, `GOAL_BLOCKED`), `blockage_status`, `route_following_status` and the metres left; while moving it prints the changes of route and blockage status (e.g. `RETURNING_TO_ROUTE`, `ROUTE_BLOCKED_TEMPORARILY` before a `STUCK`). Why: the return to wp_0 of 28-10 13:50 stopped in the grass at 0.63 m with only `bloccato (STUCK)` in the log, and GraphNav walks with Spot's default mobility parameters (foot obstacle avoidance on, our edges carry no `mobility_params`, see TODO, grass): without the reason we cannot tell if that is the cause.

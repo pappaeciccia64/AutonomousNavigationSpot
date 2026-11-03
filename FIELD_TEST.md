@@ -70,6 +70,34 @@ Turn the robot by 90 degrees and capture again for one of them: the side cameras
 
 ---
 
+## Gait calibration and cost weights
+
+Two tools: **`tools/calibration.py`** (at the computer: reads the `segments.csv` of the missions and the track trials, prints what the data say) and **`tools/gait_trial.py`** (on the robot: the same straight stretch walked several times with a fixed gait, one row per pass in `GaitTrials/trials.csv`; it also records the slope estimates of the scan, edges and local plane, and the ground plane under the feet from the legs, `gpe`). Ported on 03-11 from `taratura.py` / `prova_andatura.py` of the old code: never tried on the robot, the first time indoors on 2 m of flat floor.
+
+**What the logs already say** (`calibration.py --since 2026-10-22`: 904 stop-and-go legs from 22 missions):
+- **Cost weights**: with the gait level separated, the longitudinal slope is worth ~1.8 m of path per unit (today beta = 2: fine); counting also the CRAWL it triggers, ~4.4. The lateral slope only ~0.7 in time (today 2: a safety margin, not a time cost). Roughness: on a rough edge (0.03) about a quarter of a metre: gamma = 0 changes little.
+- **Failures**: 80 of the 155 are legs with 0 m travelled (refusals, blocks), which do not depend on the terrain. Those with the robot moving (8.3%) grow only above slope 0.3 (13% against 8%) and roughness 0.02 (11% against 8%).
+- **Thresholds**: the roughness thresholds (0.05 and 0.10) almost never trigger (95th percentile 0.028). The HARD threshold at 0.25 catches 61% of the legs with peak pitch above 12 deg; at 0.20, 84%. NB these slopes are today's estimate, which reads ~2 deg too much on slopes (`tools/slope_check.py`).
+- **Speeds**: real 0.18 / 0.12 / 0.11 m/s against limits 0.5 / 0.35 / 0.25: the limits slow down nothing.
+
+**Indoors, before going out.** In `gait_trial.py` there is no safe frontier and Spot's foot collision avoidance is off as in the mission: indoors always `--protected-feet`. Space: track + 0.5 m beyond the end and at the sides; for `--back-turn` an area of ~1.6 x 1.6 m free at the start and at the end, otherwise `--backwards`. Before the first pass, check that Ctrl+C in the terminal makes the robot sit.
+
+| What | Command | What to expect |
+|---|---|---|
+| The script works | `python3 tools/gait_trial.py --terrain floor --config auto_mu08 --dist 2 --repetitions 1 --back-turn --protected-feet` (little room: `--backwards` instead of `--back-turn`) | 2 m out, turn, back, turn; two rows in `GaitTrials/trials.csv` with all the columns filled (`slip_*`, `mu_est_*`, `energy_*`, `gpe_*` included). An empty column = data the robot does not give: note it. |
+| Zero of the estimate | `python3 tools/gait_trial.py --terrain floor --true-slope 0 --estimate-only --repetitions 5` | Estimated slope close to 0 (below 3 deg) with both methods; the ground under the feet (gpe) close to 0. |
+| Estimate on a ramp (if there is one) | robot still at the foot of the ramp, facing it: `--terrain inner_ramp --true-slope <deg> --estimate-only` | Edges a few degrees above the inclinometer (90th percentile), plane close to it. Then on the ramp: gpe along close to the true slope. |
+| Speed limit | `--terrain floor --config auto_mu08 --dist 5 --repetitions 2`, then the same with `--vel 0.3` | Almost equal times = the limit is not what slows the robot. |
+| Estimated friction | two passes on different floors (tiles, rubber mat) | Different `mu_est_mean`: an idea of the values Spot estimates. |
+
+**Outdoors: tracks.** Straight tracks of 5 m, free of stones and branches, 1 m free beyond the end and at the sides. In order of importance: `mid_ramp` (constant 10-15 deg uphill: where MODERATE against HARD is decided, 0.15 = 8.5 deg, 0.20 = 11.3, 0.25 = 14), `lawn` (flat lawn: almost the whole mission), `cross` (the same slope walked across: roll, and the check of the lateral estimate against gpe), `steep_ramp` (18-25 deg, if there is one), `clods` (uneven ground: real roughness). For each one: slope with the inclinometer in 3 points with a straight board, cones at start and end, then `--estimate-only --repetitions 3`.
+
+**Outdoors: configurations.** On every track, 3 repetitions with `--back-turn` (on the ramp the way back is the descent) of `auto_mu08` (today's PLAIN), `crawl_mu06` (today's MODERATE), `auto_high_mu06` (MODERATE without crawl: does the crawl really help?); on `steep_ramp` also `crawl_mu04` (HARD) and `auto_high_mu04`, a single pass of `crawl_mu04` first and nothing else if it slips or tilts beyond 25 deg. Change the order of the configurations from one track to the next. Below 35% battery skip `clods`.
+
+**After: how to decide.** `python3 tools/calibration.py --trials GaitTrials/trials.csv`, section 5. If the estimate is systematically off the measured slope, read the thresholds with that correction (or switch to the plane estimate). If `auto_high_mu06` always succeeds with oscillation and slip like `crawl_mu06`, the crawl in MODERATE is not needed (faster mission). The slope where the normal gait starts to give clearly higher RMS or slip, or to fail, is `GAIT_MODERATE_SLOPE_MAX`. `ground_mu_hint` against `mu_est_mean` per ground type. Then the cost weights again on the new missions (`--since <date>`). Every change: `test_replay.py`, then the CHANGELOG with the numbers.
+
+---
+
 ## The features to verify
 
 | Feature | Log line | What to expect | If it goes wrong |
