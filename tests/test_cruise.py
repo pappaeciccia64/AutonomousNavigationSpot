@@ -155,6 +155,8 @@ def run(name, rects, start, cells_seq, on_step=None):
     tracker._running = False
     records.VIS_EXECUTOR.submit(lambda: None).result()
     log = out.getvalue()
+    with open(os.path.join(folder, 'log.txt'), 'w') as f:
+        f.write(log)
     tr = np.array(TRACK) if TRACK else np.zeros((0, 3))
     # Cruise and stop-and-go legs (the fake navigate_to keeps ROBOT.min_clear too).
     clear = float(e2e.ROBOT.min_clear)
@@ -165,6 +167,7 @@ def run(name, rects, start, cells_seq, on_step=None):
                bundles=len([f for f in os.listdir(os.path.join(folder, 'scans')) if 'cruise' in f]),
                standing=float(np.sum(dt[v < 0.05])) if len(v) else 0.0,
                ends=[l.split('End: ')[1].split('. ')[0] for l in log.splitlines() if '[CRUISE] End:' in l])
+    print(f"  log: {os.path.join(folder, 'log.txt')}")
     print(f"  {res['secs']:.0f} s, cells {oks}, minimum distance of the centre from obstacles {clear:.2f} m, "
           f"standing {res['standing']:.1f} s, {res['stats'].get('cruises', 0)} cruises, ends {res['ends']}")
     check(err is None, "no exception" + ("" if err is None else ":\n" + err))
@@ -217,6 +220,9 @@ def main():
 
     r = run("three cells in a row: hand-offs and big turns", [(1.0, 6.0, 5.9, 6.1)], (2.0, 2.0, 0.785),
             [(0, 1), (1, 0), (1, 1)])
+    # Known (1 time out of 6 on 03-11): the cruise stops before the end of the wall because the
+    # rotation there is not clear, and the stop-and-go does not get into (1,0) from that pose;
+    # here there are no retries nor GraphNav as in the mission. The log of the scenario says why.
     check(r['oks'] == [True, True, True], "three cells entered")
     check(r['stats'].get('cruise_handoffs', 0) >= 2, f"hand-offs while walking ({r['stats'].get('cruise_handoffs', 0)})")
     big = [l for l in r['log'].splitlines() if 'inside the new command, without stopping first' in l]
