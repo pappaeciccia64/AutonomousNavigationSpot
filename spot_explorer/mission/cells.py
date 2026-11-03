@@ -115,6 +115,24 @@ class EnvironmentMap(object):
             mask |= 0b0001  # west
         return mask
 
+    def untried_side_neighbours(self, row, col):
+        """
+        The neighbouring cells on the sides of (row, col) not tried yet, split into
+        (visited, not_visited). A side can only be attempted from a visited neighbour (its
+        GraphNav waypoint): with visited empty the cell waits for one of the others to be
+        visited.
+        """
+        sides = self.get_cell_sides_status(row, col)
+        visited, not_visited = [], []
+        for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            r, c = row + dr, col + dc
+            if not (0 <= r < self.rows and 0 <= c < self.cols):
+                continue
+            if sides & self.get_side_bit_facing_origin(r, c, row, col):
+                continue
+            (visited if self.map[r][c] == 1 else not_visited).append((r, c))
+        return visited, not_visited
+
     def all_sides_explored(self, row, col):
         """
         True only if entry has already been tried from EVERY side that has a neighbour. Only

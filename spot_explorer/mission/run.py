@@ -169,7 +169,7 @@ def _mission_grid(options):
       2. variable:   SPOT_MISSION_GRID="rows,cols,cell_side"   e.g. "2,3,3"
     """
     grid_rows, grid_cols, grid_cell = P.MISSION_GRID_ROWS, P.MISSION_GRID_COLS, P.MISSION_CELL_SIZE_M
-    _grid_source = "mission_graph.MISSION_*"
+    _grid_source = "config.MISSION_GRID_*"
     _env_grid = os.environ.get("SPOT_MISSION_GRID", "").strip()
     if _env_grid:
         try:

@@ -142,26 +142,35 @@ def section_motion(segments, trajectory):
                     for lim in PITCH_LIMITS_DEG}
     out['max_pitch'] = max((p for p, _ in pitch), default=None)
     out['calm_hard'] = sum(p < 8 and t == 'HARD' for p, t in pitch)
-    # Smoothness: for each leg, the time before the robot moves 5 cm (rotation in place
-    # and start) and the walking time; average speed over all the legs.
+    # Smoothness, legs only (move 'prm'): for each leg, the time before the robot moves 5 cm
+    # (rotation in place and start) and the walking time. The GraphNav moves have no nodes
+    # and are measured apart, one per run of consecutive samples (before 03-11 they ended up
+    # in a single group spanning the whole mission: 66 s of "walking" for 25 s of moves).
     dur = [float(r['duration_s']) for r in segments if r.get('duration_s') not in (None, '')]
     dist = [float(r['dist_traveled_m']) for r in segments if r.get('dist_traveled_m') not in (None, '')]
     if dur and sum(dur) > 0:
-        out['speed'] = sum(dist) / sum(dur)
+        out['legs_m'] = sum(dist)
         out['move_s'] = sum(dur)
     if trajectory:
-        by_seg = {}
+        runs, prev = [], None
         for r in trajectory:
-            key = (r['iteration'], r['loop_iter'], r['node_from'], r['node_to'])
-            by_seg.setdefault(key, []).append((float(r['time']), float(r['x']), float(r['y'])))
+            move = r.get('move') or 'prm'
+            key = (move, r['iteration'], r['loop_iter'], r['node_from'], r['node_to'])
+            if key != prev:
+                runs.append((move, []))
+                prev = key
+            runs[-1][1].append((float(r['time']), float(r['x']), float(r['y'])))
         turn = walk = 0.0
-        for s in by_seg.values():
-            s.sort()
+        graphnav = []
+        for move, s in runs:
+            if move != 'prm':
+                graphnav.append(s[-1][0] - s[0][0])
+                continue
             t0, x0, y0 = s[0]
             t_go = next((t for t, x, y in s if math.hypot(x - x0, y - y0) > 0.05), s[-1][0])
             turn += t_go - t0
             walk += s[-1][0] - t_go
-        out['turn_s'], out['walk_s'] = turn, walk
+        out['turn_s'], out['walk_s'], out['graphnav_s'] = turn, walk, graphnav
     return out
 
 
@@ -612,7 +621,7 @@ def report(name):
     if t.get('breakdown'):
         tot = sum(t['breakdown'].values())
         parts = ", ".join(f"{k} {v:.0f} s" for k, v in sorted(t['breakdown'].items(), key=lambda kv: -kv[1])[:5])
-        print(f"\nMeasured time {tot:.0f} s: {parts}")
+        print(f"\nMeasured time of the exploration {tot:.0f} s (closure apart, below): {parts}")
     if t['graph']:
         loc = [s for k, s in t['graph'] if k == 'local update']
         full = [s for k, s in t['graph'] if k == 'full build']
@@ -625,14 +634,20 @@ def report(name):
 
     mo = section_motion(read_csv(f['segments']), read_csv(f['trajectory']))
     print(f"\nMotion: {mo['segments']} legs" + (f", {mo['ok']} successful" if 'ok' in mo else "")
-          + (f", {mo['distance_m']:.0f} m travelled" if 'distance_m' in mo else ""))
-    if 'speed' in mo:
-        line = f"Smoothness: {mo['speed']:.2f} m/s on average over {mo['move_s']:.0f} s of movement"
+          + (f", {mo['distance_m']:.0f} m travelled in all (legs and GraphNav)" if 'distance_m' in mo else ""))
+    if 'move_s' in mo:
+        line = (f"Legs: {mo['move_s']:.0f} s of commands, {mo['legs_m']:.0f} m, "
+                f"{mo['legs_m'] / mo['move_s']:.2f} m/s on average")
         if 'turn_s' in mo and mo['turn_s'] + mo['walk_s'] > 0:
             tot = mo['turn_s'] + mo['walk_s']
-            line += (f"; standing to rotate or start {mo['turn_s']:.0f} s ({100 * mo['turn_s'] / tot:.0f}%), "
-                     f"walking {mo['walk_s']:.0f} s")
+            line += (f" | standing to rotate or start {mo['turn_s']:.0f} s ({100 * mo['turn_s'] / tot:.0f}%), "
+                     f"walking {mo['walk_s']:.0f} s"
+                     + (f" at {mo['legs_m'] / mo['walk_s']:.2f} m/s" if mo['walk_s'] > 0 else ""))
         print(line)
+    if mo.get('graphnav_s'):
+        print(f"GraphNav moves (between cells and return to wp_0): {len(mo['graphnav_s'])}, "
+              f"{sum(mo['graphnav_s']):.0f} s ("
+              + ", ".join(f"{v:.0f}" for v in mo['graphnav_s']) + " s)")
     if 'tiers' in mo:
         print("Gaits: " + ", ".join(f"{k} {v}" for k, v in sorted(mo['tiers'].items())))
         for lim, (n, hard) in mo['steep'].items():

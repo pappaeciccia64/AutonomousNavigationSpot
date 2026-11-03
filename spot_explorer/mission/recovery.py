@@ -350,7 +350,15 @@ def finalize_or_defer_blocked_cell(env, row, col, sampler=None, global_map=None)
         print(f"[BLOCKED] Cell ({row},{col}) blocked forever: every reachable side "
               f"has been tried without success.")
     else:
+        visited, not_visited = env.untried_side_neighbours(row, col)
+        cells_txt = lambda cells: ', '.join(f'({r},{c})' for r, c in cells)
+        if visited:
+            when = (f"it will be retried later, in the normal order, from the side of "
+                    f"{cells_txt(visited)}")
+        else:
+            when = (f"the sides not tried yet face cells never visited ({cells_txt(not_visited)}): "
+                    f"it can be retried only if one of them gets visited, otherwise it leaves "
+                    f"the frontier at the end")
         print(f"[DEFER] Cell ({row},{col}) not yet tried from all sides (sides tried: "
               f"{bin(env.get_cell_sides_status(row, col))}): it stays a candidate of the "
-              f"frontier and will be retried later, in the normal order, "
-              f"from a side not yet tried.")
+              f"frontier; {when}.")

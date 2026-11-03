@@ -75,4 +75,4 @@ All the mission switches and numbers are changed in **`spot_explorer/config.py`*
 ## Decisions to take with the test data
 
 - **CRAWL in MODERATE**: the report gives the pitch per gait. If the MODERATE legs stay calm (below ~8 degrees), it can go back to the normal gait (`HINT_AUTO` in `select_mobility_params`), which is faster.
-- **Smoothness of the motion**: today the robot walks at 0.13–0.14 m/s on average, because every leg waits for the body to be still and rotates separately. The report measures it in the **Smoothness** line (mean speed, time standing to rotate or start). If the change is prepared before the test, it must be compared here, with the switch on and off.
+- **Smoothness of the motion**: today the robot walks at 0.13–0.14 m/s on average, because every leg waits for the body to be still and rotates separately. The report measures it in the **Legs** line (mean speed, time standing to rotate or start, walking speed; GraphNav moves on their own line). If the change is prepared before the test, it must be compared here, with the switch on and off.

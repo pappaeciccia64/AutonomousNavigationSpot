@@ -65,7 +65,7 @@ class Mission:
         self._closed_at_start = 0
         self._last_visited = None      # see _robot_cell
         self._attempt_count = 0               # attempts to enter a cell (see _explain_end)
-        self._dropped_cells = []            # removed from the frontier with no sides left to try
+        self._dropped_cells = []            # removed from the frontier: untried sides face only non-visited cells
         self._closed_logged = None
         self._area_points = None
 
@@ -195,8 +195,9 @@ class Mission:
                         removed = self.frontier[0]
                         self.frontier.remove(removed)
                         self._dropped_cells.append((int(removed[0]), int(removed[1])))
-                        print(f"[CELL FRONTIER] Cell ({removed[0]},{removed[1]}) removed from the frontier: in "
-                              f"this round no candidate has a side left to try.")
+                        print(f"[CELL FRONTIER] Cell ({removed[0]},{removed[1]}) removed from the frontier: no "
+                              f"candidate can be approached any more (the sides not tried yet face "
+                              f"only cells never visited, with no waypoint to start from).")
 
             if len(self.frontier) == 0:
                 break
@@ -217,9 +218,10 @@ class Mission:
                   f"Move the robot onto free terrain and try again.")
             return
         print(f"[END] Exploration finished with {total - closed} cells not closed"
-              + (f"; removed from the frontier with no sides left to try: "
+              + (f"; removed from the frontier because their sides not tried yet face only "
+                 f"cells never visited: "
                  f"{', '.join(f'({r},{c})' for r, c in self._dropped_cells)}" if self._dropped_cells else "")
-              + ". The others were never reachable from a visited cell.")
+              + ". The others never bordered a visited cell.")
 
     # --- Progress ------------------------------------------------------------------------
 
@@ -423,6 +425,11 @@ class Mission:
         already_skipped_this_round = set()
         while True:
             remaining = [c for c in self.frontier if (c[0], c[1]) not in already_skipped_this_round]
+            if self.frontier and not remaining:
+                # Not "Frontier empty" (03-11 11:09): the cells are still there, all skipped.
+                print(f"[FRONTIER_RANK] All {len(self.frontier)} frontier cells skipped in this "
+                      f"round: none can be approached from a side not tried yet.")
+                return None
             lowest_rank_cell = env.get_lowest_rank_from_frontier_list(remaining, self.path)
             if lowest_rank_cell is None:
                 return None
@@ -458,10 +465,12 @@ class Mission:
                          if wp_xy[0] is not None else None)
                 if reach is False:
                     MISSION_STATS['graphnav_trips_avoided'] += 1
+                    why = mission_prm.unreached_cell_reason(self.prm, env, wp_xy, candidate_row,
+                                                            candidate_col,
+                                                            self.global_grid.global_occupancy_map)
                     print(f"[PRECHECK] Cell ({candidate_row},{candidate_col}): from the waypoint "
                           f"of cell {candidate_nearest_cell} the graph does not reach any "
-                          f"node of the cell (obstacles already in the map). I mark the side as "
-                          f"tried without moving.")
+                          f"node of the cell ({why}). I mark the side as tried without moving.")
                     env.mark_cell_side_explored(candidate_row, candidate_col, candidate_side_bit)
                     recovery.finalize_or_defer_blocked_cell(env, candidate_row, candidate_col,
                                                    self.sampler, self.global_grid.global_occupancy_map)

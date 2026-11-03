@@ -8,6 +8,18 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-03 (log messages and report times, behaviour unchanged)
+
+From the indoor mission of 03-11 11:07 (room of about 10 x 3 m, 7 cells closed, all the rest behind the walls), messages that contradicted each other or gave the wrong reason. The robot's behaviour does not change.
+
+- **`[DEFER]`** says from which visited neighbour the cell will be retried, or, if the sides not tried yet face only cells never visited, that it can be retried only if one of them gets visited. Before it always said "will be retried later", and a moment later the same cells left the frontier.
+- **End of exploration**: when every frontier cell is skipped in the round the log says so, instead of `[FRONTIER_RANK] Frontier empty` with five cells still in it; `[CELL FRONTIER]` and `[END]` give the real reason (the untried sides face only cells never visited).
+- **`[PRECHECK]`** gives the reason from the graph (`mission_prm.unreached_cell_reason`): all the nodes of the cell inside obstacles, or no edge between the reachable area and the cell. Before it always said "obstacles already in the map", also for cells (2,0) and (2,1) with 0 obstacles and 22 points never seen: the edges were vetoed by the wall between.
+- `[CONFIG] Mission grid ... source: config.MISSION_GRID_*` (it still said `mission_graph.MISSION_*`).
+- **Report times**: the `Smoothness` line mixed two measures (90 s of legs, 32 + 124 s of standing and walking). The trajectory samples of the GraphNav moves have no nodes and fell in a single group spanning from the first to the last GraphNav move (66 s for 25 s of moves). Now `Legs` counts only the legs (03-11: 90 s = 31 standing to rotate or start + 59 walking, 0.24 m/s while walking) and `GraphNav moves` each move on its own (18 s and 7 s); "Measured time" says it is the exploration only, and the distance in `Motion` includes the GraphNav moves.
+
+---
+
 ## 2026-10-30 (largest modules split by role, behaviour unchanged)
 
 The three largest modules are split by role, so each file can be read on its own. The robot's behaviour does not change: after every step the logs of the end-to-end tests and of the fake missions are identical line by line, the replay of the reference missions and the goal-selection replay are unchanged, and the mission graphs are the same for 12 sets of parameters (lattice and random, errors included).
