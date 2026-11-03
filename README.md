@@ -96,7 +96,7 @@ It gets here when the frontier is empty, or earlier if the battery drops below t
 | `spot_explorer/graphnav/` | `map_recording.py` recording, waypoints, breadcrumbs, loop closure, download; `navigation.py` GraphNav moves and return to `wp_0`; `localization.py` localization, re-anchoring, drift; `map_shortcuts.py` shortcuts; `apriltags.py` starting fiducial and correction of the return |
 | `spot_explorer/robot/` | `connection.py` robot connection and E-Stop; `motion.py` motion commands, gait, falls; `battery.py` charge and early return |
 | `tools/` | `mission_report.py`, `mission_viewer.py`, `live_viewer.py` (no SDK needed); `preflight.py`, `compare_logs.py`; `bench_graph.py` (also the graph command line), `bench_loop_closure.py`, `bench_fiducial.py`, `bench_refresh.py` (edge refresh during a continuous walk) bench tests; `slope_check.py` (slope estimates against the measured tilt), `calibration.py` (cost weights and gait thresholds from the logs), `gait_trial.py` (gait trials on a track, on the robot), `try_path.py` (path command on the robot), `capture_scene.py` (standing capture for the grass) |
-| `tests/` | `test_e2e_loop.py`, `test_mission.py`, `test_replay.py` (+ `replay_reference.json`), `test_goal_selection.py`, `test_path_command.py` (+ `fake_spot.py`) |
+| `tests/` | `test_e2e_loop.py`, `test_mission.py`, `test_replay.py` (+ `replay_reference.json`), `test_goal_selection.py`, `test_path_command.py` (+ `fake_spot.py`), `test_cruise.py` |
 
 ---
 
@@ -162,12 +162,13 @@ python3 tests/test_replay.py --all --graph random --distribution halton --seed 7
 - **`test_replay.py`**: checks a change without the robot, on the real scans of 10 missions (`--all`, about 5 minutes): invariants that must always hold, and comparison with the reference behaviour (`replay_reference.json`). With `--graph` (and `--distribution`, `--density`, `--seed`, `--min-edge`, `--max-edge`) it replays the same scans with another graph: the final table (paths found, length, edges per path, graph time) is compared with that of the lattice.
 - **`test_e2e_loop.py`**: the real navigation loop against a fake robot in synthetic worlds (corridors, traps, walls).
 - **`test_path_command.py`**: the multi-point path command of the continuous motion (`motion.PathCommand`) against `fake_spot.py`, a fake Spot with a simulated clock that reads the real command protos: corner without stopping, new sends while walking, dead man, stop, goal blocked, network errors.
+- **`test_cruise.py`**: the cruise (continuous motion) with the real planning thread in the worlds of `test_e2e_loop.py`, the fake Spot in real time (~4 min): open field, path changes while walking, a box appearing ahead, new goal while walking, hand-offs between cells, big turns.
 - **`test_mission.py`**: the whole mission (the real `run.main()`) with a fake robot and GraphNav, in several worlds: walls, closed cell, blocks, returns, forced failures, low-battery return, emergency shutdown, correction of the return to wp_0.
 - **`test_goal_selection.py`**: the goal choice replayed on the real missions.
 - **`compare_logs.py`**: compares the logs of two versions (`E2E_LOG_DIR=<folder> python3 tests/test_e2e_loop.py`, same for `test_mission.py`), removing times and durations: a change that must not alter the behaviour must give identical logs.
 - **`preflight.py`**: checks that the modules are consistent with each other.
 
-Every change is checked with `test_replay.py --all`, `test_e2e_loop.py`, `test_mission.py` and `preflight.py` before going on the robot.
+Every change is checked with `test_replay.py --all`, `test_e2e_loop.py`, `test_mission.py`, `test_path_command.py`, `test_cruise.py` and `preflight.py` before going on the robot.
 
 ---
 

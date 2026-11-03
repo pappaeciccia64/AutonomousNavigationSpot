@@ -508,7 +508,8 @@ def _wrap(a):
 
 
 def path_trajectory(path_xy, start_xy, start_yaw, max_linear_vel, max_angular_vel,
-                    time_factor=PATH_TIME_FACTOR, start_in_place_deg=PATH_START_IN_PLACE_DEG):
+                    time_factor=PATH_TIME_FACTOR, start_in_place_deg=PATH_START_IN_PLACE_DEG,
+                    first_is_step=False):
     """
     Points (x, y, heading, t) of the trajectory from the start pose (t=0) along the path,
     as described above (PATH COMMAND). t in seconds from the start.
@@ -521,9 +522,11 @@ def path_trajectory(path_xy, start_xy, start_yaw, max_linear_vel, max_angular_ve
         return [(pts[0][0], pts[0][1], float(start_yaw), 0.0)]
     seg = [float(np.arctan2(b[1] - a[1], b[0] - a[0])) for a, b in zip(pts, pts[1:])]
     lengths = [float(np.hypot(b[0] - a[0], b[1] - a[1])) for a, b in zip(pts, pts[1:])]
-    # A short first segment is the step back onto the line (projection of the robot, see
-    # PathCommand.send): sideways, with the nose already on the segment after it.
-    if len(seg) > 1 and lengths[0] < PATH_TURN_ZONE_M:
+    # first_is_step: the first segment is the step back onto the line (projection of the robot
+    # beside it, see PathCommand.send): sideways, with the nose already on the segment after it.
+    # Only then: a robot simply close to the next node along the line turns as usual (with the
+    # rule applied to any short first segment, a 40-degree corner went at 0.06 m/s).
+    if first_is_step and len(seg) > 1 and lengths[0] < PATH_TURN_ZONE_M:
         seg[0] = seg[1]
     in_place = np.radians(PATH_TURN_IN_PLACE_DEG)
 
@@ -666,6 +669,15 @@ class PathCommand:
         from_seg = self._seg if path == self._path else 0
         path_xy, self._seg = path_ahead(path, x, y, from_seg)
         self._path = path
+        # Robot beside the line: the first point is its projection, reached sideways (more than
+        # 45 degrees between the step and the segment it lands on).
+        first_is_step = False
+        if len(path_xy) > 1:
+            (qx, qy), (nx, ny) = path_xy[0], path_xy[1]
+            sx, sy, ux, uy = qx - x, qy - y, nx - qx, ny - qy
+            ns, nu = np.hypot(sx, sy), np.hypot(ux, uy)
+            first_is_step = (ns > PATH_MIN_POINT_GAP_M and nu > 1e-9
+                             and abs(sx * ux + sy * uy) / (ns * nu) < np.cos(np.radians(45)))
         # The projection stays: the robot goes back onto the line that was checked (with a
         # short sideways step, see path_trajectory) instead of heading straight for the next
         # point along a line nobody checked. Dropping it, the robot passed 0.24 m from a wall
@@ -674,7 +686,8 @@ class PathCommand:
             self._last = (x, y, yaw)
         v = max_linear_vel if max_linear_vel is not None else DEFAULT_MAX_LINEAR_VEL_MPS
         w = max_angular_vel if max_angular_vel is not None else DEFAULT_MAX_ANGULAR_VEL_RPS
-        self.points = path_trajectory(path_xy, (x, y), yaw, v, w, start_in_place_deg=start_in_place_deg)
+        self.points = path_trajectory(path_xy, (x, y), yaw, v, w, start_in_place_deg=start_in_place_deg,
+                                      first_is_step=first_is_step)
         duration = self.points[-1][3]
         params = _build_mobility_params(
             locomotion_hint=locomotion_hint, ground_mu_hint=ground_mu_hint,

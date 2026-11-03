@@ -72,6 +72,11 @@ CRUISE_HANDOFF_M = 0.6          # distance from the goal at which the next cell 
 # more air. The check is made at the pose of the scan, and the robot still walks some cm
 # before the command arrives.
 CHAIN_TURN_EXTRA_AIR_M = 0.15
+# After a path change while walking the new line starts where the robot was at the scan, and
+# the robot has walked on meanwhile: it rejoins the line with a short step if it is closer
+# than this, otherwise the cruise stops and the stop-and-go takes over. With 0.10 m two path
+# changes out of ten ended the cruise in the end-to-end world with the gap (12 and 15 cm).
+CRUISE_REJOIN_MAX_M = 0.20
 
 
 def stop_if_moving(env, command_client, reason):
@@ -256,7 +261,16 @@ class CruiseSteps:
                     reason = "the edge being walked is out of the graph"
                     break
                 if plan['status'] == 'no_path':
+                    # The stretch confirmed by this plan (still towards the old goal) is sent
+                    # again, before and after the choice: while the main thread computes, the
+                    # command must not expire (in the end-to-end world it did, after 2 s).
+                    if len(plan.get('confirmed', [])) > 1:
+                        pc.send(plan['confirmed'][1:], **self._cruise_gait(plan['terrain']))
+                        n_sends += 1
                     new_planner = self._cruise_repick(planner, plan)
+                    if new_planner is not None and len(plan.get('confirmed', [])) > 1:
+                        pc.send(plan['confirmed'][1:], **self._cruise_gait(plan['terrain']))
+                        n_sends += 1
                     if new_planner is None:
                         reason = "no path to the goal from the next node"
                         break
@@ -280,9 +294,9 @@ class CruiseSteps:
                 # The new stretch must start where the robot is: after a path change while
                 # walking the line can pass beside it (see PathCommand.send).
                 off = motion.distance_from_polyline(rx, ry, plan['confirmed'])
-                if off > motion.PATH_MAX_DEVIATION_M:
+                if off > CRUISE_REJOIN_MAX_M:
                     reason = (f"the new path passes {100 * off:.0f} cm from the robot "
-                              f"(limit {100 * motion.PATH_MAX_DEVIATION_M:.0f} cm)")
+                              f"(limit {100 * CRUISE_REJOIN_MAX_M:.0f} cm)")
                     break
                 # Hand-off to the next cell (CHAIN_CELLS), robot inside the target cell: goal
                 # confirmed and within CRUISE_HANDOFF_M; or the frontier stops for an obstacle

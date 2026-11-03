@@ -17,6 +17,17 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-03 (offline tests of the continuous motion; fixes they found)
+
+- **`tests/test_cruise.py`** (new, ~4 min, real time): the cruise with the real planning thread in the worlds of the end-to-end test, the fake Spot moving the robot in real time. Open field, wall with a gap (path changes while walking, distance from the corner), a box appearing 1.2 m ahead during the cruise, goal inside a box (new goal while walking), obstacle beyond the goal and next cell, three cells in a row (hand-offs, big turns).
+- **`tests/test_path_command.py`** brought up to date with the path command of today: points along the edges, heading along them, corners while walking and on the spot, start on the spot, back onto the checked line, off the path (and the wider limit while turning at the start), "blocked" as advice while walking, the leg of the stop-and-go, dead man, network errors. `fake_spot.advise_blocked` reports the goal blocked while the robot walks.
+- **Corners while walking slowed down to 0.06 m/s** (found by the test): the "sideways step back onto the line" rule (heading of the next segment on a short first segment) also applied with the robot simply less than 0.20 m before the next node along the line. Now only when the robot is beside the line (`first_is_step`, step more than 45 deg off the segment).
+- **No expiry while a new goal is chosen while walking**: the stretch confirmed by the last plan is sent again before and after the choice (the command expired after 2 s in two scenarios).
+- **Rejoining a changed path**: up to `CRUISE_REJOIN_MAX_M` = 0.20 m (was 0.10) between the robot and the new line before the cruise hands over to the stop-and-go (12 and 15 cm in the world with the gap).
+- Test harness: the real-time fake Spot moved the robot back to its last trajectory pose after a stop-and-go leg (a jump in the track).
+
+---
+
 ## 2026-11-03 (calibration tools ported from the old code; grass work of the online sessions)
 
 - **`tools/calibration.py`** and **`tools/gait_trial.py`**: `taratura.py` and `prova_andatura.py`, written in the online sessions on the old code (branch `AdL-version`, 03-11, commits 0cbd1fd and 1694e8f), ported to the `spot_explorer` package and to English. Same computations; the track trial also records the local-plane estimate before starting and the ground plane of the legs (`gpe`) during the pass, and the calibration compares the inclinometer with edges, plane and gpe. Never tried on the robot: the first time indoors (FIELD_TEST.md, "Gait calibration"). Includes 5bf229f of the online session (slope on the same cells as the mission, `slope_usable_mask`; roughness as the mission, 90th percentile of the samples along the line), checked on saved scans of 22-10 and 26-10. On the 904 stop-and-go legs since 22-10: beta 1.8 [1.1; 3.0] per unit of slope with the level separated (today 2), beta_lat 0.7 [-0.2; 1.9] (today 2), the HARD threshold 0.25 catches 61% of the legs with pitch above 12 deg (0.20: 84%).

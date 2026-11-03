@@ -11,8 +11,8 @@ What it does: follows the SE2 trajectory in time (linear interpolation between t
 reference_time and end_time relative to when the command arrives), with the speed limits
 of the mobility params as a cap; the stop command; the dead man (end_time); a new
 command replacing the previous one; a point that cannot be entered (blocked(x, y) true):
-the robot stays where it is and reports the final goal blocked. The pose in the
-snapshot is vision -> body.
+the robot stays where it is and reports the final goal blocked; advise_blocked reports it
+blocked while the robot keeps walking. The pose in the snapshot is vision -> body.
 """
 import time
 
@@ -35,6 +35,7 @@ class FakeSpot:
         self.x, self.y, self.yaw = float(x), float(y), float(yaw)
         self.now = 0.0                  # simulated seconds
         self.blocked = blocked          # callable (x, y) -> True if the point cannot be entered
+        self.advise_blocked = False     # report the final goal blocked while still moving (as on 03-11 14:45)
         self.commands = []              # every command received: (sim time, RobotCommand, end_time_secs)
         self.fail_next = 0              # how many of the next feedback/state calls raise
         self.track = [(self.x, self.y)]
@@ -76,7 +77,8 @@ class FakeSpot:
         m = r.feedback.synchronized_feedback.mobility_command_feedback
         m.status = c['status']
         m.se2_trajectory_feedback.status = c['traj_status']
-        m.se2_trajectory_feedback.final_goal_status = c['final']
+        m.se2_trajectory_feedback.final_goal_status = (_FB.FINAL_GOAL_STATUS_BLOCKED if self.advise_blocked
+                                                       else c['final'])
         m.se2_trajectory_feedback.body_movement_status = (
             _FB.BODY_STATUS_SETTLED if c['traj_status'] in (_FB.STATUS_AT_GOAL, _FB.STATUS_STOPPED)
             else _FB.BODY_STATUS_MOVING)
