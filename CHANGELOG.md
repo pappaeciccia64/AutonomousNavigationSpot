@@ -24,6 +24,7 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 - **Corners while walking slowed down to 0.06 m/s** (found by the test): the "sideways step back onto the line" rule (heading of the next segment on a short first segment) also applied with the robot simply less than 0.20 m before the next node along the line. Now only when the robot is beside the line (`first_is_step`, step more than 45 deg off the segment).
 - **No expiry while a new goal is chosen while walking**: the stretch confirmed by the last plan is sent again before and after the choice (the command expired after 2 s in two scenarios).
 - **Rejoining a changed path**: up to `CRUISE_REJOIN_MAX_M` = 0.20 m (was 0.10) between the robot and the new line before the cruise hands over to the stop-and-go (12 and 15 cm in the world with the gap).
+- **Fall check during the cruise** every `CRUISE_FALL_CHECK_S` = 1 s (`motion.check_fall`): the stop-and-go checks it at every turn, the cruise did not; on a fall the cruise ends and the next turn gets the robot up (`_guards`). Scenario in `test_cruise.py`.
 - Test harness: the real-time fake Spot moved the robot back to its last trajectory pose after a stop-and-go leg (a jump in the track).
 
 ---

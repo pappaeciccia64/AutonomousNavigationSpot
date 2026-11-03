@@ -9,7 +9,7 @@ in planning mode (safe_frontier.ArcVerificationTracker.start_planning).
 Scenarios: open field; wall with a gap (path changes while walking, distance from the wall
 corner); a box appearing in front of the robot during the cruise; goal isolated inside a box
 (new goal while walking); obstacle right beyond the goal (hand-off within the arrival
-tolerance); three cells in a row (hand-offs, big turns without stopping).
+tolerance); three cells in a row (hand-offs, big turns without stopping); a fall halfway.
 """
 import contextlib
 import io
@@ -222,6 +222,22 @@ def main():
     big = [l for l in r['log'].splitlines() if 'inside the new command, without stopping first' in l]
     check(len(big) >= 1, f"big turn towards the next cell without stopping first ({len(big)})")
     check(r['clear'] >= clear_min, f"centre at least {clear_min:.2f} m from the wall ({r['clear']:.2f})")
+
+    # The robot falls halfway (recoverable): the cruise ends at once, the stop-and-go gets it up.
+    fall = {'done': False, 'xy': None}
+
+    def falls(x, y):
+        if not fall['done'] and x > 4.5:
+            fall['done'], fall['xy'] = True, (x, y)
+            e2e.FALL.update(fallen=True, recoverable=True, where=(x, y))
+    r = run("the robot falls during the cruise", [], (2.0, 2.0, 0.785), [(0, 1)], on_step=falls)
+    e2e.FALL.update(fallen=False)
+    ends = [e for e in r['ends'] if e.startswith('fall')]
+    check(fall['done'] and len(ends) == 1, f"the cruise ended for the fall ({r['ends']})")
+    walked_after = [np.hypot(x - fall['xy'][0], y - fall['xy'][1]) for x, y, _ in TRACK
+                    if fall['xy'] is not None] if fall['done'] else [0.0]
+    check(max(walked_after) < 3.0, "no wandering after the fall")
+    check("[FALL]" in r['log'] or "fall" in r['log'].lower(), "fall handled by the stop-and-go (log)")
 
     print(f"\n{'ALL OK' if not FAILS else f'{len(FAILS)} FAILED: ' + '; '.join(FAILS)} ({time.time() - t_all:.0f} s)")
     return 1 if FAILS else 0

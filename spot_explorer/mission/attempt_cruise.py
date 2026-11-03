@@ -14,7 +14,8 @@ confirmed free of every new plan (motion.PathCommand).
         arrived at the goal; the confirmed stretch ahead of the robot ends (obstacle, edge
         of the data, corner where the rotation is not clear); the edge being walked is out
         of the graph; no path; the command ends badly (stopped, off the path, Spot
-        reports it blocked); no new plan for CRUISE_PLAN_STALE_S; low battery; CRUISE_MAX_S.
+        reports it blocked); no new plan for CRUISE_PLAN_STALE_S; fall (checked every
+        CRUISE_FALL_CHECK_S); low battery; CRUISE_MAX_S.
 
 While the thread plans the main thread does not touch graph and maps: it sends commands,
 reads plans and the robot state. It takes them back after stop_planning().
@@ -63,6 +64,7 @@ CRUISE_MAX_S = 180.0
 CRUISE_TRACK_STEP_M = 0.30      # spacing of the walked track kept for the retreat
 CRUISE_BREADCRUMB_S = 1.0       # how often the GraphNav breadcrumb is tried
 CRUISE_BATTERY_S = 5.0          # how often the battery is read
+CRUISE_FALL_CHECK_S = 1.0       # how often the fall is checked (the stop-and-go does it at every turn)
 CRUISE_ARRIVAL_WAIT_S = 2.0     # at the goal: wait at most this for the command to end
 CRUISE_SETTLE_S = 1.0           # after a stop: wait at most this for the robot to stand still
 CHAIN_CELLS = True              # from a cell goal to the next cell without stopping (see above)
@@ -201,7 +203,7 @@ class CruiseSteps:
         reason, arrived = None, False
         n_plans = n_sends = bad = 0
         last_version, last_plan_t = 0, t0
-        last_crumb_t, last_battery_t = t0, t0
+        last_crumb_t, last_battery_t, last_fall_t = t0, t0, t0
         crumb = None
         try:
             pc.send(confirmed[1:], start_in_place_deg=start_in_place, **kwargs)
@@ -226,6 +228,17 @@ class CruiseSteps:
                 if now - t0 > CRUISE_MAX_S:
                     reason = f"cruise longer than {CRUISE_MAX_S:.0f} s"
                     break
+                # Fall: the cruise ends and the next turn of the stop-and-go gets the robot up
+                # and backs away (_guards, motion.check_and_recover_fall).
+                if now - last_fall_t >= CRUISE_FALL_CHECK_S:
+                    last_fall_t = now
+                    try:
+                        fall = motion.check_fall(self.robot_state_client)
+                    except Exception:
+                        fall = None
+                    if fall is not None and fall.get('fallen'):
+                        reason = f"fall ({fall.get('reason', '')})"
+                        break
                 if now - last_battery_t >= CRUISE_BATTERY_S:
                     last_battery_t = now
                     if battery_return_due():
