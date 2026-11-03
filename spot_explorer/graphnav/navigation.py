@@ -4,6 +4,7 @@ import numpy as np
 from bosdyn.api.graph_nav import graph_nav_pb2 as _graph_nav_pb2
 from bosdyn.api import geometry_pb2
 from spot_explorer.robot import motion
+from spot_explorer.robot import photos
 from spot_explorer import config as P
 from spot_explorer.robot import connection
 from spot_explorer.records import MISSION_STATS, TrajectoryLog, timing_add
@@ -207,6 +208,7 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
                   f"(reason {details[2]}, route {details[0]}, blockage {details[1]}, "
                   f"{getattr(fb, 'remaining_route_length', 0.0):.1f} m to go).")
             _stop_graphnav(command_client, reason=f"GraphNav: {_GRAPHNAV_FAIL_STATUSES[status]}")
+            photos.capture(f"graphnav_{time.strftime('%H-%M-%S')}_{_GN.Status.Name(status)}_{label}")
             MISSION_STATS['graphnav_fail'] += 1
             return False
     print(f"[GRAPHNAV] {label}: time limit of {timeout_s:.0f} s exceeded. Stopping the robot.")

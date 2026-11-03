@@ -26,6 +26,7 @@ from spot_explorer.robot import connection
 from spot_explorer.mission import cells
 from spot_explorer.planning import safe_frontier
 from spot_explorer.robot import battery
+from spot_explorer.robot import photos
 
 from spot_explorer.planning import roadmap
 from spot_explorer.mission import mission_prm
@@ -292,6 +293,8 @@ def easy_walk(options):
             MISSION_CTX['segment_log'] = SegmentLog(os.path.join(mission_log_folder, "segments.csv"))
             MISSION_CTX['summary_done'] = False
             print(f"[LOG] Log folder: {mission_log_folder}  |  data and images: {mission_folder}")
+            if P.SAVE_BLOCK_PHOTOS:
+                photos.init(robot, mission_folder)
             _print_configuration()
         except Exception as e:
             print(f"[LOG] Could not initialize the segment CSV: {e}")

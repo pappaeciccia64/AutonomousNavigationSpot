@@ -363,7 +363,8 @@ class LocalGrid:
         they do not enter the alignment checks of return_local_grid, so if they are
         missing or have another geometry the scan used for navigation is not affected.
         Never raises. Returns {name: dict(values (ny, nx) float32, origin (x, y) in the
-        VISION frame, cell)}; {} if the request fails.
+        VISION frame, cell, origin_z: z of the layer frame in VISION, to add to the decoded
+        heights of 'terrain')}; {} if the request fails.
         """
         try:
             protos = list(self.local_grid_client.get_local_grids(list(names)))
@@ -376,9 +377,11 @@ class LocalGrid:
                 vals = self.unpack_grid(lg)
                 if vals is None or np.size(vals) != nx * ny:
                     continue
+                g = lg.local_grid
+                oz = get_a_tform_b(g.transforms_snapshot, VISION_FRAME_NAME, g.frame_name_local_grid_data).position.z
                 out[lg.local_grid_type_name] = dict(
                     values=np.asarray(vals, dtype=np.float32).reshape((ny, nx)),
-                    origin=np.array([ox, oy]), cell=float(cell))
+                    origin=np.array([ox, oy]), cell=float(cell), origin_z=float(oz))
             except Exception:
                 continue
         return out

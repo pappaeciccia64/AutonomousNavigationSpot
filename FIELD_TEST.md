@@ -48,10 +48,34 @@ All the mission switches and numbers are changed in **`spot_explorer/config.py`*
 
 ---
 
+## Indoors first (03-11, a few minutes, before going out)
+
+1. **Why GraphNav stops.** Put a box on a GraphNav stretch (the return to wp_0, or a move between cells) once the robot is on its way; in a passage it cannot go around (GraphNav may deviate up to 1.5 m from the recorded path). Expected: `[GRAPHNAV] …: route …, blockage ROUTE_BLOCKED_TEMPORARILY …` while it tries, then `interrupted -- blocked (STUCK) (reason OBSTACLE, …)`. If a field shows `-`, the SDK on the PC does not have it: note the `bosdyn` version (`pip show bosdyn-api`).
+2. **Photos at the stop.** Same move: `[PHOTO] graphnav_…: 5 photos in X s` and in `MissionMap/<mission>/photos/` five JPEGs plus a `.json`. Also at a confirmed block (`[DATA SAVE] Block data saved in …BLOCKED_n.npz` followed by `[PHOTO]`). Look at one photo: it must show what was in front of the robot.
+3. **Spot's own margin.** We send `obstacle_avoidance_padding` = 0, i.e. Spot's default, unknown. With a GraphNav move passing next to a box, note by eye (or tape measure) how close the body passes and whether Spot goes around it by itself.
+4. **`tools/capture_scene.py`** once, in front of the box: it must print the layers (5), 5 photos and the obstacle cells with their height above the ground (the box: median close to its real height).
+
+---
+
+## Grass: standing capture (outdoors, ~10 minutes, before the mission)
+
+The labelled data that decides how to treat grass (TODO, main work 1). Robot standing, moved with the tablet; on the PC `python3 tools/capture_scene.py`, one capture per situation, with a label saying what is in front and how far:
+- on short grass, nothing in front (the reference: "free");
+- 1 m from tall grass (and the height of the grass, measured);
+- 1 m from a bush;
+- 1 m from a solid object of similar height (a box, a bag);
+- inside the tall grass, as at the start of 28-10 14:17.
+
+Turn the robot by 90 degrees and capture again for one of them: the side cameras see the same thing from another point. Also a photo with the phone of each scene from behind the robot. The captures are in `SceneCaptures/<date_time>/`: load the folder to the repo with the mission.
+
+---
+
 ## The features to verify
 
 | Feature | Log line | What to expect | If it goes wrong |
 |---|---|---|---|
+| **Why GraphNav stops** (03-11) | `[GRAPHNAV] …: route X, blockage Y after N s`; `interrupted -- … (reason R, route X, blockage Y, D m to go)` | On every GraphNav stop the reason; in the grass, whether it is `OBSTACLE` (Spot's own obstacle avoidance) or something else. | Log only. |
+| **Photos at block and GraphNav stop** (03-11, `SAVE_BLOCK_PHOTOS`) | `[PHOTO] name: 5 photos in X s (photos/)` | One per confirmed block and per GraphNav stop, ~0.3 s; photos in `MissionMap/<mission>/photos/`. Never a mission stopped by it (`photos not taken` is only a message). | `SAVE_BLOCK_PHOTOS = False` in `config.py`. |
 | **Return to wp_0 corrected with the fiducial** (29-10 afternoon, `WP0_FIDUCIAL_CORRECTION`) | `[WP0] According to the tag the robot is D m from the starting point`; if D > 0.30: `[WP0] CORRECTION 1/2 ...`, `[GRAPHNAV] correction 1 of the return to wp_0: arrived`, `[WP0] After correction 1: D m from the start (before D0 m)`. In the live viewer: PHASE "CORRECTION of the return to wp_0" and a crimson stretch | The tag must be visible from the start (1-2 m). At the end of the mission the robot stops within ~0.3 m of the start, checked by eye. | `WP0_FIDUCIAL_CORRECTION = False` in `config.py` (the measurement stays). |
 | **Emergency shutdown** (28-10 evening) | `[EMERGENCY] Mission interrupted …`, `Robot sitting and motors off.`, `GraphNav map downloaded.` | A deliberate test, short and in a safe place: Ctrl+C halfway through a short mission; the robot sits down and the mission's `graph/` folder has the map. | If it does not sit down: E-Stop from the tablet. |
 | **Battery and low-battery return** (28-10 evening, `BATTERY_RETURN_PCT = 30`) | `[BATTERY] start: charge N%`, a line `[BATTERY] loop: …` at every point lost; `battery.csv`; at the end of the mission `[BATTERY] Return to wp_0: from A% to B%` | The charge is read from start-up (if `Charge not available` appears, note it: the return cannot trigger). Sensible and stable consumption per minute and per metre. If the battery drops below 30%: `[BATTERY] RETURN`, then `End of exploration for low battery` and the normal closure up to wp_0. | `BATTERY_RETURN_PCT = 0` in `config.py` turns the return off (the measurement stays). |

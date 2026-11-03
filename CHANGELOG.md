@@ -8,6 +8,15 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-03 (photos at the stops, standing capture of a scene)
+
+- **`SAVE_BLOCK_PHOTOS`** (`config.py`, on): at every confirmed block (same name as the `BLOCKED_n.npz`) and every GraphNav stop, the five body cameras are saved in `MissionMap/<mission>/photos/`, with a `.json` giving for each camera the pose in VISION and the intrinsics (`robot/photos.py`). With them the obstacle cells of the scan can be projected onto the image afterwards. Why: on 28-10 the only ground truth on grass was memory; the photo taken by the robot at the moment it stops says what it had in front. Never stops the mission.
+- **`tools/capture_scene.py`**: robot standing, a label typed on the PC, one capture = the layers `terrain`, `terrain_valid`, `obstacle_distance`, `intensity`, `no_step` with Spot's ground plane and the five photos, in `SceneCaptures/<date_time>/`. It prints the height above the ground of the obstacle cells. For the standing grass test of `FIELD_TEST.md` (tall grass, bush, solid object): true labels for the rule on grass.
+- `spot_grid.LocalGrid.extra_layers` also returns `origin_z`, the z of the layer frame in VISION, needed to turn the decoded `terrain` into a height (not used by the mission).
+- `FIELD_TEST.md`: indoor checks before going out (GraphNav reason, photos, Spot's margin, capture tool) and the standing grass capture.
+
+---
+
 ## 2026-11-03 (why GraphNav stops, behaviour unchanged)
 
 `[GRAPHNAV]` gives the reason when GraphNav stops: `stuck_reason` (e.g. `OBSTACLE`, `GOAL_BLOCKED`), `blockage_status`, `route_following_status` and the metres left; while moving it prints the changes of route and blockage status (e.g. `RETURNING_TO_ROUTE`, `ROUTE_BLOCKED_TEMPORARILY` before a `STUCK`). Why: the return to wp_0 of 28-10 13:50 stopped in the grass at 0.63 m with only `bloccato (STUCK)` in the log, and GraphNav walks with Spot's default mobility parameters (foot obstacle avoidance on, our edges carry no `mobility_params`, see TODO, grass): without the reason we cannot tell if that is the cause.

@@ -299,6 +299,12 @@ SAVE_SCAN_BUNDLES = True
 # <name>_origin and <name>_cell next to it, because its grid may not coincide with the
 # others. () = off.
 SAVE_EXTRA_LAYERS = ('intensity', 'no_step')
+# Photos from the five body cameras (robot.photos) at the confirmed block (same name as the
+# BLOCKED_n.npz) and when GraphNav stops (STUCK, no route, ...), in MissionMap/<mission>/photos/,
+# with the camera pose in VISION and the intrinsics: to see afterwards what the robot had in
+# front (grass, bush, wall), the ground truth missing on 28-10. ~0.3 s and ~0.3 MB each time.
+# False = off.
+SAVE_BLOCK_PHOTOS = True
 
 # Radius of the disk marked as dangerous in the global map around the point of a
 # fall (see motion.check_and_recover_fall and GlobalGrid.mark_hazard).
