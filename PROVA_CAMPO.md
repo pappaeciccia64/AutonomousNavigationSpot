@@ -75,3 +75,92 @@ Tutti gli interruttori e i numeri della missione si cambiano in **`parametri.py`
 
 - **CRAWL in MODERATE**: il rapporto dà il beccheggio per andatura. Se i tratti MODERATE restano tranquilli (sotto ~8 gradi), si può tornare all'andatura normale (`HINT_AUTO` in `select_mobility_params`), che è più veloce.
 - **Fluidità del movimento**: oggi il robot cammina in media a 0.14 m/s (13-10 12:40), perché ogni tratto aspetta che il corpo sia fermo e ruota a parte. Il rapporto lo misura nella riga **Fluidita'** (velocità media, tempo fermo a ruotare o a partire). Se la modifica viene preparata prima della prova, va confrontata qui, con l'interruttore acceso e spento.
+
+---
+
+## Taratura dell'andatura e dei pesi del costo
+
+Due strumenti: **`taratura.py`** (al computer: legge i `segments.csv` delle missioni e le prove su tracciato, stampa cosa dicono i dati) e **`prova_andatura.py`** (sul robot: lo stesso tratto rettilineo percorso più volte con un'andatura fissa, una riga per passaggio in `ProveAndatura/prove.csv`). `prova_andatura.py` non è mai stato provato sul robot: la prima volta al chiuso, su 2 m in piano.
+
+### Cosa dicono già i log (713 tratti, 14 missioni fino al 26-10)
+
+- **Pesi del costo**: con il livello d'andatura separato, la pendenza longitudinale vale ~2 m di strada per unità (oggi β = 2: va bene); contando anche il CRAWL che fa scattare, ~5. La pendenza laterale vale solo ~0.6 in tempo (oggi 2: è un margine di sicurezza, non un costo di tempo). La rugosità, su un arco ruvido (0.03), vale circa mezzo metro: γ = 0 cambia poco.
+- **Fallimenti**: 56 dei 96 sono tratti con 0 m percorsi (rifiuti, blocchi), che non dipendono dal terreno. Quelli con il robot in movimento (5.6% dei tratti) crescono sul terreno difficile: 14% sopra pendenza 0.3 contro 5% sotto, 12% con rugosità ≥ 0.02 contro 5%. Pochi casi (58 e 104 tratti): da ricontrollare con più missioni prima di metterli nel costo.
+- **Soglie**: le soglie di rugosità (0.05 e 0.10) non scattano quasi mai (95° percentile 0.029). La soglia di HARD a 0.25 prende solo la metà dei tratti con beccheggio > 12°; a 0.20 il 72%.
+- **Velocità**: reale 0.17 / 0.13 / 0.11 m/s contro limiti 0.5 / 0.35 / 0.25: i limiti non frenano niente.
+
+### Al chiuso (prima di uscire)
+
+| Cosa | Comando | Cosa aspettarsi |
+|---|---|---|
+| Lo script funziona | `python3 prova_andatura.py --terreno pavimento --config auto_mu08 --dist 2 --ripetizioni 1 --ritorno` | Il robot va avanti 2 m, si gira, torna, si gira; due righe in `ProveAndatura/prove.csv` con tutte le colonne piene (`slip_*`, `mu_est_*`, `energy_*` comprese). Se una colonna è vuota, annotarlo: quel dato il robot non lo dà. |
+| Zero della stima | `python3 prova_andatura.py --terreno pavimento --pendenza-vera 0 --solo-stima --ripetizioni 5` | Pendenza stimata vicina a 0 (sotto 0.05, cioè 3°). Quello che resta è l'errore della stima in piano. |
+| Stima su una rampa (se c'è: rampa d'accesso, pedana di carico, tavola appoggiata) | robot fermo ai piedi della rampa, rivolto verso di essa: `--terreno rampa_interna --pendenza-vera <gradi> --solo-stima` | Pendenza stimata coerente con l'inclinometro (qualche grado sopra, perché è un 90° percentile). Poi sopra la rampa: il beccheggio del corpo da fermo deve essere vicino alla pendenza vera. |
+| Limite di velocità | `--terreno pavimento --config auto_mu08 --dist 5 --ripetizioni 2`, poi lo stesso con `--vel 0.3` | Se i tempi sono quasi uguali, il limite non è ciò che rallenta il robot (conferma dei log). |
+| Attrito stimato | due passaggi su fondi diversi (piastrelle, tappeto di gomma) | `mu_est_mean` diverso fra i due fondi: dà un'idea dei valori che Spot stima. |
+
+Al chiuso non si prova: erba, zolle, fondo bagnato, pendenze vere oltre 10°.
+
+### Fuori: materiale
+
+- Inclinometro (app del telefono va bene) e un'asta o una tavola dritta di circa 1 m da appoggiare a terra.
+- Metro a nastro, 4 coni o picchetti, nastro colorato.
+- Due batterie se possibile: il programma completo richiede circa 2 ore di robot acceso.
+- Tablet con E-Stop sempre in mano: in `prova_andatura.py` non c'è il fronte sicuro, il robot va dritto.
+- Foglio per le note (la scheda qui sotto).
+
+### Fuori: i tracciati
+
+Cinque tracciati rettilinei da **5 m**, puliti da sassi e rami, con un metro libero in più alla fine e ai lati (il robot si gira sul posto alla fine). In ordine di importanza:
+
+| # | Nome (`--terreno`) | Dove | Perché |
+|---|---|---|---|
+| 1 | `rampa_media` | pendenza costante di **10–15°** in salita | È dove si decide MODERATE contro HARD (0.15 = 8.5°, 0.20 = 11.3°, 0.25 = 14°). |
+| 2 | `prato` | prato in piano | È il terreno di quasi tutta la missione: se CRAWL non serve qui, la missione è molto più veloce. |
+| 3 | `laterale` | lo stesso pendio, percorso di traverso (pendenza laterale) | Rollio: giustifica o meno β_lat = 2. |
+| 4 | `rampa_ripida` | **18–25°**, se c'è | Il limite: dove l'andatura normale smette di andare bene. |
+| 5 | `zolle` | terreno sconnesso, zolle, radici | Rugosità vera: serve per sapere che valori dà la stima. |
+
+Per ogni tracciato, **prima di tutto**:
+1. Misurare la pendenza con l'inclinometro in 3 punti (inizio, metà, fine), con la tavola appoggiata lungo il tracciato; scrivere la media. Per `laterale`, misurare di traverso.
+2. Segnare inizio e fine (5 m) con i coni; robot all'inizio, muso verso la fine.
+3. `python3 prova_andatura.py --terreno <nome> --pendenza-vera <gradi> --solo-stima --ripetizioni 3` (circa 30 s): pendenza stimata contro misurata.
+
+### Fuori: le configurazioni, passo per passo
+
+Su ogni tracciato, tre configurazioni, **3 ripetizioni ciascuna con `--ritorno`** (sulla rampa il ritorno è la discesa: è un dato in più). Circa 15 minuti per tracciato.
+
+```
+python3 prova_andatura.py --terreno <nome> --pendenza-vera <gradi> --config auto_mu08 --ripetizioni 3 --ritorno
+python3 prova_andatura.py --terreno <nome> --pendenza-vera <gradi> --config crawl_mu06 --ripetizioni 3 --ritorno
+python3 prova_andatura.py --terreno <nome> --pendenza-vera <gradi> --config auto_alto_mu06 --ripetizioni 3 --ritorno
+```
+
+- `auto_mu08` = PLAIN di oggi; `crawl_mu06` = MODERATE di oggi; `auto_alto_mu06` = MODERATE senza crawl: dice se il crawl serve davvero.
+- Su `rampa_ripida` aggiungere `crawl_mu04` (= HARD di oggi) e `auto_alto_mu04`.
+- **Ordine**: cambiare l'ordine delle configurazioni da un tracciato all'altro (prima `crawl` su un tracciato, prima `auto` sul successivo): il terreno si segna con i passaggi e la batteria cala.
+- **Sicurezza**: su `rampa_ripida` fare prima un solo passaggio con `crawl_mu04` (`--ripetizioni 1`); se il robot scivola o si inclina oltre 25°, non provare le altre su quel tracciato. Se il robot inciampa o scivola in un passaggio, annotarlo e passare alla configurazione successiva.
+- Se la batteria scende sotto il 35%, saltare `zolle` e tenere `rampa_media`, `prato` e `laterale`.
+
+Al termine, se resta batteria: una **missione normale breve** (`python3 easy_walk.py --rows 4 --cols 4`) sul terreno più vario disponibile, per avere altri tratti per la regressione del costo.
+
+### Scheda da compilare (una riga per tracciato)
+
+| Tracciato | Pendenza misurata (°) | Stima (°) | Note sul fondo (asciutto, bagnato, erba alta…) | Passaggi con scivolate o inciampi (config, ora) | Impressione a vista (quale andatura sembra più sicura) |
+|---|---|---|---|---|---|
+| rampa_media | | | | | |
+| prato | | | | | |
+| laterale | | | | | |
+| rampa_ripida | | | | | |
+| zolle | | | | | |
+
+### Dopo: come si decide
+
+1. `python3 taratura.py --prove ProveAndatura/prove.csv`: sezione 5.
+2. **Stima della pendenza**: se la stima è sistematicamente più alta o più bassa della misura, le soglie vanno lette con quella correzione (non si corregge la stima al buio).
+3. **Crawl in MODERATE**: su `rampa_media` e `prato`, se `auto_alto_mu06` riesce sempre con RMS di beccheggio e rollio e slittamento simili a `crawl_mu06`, il crawl in MODERATE non serve (`HINT_AUTO` in `select_mobility_params`): missione più veloce.
+4. **Soglia di HARD**: la pendenza (stimata) a cui l'andatura normale comincia a dare RMS o slittamenti chiaramente più alti, o a non riuscire, è la soglia `GAIT_MODERATE_SLOPE_MAX`. I log indicano 0.20 al posto di 0.25.
+5. **`ground_mu_hint`**: confrontarlo con `mu_est_mean` (l'attrito che Spot stima sotto i piedi) per fondo: va scelto in base al fondo (erba asciutta, bagnata), non alla pendenza.
+6. **Rugosità**: le soglie vanno messe sui valori stimati su `zolle` contro `prato` (oggi non scattano mai).
+7. **Pesi del costo**: dopo aver cambiato l'andatura, rifare `python3 taratura.py --dal <data>` sulle missioni nuove (sezione 2): il costo della pendenza dipende da come il robot la percorre.
+8. Ogni modifica: `test_replay.py`, poi CHANGELOG con i numeri della prova.
