@@ -1,0 +1,881 @@
+14:19:52.027 [LOG] Copia completa dell'output su file: /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionLogs/Mission_28-10-2026_14-19-52/mission_log.txt
+14:19:52.027 [LOG] Cartella log: /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionLogs/Mission_28-10-2026_14-19-52  |  dati e immagini: /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_28-10-2026_14-19-52
+14:19:52.027 [CONFIG] INTERRUTTORI: MISSION_GRAPH_SAMPLING=casuale  INCREMENTAL_GRAPH_UPDATE=True  BATCH_SLOPES=True  REFRESH_BATCH_SLOPES=True  CLEARANCE_MAP_DECIDES=False  PLAN_ONLY_EXPLORED_CELLS=True  GRAPHNAV_SHORTCUTS=True  GRAPHNAV_PRECHECK=True  GRAPHNAV_SDK_LOOP_CLOSURE=True  GRAPHNAV_SDK_LOOP_BUDGET_S=0.0  GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S=45.0  GRAPHNAV_SDK_LOOP_FAST=True  GRAPHNAV_SDK_LOOP_FINAL_PRUNE=None  GRAPHNAV_SDK_LOOP_MAX_PATH_M=None  SAVE_SCAN_BUNDLES=True  SAVE_EXTRA_LAYERS=['intensity', 'no_step']  DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT=True  ARC_BODY_EXTENSION_M=0.55  ROBOT_CLEARANCE_AIR_M=0.0  PLAN_CLEARANCE_EXTRA_M=0.03  BATTERY_RETURN_PCT=30.0
+14:19:52.027 [CONFIG] SLOPE_THRESHOLD=0.6  LATERAL_SLOPE_COST_MULTIPLIER=1.0  OBSTACLE_THRESHOLD=0.15  ROUGH_THRESHOLD=0.15  NEAR_THRESHOLD_MARGIN_FRACTION=0.15
+14:19:52.027 [CONFIG] PROFILO ARCO: base=0.25m  fetta_laterale=+/-0.3m  copertura_minima=50%
+14:19:52.027 [CONFIG] GAIT: plain<0.15/0.05  moderate<0.25/0.1  mu=0.8/0.6/0.4
+14:19:52.027 [CONFIG] TERRENO: terrain_valid >= 0.5 (era > 0.0, dipendeva dal segno di un residuo numerico)  celle mai scritte: plateau >= 100 celle, almeno 80% marcate non valide da Spot
+14:19:52.027 [CONFIG] ROTAZIONE: prefiltro 0.604 m (aria 0.00 m, separata dai 0.00 m dell'avanzamento), poi controllo sul settore spazzato a passi di 5 gradi (tolleranza 0.15 m sul rumore); MARCIA DI TRAVERSO DISATTIVATA
+14:19:52.027 [CONFIG] SE NON PUO' RUOTARE: 1) ventaglio nel cono +/-90 gradi a passi di 10, si va nella direzione piu' libera fra quelle che avvicinano di almeno 0.20 m; 2) arretramento dritto fino a 0.60 m SOLO se da li' la rotazione diventa possibile, max 2 consecutivi; 3) si scarta il tratto
+14:19:52.027 [CONFIG] TRAPPOLA: ventaglio a 360 gradi a passi di 15 (24 direzioni); una direzione vale se concede 0.30 m E il robot puo' girarsi per puntarla. Zero direzioni -> si ripercorre il tratto da cui si e' venuti SUBITO, senza scartare archi. Controllo sulla posa d'arrivo per i passi sotto 0.40 m o con obstacle_distance sotto 0.50 m, max 3 rifiuti. Scarto da [SUBITO] e da [ARRIVO]: NON permanente
+14:19:52.027 [CONFIG] RITORNI: briciola GraphNav ogni 0.75 m, ritorno con GraphNav fino a 3 waypoint indietro riprovando la pianificazione a ogni tappa, poi si rimanda la cella; ritirata a zampe solo come ultima rete. Nodi PRM scartati sotto 0.25 m di spazio libero, solo dove visti. Deroga di 0.70 m alla mappa globale attorno al robot: ora solo dopo una caduta
+14:19:52.027 [CONFIG] OSTACOLI: mediana su 3 scansioni + isteresi 0.04 m attorno a 0.25 m (rumore misurato 1.5 cm tipici, 7.3 di punta); celle-ostacolo escluse dal campionamento della pendenza d'arco
+14:19:52.027 [CONFIG] BATTERIA: rientro a wp_0 sotto 30% (2 letture di fila; 0 = spento), lettura al massimo ogni 5 s, dati in battery.csv
+14:19:52.027 [CONFIG] OBIETTIVO: tolleranza d'arrivo 0.65 m (= meta' corpo + margine del fronte), riscelta del punto fino a 3 volte se risulta irraggiungibile; ripianificazione alla PRIMA cella bloccante, fino a 4 volte per tentativo
+14:19:52.027 [CONFIG] SCELTA OBIETTIVO: solo punti raggiungibili dal robot nel grafo (se ce ne sono), spazio libero preferito 0.33 m (minimo 0.28), almeno 0.30 m dal bordo della cella, obiettivi rifiutati dal fronte esclusi per la missione; arrivo valido anche col robot fuori dalla cella fino a 0.35 m
+14:19:58.568 [BATTERIA] avvio: carica 69%, autonomia stimata da Spot 65 min
+14:19:58.577 [GRAPH_CACHE] Scarico il grafo aggiornato dal robot...
+14:19:58.698 [GRAPH_CACHE] Grafo in memoria da riscaricare
+14:19:58.698 [REGISTRAZIONE] Registrazione della mappa avviata.
+14:20:01.958 [FIDUCIAL] Nessun fiducial visto in 3 s da nessuna telecamera: si parte senza. Spot riconosce solo gli AprilTag 36h11 (i fiducial di Boston Dynamics).
+14:20:01.968 [GRAPH_CACHE] Scarico il grafo aggiornato dal robot...
+14:20:01.980 
+14:20:01.980 [WAYPOINT CREATION] Creo un nuovo waypoint MANUALE:
+14:20:01.980   Nome: wp_0 (formato dei waypoint manuali)
+14:20:01.980   Numero: 0
+14:20:01.980   Posizione: (29.227, -57.664, -18.315)
+14:20:01.980   Orientamento (imbardata): -101.1°
+14:20:01.980   Cella: (0, 0)
+14:20:02.078 [WAYPOINT CREATION] ✓ Waypoint creato:
+14:20:02.078   Nome: wp_0
+14:20:02.078   ID: fetid-crest-m9WKmrZgztttgpS9rznopg==
+14:20:02.078   Posa salvata per i riallineamenti
+14:20:02.078   Cella salvata: (0, 0)
+14:20:02.078   Stato: 1
+14:20:02.078 
+14:20:02.078 [GRAPH_CACHE] Grafo in memoria da riscaricare
+14:20:02.078 [CONFIG] Griglia di missione: 8 x 7 celle da 2.0 m (16 m a sinistra x 14 m davanti; fonte: mission_graph.MISSION_*)
+14:20:02.078 [CONFIG] Reticolo: passo richiesto 0.500 m, anelli tutti
+14:20:02.078 [CONFIG] Grafo: nodi casuale (poisson, 4 nodi/m2, seme a caso); archi da 0.5 a 1.25 m
+14:20:02.088 [OK] Origine fissata alle coordinate (29.23, -57.66)
+14:20:02.088 [OK] Orientamento iniziale: -101.1°
+14:20:02.088 [OK] Cella di partenza (0, 0) segnata come visitata
+14:20:02.099 [QUOTE] Riferimento quote = suolo all'avvio missione: z=-18.828 m nel frame VISION (piano del suolo di Spot), cioe' -18.83 m rispetto all'accensione -- il robot e' stato acceso a un'altra quota (scale?). La navigazione non ne risente; il valore e' salvato come mission_z0 in ogni file e mission_viewer mostra le quote rispetto all'avvio missione.
+14:20:02.282 [GRAFO] Missione 8x7 celle da 2.0 m = 224 m2; nodi CASUALI, archi fra 0.50 e 1.25 m
+14:20:02.282 [GRAFO] Nodi casuali: distribuzione poisson, densita' 4.00 nodi/m2, seme 1968960193 (per ripetere: --grafo casuale --distribuzione poisson --densita 4 --seme 1968960193)
+14:20:02.282 [GRAFO] 952 nodi, 4.25 nodi/m2, 7450 archi, grado medio 15.7 (min 5, max 22)
+14:20:02.282 [GRAFO] Lunghezze degli archi 0.50-1.25 m, min_edge_length=0.50 m, 1128 coppie di vicini troppo vicini, non collegate
+14:20:02.282 [GRAFO] Copertura misurata 0.49 m (95% dell'area entro 0.32 m; un corridoio utile al fronte e' largo almeno 0.50 m)
+14:20:02.282 [GRAFO] Obiettivi di cella: 56 su 56, tutti nel centro geometrico esatto
+14:20:02.282 [GRAFO] Connessione geometrica: UNICA componente, nessun nodo isolato
+14:20:02.282 [GRAFO] Accensione = centro della cella di partenza = nodo 0 (nessun nodo di boot da aggiungere)
+14:20:02.285 ArcVerificationTracker (fronte sicuro) avviato in background.
+14:20:02.285 [INFO] Cartella per scaricare il grafo: /home/andrea/spotSDK/v2/AutonomousNavigationSpot/graph/Mission_28-10-2026_14-19-52
+14:20:02.305 
+14:20:02.306 [ADJACENT] Cerco le celle confinanti non esplorate attorno a (0,0)
+14:20:02.306   ✓ Vicina south: (1,0) rango=13
+14:20:02.306   ✓ Vicina east: (0,1) rango=1
+14:20:02.306 [ADJACENT] ✓ 2 celle confinanti non esplorate
+14:20:02.306 [ADJACENT] Quella di rango piu' basso: (0,1) rango=1
+14:20:02.306 [PROGRESSO] 1/56 celle chiuse (2%): 1 visitate, 0 bloccate, 55 da fare | area vista ?
+14:20:02.306             0.0 min trascorsi | batteria 69%
+14:20:02.306 [(0, 1, 1), (1, 0, 13)]
+14:20:02.314 
+14:20:02.314 [ADJACENT] Cerco le celle confinanti non esplorate attorno a (0,0)
+14:20:02.314   ✓ Vicina south: (1,0) rango=13
+14:20:02.314   ✓ Vicina east: (0,1) rango=1
+14:20:02.314 [ADJACENT] ✓ 2 celle confinanti non esplorate
+14:20:02.314 [ADJACENT] Quella di rango piu' basso: (0,1) rango=1
+14:20:02.314 
+14:20:02.314 [ATTEMPT] Provo a entrare nella cella (0,1) dalla posizione attuale...
+14:20:02.425 [MAP] Inizializzata nuova mappa di occupazione globale persistente.
+14:20:02.425 [MAP] Inizializzata nuova mappa globale persistente del terreno (altezza).
+14:20:02.428 [GROUND-FILTER] scan-iniziale: 463 celle scartate, fino a 1.39 m sopra il suolo (suolo z=-18.730, stimato sotto il robot su 896 celle)
+14:20:02.428 [GROUND-FILTER] scan-iniziale: 472 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0003 m
+14:20:02.430 [FOOTPRINT-DIAG] scan-cella: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+14:20:02.463 [MAP] Mappa globale salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_28-10-2026_14-19-52/global_occupancy_map.pkl
+14:20:02.493 [MAP] Mappa globale del terreno salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_28-10-2026_14-19-52/global_terrain_map.pkl
+14:20:02.493 [MAP] Dimensione mappe globali -- occupazione: 14927 celle, terreno: 9240 celle
+14:20:02.494 [DATA SAVE] Matrici .npy salvate per cella (0,1)
+14:20:02.602 [PENDENZE] costruzione: archi vetati per pendenza -- longitudinale 0 (max 0.00), laterale 1 (max 0.83), 1 mai vetati prima; 0 cambi di verdetto vicino soglia (soglia 0.60).
+14:20:02.602 [GRAFO] 7266 archi ammessi su 7450 coppie del grafo (952 nodi, nodi casuali poisson); 7085 in zona senza dati, con il solo costo geometrico
+14:20:02.603 [TEMPO] costruzione completa del grafo: 0.11 s
+14:20:02.603 [ARCHI] 183 archi scartati subito dalla scansione dal vivo (passano a meno di 0.25 m da un ostacolo appena visto), prima della pendenza.
+14:20:02.604 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1)]: 34 nodi su 952. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+14:20:02.605 [NODO] partenza tentativo: agganciato al nodo 0 in (29.23, -57.66), a 0.00 m da (29.23, -57.66) -- nessun nodo nuovo
+14:20:02.610 [TARGET] Cella (0,1): uso il centro geometrico (28.84, -59.63), libero.
+14:20:02.647 
+14:20:02.647 [WAYPOINT CREATION] Creo un nuovo waypoint MANUALE:
+14:20:02.647   Nome: wp_1 (formato dei waypoint manuali)
+14:20:02.647   Numero: 1
+14:20:02.647   Posizione: (29.225, -57.668, -18.317)
+14:20:02.647   Orientamento (imbardata): -101.1°
+14:20:02.647   Cella: (0, 1)
+14:20:02.740 [WAYPOINT CREATION] ✓ Waypoint creato:
+14:20:02.740   Nome: wp_1
+14:20:02.740   ID: prosy-boa-kW4UOkqCTqk54L01o5da9w==
+14:20:02.740   Posa salvata per i riallineamenti
+14:20:02.741   Cella salvata: (0, 1)
+14:20:02.741   Stato: 1
+14:20:02.741 
+14:20:02.741 [GRAPH_CACHE] Grafo in memoria da riscaricare
+14:20:02.741 [BRICIOLA] Waypoint wp_1 in (29.22, -57.67), nodo PRM 0 (traccia: 1 waypoint).
+14:20:02.773 [LOCALIZZAZIONE] briciola wp_1: localizzato su wp_1 | localizzazioni accettate 116045, rifiutate 1451 (0 dall'ultima accettata, 0.0 m fatti cosi'), archi cattivi di fila 0 | ultimo passo None, beccheggio -8.9 gradi.
+14:20:02.773 [NODO] obiettivo cella (0,1): agganciato al nodo 1 in (28.84, -59.63), a 0.00 m da (28.84, -59.63) -- nessun nodo nuovo
+14:20:02.872 [GROUND-FILTER] scan-passo: 277 celle scartate, fino a 1.39 m sopra il suolo (suolo z=-18.745, stimato sotto il robot su 1587 celle)
+14:20:02.872 [GROUND-FILTER] scan-passo: 634 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0003 m
+14:20:02.873 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/799 (0.0%)
+14:20:02.953 [ARCHI] 96 archi fuori dal grafo per la scansione dal vivo (96 rivalutati, 0 oltre il raggio di refresh), prima della pendenza.
+14:20:02.954 [SPAZIO] Archi su cui i due criteri non concordano: 7 su 144 (4.9%) -- 2 bloccati solo dalla mappa binaria, 5 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 15148.
+14:20:02.954 [REPLAN STABILE] Percorso invariato da 0 a 1 (19 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+14:20:02.956 [FRONTE] 2.09 m confermati su 2.14 m di percorso, avanzamento consentito 1.44 m -- si ferma sul bordo dei dati in (28.85, -59.57): avanzo e riguardo
+14:20:03.000 [TEMPO] scansione 0.09 s | elaborazione 0.00 | mappe 0.03 | PRM 0.05 | fronte 0.05 | decisione: move
+14:20:03.000 [OK] Tratto 0->520 confermato libero dal fronte. Eseguo movimento...
+14:20:03.002 [SLOPE-SOURCE] Arco 0->520: FALLBACK_NODES (long=0.060, lat=0.000)
+14:20:03.004 [SLOPE-CHECK] Arco 0->520: in uso long=0.060 lat=0.000 | interpolata long=0.549 lat=0.585 | campioni dentro griglia: lungo arco 100%, laterali 100%
+14:20:03.004 [GAIT] Livello del terreno: PLAIN (pendenza=0.060, rugosita'=0.011) -> locomotion_hint=1, swing_height=2, ground_mu_hint=0.8, vel_max=0.50 m/s, rot_max=0.60 rad/s
+14:20:03.012 [INFO] Passo 1: rotazione verso il punto...
+14:20:06.926 [MOVIMENTO] Rotazione completata: -37 gradi su -37 richiesti (il centro del corpo si e' spostato di 0.06 m girando).
+14:20:06.927 [INFO] Passo 2: avanti di 0.53 m...
+14:20:09.304 [MOVIMENTO] Arrivato: percorsi 0.58 m su 0.53 richiesti.
+14:20:09.316 [TILT] Arco 0->520: picco roll=0.8 deg, pitch=8.9 deg (30 campioni) | stimato long=0.060 (~3.4 deg), lat=0.000 (~0.0 deg) | tier=PLAIN, 6.3s
+14:20:09.316 [INFO] Spostamento completato con successo su (28.83, -58.02)
+14:20:09.491 [GROUND-FILTER] scan-passo: 208 celle scartate, fino a 1.46 m sopra il suolo (suolo z=-18.793, stimato sotto il robot su 1647 celle)
+14:20:09.491 [GROUND-FILTER] scan-passo: 484 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0003 m
+14:20:09.494 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/795 (0.0%)
+14:20:09.641 [PENDENZE] refresh: archi vetati per pendenza -- longitudinale 2 (max 0.67), laterale 0 (max 0.00), 2 mai vetati prima; 2 cambi di verdetto vicino soglia (soglia 0.60).
+14:20:09.641 [ARCHI] 69 archi fuori dal grafo per la scansione dal vivo (61 rivalutati, 8 oltre il raggio di refresh), prima della pendenza.
+14:20:09.641 [SPAZIO] Archi su cui i due criteri non concordano: 4 su 138 (2.9%) -- 4 bloccati solo dalla mappa binaria, 0 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 18556.
+14:20:09.642 [REPLAN STABILE] Percorso invariato da 520 a 1 (17 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+14:20:09.643 [FRONTE] 1.96 m confermati su 1.64 m di percorso, avanzamento consentito 1.31 m -- si ferma sul bordo dei dati in (28.80, -59.94): avanzo e riguardo
+14:20:09.692 [TEMPO] scansione 0.16 s | elaborazione 0.01 | mappe 0.05 | PRM 0.09 | fronte 0.05 | decisione: move
+14:20:09.693 [OK] Tratto 520->68 confermato libero dal fronte. Eseguo movimento...
+14:20:09.695 [SLOPE-SOURCE] Arco 520->68: LIVE (long=0.260, lat=0.229)
+14:20:09.705 [SLOPE-CHECK] Arco 520->68: in uso long=0.260 lat=0.229 | interpolata long=0.314 lat=0.397 | campioni dentro griglia: lungo arco 100%, laterali 100%
+14:20:09.705 [GAIT] Livello del terreno: HARD (pendenza=0.260, rugosita'=0.014) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.4, vel_max=0.25 m/s, rot_max=0.40 rad/s
+14:20:09.713 [INFO] Passo 1: rotazione verso il punto...
+14:20:13.286 [MOVIMENTO] Rotazione completata: +59 gradi su +60 richiesti (il centro del corpo si e' spostato di 0.04 m girando).
+14:20:13.286 [INFO] Passo 2: avanti di 1.08 m...
+14:20:18.890 [MOVIMENTO] Arrivato: percorsi 1.10 m su 1.08 richiesti.
+14:20:18.902 [TILT] Arco 520->68: picco roll=1.4 deg, pitch=12.5 deg (42 campioni) | stimato long=0.260 (~14.6 deg), lat=0.229 (~12.9 deg) | tier=HARD, 9.2s
+14:20:18.902 [INFO] Spostamento completato con successo su (28.92, -59.08)
+14:20:18.919 
+14:20:18.919 [WAYPOINT CREATION] Creo un nuovo waypoint MANUALE:
+14:20:18.919   Nome: wp_2 (formato dei waypoint manuali)
+14:20:18.919   Numero: 2
+14:20:18.919   Posizione: (28.922, -59.132, -18.151)
+14:20:18.920   Orientamento (imbardata): -79.1°
+14:20:18.920   Cella: (0, 1)
+14:20:19.848 [WAYPOINT CREATION] ✓ Waypoint creato:
+14:20:19.848   Nome: wp_2
+14:20:19.848   ID: prize-algae-L4siwxnQqTkrDmFO1iNVcg==
+14:20:19.848   Posa salvata per i riallineamenti
+14:20:19.849   Cella salvata: (0, 1)
+14:20:19.849   Stato: 1
+14:20:19.849 
+14:20:19.849 [GRAPH_CACHE] Grafo in memoria da riscaricare
+14:20:19.849 [BRICIOLA] Waypoint wp_2 in (28.92, -59.13), nodo PRM 68 (traccia: 2 waypoint).
+14:20:19.928 [BATTERIA] ciclo: carica 68%, autonomia stimata da Spot 65 min
+14:20:20.031 [GROUND-FILTER] scan-passo: 268 celle scartate, fino a 1.44 m sopra il suolo (suolo z=-18.619, stimato sotto il robot su 1696 celle)
+14:20:20.031 [GROUND-FILTER] scan-passo: 542 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0008 m
+14:20:20.033 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+14:20:20.159 [ARCHI] 176 archi fuori dal grafo per la scansione dal vivo (101 rivalutati, 75 oltre il raggio di refresh), prima della pendenza.
+14:20:20.160 [SPAZIO] Archi su cui i due criteri non concordano: 22 su 163 (13.5%) -- 0 bloccati solo dalla mappa binaria, 22 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 23300.
+14:20:20.160 [REPLAN STABILE] Percorso invariato da 68 a 1 (17 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+14:20:20.161 [FRONTE] 1.05 m confermati su 0.50 m di percorso, avanzamento consentito 0.50 m -- percorso libero fino all'obiettivo
+14:20:20.245 [TEMPO] scansione 0.15 s | elaborazione 0.01 | mappe 0.05 | PRM 0.07 | fronte 0.09 | decisione: move
+14:20:20.246 [OK] Tratto 68->1 confermato libero dal fronte. Eseguo movimento...
+14:20:20.248 [SLOPE-SOURCE] Arco 68->1: LIVE (long=0.096, lat=0.246)
+14:20:20.251 [SLOPE-CHECK] Arco 68->1: in uso long=0.096 lat=0.246 | interpolata long=0.110 lat=0.474 | campioni dentro griglia: lungo arco 100%, laterali 100%
+14:20:20.251 [GAIT] Livello del terreno: MODERATE (pendenza=0.246, rugosita'=0.010) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.6, vel_max=0.35 m/s, rot_max=0.50 rad/s
+14:20:20.265 [INFO] Passo 1: rotazione verso il punto...
+14:20:22.614 [MOVIMENTO] Rotazione completata: -20 gradi su -20 richiesti (il centro del corpo si e' spostato di 0.07 m girando).
+14:20:22.614 [INFO] Passo 2: avanti di 0.50 m...
+14:20:24.984 [STOP] Movimento interrotto: richiesta del chiamante dopo 0.43m
+14:20:24.995 [TILT] Arco 68->1: picco roll=1.0 deg, pitch=6.0 deg (23 campioni) | stimato long=0.096 (~5.5 deg), lat=0.246 (~13.8 deg) | tier=MODERATE, 4.7s
+14:20:24.995 [STOP] Movimento verso (28.84, -59.63) interrotto dopo 0.43m: il fronte si e' accorciato (ostacolo in (29.08, -59.99)): raggiungibili 0.00 m su 0.08 m mancanti.
+14:20:25.009 [NODO] sosta (arresto): agganciato al nodo 1 in (28.84, -59.63), a 0.03 m da (28.81, -59.61) -- nessun nodo nuovo
+14:20:25.152 [GROUND-FILTER] scan-passo: 127 celle scartate, fino a 1.41 m sopra il suolo (suolo z=-18.613, stimato sotto il robot su 1696 celle)
+14:20:25.152 [GROUND-FILTER] scan-passo: 605 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0008 m
+14:20:25.155 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/803 (0.0%)
+14:20:25.278 [ARCHI] 213 archi fuori dal grafo per la scansione dal vivo (137 rivalutati, 76 oltre il raggio di refresh), prima della pendenza.
+14:20:25.279 [SPAZIO] Archi su cui i due criteri non concordano: 22 su 184 (12.0%) -- 1 bloccati solo dalla mappa binaria, 21 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 25463.
+14:20:25.279 [REPLAN STABILE] Percorso invariato da 1 a 1 (18 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+14:20:25.279 [FRONTE] 0.41 m confermati su 0.03 m di percorso, avanzamento consentito 0.00 m -- ostacolo a 0.21 m dalla linea centrale in (29.15, -59.85) (minimo 0.25 m)
+14:20:25.348 [TEMPO] scansione 0.14 s | elaborazione 0.01 | mappe 0.03 | PRM 0.09 | fronte 0.07 | decisione: reached_node
+14:20:25.396 [CHECK] Il punto (28.81,-59.61) e' DENTRO la cella (0,1)
+14:20:25.419 [MAP] Cella (0, 1) segnata come visitata (centro del robot dentro)
+14:20:25.432 
+14:20:25.432 [WAYPOINT CREATION] Creo un nuovo waypoint MANUALE:
+14:20:25.432   Nome: wp_3 (formato dei waypoint manuali)
+14:20:25.432   Numero: 3
+14:20:25.433   Posizione: (28.806, -59.618, -18.137)
+14:20:25.433   Orientamento (imbardata): -100.0°
+14:20:25.433   Cella: (0, 1)
+14:20:27.231 [WAYPOINT CREATION] ✓ Waypoint creato:
+14:20:27.231   Nome: wp_3
+14:20:27.231   ID: grungy-eland-piv2y1Z.9hA51ZIW5joHzA==
+14:20:27.231   Posa salvata per i riallineamenti
+14:20:27.231   Cella salvata: (0, 1)
+14:20:27.231   Stato: 1
+14:20:27.231 
+14:20:27.231 [GRAPH_CACHE] Grafo in memoria da riscaricare
+14:20:27.231 [WAYPOINT] Registrato il waypoint n. 1 in (28.807, -59.617)
+14:20:27.231 [VISITED] Cella (0,1) segnata come visitata (valore 1)
+14:20:27.231 
+14:20:27.231 [ADJACENT] Cerco le celle confinanti non esplorate attorno a (0,1)
+14:20:27.231   ✓ Vicina south: (1,1) rango=12
+14:20:27.231   ✓ Vicina east: (0,2) rango=2
+14:20:27.231 [ADJACENT] ✓ 2 celle confinanti non esplorate
+14:20:27.231 [ADJACENT] Quella di rango piu' basso: (0,2) rango=2
+14:20:27.275 [PROGRESSO] 2/56 celle chiuse (4%): 2 visitate, 0 bloccate, 54 da fare | area vista 6%
+14:20:27.275             0.4 min trascorsi, ~22 min alla fine (0.42 min a cella) | batteria 68%
+14:20:27.275 [(1, 0, 13), (0, 2, 2), (1, 1, 12)]
+14:20:27.300 
+14:20:27.300 [ADJACENT] Cerco le celle confinanti non esplorate attorno a (0,1)
+14:20:27.300   ✓ Vicina south: (1,1) rango=12
+14:20:27.300   ✓ Vicina east: (0,2) rango=2
+14:20:27.300 [ADJACENT] ✓ 2 celle confinanti non esplorate
+14:20:27.300 [ADJACENT] Quella di rango piu' basso: (0,2) rango=2
+14:20:27.300 
+14:20:27.300 [ATTEMPT] Provo a entrare nella cella (0,2) dalla posizione attuale...
+14:20:27.396 [GROUND-FILTER] scan-iniziale: 86 celle scartate, fino a 1.36 m sopra il suolo (suolo z=-18.615, stimato sotto il robot su 1696 celle)
+14:20:27.396 [GROUND-FILTER] scan-iniziale: 856 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0003 m
+14:20:27.398 [FOOTPRINT-DIAG] scan-cella: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+14:20:27.439 [MAP] Mappa globale salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_28-10-2026_14-19-52/global_occupancy_map.pkl
+14:20:27.514 [MAP] Mappa globale del terreno salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_28-10-2026_14-19-52/global_terrain_map.pkl
+14:20:27.514 [MAP] Dimensione mappe globali -- occupazione: 25973 celle, terreno: 20490 celle
+14:20:27.514 [DATA SAVE] Matrici .npy salvate per cella (0,2)
+14:20:27.607 [GRAFO] Aggiornamento locale: rivalutate 938 coppie su 7450 (vicine alle zone con dati nuovi), 514 ammesse; le altre restano come erano.
+14:20:27.607 [TEMPO] aggiornamento locale del grafo: 0.09 s
+14:20:27.607 [ARCHI] 314 archi scartati subito dalla scansione dal vivo (passano a meno di 0.25 m da un ostacolo appena visto), prima della pendenza.
+14:20:27.607 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1), (0, 2)]: 51 nodi su 952. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+14:20:27.608 [NODO] partenza tentativo: agganciato al nodo 1 in (28.84, -59.63), a 0.08 m da (28.78, -59.67) -- nessun nodo nuovo
+14:20:27.614 [TARGET] Cella (0,2): uso il centro geometrico (28.46, -61.59), libero.
+14:20:27.633 
+14:20:27.633 [WAYPOINT CREATION] Creo un nuovo waypoint MANUALE:
+14:20:27.633   Nome: wp_4 (formato dei waypoint manuali)
+14:20:27.633   Numero: 4
+14:20:27.633   Posizione: (28.781, -59.672, -18.140)
+14:20:27.633   Orientamento (imbardata): -100.2°
+14:20:27.633   Cella: (0, 2)
+14:20:27.723 [WAYPOINT CREATION] ✓ Waypoint creato:
+14:20:27.723   Nome: wp_4
+14:20:27.723   ID: hick-raven-.r5N0p9bKbGqEVKSOxKMbg==
+14:20:27.723   Posa salvata per i riallineamenti
+14:20:27.723   Cella salvata: (0, 2)
+14:20:27.723   Stato: 1
+14:20:27.723 
+14:20:27.723 [GRAPH_CACHE] Grafo in memoria da riscaricare
+14:20:27.723 [BRICIOLA] Waypoint wp_4 in (28.78, -59.67), nodo PRM 1 (traccia: 3 waypoint).
+14:20:27.751 [NODO] obiettivo cella (0,2): agganciato al nodo 2 in (28.46, -61.59), a 0.00 m da (28.46, -61.59) -- nessun nodo nuovo
+14:20:27.874 [GROUND-FILTER] scan-passo: 92 celle scartate, fino a 1.36 m sopra il suolo (suolo z=-18.615, stimato sotto il robot su 1696 celle)
+14:20:27.874 [GROUND-FILTER] scan-passo: 552 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0003 m
+14:20:27.876 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/801 (0.0%)
+14:20:27.968 [ARCHI] 135 archi fuori dal grafo per la scansione dal vivo (131 rivalutati, 4 oltre il raggio di refresh), prima della pendenza.
+14:20:27.968 [SPAZIO] Archi su cui i due criteri non concordano: 16 su 184 (8.7%) -- 7 bloccati solo dalla mappa binaria, 9 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 25914.
+14:20:27.969 [REPLAN STABILE] Percorso invariato da 1 a 2 (18 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+14:20:27.970 [FRONTE] 1.92 m confermati su 1.95 m di percorso, avanzamento consentito 1.27 m -- si ferma sul bordo dei dati in (28.46, -61.56): avanzo e riguardo
+14:20:28.011 [TEMPO] scansione 0.11 s | elaborazione 0.01 | mappe 0.03 | PRM 0.06 | fronte 0.04 | decisione: move
+14:20:28.011 [OK] Tratto 1->316 confermato libero dal fronte. Eseguo movimento...
+14:20:28.013 [SLOPE-SOURCE] Arco 1->316: LIVE (long=0.115, lat=0.311)
+14:20:28.017 [SLOPE-CHECK] Arco 1->316: in uso long=0.115 lat=0.311 | interpolata long=0.276 lat=0.525 | campioni dentro griglia: lungo arco 100%, laterali 100%
+14:20:28.017 [GAIT] Livello del terreno: HARD (pendenza=0.311, rugosita'=0.020) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.4, vel_max=0.25 m/s, rot_max=0.40 rad/s
+14:20:28.028 [INFO] Passo 1: rotazione verso il punto...
+14:20:28.960 [MOVIMENTO] Rotazione completata: +3 gradi su +4 richiesti (il centro del corpo si e' spostato di 0.00 m girando).
+14:20:28.960 [INFO] Passo 2: avanti di 0.88 m...
+14:20:29.905 [STOP] Movimento interrotto: richiesta del chiamante dopo 0.14m
+14:20:29.914 [TILT] Arco 1->316: picco roll=1.2 deg, pitch=2.8 deg (10 campioni) | stimato long=0.115 (~6.6 deg), lat=0.311 (~17.3 deg) | tier=HARD, 1.9s
+14:20:29.914 [STOP] Movimento verso (28.68, -60.55) interrotto dopo 0.14m: il fronte si e' accorciato (ostacolo in (28.62, -60.84)): raggiungibili 0.50 m su 0.86 m mancanti.
+14:20:29.927 [NODO] sosta (arresto): agganciato al nodo 1 in (28.84, -59.63), a 0.21 m da (28.79, -59.83) -- nessun nodo nuovo
+14:20:30.121 [GROUND-FILTER] scan-passo: 76 celle scartate, fino a 1.45 m sopra il suolo (suolo z=-18.613, stimato sotto il robot su 1696 celle)
+14:20:30.121 [GROUND-FILTER] scan-passo: 608 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0003 m
+14:20:30.124 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+14:20:30.242 [ARCHI] 155 archi fuori dal grafo per la scansione dal vivo (136 rivalutati, 19 oltre il raggio di refresh), prima della pendenza.
+14:20:30.242 [SPAZIO] Archi su cui i due criteri non concordano: 18 su 184 (9.8%) -- 7 bloccati solo dalla mappa binaria, 11 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 26302.
+14:20:30.243 [REPLAN] Percorso aggiornato (18 nodi locali rivalutati): 3 waypoint rimanenti.
+14:20:30.250 [FRONTE] 2.42 m confermati su 2.75 m di percorso, avanzamento consentito 1.77 m -- si ferma sul bordo dei dati in (28.78, -61.54): avanzo e riguardo
+14:20:30.307 [TEMPO] scansione 0.18 s | elaborazione 0.01 | mappe 0.05 | PRM 0.07 | fronte 0.06 | decisione: move
+14:20:30.341 [OK] Tratto 1->316 confermato libero dal fronte. Eseguo movimento...
+14:20:30.342 [SLOPE-SOURCE] Arco 1->316: LIVE (long=0.063, lat=0.291)
+14:20:30.345 [SLOPE-CHECK] Arco 1->316: in uso long=0.063 lat=0.291 | interpolata long=0.228 lat=0.497 | campioni dentro griglia: lungo arco 100%, laterali 100%
+14:20:30.345 [GAIT] Livello del terreno: HARD (pendenza=0.291, rugosita'=0.024) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.4, vel_max=0.25 m/s, rot_max=0.40 rad/s
+14:20:30.357 [INFO] Passo 1: rotazione verso il punto...
+14:20:31.570 [MOVIMENTO] Rotazione completata: -2 gradi su -2 richiesti (il centro del corpo si e' spostato di 0.08 m girando).
+14:20:31.570 [INFO] Passo 2: avanti di 0.73 m...
+14:20:32.126 [STOP] Movimento interrotto: richiesta del chiamante dopo 0.02m
+14:20:32.136 [TILT] Arco 1->316: picco roll=1.8 deg, pitch=3.8 deg (10 campioni) | stimato long=0.063 (~3.6 deg), lat=0.291 (~16.2 deg) | tier=HARD, 1.8s
+14:20:32.136 [STOP] Movimento verso (28.68, -60.55) interrotto dopo 0.02m: il fronte si e' accorciato (ostacolo in (28.76, -60.67)): raggiungibili 0.13 m su 0.63 m mancanti.
+14:20:32.306 [GROUND-FILTER] scan-passo: 159 celle scartate, fino a 1.45 m sopra il suolo (suolo z=-18.609, stimato sotto il robot su 1696 celle)
+14:20:32.316 [GROUND-FILTER] scan-passo: 816 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0003 m
+14:20:32.319 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/799 (0.0%)
+14:20:32.460 [ARCHI] 134 archi fuori dal grafo per la scansione dal vivo (121 rivalutati, 13 oltre il raggio di refresh), prima della pendenza.
+14:20:32.460 [SPAZIO] Archi su cui i due criteri non concordano: 7 su 184 (3.8%) -- 6 bloccati solo dalla mappa binaria, 1 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 26950.
+14:20:32.461 [REPLAN] Percorso aggiornato (18 nodi locali rivalutati): 4 waypoint rimanenti.
+14:20:32.467 [FRONTE] 2.34 m confermati su 3.09 m di percorso, avanzamento consentito 1.69 m -- si ferma sul bordo dei dati in (29.11, -61.89): avanzo e riguardo
+14:20:32.541 [TEMPO] scansione 0.15 s | elaborazione 0.03 | mappe 0.05 | PRM 0.09 | fronte 0.08 | decisione: move
+14:20:32.576 [MULTINODO] Il fronte conferma 1.69 m: percorro 2 tratti di fila [238, 463] senza fermarmi a riscansionare.
+14:20:32.576 [OK] Tratto 1->238 confermato libero dal fronte. Eseguo movimento...
+14:20:32.577 [SLOPE-SOURCE] Arco 1->238: LIVE (long=0.228, lat=0.175)
+14:20:32.578 [SLOPE-CHECK] Arco 1->238: in uso long=0.228 lat=0.175 | interpolata long=0.571 lat=0.480 | campioni dentro griglia: lungo arco 100%, laterali 100%
+14:20:32.578 [GAIT] Livello del terreno: MODERATE (pendenza=0.228, rugosita'=0.026) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.6, vel_max=0.35 m/s, rot_max=0.50 rad/s
+14:20:32.587 [INFO] Passo 1: rotazione verso il punto...
+14:20:35.170 [MOVIMENTO] Rotazione completata: -41 gradi su -42 richiesti (il centro del corpo si e' spostato di 0.04 m girando).
+14:20:35.170 [INFO] Passo 2: avanti di 0.38 m...
+14:20:38.292 [MOVIMENTO] Arrivato: percorsi 0.32 m su 0.38 richiesti.
+14:20:38.307 [TILT] Arco 1->238: picco roll=1.3 deg, pitch=12.9 deg (27 campioni) | stimato long=0.228 (~12.8 deg), lat=0.175 (~9.9 deg) | tier=MODERATE, 5.7s
+14:20:38.307 [INFO] Spostamento completato con successo su (28.49, -60.19)
+14:20:38.386 [OK] Tratto 238->463 confermato libero dal fronte. Eseguo movimento...
+14:20:38.387 [SLOPE-SOURCE] Arco 238->463: LIVE (long=0.271, lat=0.238)
+14:20:38.395 [SLOPE-CHECK] Arco 238->463: in uso long=0.271 lat=0.238 | interpolata long=0.379 lat=0.473 | campioni dentro griglia: lungo arco 100%, laterali 100%
+14:20:38.395 [GAIT] Livello del terreno: HARD (pendenza=0.271, rugosita'=0.018) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.4, vel_max=0.25 m/s, rot_max=0.40 rad/s
+14:20:38.408 [INFO] Passo 1: rotazione verso il punto...
+14:20:43.511 [MOVIMENTO] Rotazione completata: +90 gradi su +90 richiesti (il centro del corpo si e' spostato di 0.02 m girando).
+14:20:43.511 [INFO] Passo 2: avanti di 1.04 m...
+14:20:50.054 [MOVIMENTO] Arrivato: percorsi 1.03 m su 1.04 richiesti.
+14:20:50.066 [TILT] Arco 238->463: picco roll=1.3 deg, pitch=13.5 deg (54 campioni) | stimato long=0.271 (~15.1 deg), lat=0.238 (~13.4 deg) | tier=HARD, 11.7s
+14:20:50.066 [INFO] Spostamento completato con successo su (29.19, -61.02)
+14:20:50.084 
+14:20:50.084 [WAYPOINT CREATION] Creo un nuovo waypoint MANUALE:
+14:20:50.084   Nome: wp_5 (formato dei waypoint manuali)
+14:20:50.084   Numero: 5
+14:20:50.084   Posizione: (29.166, -61.044, -18.055)
+14:20:50.084   Orientamento (imbardata): -50.1°
+14:20:50.084   Cella: (0, 2)
+14:20:50.971 [WAYPOINT CREATION] ✓ Waypoint creato:
+14:20:50.971   Nome: wp_5
+14:20:50.971   ID: lethal-scarab-GKFjfWp1zZlIJVEhqS3csw==
+14:20:50.971   Posa salvata per i riallineamenti
+14:20:50.971   Cella salvata: (0, 2)
+14:20:50.971   Stato: 1
+14:20:50.971 
+14:20:50.971 [GRAPH_CACHE] Grafo in memoria da riscaricare
+14:20:50.971 [BRICIOLA] Waypoint wp_5 in (29.17, -61.04), nodo PRM 463 (traccia: 4 waypoint).
+14:20:51.207 [GROUND-FILTER] scan-passo: 87 celle scartate, fino a 1.66 m sopra il suolo (suolo z=-18.493, stimato sotto il robot su 1696 celle)
+14:20:51.207 [GROUND-FILTER] scan-passo: 521 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0003 m
+14:20:51.210 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 20/799 (2.5%)
+14:20:51.210                  perche': prossimita'=20  rugosita'=0  entrambi=0   (celle non valide sotto il corpo: 0)
+14:20:51.210                  dove: nucleo=0/499  corona esterna=20/300
+14:20:51.304 [ARCHI] 245 archi fuori dal grafo per la scansione dal vivo (155 rivalutati, 90 oltre il raggio di refresh), prima della pendenza.
+14:20:51.304 [SPAZIO] Archi su cui i due criteri non concordano: 49 su 244 (20.1%) -- 38 bloccati solo dalla mappa binaria, 11 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 32082.
+14:20:51.304 [REPLAN STABILE] Percorso invariato da 463 a 2 (20 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+14:20:51.306 [FRONTE] 2.15 m confermati su 1.60 m di percorso, avanzamento consentito 1.60 m -- percorso libero fino all'obiettivo
+14:20:51.456 [TEMPO] scansione 0.19 s | elaborazione 0.01 | mappe 0.03 | PRM 0.06 | fronte 0.15 | decisione: move
+14:20:51.506 [ARRIVO] Il passo di 0.87 m verso (29.10, -61.92) (obstacle_distance li' 0.32 m) mi porterebbe dove non ci sono uscite: 0/24 direzioni utilizzabili (+105 gradi: 2.26 m (NON ruotabile); +90 gradi: 2.14 m (NON ruotabile); +75 gradi: 1.85 m (NON ruotabile); +165 gradi: 1.30 m (NON ruotabile)). Non ci vado (1/3), scarto il tratto 463->228 per il resto del tentativo e ripianifico.
+14:20:51.611 [GROUND-FILTER] scan-passo: 72 celle scartate, fino a 1.61 m sopra il suolo (suolo z=-18.493, stimato sotto il robot su 1696 celle)
+14:20:51.611 [GROUND-FILTER] scan-passo: 479 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0003 m
+14:20:51.614 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 20/799 (2.5%)
+14:20:51.614                  perche': prossimita'=20  rugosita'=0  entrambi=0   (celle non valide sotto il corpo: 0)
+14:20:51.614                  dove: nucleo=0/500  corona esterna=20/299
+14:20:51.744 [ARCHI] 157 archi fuori dal grafo per la scansione dal vivo (156 rivalutati, 1 oltre il raggio di refresh), prima della pendenza.
+14:20:51.745 [SPAZIO] Archi su cui i due criteri non concordano: 30 su 244 (12.3%) -- 30 bloccati solo dalla mappa binaria, 0 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 32165.
+14:20:51.745 [REPLAN] Percorso aggiornato (20 nodi locali rivalutati): 1 waypoint rimanenti.
+14:20:51.751 [FRONTE] 1.44 m confermati su 0.89 m di percorso, avanzamento consentito 0.89 m -- percorso libero fino all'obiettivo
+14:20:51.819 [TEMPO] scansione 0.10 s | elaborazione 0.01 | mappe 0.03 | PRM 0.10 | fronte 0.07 | decisione: move
+14:20:51.819 [OK] Tratto 463->2 confermato libero dal fronte. Eseguo movimento...
+14:20:51.820 [SLOPE-SOURCE] Arco 463->2: LIVE (long=0.290, lat=0.246)
+14:20:51.825 [SLOPE-CHECK] Arco 463->2: in uso long=0.290 lat=0.246 | interpolata long=0.540 lat=0.524 | campioni dentro griglia: lungo arco 100%, laterali 100%
+14:20:51.825 [GAIT] Livello del terreno: HARD (pendenza=0.290, rugosita'=0.021) -> locomotion_hint=4, swing_height=3, ground_mu_hint=0.4, vel_max=0.25 m/s, rot_max=0.40 rad/s
+14:20:51.841 [INFO] Passo 1: rotazione verso il punto...
+14:20:56.860 [MOVIMENTO] Rotazione completata: -92 gradi su -92 richiesti (il centro del corpo si e' spostato di 0.04 m girando).
+14:20:56.860 [INFO] Passo 2: avanti di 0.89 m...
+14:21:00.961 [STOP] Movimento interrotto: richiesta del chiamante dopo 0.86m
+14:21:00.981 [TILT] Arco 463->2: picco roll=1.9 deg, pitch=14.1 deg (43 campioni) | stimato long=0.290 (~16.2 deg), lat=0.246 (~13.8 deg) | tier=HARD, 9.2s
+14:21:00.981 [STOP] Movimento verso (28.46, -61.59) interrotto dopo 0.86m: il fronte si e' accorciato (ostacolo in (28.35, -62.10)): raggiungibili 0.00 m su 0.10 m mancanti.
+14:21:00.993 [NODO] sosta (arresto): agganciato al nodo 2 in (28.46, -61.59), a 0.07 m da (28.41, -61.53) -- nessun nodo nuovo
+14:21:01.139 [GROUND-FILTER] scan-passo: 65 celle scartate, fino a 1.72 m sopra il suolo (suolo z=-18.692, stimato sotto il robot su 1696 celle)
+14:21:01.139 [GROUND-FILTER] scan-passo: 351 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0003 m
+14:21:01.141 [FOOTPRINT-DIAG] scan-passo: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+14:21:01.293 [ARCHI] 225 archi fuori dal grafo per la scansione dal vivo (159 rivalutati, 66 oltre il raggio di refresh), prima della pendenza.
+14:21:01.294 [SPAZIO] Archi su cui i due criteri non concordano: 46 su 220 (20.9%) -- 21 bloccati solo dalla mappa binaria, 25 solo dallo spazio libero. Adesso decide la mappa binaria. Celle con spazio libero noto: 36227.
+14:21:01.294 [REPLAN STABILE] Percorso invariato da 2 a 2 (20 nodi locali rivalutati): l'alternativa non supera la soglia di stabilita'. Proseguo sul piano corrente.
+14:21:01.294 [FRONTE] 0.51 m confermati su 0.07 m di percorso, avanzamento consentito 0.00 m -- ostacolo a 0.29 m dalla linea centrale in (28.77, -61.90) (minimo 0.25 m; qui decide l'isteresi, che tiene bloccante la cella fino a 0.29 m)
+14:21:01.361 [TEMPO] scansione 0.14 s | elaborazione 0.01 | mappe 0.03 | PRM 0.12 | fronte 0.07 | decisione: arrived
+14:21:01.361 [OBIETTIVO] Il fronte non permette gli ultimi 0.07 m (ostacolo), entro la tolleranza di 0.65 m: considero raggiunto l'obiettivo.
+14:21:01.389 [CHECK] Il punto (28.39,-61.56) e' DENTRO la cella (0,2)
+14:21:01.561 [MAP] Cella (0, 2) segnata come visitata (centro del robot dentro)
+14:21:01.630 
+14:21:01.630 [WAYPOINT CREATION] Creo un nuovo waypoint MANUALE:
+14:21:01.630   Nome: wp_6 (formato dei waypoint manuali)
+14:21:01.630   Numero: 6
+14:21:01.630   Posizione: (28.388, -61.567, -18.244)
+14:21:01.630   Orientamento (imbardata): -143.0°
+14:21:01.630   Cella: (0, 2)
+14:21:02.079 [WAYPOINT CREATION] ✓ Waypoint creato:
+14:21:02.079   Nome: wp_6
+14:21:02.079   ID: spiffy-flea-8pPBziDl7bnRDMWkkhIDkg==
+14:21:02.081   Posa salvata per i riallineamenti
+14:21:02.081   Cella salvata: (0, 2)
+14:21:02.081   Stato: 1
+14:21:02.081 
+14:21:02.081 [GRAPH_CACHE] Grafo in memoria da riscaricare
+14:21:02.081 [WAYPOINT] Registrato il waypoint n. 2 in (28.389, -61.566)
+14:21:02.081 [VISITED] Cella (0,2) segnata come visitata (valore 1)
+14:21:02.081 
+14:21:02.081 [ADJACENT] Cerco le celle confinanti non esplorate attorno a (0,2)
+14:21:02.081   ✓ Vicina south: (1,2) rango=11
+14:21:02.081   ✓ Vicina east: (0,3) rango=3
+14:21:02.081 [ADJACENT] ✓ 2 celle confinanti non esplorate
+14:21:02.081 [ADJACENT] Quella di rango piu' basso: (0,3) rango=3
+14:21:02.129 [PROGRESSO] 3/56 celle chiuse (5%): 3 visitate, 0 bloccate, 53 da fare | area vista 10%
+14:21:02.129             1.0 min trascorsi, ~26 min alla fine (0.50 min a cella) | batteria 68%
+14:21:02.129 [(1, 0, 13), (1, 1, 12), (0, 3, 3), (1, 2, 11)]
+14:21:02.158 
+14:21:02.158 [ADJACENT] Cerco le celle confinanti non esplorate attorno a (0,2)
+14:21:02.158   ✓ Vicina south: (1,2) rango=11
+14:21:02.158   ✓ Vicina east: (0,3) rango=3
+14:21:02.158 [ADJACENT] ✓ 2 celle confinanti non esplorate
+14:21:02.158 [ADJACENT] Quella di rango piu' basso: (0,3) rango=3
+14:21:02.158 
+14:21:02.158 [ATTEMPT] Provo a entrare nella cella (0,3) dalla posizione attuale...
+14:21:02.329 [GROUND-FILTER] scan-iniziale: 90 celle scartate, fino a 1.73 m sopra il suolo (suolo z=-18.702, stimato sotto il robot su 1696 celle)
+14:21:02.329 [GROUND-FILTER] scan-iniziale: 285 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0003 m
+14:21:02.332 [FOOTPRINT-DIAG] scan-cella: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+14:21:02.389 [MAP] Mappa globale salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_28-10-2026_14-19-52/global_occupancy_map.pkl
+14:21:02.496 [MAP] Mappa globale del terreno salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_28-10-2026_14-19-52/global_terrain_map.pkl
+14:21:02.496 [MAP] Dimensione mappe globali -- occupazione: 36820 celle, terreno: 29026 celle
+14:21:02.497 [DATA SAVE] Matrici .npy salvate per cella (0,3)
+14:21:02.617 [PENDENZE] costruzione: archi vetati per pendenza -- longitudinale 2 (max 0.80), laterale 5 (max 0.98), 7 mai vetati prima; 0 cambi di verdetto vicino soglia (soglia 0.60).
+14:21:02.617 [GRAFO] Aggiornamento locale: rivalutate 1269 coppie su 7450 (vicine alle zone con dati nuovi), 602 ammesse; le altre restano come erano.
+14:21:02.618 [TEMPO] aggiornamento locale del grafo: 0.12 s
+14:21:02.618 [ARCHI] 359 archi scartati subito dalla scansione dal vivo (passano a meno di 0.25 m da un ostacolo appena visto), prima della pendenza.
+14:21:02.618 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1), (0, 2), (0, 3)]: 69 nodi su 952. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+14:21:02.618 [NODO] partenza tentativo: agganciato al nodo 2 in (28.46, -61.59), a 0.08 m da (28.39, -61.57) -- nessun nodo nuovo
+14:21:02.632 [TARGET] Cella (0,3): uso il centro geometrico (28.07, -63.55), ignoto; NESSUN punto della cella e' raggiungibile dal robot nel grafo.
+14:21:02.679 
+14:21:02.679 [WAYPOINT CREATION] Creo un nuovo waypoint MANUALE:
+14:21:02.679   Nome: wp_7 (formato dei waypoint manuali)
+14:21:02.679   Numero: 7
+14:21:02.679   Posizione: (28.387, -61.571, -18.243)
+14:21:02.679   Orientamento (imbardata): -142.9°
+14:21:02.679   Cella: (0, 3)
+14:21:02.807 [WAYPOINT CREATION] ✓ Waypoint creato:
+14:21:02.807   Nome: wp_7
+14:21:02.808   ID: three-fleece-cTW9ToHuVyMTbFm3.eRX7A==
+14:21:02.808   Posa salvata per i riallineamenti
+14:21:02.808   Cella salvata: (0, 3)
+14:21:02.808   Stato: 1
+14:21:02.808 
+14:21:02.808 [GRAPH_CACHE] Grafo in memoria da riscaricare
+14:21:02.808 [BRICIOLA] Waypoint wp_7 in (28.39, -61.57), nodo PRM 2 (traccia: 5 waypoint).
+14:21:02.820 [NODO] obiettivo cella (0,3): agganciato al nodo 3 in (28.07, -63.55), a 0.00 m da (28.07, -63.55) -- nessun nodo nuovo
+14:21:02.821 [GRAFO DISCONNESSO] Nessun percorso nel PRM dal nodo 2 al nodo 3: i due nodi stanno in componenti separate del grafo. Non e' un errore di Dijkstra -- vuol dire che tutti gli archi di collegamento sono stati vetati (occupazione o pendenza). Vedi i conteggi in [PRM MISSION SUMMARY].
+14:21:02.821  -> Coordinate partenza robot: (28.39, -61.57)
+14:21:02.821  -> Coordinate target cella: (28.07, -63.55)
+14:21:02.843 [CHECK] Il punto (28.39,-61.57) e' FUORI dalla cella (0,3) di (-2.00,-0.07)
+14:21:03.033 [PENDENZE] costruzione: archi vetati per pendenza -- longitudinale 1 (max 0.82), laterale 1 (max 0.74), 1 mai vetati prima; 0 cambi di verdetto vicino soglia (soglia 0.60).
+14:21:03.033 [GRAFO] Aggiornamento locale: rivalutate 942 coppie su 7450 (vicine alle zone con dati nuovi), 372 ammesse; le altre restano come erano.
+14:21:03.039 [TARGET] Cella (0,3): uso il centro geometrico (28.07, -63.55), ignoto.
+14:21:03.039 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1), (0, 2), (0, 3)]: 69 nodi su 952. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+14:21:03.040 [NODO] verifica recupero (robot): agganciato al nodo 2 in (28.46, -61.59), a 0.07 m da (28.39, -61.57) -- nessun nodo nuovo
+14:21:03.040 [NODO] verifica recupero (obiettivo): agganciato al nodo 3 in (28.07, -63.55), a 0.00 m da (28.07, -63.55) -- nessun nodo nuovo
+14:21:03.041 [SKIP] Nessun percorso alternativo valido o costo superiore a 4. Continuo l'algoritmo normale.
+14:21:03.041 [SIDE] Cella (0,3): lato 0b1 segnato come provato (ora 0b1)
+14:21:03.041 [CELLA] (0,3) dopo il tentativo fallito: dei punti candidati, 4 visti liberi, 10 mai visti, 5 dentro un ostacolo nella mappa globale.
+14:21:03.041 [DEFER] Cella (0,3) non ancora provata da tutti i lati (lati provati: 0b1): resta candidata della frontiera e si ritentera' piu' avanti, nell'ordine normale, da un lato non ancora provato.
+14:21:03.041 [(1, 0, 13), (1, 1, 12), (1, 2, 11), (0, 3, 3)]
+14:21:03.055 
+14:21:03.055 [ADJACENT] Cerco le celle confinanti non esplorate attorno a (0,2)
+14:21:03.055   ✓ Vicina south: (1,2) rango=11
+14:21:03.055   ✗ Vicina east: (0,3) gia' provata da questo lato senza successo: per ora la salto
+14:21:03.055 [ADJACENT] ✓ 1 celle confinanti non esplorate
+14:21:03.055 [ADJACENT] Quella di rango piu' basso: (1,2) rango=11
+14:21:03.055 
+14:21:03.055 [ATTEMPT] Provo a entrare nella cella (1,2) dalla posizione attuale...
+14:21:03.188 [GROUND-FILTER] scan-iniziale: 112 celle scartate, fino a 1.65 m sopra il suolo (suolo z=-18.702, stimato sotto il robot su 1696 celle)
+14:21:03.188 [GROUND-FILTER] scan-iniziale: 296 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0008 m
+14:21:03.190 [FOOTPRINT-DIAG] scan-cella: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+14:21:03.254 [MAP] Mappa globale salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_28-10-2026_14-19-52/global_occupancy_map.pkl
+14:21:03.364 [MAP] Mappa globale del terreno salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_28-10-2026_14-19-52/global_terrain_map.pkl
+14:21:03.364 [MAP] Dimensione mappe globali -- occupazione: 36910 celle, terreno: 29165 celle
+14:21:03.365 [DATA SAVE] Matrici .npy salvate per cella (1,2)
+14:21:03.468 [GRAFO] Aggiornamento locale: rivalutate 942 coppie su 7450 (vicine alle zone con dati nuovi), 371 ammesse; le altre restano come erano.
+14:21:03.469 [TEMPO] aggiornamento locale del grafo: 0.10 s
+14:21:03.469 [ARCHI] 354 archi scartati subito dalla scansione dal vivo (passano a meno di 0.25 m da un ostacolo appena visto), prima della pendenza.
+14:21:03.469 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1), (0, 2), (1, 2)]: 70 nodi su 952. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+14:21:03.470 [NODO] partenza tentativo: agganciato al nodo 2 in (28.46, -61.59), a 0.07 m da (28.39, -61.57) -- nessun nodo nuovo
+14:21:03.481 [TARGET] Cella (1,2): centro occupato nella mappa, uso il punto libero (30.99, -61.69), a 0.63 m dal centro; NESSUN punto della cella e' raggiungibile dal robot nel grafo  [liberi=4 ignoti=3 scartati=12 stretti=1 sul bordo=4 rifiutati=0]
+14:21:03.512 
+14:21:03.512 [WAYPOINT CREATION] Creo un nuovo waypoint MANUALE:
+14:21:03.512   Nome: wp_8 (formato dei waypoint manuali)
+14:21:03.512   Numero: 8
+14:21:03.512   Posizione: (28.387, -61.572, -18.243)
+14:21:03.512   Orientamento (imbardata): -142.9°
+14:21:03.512   Cella: (1, 2)
+14:21:03.615 [WAYPOINT CREATION] ✓ Waypoint creato:
+14:21:03.615   Nome: wp_8
+14:21:03.615   ID: garbed-zebra-05qqBq9Ty7Qkd1APJXjYWg==
+14:21:03.615   Posa salvata per i riallineamenti
+14:21:03.615   Cella salvata: (1, 2)
+14:21:03.615   Stato: 1
+14:21:03.615 
+14:21:03.615 [GRAPH_CACHE] Grafo in memoria da riscaricare
+14:21:03.615 [BRICIOLA] Waypoint wp_8 in (28.39, -61.57), nodo PRM 2 (traccia: 6 waypoint).
+14:21:03.662 [NODO] obiettivo cella (1,2): agganciato al nodo 118 in (30.99, -61.69), a 0.00 m da (30.99, -61.69) -- nessun nodo nuovo
+14:21:03.663 [GRAFO DISCONNESSO] Nessun percorso nel PRM dal nodo 2 al nodo 118: i due nodi stanno in componenti separate del grafo. Non e' un errore di Dijkstra -- vuol dire che tutti gli archi di collegamento sono stati vetati (occupazione o pendenza). Vedi i conteggi in [PRM MISSION SUMMARY].
+14:21:03.664  -> Coordinate partenza robot: (28.39, -61.57)
+14:21:03.664  -> Coordinate target cella: (30.99, -61.69)
+14:21:03.685 [CHECK] Il punto (28.39,-61.57) e' FUORI dalla cella (1,2) di (-0.00,-2.07)
+14:21:03.893 [PENDENZE] costruzione: archi vetati per pendenza -- longitudinale 2 (max 0.79), laterale 4 (max 0.81), 2 mai vetati prima; 0 cambi di verdetto vicino soglia (soglia 0.60).
+14:21:03.893 [GRAFO] Aggiornamento locale: rivalutate 942 coppie su 7450 (vicine alle zone con dati nuovi), 365 ammesse; le altre restano come erano.
+14:21:03.899 [TARGET] Cella (1,2): centro occupato nella mappa, uso il punto libero (30.99, -61.69), a 0.63 m dal centro  [liberi=4 ignoti=3 scartati=12 stretti=1 sul bordo=4 rifiutati=0]
+14:21:03.899 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1), (0, 2), (1, 2)]: 70 nodi su 952. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+14:21:03.899 [NODO] verifica recupero (robot): agganciato al nodo 2 in (28.46, -61.59), a 0.07 m da (28.39, -61.57) -- nessun nodo nuovo
+14:21:03.900 [NODO] verifica recupero (obiettivo): agganciato al nodo 118 in (30.99, -61.69), a 0.00 m da (30.99, -61.69) -- nessun nodo nuovo
+14:21:03.900 [SKIP] Nessun percorso alternativo valido o costo superiore a 4. Continuo l'algoritmo normale.
+14:21:03.900 [SIDE] Cella (1,2): lato 0b1000 segnato come provato (ora 0b1000)
+14:21:03.901 [CELLA] (1,2) dopo il tentativo fallito: dei punti candidati, 4 visti liberi, 3 mai visti, 13 dentro un ostacolo nella mappa globale.
+14:21:03.901 [DEFER] Cella (1,2) non ancora provata da tutti i lati (lati provati: 0b1000): resta candidata della frontiera e si ritentera' piu' avanti, nell'ordine normale, da un lato non ancora provato.
+14:21:03.901 [(1, 0, 13), (1, 1, 12), (0, 3, 3), (1, 2, 11)]
+14:21:03.913 
+14:21:03.913 [ADJACENT] Cerco le celle confinanti non esplorate attorno a (0,2)
+14:21:03.913   ✗ Vicina south: (1,2) gia' provata da questo lato senza successo: per ora la salto
+14:21:03.913   ✗ Vicina east: (0,3) gia' provata da questo lato senza successo: per ora la salto
+14:21:03.913 [ADJACENT] Nessuna cella confinante non esplorata
+14:21:03.913 
+14:21:03.913 [FRONTIER_RANK] Cerco la cella di rango piu' basso fra 4 celle di frontiera
+14:21:03.914   Cella (1,0): rango=13
+14:21:03.914   Cella (1,1): rango=12
+14:21:03.914   Cella (0,3): rango=3
+14:21:03.914   Cella (1,2): rango=11
+14:21:03.914 [FRONTIER_RANK] ✓ Cella di rango piu' basso: (0,3) rango=3
+14:21:03.914 [WAYPOINTS] 5 waypoint manuali con la cella
+14:21:03.914 [NEAREST_WP] Waypoint in una cella confinante: (0, 2)
+14:21:03.914 [WAYPOINTS] 5 waypoint manuali con la cella
+14:21:03.914 [SKIP-ROUND] Cella (0,3): ci arriverei dallo stesso lato gia' provato senza successo. Per questo giro provo la candidata successiva.
+14:21:03.914 
+14:21:03.914 [FRONTIER_RANK] Cerco la cella di rango piu' basso fra 3 celle di frontiera
+14:21:03.914   Cella (1,0): rango=13
+14:21:03.914   Cella (1,1): rango=12
+14:21:03.914   Cella (1,2): rango=11
+14:21:03.914 [FRONTIER_RANK] ✓ Cella di rango piu' basso: (1,2) rango=11
+14:21:03.914 [WAYPOINTS] 5 waypoint manuali con la cella
+14:21:03.914 [NEAREST_WP] Waypoint in una cella confinante: (0, 2)
+14:21:03.914 [WAYPOINTS] 5 waypoint manuali con la cella
+14:21:03.914 [SKIP-ROUND] Cella (1,2): ci arriverei dallo stesso lato gia' provato senza successo. Per questo giro provo la candidata successiva.
+14:21:03.914 
+14:21:03.914 [FRONTIER_RANK] Cerco la cella di rango piu' basso fra 2 celle di frontiera
+14:21:03.914   Cella (1,0): rango=13
+14:21:03.914   Cella (1,1): rango=12
+14:21:03.914 [FRONTIER_RANK] ✓ Cella di rango piu' basso: (1,1) rango=12
+14:21:03.914 [WAYPOINTS] 5 waypoint manuali con la cella
+14:21:03.914 [NEAREST_WP] Waypoint in una cella confinante: (0, 1)
+14:21:03.914 [WAYPOINTS] 5 waypoint manuali con la cella
+14:21:03.914 [WAYPOINTS] 5 waypoint manuali con la cella
+14:21:03.932 [WAYPOINTS] 5 waypoint manuali con la cella
+14:21:03.941 [GRAPH_CACHE] Scarico il grafo aggiornato dal robot...
+14:21:04.079 [GRAPHNAV] prima dello spostamento fra celle: strada verso wp_3 2.7 m -> 2.4 m con 2 scorciatoie (fino a 3.0 m, viste libere con 0.30 m di margine).
+14:21:04.079 [GRAPH_CACHE] Grafo in memoria da riscaricare
+14:21:04.079 [GRAPHNAV] prima dello spostamento fra celle: 2 scorciatoie dalla mappa globale + 0 da Spot (chiusure d'anello con controllo di collisione).
+14:21:04.090 [REGISTRAZIONE] Attendo che la mappa finisca di elaborare...
+14:21:04.612 [REGISTRAZIONE] Registrazione della mappa fermata.
+14:21:04.644 [GRAPHNAV] verso il waypoint della cella (0, 1) per la cella (1,1): avvio (massimo 240 s, 0.5 m/s).
+14:21:04.707 [LOCALIZZAZIONE] prima di 'verso il waypoint della cella (0, 1) per la cella (1,1)': localizzato su wp_8 | localizzazioni accettate 116499, rifiutate 1451 (0 dall'ultima accettata, 0.0 m fatti cosi'), archi cattivi di fila 0 | ultimo passo HARD, beccheggio 13.6 gradi.
+14:21:19.408 [GRAPHNAV] verso il waypoint della cella (0, 1) per la cella (1,1): arrivato in 15 s.
+14:21:19.445 [DERIVA] verso il waypoint della cella (0, 1) per la cella (1,1): localizzato su wp_3, creato 0.9 min fa -> l'odometria (VISION) e' scostata di 0.06 m (dx +0.06, dy -0.01) da dove GraphNav mette il robot.
+14:21:19.477 [GRAPH_CACHE] Scarico il grafo aggiornato dal robot...
+14:21:19.604 [GRAPH_CACHE] Grafo in memoria da riscaricare
+14:21:19.604 [REGISTRAZIONE] Registrazione della mappa avviata.
+14:21:19.623 [BATTERIA] dopo lo spostamento GraphNav: carica 68%, 0.74 %/min, 0.152 %/m su 7 m, autonomia stimata da Spot 64 min, ~51 min alla soglia del 30%
+14:21:19.623 
+14:21:19.623 [ATTEMPT] Provo a entrare nella cella (1,1) dalla posizione attuale...
+14:21:19.721 [GROUND-FILTER] scan-iniziale: 277 celle scartate, fino a 1.69 m sopra il suolo (suolo z=-18.609, stimato sotto il robot su 1696 celle)
+14:21:19.721 [GROUND-FILTER] scan-iniziale: 310 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota +0.0000 m
+14:21:19.723 [FOOTPRINT-DIAG] scan-cella: celle sotto il corpo marcate ostacolo: 0/800 (0.0%)
+14:21:19.770 [MAP] Mappa globale salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_28-10-2026_14-19-52/global_occupancy_map.pkl
+14:21:19.900 [MAP] Mappa globale del terreno salvata correttamente in /home/andrea/spotSDK/v2/AutonomousNavigationSpot/MissionMap/Mission_28-10-2026_14-19-52/global_terrain_map.pkl
+14:21:19.900 [MAP] Dimensione mappe globali -- occupazione: 36912 celle, terreno: 29296 celle
+14:21:19.901 [DATA SAVE] Matrici .npy salvate per cella (1,1)
+14:21:20.010 [PENDENZE] costruzione: archi vetati per pendenza -- longitudinale 1 (max 0.66), laterale 2 (max 0.75), 3 mai vetati prima; 0 cambi di verdetto vicino soglia (soglia 0.60).
+14:21:20.010 [GRAFO] Aggiornamento locale: rivalutate 1163 coppie su 7450 (vicine alle zone con dati nuovi), 492 ammesse; le altre restano come erano.
+14:21:20.011 [TEMPO] aggiornamento locale del grafo: 0.11 s
+14:21:20.011 [ARCHI] 283 archi scartati subito dalla scansione dal vivo (passano a meno di 0.25 m da un ostacolo appena visto), prima della pendenza.
+14:21:20.011 [PIANO] Percorsi ammessi solo nelle celle [(0, 0), (0, 1), (0, 2), (1, 1)]: 68 nodi su 952. Se serve passare da una cella non visitata, rinuncio a questo lato e passo a un'altra cella.
+14:21:20.011 [NODO] partenza tentativo: agganciato al nodo 1 in (28.84, -59.63), a 0.05 m da (28.84, -59.68) -- nessun nodo nuovo
+14:21:20.023 [TARGET] Cella (1,1): centro occupato nella mappa, uso il punto ignoto (31.47, -59.91), a 0.67 m dal centro; NESSUN punto della cella e' raggiungibile dal robot nel grafo  [liberi=1 ignoti=6 scartati=10 stretti=2 sul bordo=4 rifiutati=0]
+14:21:20.056 
+14:21:20.056 [WAYPOINT CREATION] Creo un nuovo waypoint MANUALE:
+14:21:20.056   Nome: wp_9 (formato dei waypoint manuali)
+14:21:20.057   Numero: 9
+14:21:20.057   Posizione: (28.845, -59.699, -18.137)
+14:21:20.057   Orientamento (imbardata): -100.1°
+14:21:20.057   Cella: (1, 1)
+14:21:20.137 [WAYPOINT CREATION] ✓ Waypoint creato:
+14:21:20.137   Nome: wp_9
+14:21:20.137   ID: burked-weaver-VMP.QUV9FP.WfXonpL4JkA==
+14:21:20.137   Posa salvata per i riallineamenti
+14:21:20.137   Cella salvata: (1, 1)
+14:21:20.137   Stato: 1
+14:21:20.137 
+14:21:20.137 [GRAPH_CACHE] Grafo in memoria da riscaricare
+14:21:20.137 [BRICIOLA] Waypoint wp_9 in (28.85, -59.70), nodo PRM 1 (traccia: 7 waypoint).
+14:21:20.150 [NODO] obiettivo cella (1,1): agganciato al nodo 775 in (31.47, -59.91), a 0.00 m da (31.47, -59.91) -- nessun nodo nuovo
+14:21:20.152 [GRAFO DISCONNESSO] Nessun percorso nel PRM dal nodo 1 al nodo 775: i due nodi stanno in componenti separate del grafo. Non e' un errore di Dijkstra -- vuol dire che tutti gli archi di collegamento sono stati vetati (occupazione o pendenza). Vedi i conteggi in [PRM MISSION SUMMARY].
+14:21:20.152  -> Coordinate partenza robot: (28.84, -59.68)
+14:21:20.152  -> Coordinate target cella: (31.47, -59.91)
+14:21:20.179 [CHECK] Il punto (28.85,-59.70) e' FUORI dalla cella (1,1) di (0.07,-1.98)
+14:21:20.179 [SIDE] Cella (1,1): lato 0b1000 segnato come provato (ora 0b1000)
+14:21:20.180 [CELLA] (1,1) dopo il tentativo fallito: dei punti candidati, 2 visti liberi, 6 mai visti, 10 dentro un ostacolo nella mappa globale.
+14:21:20.180 [DEFER] Cella (1,1) non ancora provata da tutti i lati (lati provati: 0b1000): resta candidata della frontiera e si ritentera' piu' avanti, nell'ordine normale, da un lato non ancora provato.
+14:21:20.180 [(1, 0, 13), (1, 1, 12), (0, 3, 3), (1, 2, 11)]
+14:21:20.193 
+14:21:20.193 [ADJACENT] Cerco le celle confinanti non esplorate attorno a (0,1)
+14:21:20.193   ✗ Vicina south: (1,1) gia' provata da questo lato senza successo: per ora la salto
+14:21:20.193 [ADJACENT] Nessuna cella confinante non esplorata
+14:21:20.193 
+14:21:20.193 [FRONTIER_RANK] Cerco la cella di rango piu' basso fra 4 celle di frontiera
+14:21:20.193   Cella (1,0): rango=13
+14:21:20.194   Cella (1,1): rango=12
+14:21:20.194   Cella (0,3): rango=3
+14:21:20.194   Cella (1,2): rango=11
+14:21:20.194 [FRONTIER_RANK] ✓ Cella di rango piu' basso: (0,3) rango=3
+14:21:20.194 [WAYPOINTS] 6 waypoint manuali con la cella
+14:21:20.194 [NEAREST_WP] Waypoint in una cella confinante: (0, 2)
+14:21:20.194 [WAYPOINTS] 6 waypoint manuali con la cella
+14:21:20.194 [SKIP-ROUND] Cella (0,3): ci arriverei dallo stesso lato gia' provato senza successo. Per questo giro provo la candidata successiva.
+14:21:20.194 
+14:21:20.194 [FRONTIER_RANK] Cerco la cella di rango piu' basso fra 3 celle di frontiera
+14:21:20.194   Cella (1,0): rango=13
+14:21:20.194   Cella (1,1): rango=12
+14:21:20.194   Cella (1,2): rango=11
+14:21:20.194 [FRONTIER_RANK] ✓ Cella di rango piu' basso: (1,2) rango=11
+14:21:20.194 [WAYPOINTS] 6 waypoint manuali con la cella
+14:21:20.194 [NEAREST_WP] Waypoint in una cella confinante: (0, 2)
+14:21:20.194 [WAYPOINTS] 6 waypoint manuali con la cella
+14:21:20.194 [SKIP-ROUND] Cella (1,2): ci arriverei dallo stesso lato gia' provato senza successo. Per questo giro provo la candidata successiva.
+14:21:20.194 
+14:21:20.194 [FRONTIER_RANK] Cerco la cella di rango piu' basso fra 2 celle di frontiera
+14:21:20.194   Cella (1,0): rango=13
+14:21:20.194   Cella (1,1): rango=12
+14:21:20.194 [FRONTIER_RANK] ✓ Cella di rango piu' basso: (1,1) rango=12
+14:21:20.194 [WAYPOINTS] 6 waypoint manuali con la cella
+14:21:20.194 [NEAREST_WP] Waypoint in una cella confinante: (0, 1)
+14:21:20.194 [WAYPOINTS] 6 waypoint manuali con la cella
+14:21:20.194 [SKIP-ROUND] Cella (1,1): ci arriverei dallo stesso lato gia' provato senza successo. Per questo giro provo la candidata successiva.
+14:21:20.194 
+14:21:20.194 [FRONTIER_RANK] Cerco la cella di rango piu' basso fra 1 celle di frontiera
+14:21:20.194   Cella (1,0): rango=13
+14:21:20.194 [FRONTIER_RANK] ✓ Cella di rango piu' basso: (1,0) rango=13
+14:21:20.194 [WAYPOINTS] 6 waypoint manuali con la cella
+14:21:20.194 [NEAREST_WP] Waypoint in una cella confinante: (0, 0)
+14:21:20.194 [WAYPOINTS] 6 waypoint manuali con la cella
+14:21:20.194 [WAYPOINTS] 6 waypoint manuali con la cella
+14:21:20.196 [PRECHECK] Cella (1,0): dal waypoint della cella (0, 0) il grafo non arriva a nessun nodo della cella (ostacoli gia' in mappa). Segno il lato come provato senza spostarmi.
+14:21:20.196 [SIDE] Cella (1,0): lato 0b1000 segnato come provato (ora 0b1000)
+14:21:20.196 [CELLA] (1,0) dopo il tentativo fallito: dei punti candidati, 0 visti liberi, 8 mai visti, 10 dentro un ostacolo nella mappa globale.
+14:21:20.196 [DEFER] Cella (1,0) non ancora provata da tutti i lati (lati provati: 0b1000): resta candidata della frontiera e si ritentera' piu' avanti, nell'ordine normale, da un lato non ancora provato.
+14:21:20.196 [FRONTIER_RANK] Frontiera vuota
+14:21:20.196 [(1, 1, 12), (0, 3, 3), (1, 2, 11)]
+14:21:20.207 
+14:21:20.207 [ADJACENT] Cerco le celle confinanti non esplorate attorno a (0,1)
+14:21:20.207   ✗ Vicina south: (1,1) gia' provata da questo lato senza successo: per ora la salto
+14:21:20.207 [ADJACENT] Nessuna cella confinante non esplorata
+14:21:20.207 
+14:21:20.207 [FRONTIER_RANK] Cerco la cella di rango piu' basso fra 3 celle di frontiera
+14:21:20.207   Cella (1,1): rango=12
+14:21:20.207   Cella (0,3): rango=3
+14:21:20.207   Cella (1,2): rango=11
+14:21:20.207 [FRONTIER_RANK] ✓ Cella di rango piu' basso: (0,3) rango=3
+14:21:20.207 [WAYPOINTS] 6 waypoint manuali con la cella
+14:21:20.207 [NEAREST_WP] Waypoint in una cella confinante: (0, 2)
+14:21:20.207 [WAYPOINTS] 6 waypoint manuali con la cella
+14:21:20.207 [SKIP-ROUND] Cella (0,3): ci arriverei dallo stesso lato gia' provato senza successo. Per questo giro provo la candidata successiva.
+14:21:20.207 
+14:21:20.207 [FRONTIER_RANK] Cerco la cella di rango piu' basso fra 2 celle di frontiera
+14:21:20.207   Cella (1,1): rango=12
+14:21:20.207   Cella (1,2): rango=11
+14:21:20.207 [FRONTIER_RANK] ✓ Cella di rango piu' basso: (1,2) rango=11
+14:21:20.207 [WAYPOINTS] 6 waypoint manuali con la cella
+14:21:20.207 [NEAREST_WP] Waypoint in una cella confinante: (0, 2)
+14:21:20.207 [WAYPOINTS] 6 waypoint manuali con la cella
+14:21:20.207 [SKIP-ROUND] Cella (1,2): ci arriverei dallo stesso lato gia' provato senza successo. Per questo giro provo la candidata successiva.
+14:21:20.207 
+14:21:20.207 [FRONTIER_RANK] Cerco la cella di rango piu' basso fra 1 celle di frontiera
+14:21:20.207   Cella (1,1): rango=12
+14:21:20.207 [FRONTIER_RANK] ✓ Cella di rango piu' basso: (1,1) rango=12
+14:21:20.207 [WAYPOINTS] 6 waypoint manuali con la cella
+14:21:20.208 [NEAREST_WP] Waypoint in una cella confinante: (0, 1)
+14:21:20.208 [WAYPOINTS] 6 waypoint manuali con la cella
+14:21:20.208 [SKIP-ROUND] Cella (1,1): ci arriverei dallo stesso lato gia' provato senza successo. Per questo giro provo la candidata successiva.
+14:21:20.208 [FRONTIER_RANK] Frontiera vuota
+14:21:20.208 [(0, 3, 3), (1, 2, 11)]
+14:21:20.218 
+14:21:20.218 [ADJACENT] Cerco le celle confinanti non esplorate attorno a (0,1)
+14:21:20.218   ✗ Vicina south: (1,1) gia' provata da questo lato senza successo: per ora la salto
+14:21:20.218 [ADJACENT] Nessuna cella confinante non esplorata
+14:21:20.218 
+14:21:20.218 [FRONTIER_RANK] Cerco la cella di rango piu' basso fra 2 celle di frontiera
+14:21:20.218   Cella (0,3): rango=3
+14:21:20.218   Cella (1,2): rango=11
+14:21:20.218 [FRONTIER_RANK] ✓ Cella di rango piu' basso: (0,3) rango=3
+14:21:20.218 [WAYPOINTS] 6 waypoint manuali con la cella
+14:21:20.218 [NEAREST_WP] Waypoint in una cella confinante: (0, 2)
+14:21:20.218 [WAYPOINTS] 6 waypoint manuali con la cella
+14:21:20.218 [SKIP-ROUND] Cella (0,3): ci arriverei dallo stesso lato gia' provato senza successo. Per questo giro provo la candidata successiva.
+14:21:20.218 
+14:21:20.218 [FRONTIER_RANK] Cerco la cella di rango piu' basso fra 1 celle di frontiera
+14:21:20.218   Cella (1,2): rango=11
+14:21:20.218 [FRONTIER_RANK] ✓ Cella di rango piu' basso: (1,2) rango=11
+14:21:20.219 [WAYPOINTS] 6 waypoint manuali con la cella
+14:21:20.219 [NEAREST_WP] Waypoint in una cella confinante: (0, 2)
+14:21:20.219 [WAYPOINTS] 6 waypoint manuali con la cella
+14:21:20.219 [SKIP-ROUND] Cella (1,2): ci arriverei dallo stesso lato gia' provato senza successo. Per questo giro provo la candidata successiva.
+14:21:20.219 [FRONTIER_RANK] Frontiera vuota
+14:21:20.219 [(1, 2, 11)]
+14:21:20.226 
+14:21:20.226 [ADJACENT] Cerco le celle confinanti non esplorate attorno a (0,1)
+14:21:20.226   ✗ Vicina south: (1,1) gia' provata da questo lato senza successo: per ora la salto
+14:21:20.226 [ADJACENT] Nessuna cella confinante non esplorata
+14:21:20.226 
+14:21:20.226 [FRONTIER_RANK] Cerco la cella di rango piu' basso fra 1 celle di frontiera
+14:21:20.226   Cella (1,2): rango=11
+14:21:20.226 [FRONTIER_RANK] ✓ Cella di rango piu' basso: (1,2) rango=11
+14:21:20.226 [WAYPOINTS] 6 waypoint manuali con la cella
+14:21:20.226 [NEAREST_WP] Waypoint in una cella confinante: (0, 2)
+14:21:20.226 [WAYPOINTS] 6 waypoint manuali con la cella
+14:21:20.226 [SKIP-ROUND] Cella (1,2): ci arriverei dallo stesso lato gia' provato senza successo. Per questo giro provo la candidata successiva.
+14:21:20.226 [FRONTIER_RANK] Frontiera vuota
+14:21:20.265 [PROGRESSO] Fine esplorazione: 3/56 celle chiuse (5%): 3 visitate, 0 bloccate, 53 da fare | area vista 10%
+14:21:20.265             1.3 min di esplorazione (0.65 min a cella), 53 celle mai raggiunte | batteria 68%
+14:21:20.265 
+14:21:20.265 --- Mappa delle celle ---
+14:21:20.265 1 1 1 0 0 0 0
+14:21:20.265 0 0 0 0 0 0 0
+14:21:20.265 0 0 0 0 0 0 0
+14:21:20.266 0 0 0 0 0 0 0
+14:21:20.266 0 0 0 0 0 0 0
+14:21:20.266 0 0 0 0 0 0 0
+14:21:20.266 0 0 0 0 0 0 0
+14:21:20.266 0 0 0 0 0 0 0
+14:21:20.266 Cella attuale: (0, 2)
+14:21:20.266 -----------------------
+14:21:20.266 
+14:21:20.289 
+14:21:20.290 [WAYPOINT CREATION] Creo un nuovo waypoint MANUALE:
+14:21:20.290   Nome: wp_10 (formato dei waypoint manuali)
+14:21:20.290   Numero: 10
+14:21:20.290   Posizione: (28.847, -59.700, -18.133)
+14:21:20.290   Orientamento (imbardata): -100.1°
+14:21:20.290   Cella: (0, 1)
+14:21:20.391 [WAYPOINT CREATION] ✓ Waypoint creato:
+14:21:20.391   Nome: wp_10
+14:21:20.392   ID: soaked-fowl-nvgDBI1p9ydXXx3rEmqgBw==
+14:21:20.392   Posa salvata per i riallineamenti
+14:21:20.392   Cella salvata: (0, 1)
+14:21:20.392   Stato: 1
+14:21:20.392 
+14:21:20.392 [GRAPH_CACHE] Grafo in memoria da riscaricare
+14:21:20.392 [FINAL SCAN] Ultima scansione attorno al robot prima di tornare alla partenza...
+14:21:20.515 [GROUND-FILTER] scan-finale: 223 celle scartate, fino a 1.69 m sopra il suolo (suolo z=-18.609, stimato sotto il robot su 1696 celle)
+14:21:20.515 [GROUND-FILTER] scan-finale: 344 celle mai scritte dai sensori (0 sotto il suolo) -> trattate come non viste, quota -0.0008 m
+14:21:20.557 [FINAL SCAN] Fatto: l'ultima scansione e' nelle mappe globali.
+14:21:20.557 
+14:21:20.557 ================ [PRM MISSION SUMMARY] ================
+14:21:20.557 Fonte pendenza usata nel costo degli archi (totale 10499 query):
+14:21:20.558   live           :    947  (  9.0%)
+14:21:20.558   global_map     :    262  (  2.5%)
+14:21:20.558   fallback_nodes :   9290  ( 88.5%)
+14:21:20.558 Veti -- archi DISTINTI (e, tra parentesi, valutazioni totali, che contano lo stesso arco a ogni refresh):
+14:21:20.558   longitudinale: 6 (8)  laterale: 10 (13)  occupazione: 725 (5382)
+14:21:20.558 Pendenza massima misurata su un arco -- longitudinale: 0.816, laterale: 0.977 (soglia veto 0.600)
+14:21:20.558 Geometria del profilo d'arco -- base 0.25 m, fetta laterale +/-0.30 m
+14:21:20.558 Pesi del costo -- alpha=1.0, beta(long)=2.0, beta_lateral=2.0, gamma=0.0
+14:21:20.558 Flip del veto pendenza vicino soglia (possibile oscillazione): 2
+14:21:20.558 =========================================================
+14:21:20.558 
+14:21:20.558 ================ [MISSION STATS] ================
+14:21:20.558 Distribuzione tier di gait (totale 8 passi):
+14:21:20.558   PLAIN     :      1  ( 12.5%)
+14:21:20.558   MODERATE  :      2  ( 25.0%)
+14:21:20.558   HARD      :      5  ( 62.5%)
+14:21:20.558 Ripianificazioni totali: 3
+14:21:20.558 Segmenti registrati nel CSV: 8
+14:21:20.558 Salvataggi .npz per archi vicino soglia: 0
+14:21:20.558 Blocchi confermati dal fronte: 0, arresti a meta' movimento: 4, rotazioni rifiutate: 0, arretramenti dritti: 0, obiettivi riscelti: 0, scorciatoie: 0
+14:21:20.558 Avanzamenti nel cono di rotazione: 0, arretramenti evitati perche' inutili: 0, ripianificazioni immediate: 0
+14:21:20.558 Ritorni con GraphNav: 0 riusciti, 0 falliti (ripiego a zampe); nodi PRM scartati perche' dentro ostacoli: 0
+14:21:20.558 Obiettivi esclusi per la missione: 0, scelte senza punti raggiungibili: 3, arrivi con il robot appena fuori dalla cella: 0, ritorni senza movimento: 0
+14:21:20.558 Trappole riconosciute dal ventaglio: 0, passi rifiutati per mancanza di uscite all'arrivo: 1
+14:21:20.558 Movimenti multinodo: 1, 2 nodi attraversati (2.0 per movimento); fermati a un nodo intermedio (rotazione o arrivo): 0
+14:21:20.558 Refresh degli archi del PRM: 10 fatti, 0 saltati perche' senza eventi (0% di giri risparmiati)
+14:21:20.558 Cadute: 0, rialzate da solo: 0
+14:21:20.558 Spostamenti GraphNav riusciti: 1, falliti: 0
+14:21:20.558 Deriva dell'odometria: 1 misure agli arrivi GraphNav, massima 0.06 m, ultima 0.06 m (dettaglio in drift.csv)
+14:21:20.558 Chiusura d'anello di Spot: 0 chiamate, 0 s, 0 archi, 0 finite allo scadere del limite, 0 tentativi falliti
+14:21:20.558 Riagganci GraphNav (robot perso): 0 riusciti, 0 falliti | celle rimandate dopo 2 ritorni nello stesso tentativo: 0 | archi tolti dalla scansione dal vivo nei refresh: 1605
+14:21:20.558 Scansioni scartate (layer mancanti o non allineati): ciclo principale 0, controllo in movimento 0
+14:21:20.558 Pacchetti di scansione salvati: 10
+14:21:20.558 Batteria: da 69% a 68% in 1.4 min e 7 m; carica 68%, 0.74 %/min, 0.152 %/m su 7 m, ~51 min alla soglia del 30% (dettaglio in battery.csv)
+14:21:20.558 [TEMPO] Ripartizione del tempo misurato (70 s):
+14:21:20.558   movimento                  50.5 s  ( 72.0%)
+14:21:20.558   GraphNav                   14.9 s  ( 21.2%)
+14:21:20.558   scansione                   2.1 s  (  3.0%)
+14:21:20.558   PRM e ripianificazione      0.8 s  (  1.2%)
+14:21:20.558   fronte e decisione          0.7 s  (  1.0%)
+14:21:20.558   costruzione grafo           0.5 s  (  0.8%)
+14:21:20.558   mappe globali               0.4 s  (  0.6%)
+14:21:20.558   elaborazione griglia        0.1 s  (  0.1%)
+14:21:20.558   dati figure                 0.1 s  (  0.1%)
+14:21:20.558 ===================================================
+14:21:20.558 
+14:21:20.559 [GRAPH_CACHE] Scarico il grafo aggiornato dal robot...
+14:21:20.605 [GRAPH_CACHE] Scarico il grafo aggiornato dal robot...
+14:21:20.675 [GRAPHNAV] prima del ritorno a wp_0: strada verso wp_0 2.4 m -> 2.4 m con 1 scorciatoie (fino a 3.0 m, viste libere con 0.30 m di margine).
+14:21:20.675 [GRAPH_CACHE] Grafo in memoria da riscaricare
+14:21:20.675 [GRAPHNAV] prima del ritorno a wp_0: 1 scorciatoie dalla mappa globale + 0 da Spot (chiusure d'anello con controllo di collisione).
+14:21:20.717 [ANELLI] Creati 0 archi nuovi.
+14:21:20.733 [REGISTRAZIONE] Attendo che la mappa finisca di elaborare...
+14:21:21.773 [REGISTRAZIONE] Registrazione della mappa fermata.
+14:21:21.817 [GRAPH_CACHE] Grafo in memoria da riscaricare
+14:21:21.817 [GRAPHNAV] Chiusura d'anello di Spot (completa): 0 archi in 0.0 s (limite 45 s, finita).
+14:21:21.817 
+14:21:21.817 [========================================]
+14:21:21.817 [ANCHORING] Avvio ottimizzazione globale dell'ancoraggio...
+14:21:21.833 [ANCHORING] ✓ Ottimizzazione completata!
+14:21:21.833 [ANCHORING] Status: 1, Iterazioni: 5, Costo finale: 184.0333
+14:21:21.833 [========================================]
+14:21:21.833 
+14:21:21.833 [GRAPH_CACHE] Grafo in memoria da riscaricare
+14:21:21.856 [BATTERIA] inizio del ritorno a wp_0: carica 68%, 0.72 %/min, 0.152 %/m su 7 m, autonomia stimata da Spot 64 min, ~53 min alla soglia del 30%
+14:21:21.856 [GRAPH_CACHE] Scarico il grafo aggiornato dal robot...
+14:21:21.900 [GRAPHNAV] ritorno a wp_0: avvio (massimo 480 s, 0.5 m/s).
+14:21:21.928 [LOCALIZZAZIONE] prima di 'ritorno a wp_0': localizzato su wp_10 | localizzazioni accettate 116612, rifiutate 1453 (1 dall'ultima accettata, 0.0 m fatti cosi'), archi cattivi di fila 0 | ultimo passo HARD, beccheggio 3.5 gradi.
+14:21:36.809 [GRAPHNAV] ritorno a wp_0: arrivato in 15 s.
+14:21:36.848 [DERIVA] ritorno a wp_0: localizzato su wp_0, creato 1.6 min fa -> l'odometria (VISION) e' scostata di 0.11 m (dx +0.10, dy -0.02) da dove GraphNav mette il robot.
+14:21:36.878 [BATTERIA] fine del ritorno a wp_0: carica 67%, 1.22 %/min, 0.231 %/m su 9 m, autonomia stimata da Spot 64 min, ~30 min alla soglia del 30%
+14:21:36.878 [BATTERIA] Ritorno a wp_0: da 68% a 67% (1.0 punti in 15 s)
+14:21:44.005 [GRAPH_CACHE] Scarico il grafo aggiornato dal robot...
+14:21:44.022 [MAP DOWNLOAD] La mappa nuova andra' in: Grafo_28-10-2026_14-21-44
+14:21:44.022 
+14:21:44.022 [MAP DOWNLOAD] Scaricamento in corso...
+14:21:44.022 [MAP DOWNLOAD] Destinazione: Grafo_28-10-2026_14-21-44
+14:21:44.022 [MAP DOWNLOAD] Grafo scaricato: 20 waypoint e 22 archi
+14:21:44.140 [MAP DOWNLOAD] Istantanee dei waypoint: 1 su 20.
+14:21:45.557 [MAP DOWNLOAD] Istantanee dei waypoint: 2 su 20.
+14:21:45.662 [MAP DOWNLOAD] Istantanee dei waypoint: 3 su 20.
+14:21:45.788 [MAP DOWNLOAD] Istantanee dei waypoint: 4 su 20.
+14:21:46.727 [MAP DOWNLOAD] Istantanee dei waypoint: 5 su 20.
+14:21:46.848 [MAP DOWNLOAD] Istantanee dei waypoint: 6 su 20.
+14:21:46.957 [MAP DOWNLOAD] Istantanee dei waypoint: 7 su 20.
+14:21:47.388 [MAP DOWNLOAD] Istantanee dei waypoint: 8 su 20.
+14:21:47.514 [MAP DOWNLOAD] Istantanee dei waypoint: 9 su 20.
+14:21:48.510 [MAP DOWNLOAD] Istantanee dei waypoint: 10 su 20.
+14:21:49.071 [MAP DOWNLOAD] Istantanee dei waypoint: 11 su 20.
+14:21:50.080 [MAP DOWNLOAD] Istantanee dei waypoint: 12 su 20.
+14:21:50.542 [MAP DOWNLOAD] Istantanee dei waypoint: 13 su 20.
+14:21:50.655 [MAP DOWNLOAD] Istantanee dei waypoint: 14 su 20.
+14:21:50.898 [MAP DOWNLOAD] Istantanee dei waypoint: 15 su 20.
+14:21:51.061 [MAP DOWNLOAD] Istantanee dei waypoint: 16 su 20.
+14:21:51.408 [MAP DOWNLOAD] Istantanee dei waypoint: 17 su 20.
+14:21:51.527 [MAP DOWNLOAD] Istantanee dei waypoint: 18 su 20.
+14:21:52.141 [MAP DOWNLOAD] Istantanee dei waypoint: 19 su 20.
+14:21:52.807 [MAP DOWNLOAD] Istantanee dei waypoint: 20 su 20.
+14:21:52.819 [MAP DOWNLOAD] Istantanee degli archi: 1 su 1.
+14:21:52.827 [MAP DOWNLOAD] Istantanee degli archi: 2 su 2.
+14:21:52.835 [MAP DOWNLOAD] Istantanee degli archi: 3 su 3.
+14:21:52.844 [MAP DOWNLOAD] Istantanee degli archi: 4 su 4.
+14:21:52.854 [MAP DOWNLOAD] Istantanee degli archi: 5 su 5.
+14:21:52.863 [MAP DOWNLOAD] Istantanee degli archi: 6 su 6.
+14:21:52.871 [MAP DOWNLOAD] Istantanee degli archi: 7 su 7.
+14:21:52.881 [MAP DOWNLOAD] Istantanee degli archi: 8 su 8.
+14:21:52.890 [MAP DOWNLOAD] Istantanee degli archi: 9 su 9.
+14:21:52.898 [MAP DOWNLOAD] Istantanee degli archi: 10 su 10.
+14:21:52.908 [MAP DOWNLOAD] Istantanee degli archi: 11 su 11.
+14:21:52.919 [MAP DOWNLOAD] Istantanee degli archi: 12 su 12.
+14:21:52.927 [MAP DOWNLOAD] Istantanee degli archi: 13 su 13.
+14:21:52.935 [MAP DOWNLOAD] Istantanee degli archi: 14 su 14.
+14:21:52.943 [MAP DOWNLOAD] Istantanee degli archi: 15 su 15.
+14:21:52.951 [MAP DOWNLOAD] Istantanee degli archi: 16 su 16.
+14:21:52.960 [MAP DOWNLOAD] Istantanee degli archi: 17 su 17.
+14:21:52.969 [MAP DOWNLOAD] Istantanee degli archi: 18 su 18.
+14:21:52.979 [MAP DOWNLOAD] Istantanee degli archi: 19 su 19.
+14:21:52.990 [MAP DOWNLOAD] Istantanee degli archi: 20 su 20.
+14:21:52.999 [MAP DOWNLOAD] Istantanee degli archi: 21 su 21.
+14:21:53.012 [MAP DOWNLOAD] Istantanee degli archi: 22 su 22.
+14:21:53.012 [MAP DOWNLOAD] ✓ Mappa salvata in: /home/andrea/spotSDK/v2/AutonomousNavigationSpot/graph/Mission_28-10-2026_14-19-52/Grafo_28-10-2026_14-21-44
+14:21:53.012 [TEMPO] Chiusura della missione, 32.4 s in tutto:
+14:21:53.012   ritorno a wp_0                     15.0 s
+14:21:53.012   scaricamento della mappa            9.0 s
+14:21:53.012   seduta e spegnimento                7.1 s
+14:21:53.012   chiusura mappa e ancoraggio         1.3 s
+14:21:53.023 [ESTOP] Robot fermato

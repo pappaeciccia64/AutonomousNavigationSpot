@@ -1,0 +1,3 @@
+time,where,waypoint,age_s,dx,dy,d,gn_x,gn_y,vision_x,vision_y
+1793192047.2784,"ritorno al waypoint wp_29 in (37.45, -56.40)",wp_29,24.7000,0.0150,-0.0430,0.0455,37.4243,-56.4092,37.4393,-56.4521
+1793192977.9143,"verso il waypoint della cella (5, 6) per la cella (6,6)",wp_149,229.3000,0.0242,-0.1928,0.1944,43.4914,-64.7938,43.5155,-64.9867
