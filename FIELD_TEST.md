@@ -32,7 +32,7 @@ To go back at once to the morning's behaviour: `CONTINUOUS_MOTION = False` (and 
 
 **Stop the robot:** Ctrl+C or the tablet. If the program hangs the command expires and the robot stops by itself within 2 s.
 
-**After:** `python3 tools/mission_report.py` (line `Cruise (continuous motion)` and the next one: hand-offs, new goals, path changes, distance from the line, reasons of the ends) and `python3 tools/mission_viewer.py` (the scans of the cruise every 0.5 m, decision `cruise`; light blue contour = area really seen by the cameras).
+**After:** `python3 tools/mission_report.py` (line `Cruise (continuous motion)` and the next one: hand-offs, new goals, path changes, distance from the line, reasons of the ends) and `python3 tools/mission_viewer.py` (the scans of the cruise every 0.5 m, decision `cruise`; light blue contour = area really seen by the cameras). Slopes: `python3 tools/slope_check.py <mission>` (estimates against the body tilt and the ground plane of the legs, `gpe`, recorded from 04-11).
 
 ---
 

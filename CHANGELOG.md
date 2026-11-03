@@ -8,6 +8,14 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-03 (slopes: measured against the robot, plane estimate behind a switch, off)
+
+- **`tools/slope_check.py`**: for every sample of trajectory.csv the slope under the robot from the last scan saved before it, with several methods, against the measured one (body tilt; from 04-11 also the ground plane from the legs). 46800 samples of 40 missions, longitudinal, against the body pitch: today's differences on a base mean error 2.15 deg, bias +2.0 (the 90th percentile along a segment extended beyond the body inflates it); a plane on a square window as long as the body at the robot centre 0.91 deg, bias -0.1, correlation 0.95 (0.97 signed); on the slopes (22-10, 26-10, 28-10, 29-10) 3.0 -> 1.2 deg. Lateral: not checkable on the body: with the robot walking 45-90 deg off the fall line of a 10-15 deg slope the estimated pitch matches the measured one (3.6 / 3.5 deg) but the body roll stays 0.5 deg whatever the angle: Spot keeps the body level sideways.
+- **Ground plane of the legs in trajectory.csv** (`gpe_long_deg`, `gpe_lat_deg`, from Spot's frame `gpe`): the slope the robot really stands on, to check the lateral too.
+- **`slopes.PLANE_SLOPES`** (default `False`): the edges on the live scan with the plane estimate (`plane_gradient_field`, integral images, ~3 ms per scan; `plane_slope_profiles_batch`, 11 ms per 2000 edges against 82 of the batch of today). Replay of 13-10 12:40 with it on: paths 11/11, 300-475 fewer edges discarded for slope on the slopes, graph time 31 s against 35. SLOPE_THRESHOLD and the gait levels were tuned on the old estimate (about 2 deg more on slopes): to be retuned before using it.
+
+---
+
 ## 2026-11-03 (fewer stops between cells: big turns and failed attempts)
 
 Mission of 03-11 16:02 (other start, same room): 6 cruises out of 6 ended with the hand-off (2 with the last stretch closed by an obstacle), 3 new goals while walking, exploration 40 s (57 at 15:39, 73 with the stop-and-go at 14:23), standing 3% and turning on the spot 7% of the cruise, cycle median 0.17 s with the cruise bundles. Five times out of six, though, the attempt on the next cell failed at once (cells beyond the wall: no goal or no path in the graph) and stopped the robot, then the next attempt started from standing.

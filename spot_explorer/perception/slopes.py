@@ -538,3 +538,166 @@ def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
                               h_along, np.isfinite(h_along), step_along, grad_lat,
                               np.isfinite(h_perp), u, step_perp, num_slices, dist,
                               perp_sample_spacing_m, baseline_m, min_sample_fraction, body_ext_m)
+
+
+# =========================================================================
+# SLOPE FROM A LOCAL PLANE (under test, see tools/slope_check.py)
+#
+# Instead of height differences on a base along the edge, the plane that best fits the
+# heights in a window of 2 * PLANE_HALF_WINDOW_M around each cell (least squares, reliable
+# cells only): its gradient gives the slope in any direction at once, along the edge
+# (pitch) and across it (roll). The window does not depend on the length of the edge (a
+# 0.30 m edge is measured like a long one), all the cells of the window count (not two
+# samples at the ends of a base) and an unreliable cell only lowers the weight.
+# plane_gradient_field computes the whole grid at a fixed cost per cell, with integral
+# images (cumulative sums), whatever the window.
+# =========================================================================
+PLANE_HALF_WINDOW_M = 0.25
+PLANE_MIN_VALID_FRACTION = 0.5
+# Switch for the edges of the PRM on the live scan (edge_evaluation): off = differences on a
+# base along the edge, as before. On = the plane of a square window as long as the body
+# (PLANE_EDGE_HALF_WINDOW_M = half body length) at every position of the robot centre between
+# the two nodes, 90th percentile of those. The window already covers the body, so the values
+# "with the body" are the same. tools/slope_check.py on 46800 samples of 40 missions, against
+# the measured body pitch: mean error 0.91 deg against 2.15 (bias -0.1 against +2.0); on the
+# slopes of 22-10/26-10/28-10/29-10 1.2 against 3.0. The lateral cannot be checked on the body
+# (Spot keeps it level): from 04-11 trajectory.csv also has the ground plane of the legs (gpe).
+# CAREFUL: SLOPE_THRESHOLD and the gait levels were tuned on the old estimate, which on the
+# slopes reads about 2 deg more.
+PLANE_SLOPES = False
+PLANE_EDGE_HALF_WINDOW_M = ROBOT_HALF_LENGTH_M
+
+
+def _box_sum(a, k):
+    """Sum of a over the (2k+1) x (2k+1) window centred on each cell (zero outside)."""
+    p = np.pad(a, k + 1, mode='constant')
+    c = p.cumsum(0).cumsum(1)
+    n = 2 * k + 1
+    return c[n:, n:] - c[:-n, n:] - c[n:, :-n] + c[:-n, :-n]
+
+
+def plane_gradient_field(terrain_2d, valid_2d, cell_size, half_window_m=PLANE_HALF_WINDOW_M,
+                         min_valid_fraction=PLANE_MIN_VALID_FRACTION):
+    """
+    Gradient (dz/dx, dz/dy) of the least-squares plane around every cell of the grid, x along
+    the columns and y along the rows (as the grid origin). NaN where the window has fewer than
+    min_valid_fraction reliable cells. Returns (gx, gy, fraction of reliable cells).
+    """
+    z = np.asarray(terrain_2d, dtype=np.float64)
+    w = np.isfinite(z) if valid_2d is None else (np.asarray(valid_2d, dtype=bool) & np.isfinite(z))
+    w = w.astype(np.float64)
+    zz = np.where(w > 0, z, 0.0)
+    k = max(1, int(round(half_window_m / cell_size)))
+    rows, cols = np.indices(z.shape, dtype=np.float64)
+    # Coordinates relative to the cell, so the sums stay small: u = col - c0, v = row - r0
+    # in the window; with the sums of the absolute indices and the centre subtracted later.
+    s1 = _box_sum(w, k)
+    su, sv = _box_sum(w * cols, k), _box_sum(w * rows, k)
+    suu, svv, suv = _box_sum(w * cols * cols, k), _box_sum(w * rows * rows, k), _box_sum(w * cols * rows, k)
+    sz, suz, svz = _box_sum(zz, k), _box_sum(zz * cols, k), _box_sum(zz * rows, k)
+    frac = s1 / float((2 * k + 1) ** 2)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        mu, mv, mz = su / s1, sv / s1, sz / s1
+        cuu, cvv, cuv = suu / s1 - mu * mu, svv / s1 - mv * mv, suv / s1 - mu * mv
+        cuz, cvz = suz / s1 - mu * mz, svz / s1 - mv * mz
+        det = cuu * cvv - cuv * cuv
+        gx = (cvv * cuz - cuv * cvz) / det / cell_size
+        gy = (cuu * cvz - cuv * cuz) / det / cell_size
+    bad = (frac < min_valid_fraction) | ~np.isfinite(gx) | ~np.isfinite(gy) | (np.abs(det) < 1e-6)
+    gx[bad] = np.nan
+    gy[bad] = np.nan
+    return gx, gy, frac
+
+
+def plane_slope_along(gx, gy, grid_origin_x, grid_origin_y, cell_size, x1, y1, x2, y2,
+                      body_ext_m=0.0, min_sample_fraction=MIN_ARC_SAMPLE_FRACTION):
+    """
+    Slope of the edge (x1, y1) -> (x2, y2) on a plane gradient field: one sample per cell
+    along the edge (extended by body_ext_m at both ends), longitudinal = |gradient . direction|,
+    lateral = |gradient . perpendicular|, each summarized with the 90th percentile as
+    compute_arc_slope_profile does. Returns (long, lat, has_data), as tangents.
+    """
+    dx, dy = x2 - x1, y2 - y1
+    dist = float(np.hypot(dx, dy))
+    if dist < 1e-6:
+        return 0.0, 0.0, False
+    ux, uy = dx / dist, dy / dist
+    n = max(2, int(np.ceil((dist + 2 * body_ext_m) / cell_size)) + 1)
+    s = np.linspace(-body_ext_m, dist + body_ext_m, n)
+    xs, ys = x1 + ux * s, y1 + uy * s
+    num_rows, num_cols = gx.shape
+    c = np.floor((xs - grid_origin_x) / cell_size).astype(np.int64)
+    r = np.floor((ys - grid_origin_y) / cell_size).astype(np.int64)
+    inside = (r >= 0) & (r < num_rows) & (c >= 0) & (c < num_cols)
+    g_x = np.full(n, np.nan)
+    g_y = np.full(n, np.nan)
+    g_x[inside], g_y[inside] = gx[r[inside], c[inside]], gy[r[inside], c[inside]]
+    ok = np.isfinite(g_x) & np.isfinite(g_y)
+    if np.count_nonzero(ok) < min_sample_fraction * n:
+        return 0.0, 0.0, False
+    lon = np.abs(g_x[ok] * ux + g_y[ok] * uy)
+    lat = np.abs(-g_x[ok] * uy + g_y[ok] * ux)
+    return p90(lon), p90(lat), True
+
+
+def plane_slope_profile(gx, gy, grid_origin_x, grid_origin_y, cell_size, x1, y1, x2, y2,
+                        body_ext_m=0.0):
+    """compute_arc_slope_profile on a plane gradient field (PLANE_SLOPES): the robot centre
+    from node to node, the window already covering the body. Same return format (3 values,
+    or 6 with body_ext_m > 0, the body ones equal to the others)."""
+    lo, la, has = plane_slope_along(gx, gy, grid_origin_x, grid_origin_y, cell_size, x1, y1, x2, y2)
+    if body_ext_m > 0:
+        return lo, la, has, lo, la, has
+    return lo, la, has
+
+
+def _p90_rows_nan(m):
+    """90th percentile of every row ignoring the NaN, as p90 (linear interpolation); 0 for a
+    row without values."""
+    k = np.count_nonzero(np.isfinite(m), axis=1)
+    srt = np.sort(m, axis=1)                    # NaN go to the end
+    v = np.maximum(k - 1, 0) * 0.9
+    lo = np.floor(v).astype(np.int64)
+    hi = np.minimum(lo + 1, np.maximum(k - 1, 0))
+    rows = np.arange(m.shape[0])
+    x0, x1 = srt[rows, lo], srt[rows, hi]
+    out = x0 + (x1 - x0) * (v - lo)
+    return np.where(k > 0, out, 0.0)
+
+
+def plane_slope_profiles_batch(gx, gy, grid_origin_x, grid_origin_y, cell_size, x1, y1, x2, y2,
+                               min_sample_fraction=MIN_ARC_SAMPLE_FRACTION):
+    """plane_slope_profile for many edges at once (arrays): rows (long, lat, has, long, lat,
+    has) like arc_slope_profiles_batch with the body. Same numbers as plane_slope_along."""
+    x1, y1, x2, y2 = (np.asarray(v, dtype=np.float64) for v in (x1, y1, x2, y2))
+    e = x1.size
+    out = np.zeros((e, 6))
+    if e == 0:
+        return out
+    dx, dy = x2 - x1, y2 - y1
+    dist = np.hypot(dx, dy)
+    good = dist >= 1e-6
+    ux, uy = np.where(good, dx / np.where(good, dist, 1.0), 0.0), np.where(good, dy / np.where(good, dist, 1.0), 0.0)
+    n = np.maximum(2, np.ceil(dist / cell_size).astype(np.int64) + 1)
+    m = int(n.max())
+    j = np.arange(m)[None, :]
+    used = j < n[:, None]
+    s = np.where(used, j / np.maximum(n[:, None] - 1, 1) * dist[:, None], 0.0)
+    xs, ys = x1[:, None] + ux[:, None] * s, y1[:, None] + uy[:, None] * s
+    num_rows, num_cols = gx.shape
+    c = np.floor((xs - grid_origin_x) / cell_size).astype(np.int64)
+    r = np.floor((ys - grid_origin_y) / cell_size).astype(np.int64)
+    inside = used & (r >= 0) & (r < num_rows) & (c >= 0) & (c < num_cols)
+    g_x = np.full(xs.shape, np.nan)
+    g_y = np.full(xs.shape, np.nan)
+    g_x[inside], g_y[inside] = gx[r[inside], c[inside]], gy[r[inside], c[inside]]
+    ok = np.isfinite(g_x) & np.isfinite(g_y)
+    has = good & (ok.sum(axis=1) >= min_sample_fraction * n)
+    lon = np.where(ok, np.abs(g_x * ux[:, None] + g_y * uy[:, None]), np.nan)
+    lat = np.where(ok, np.abs(-g_x * uy[:, None] + g_y * ux[:, None]), np.nan)
+    p_lon, p_lat = _p90_rows_nan(lon), _p90_rows_nan(lat)
+    p_lon = np.where(has, p_lon, 0.0)
+    p_lat = np.where(has, p_lat, 0.0)
+    out[:, 0], out[:, 1], out[:, 2] = p_lon, p_lat, has
+    out[:, 3], out[:, 4], out[:, 5] = p_lon, p_lat, has
+    return out

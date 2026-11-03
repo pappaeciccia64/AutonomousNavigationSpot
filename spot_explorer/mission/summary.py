@@ -34,6 +34,7 @@ def mission_switches():
         'mission_graph.BATCH_SLOPES': mission_graph.BATCH_SLOPES,
         'edge_evaluation.REFRESH_BATCH_SLOPES': edge_evaluation.REFRESH_BATCH_SLOPES,
         'edge_evaluation.INCREMENTAL_REFRESH': edge_evaluation.INCREMENTAL_REFRESH,
+        'slopes.PLANE_SLOPES': slopes.PLANE_SLOPES,
         'motion.PATH_COMMAND_FOR_LEGS': motion.PATH_COMMAND_FOR_LEGS,
         'attempt_cruise.CONTINUOUS_MOTION': attempt_cruise.CONTINUOUS_MOTION,
         'attempt_cruise.CHAIN_CELLS': attempt_cruise.CHAIN_CELLS,

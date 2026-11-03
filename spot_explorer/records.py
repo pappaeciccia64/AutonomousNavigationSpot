@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import numpy as np
-from bosdyn.client.frame_helpers import GROUND_PLANE_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b
+from bosdyn.client.frame_helpers import BODY_FRAME_NAME, GROUND_PLANE_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b
 
 from spot_explorer.robot import connection
 
@@ -131,7 +131,8 @@ _CSV_LOCK = threading.Lock()
 # viewer joined with a straight line the last point before a GraphNav return and the first
 # after, a line that cut through obstacles (mission of 22-10, around 16:00).
 _TRAJECTORY_COLUMNS = ['time', 'iteration', 'cell_row', 'cell_col', 'loop_iter', 'node_from', 'node_to',
-                       'x', 'y', 'yaw_deg', 'roll_deg', 'pitch_deg', 'target_x', 'target_y', 'move']
+                       'x', 'y', 'yaw_deg', 'roll_deg', 'pitch_deg', 'target_x', 'target_y', 'move',
+                       'gpe_long_deg', 'gpe_lat_deg']
 
 
 def timing_add(phase, seconds):
@@ -264,6 +265,29 @@ def _quat_to_roll_pitch_deg(q):
     return float(np.degrees(roll)), float(np.degrees(pitch))
 
 
+def _ground_plane_slopes_deg(snap, yaw):
+    """
+    Slope of the ground under the feet, from Spot's ground plane estimate (frame 'gpe', from
+    the legs): (along the heading, across it) in degrees, positive = ground rising ahead /
+    to the left. It is what the robot really stands on, unlike the body tilt, which Spot
+    partly levels. NaN if the frame is not there.
+    """
+    try:
+        r = get_a_tform_b(snap, VISION_FRAME_NAME, GROUND_PLANE_FRAME_NAME).rotation
+    except Exception:
+        return float('nan'), float('nan')
+    # z axis of the gpe frame in VISION = normal of the ground plane.
+    nx = 2.0 * (r.x * r.z + r.w * r.y)
+    ny = 2.0 * (r.y * r.z - r.w * r.x)
+    nz = 1.0 - 2.0 * (r.x * r.x + r.y * r.y)
+    if nz <= 1e-6:
+        return float('nan'), float('nan')
+    gx, gy = -nx / nz, -ny / nz                      # height gradient of the plane
+    c, s = np.cos(yaw), np.sin(yaw)
+    return (float(np.degrees(np.arctan(gx * c + gy * s))),
+            float(np.degrees(np.arctan(-gx * s + gy * c))))
+
+
 class BodyTiltRecorder:
     """
     Record the REAL tilt of Spot's body (roll and pitch) while it executes a move,
@@ -292,16 +316,19 @@ class BodyTiltRecorder:
         self._peak_pitch = 0.0
         self._n = 0
         self._errors = 0
-        # Real sampled trajectory: (t, x, y, yaw, roll, pitch). Ends up in
-        # trajectory.csv, to compare where the robot really went with what was
-        # commanded.
+        # Real sampled trajectory: (t, x, y, yaw, roll, pitch, gpe_long, gpe_lat). Ends up
+        # in trajectory.csv, to compare where the robot really went with what was
+        # commanded, and the slope estimates with the ground the robot stands on.
         self.samples = []
 
     def _sample(self):
         try:
-            x, y, _, q = connection.getPosition(self._client)
+            snap = self._client.get_robot_state().kinematic_state.transforms_snapshot
+            tf = get_a_tform_b(snap, VISION_FRAME_NAME, BODY_FRAME_NAME)
+            x, y, q = tf.position.x, tf.position.y, tf.rotation
             roll, pitch = _quat_to_roll_pitch_deg(q)
             yaw = float(np.degrees(np.arctan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y ** 2 + q.z ** 2))))
+            gpe_long, gpe_lat = _ground_plane_slopes_deg(snap, np.radians(yaw))
         except Exception:
             with self._lock:
                 self._errors += 1
@@ -313,7 +340,7 @@ class BodyTiltRecorder:
             self._peak_roll = max(self._peak_roll, abs(roll))
             self._peak_pitch = max(self._peak_pitch, abs(pitch))
             self._n += 1
-            self.samples.append((time.time(), float(x), float(y), yaw, roll, pitch))
+            self.samples.append((time.time(), float(x), float(y), yaw, roll, pitch, gpe_long, gpe_lat))
         return roll, pitch
 
     def _run(self):
@@ -397,8 +424,8 @@ def append_trajectory(samples, move, target_xy=(np.nan, np.nan), seg_id=None):
     """Samples of a BodyTiltRecorder into trajectory.csv. seg_id: the 6 columns from iteration to node_to."""
     seg_id = list(seg_id) if seg_id is not None else [''] * 6
     append_csv("trajectory.csv", _TRAJECTORY_COLUMNS,
-                [[t] + seg_id + [x, y, yw, r, pt, target_xy[0], target_xy[1], move]
-                 for (t, x, y, yw, r, pt) in samples])
+                [[s[0]] + seg_id + list(s[1:6]) + [target_xy[0], target_xy[1], move] + list(s[6:8])
+                 for s in samples])
 
 
 class TrajectoryLog:
