@@ -13,9 +13,11 @@ ricavare: in missione ogni terreno ha visto una sola configurazione.
 Il robot va messo all'INIZIO del tracciato, con il muso lungo il tracciato, a terra libera
 per --dist metri davanti (e dietro, con --ritorno, perche' gira su se stesso alla fine).
 Prima di ogni passaggio lo script aspetta Invio: si controlla che il tracciato sia libero e
-si riporta il robot all'inizio se serve (o si usa --ritorno). E-Stop dal tablet sempre a
+si riporta il robot all'inizio se serve (o si usa --ritorno, o --indietro dove non c'e'
+spazio per girarsi: Spot lungo ~1.1 m ha bisogno di un cerchio di ~1.6 m per ruotare). E-Stop dal tablet sempre a
 portata di mano: qui non c'e' il fronte sicuro della missione, il robot va dritto e basta
-(l'anticollisione di Spot resta quella della missione).
+(l'anticollisione dei piedi resta spenta come in missione, salvo --piedi-protetti; quella del
+corpo di Spot resta accesa).
 
 Per ogni passaggio, una riga in ProveAndatura/prove.csv:
   - terreno, verso (andata/ritorno), configurazione, pendenza misurata con l'inclinometro;
@@ -260,6 +262,8 @@ def passaggio(a, verso, rip, robot_state_client, command_client, local_grid, csv
                        and r < spotGrid.GAIT_MODERATE_ROUGH_MAX else 'HARD')
     if a.vel is not None:
         params['max_linear_vel'] = a.vel
+    if a.piedi_protetti:
+        params['disable_foot_obstacle_avoidance'] = False
 
     c0 = carica(robot_state_client)
     camp = Campionatore(robot_state_client)
@@ -318,6 +322,12 @@ def main():
                         "(discesa su una rampa) viene misurato")
     p.add_argument('--vel', type=float, default=None, help="limite di velocita' (m/s) al posto di "
                                                           "quello della configurazione")
+    p.add_argument('--indietro', action='store_true',
+                   help="alla fine di ogni andata il robot torna all'inizio camminando all'indietro, "
+                        "senza girarsi e senza registrare: per gli spazi stretti")
+    p.add_argument('--piedi-protetti', action='store_true',
+                   help="riaccende l'anticollisione dei piedi di Spot (spenta in missione per il "
+                        "prato): al chiuso, dove non c'e' il fronte sicuro, e' la rete in piu'")
     p.add_argument('--solo-stima', action='store_true',
                    help="il robot si alza e stima la pendenza davanti, senza camminare")
     p.add_argument('--note', default='')
@@ -334,6 +344,8 @@ def main():
         p.error("serve --terreno")
     if not (0.5 <= a.dist <= 10.0):
         p.error("--dist fra 0.5 e 10 m")
+    if a.ritorno and a.indietro:
+        p.error("--ritorno e --indietro insieme no: scegline uno")
     os.makedirs(a.cartella, exist_ok=True)
     csv_path = os.path.join(a.cartella, 'prove.csv')
 
@@ -375,8 +387,20 @@ def main():
                     if r == 's':
                         continue
                     passaggio(a, 'andata', i, robot_state_client, command_client, local_grid, csv_path)
+                    if a.indietro:
+                        time.sleep(0.5)
+                        ok_i, d_i = movements.relative_move(
+                            -a.dist, 0.0, 0.0, VISION_FRAME_NAME, command_client, robot_state_client,
+                            max_linear_vel=movements.RETREAT_MAX_LINEAR_VEL_MPS,
+                            disable_foot_obstacle_avoidance=(False if a.piedi_protetti else None))
+                        print(f"[PROVA] Ritorno all'indietro all'inizio: "
+                              f"{'fatto' if ok_i else 'NON RIUSCITO'} ({d_i:.2f} m)")
+                        if not ok_i:
+                            break
                     if a.ritorno:
                         params = dict(CONFIG.get(a.config, CONFIG['crawl_mu06']))
+                        if a.piedi_protetti:
+                            params['disable_foot_obstacle_avoidance'] = False
                         if not gira(command_client, robot_state_client, params):
                             print("[PROVA] Rotazione non riuscita: mi fermo qui.")
                             break

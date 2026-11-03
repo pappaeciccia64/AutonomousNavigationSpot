@@ -91,9 +91,11 @@ Due strumenti: **`taratura.py`** (al computer: legge i `segments.csv` delle miss
 
 ### Al chiuso (prima di uscire)
 
+In `prova_andatura.py` non c'è il fronte sicuro della missione e l'anticollisione dei piedi di Spot è spenta come in missione (per il prato): al chiuso usare sempre `--piedi-protetti`. Spazio: tracciato + 0.5 m oltre la fine e 0.5 m ai lati; per `--ritorno` un'area di ~1.6 × 1.6 m libera all'inizio e alla fine (rotazione sul posto), altrimenti `--indietro`. Niente cavi a terra, nessuno sul tracciato, un'uscita libera per il robot. Prima del primo passaggio, provare che Ctrl+C nel terminale faccia sedere il robot.
+
 | Cosa | Comando | Cosa aspettarsi |
 |---|---|---|
-| Lo script funziona | `python3 prova_andatura.py --terreno pavimento --config auto_mu08 --dist 2 --ripetizioni 1 --ritorno` | Il robot va avanti 2 m, si gira, torna, si gira; due righe in `ProveAndatura/prove.csv` con tutte le colonne piene (`slip_*`, `mu_est_*`, `energy_*` comprese). Se una colonna è vuota, annotarlo: quel dato il robot non lo dà. |
+| Lo script funziona | `python3 prova_andatura.py --terreno pavimento --config auto_mu08 --dist 2 --ripetizioni 1 --ritorno --piedi-protetti` (in poco spazio: `--indietro` al posto di `--ritorno`, torna all'inizio in retromarcia senza girarsi) | Il robot va avanti 2 m, si gira, torna, si gira (con `--indietro`: torna in retromarcia, una riga sola); due righe in `ProveAndatura/prove.csv` con tutte le colonne piene (`slip_*`, `mu_est_*`, `energy_*` comprese). Se una colonna è vuota, annotarlo: quel dato il robot non lo dà. |
 | Zero della stima | `python3 prova_andatura.py --terreno pavimento --pendenza-vera 0 --solo-stima --ripetizioni 5` | Pendenza stimata vicina a 0 (sotto 0.05, cioè 3°). Quello che resta è l'errore della stima in piano. |
 | Stima su una rampa (se c'è: rampa d'accesso, pedana di carico, tavola appoggiata) | robot fermo ai piedi della rampa, rivolto verso di essa: `--terreno rampa_interna --pendenza-vera <gradi> --solo-stima` | Pendenza stimata coerente con l'inclinometro (qualche grado sopra, perché è un 90° percentile). Poi sopra la rampa: il beccheggio del corpo da fermo deve essere vicino alla pendenza vera. |
 | Limite di velocità | `--terreno pavimento --config auto_mu08 --dist 5 --ripetizioni 2`, poi lo stesso con `--vel 0.3` | Se i tempi sono quasi uguali, il limite non è ciò che rallenta il robot (conferma dei log). |
