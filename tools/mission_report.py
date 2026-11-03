@@ -132,16 +132,15 @@ def section_motion(segments, trajectory):
     if trajectory:
         xy = np.array([[float(r['x']), float(r['y'])] for r in trajectory])
         out['distance_m'] = float(np.sum(np.hypot(*np.diff(xy, axis=0).T))) if len(xy) > 1 else 0.0
-    if not segments:
-        return out
-    out['ok'] = sum(r.get('success') == 'True' for r in segments)
-    out['tiers'] = Counter(r.get('tier', '?') for r in segments)
-    pitch = [(float(r['pitch_peak_abs_deg']), r.get('tier', '?')) for r in segments
-             if r.get('pitch_peak_abs_deg') not in (None, '', 'nan')]
-    out['steep'] = {lim: (sum(p > lim for p, _ in pitch), sum(p > lim and t == 'HARD' for p, t in pitch))
-                    for lim in PITCH_LIMITS_DEG}
-    out['max_pitch'] = max((p for p, _ in pitch), default=None)
-    out['calm_hard'] = sum(p < 8 and t == 'HARD' for p, t in pitch)
+    if segments:
+        out['ok'] = sum(r.get('success') == 'True' for r in segments)
+        out['tiers'] = Counter(r.get('tier', '?') for r in segments)
+        pitch = [(float(r['pitch_peak_abs_deg']), r.get('tier', '?')) for r in segments
+                 if r.get('pitch_peak_abs_deg') not in (None, '', 'nan')]
+        out['steep'] = {lim: (sum(p > lim for p, _ in pitch), sum(p > lim and t == 'HARD' for p, t in pitch))
+                        for lim in PITCH_LIMITS_DEG}
+        out['max_pitch'] = max((p for p, _ in pitch), default=None)
+        out['calm_hard'] = sum(p < 8 and t == 'HARD' for p, t in pitch)
     # Smoothness, legs only (move 'prm'): for each leg, the time before the robot moves 5 cm
     # (rotation in place and start) and the walking time. The GraphNav moves have no nodes
     # and are measured apart, one per run of consecutive samples (before 03-11 they ended up
@@ -159,18 +158,33 @@ def section_motion(segments, trajectory):
             if key != prev:
                 runs.append((move, []))
                 prev = key
-            runs[-1][1].append((float(r['time']), float(r['x']), float(r['y'])))
+            runs[-1][1].append((float(r['time']), float(r['x']), float(r['y']),
+                                float(r['yaw_deg']) if r.get('yaw_deg') not in (None, '', 'nan') else 0.0))
         turn = walk = 0.0
-        graphnav = []
+        graphnav, cruise = [], []
         for move, s in runs:
+            if move == 'cruise':
+                # (seconds, metres, seconds under 5 cm/s: turning on the spot (above 5 deg/s)
+                # and standing)
+                m = turning = still = 0.0
+                for (ta, xa, ya, ha), (tb, xb, yb, hb) in zip(s, s[1:]):
+                    d = math.hypot(xb - xa, yb - ya)
+                    m += d
+                    if tb > ta and d / (tb - ta) < 0.05:
+                        if abs((hb - ha + 180.0) % 360.0 - 180.0) / (tb - ta) > 5.0:
+                            turning += tb - ta
+                        else:
+                            still += tb - ta
+                cruise.append((s[-1][0] - s[0][0], m, turning, still))
+                continue
             if move != 'prm':
                 graphnav.append(s[-1][0] - s[0][0])
                 continue
-            t0, x0, y0 = s[0]
-            t_go = next((t for t, x, y in s if math.hypot(x - x0, y - y0) > 0.05), s[-1][0])
+            t0, x0, y0, _ = s[0]
+            t_go = next((t for t, x, y, _h in s if math.hypot(x - x0, y - y0) > 0.05), s[-1][0])
             turn += t_go - t0
             walk += s[-1][0] - t_go
-        out['turn_s'], out['walk_s'], out['graphnav_s'] = turn, walk, graphnav
+        out['turn_s'], out['walk_s'], out['graphnav_s'], out['cruise'] = turn, walk, graphnav, cruise
     return out
 
 
@@ -644,6 +658,23 @@ def report(name):
                      f"walking {mo['walk_s']:.0f} s"
                      + (f" at {mo['legs_m'] / mo['walk_s']:.2f} m/s" if mo['walk_s'] > 0 else ""))
         print(line)
+    if mo.get('cruise'):
+        c_s, c_m, c_turn, c_still = (sum(c[k] for c in mo['cruise']) for k in range(4))
+        print(f"Cruise (continuous motion): {len(mo['cruise'])} times, {c_s:.0f} s, {c_m:.1f} m, "
+              f"{c_m / max(c_s, 1e-6):.2f} m/s on average | turning on the spot {c_turn:.0f} s "
+              f"({100 * c_turn / max(c_s, 1e-6):.0f}%), standing {c_still:.0f} s "
+              f"({100 * c_still / max(c_s, 1e-6):.0f}%)")
+    if stats.get('cruises'):
+        exits = stats.get('cruise_exits', {})
+        grouped = {}
+        for k, v in exits.items():
+            k = re.sub(r"\d+(\.\d+)?", "#", k.split(':')[0])
+            grouped[k] = grouped.get(k, 0) + v
+        print(f"  {stats['cruises']} cruises, next cell while walking {stats.get('cruise_handoffs', 0)}, "
+              f"new goal while walking {stats.get('cruise_goal_repicks', 0)}, path changes "
+              f"{stats.get('cruise_replans', 0)}, at most {stats.get('cruise_max_dev_cm', 0)} cm from the line, "
+              f"{stats.get('cruise_cycles', 0)} planning cycles | ends: "
+              + ", ".join(f"{k} {v}" for k, v in sorted(grouped.items(), key=lambda kv: -kv[1])))
     if mo.get('graphnav_s'):
         print(f"GraphNav moves (between cells and return to wp_0): {len(mo['graphnav_s'])}, "
               f"{sum(mo['graphnav_s']):.0f} s ("

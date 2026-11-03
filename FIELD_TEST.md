@@ -6,6 +6,36 @@ Since 30-10-2026 the code, the logs and this list are in English. Earlier missio
 
 ---
 
+## Continuous motion outdoors (first time on 04-11)
+
+Validated indoors on 03-11 in five missions (room of about 10 x 3 m, always gait PLAIN). Never tried: grass, gait changes in the middle of a cruise (MODERATE / HARD, CRAWL), cruises longer than ~3 m.
+
+**Switches** (all on in the code):
+
+| Switch | File | Off = |
+|---|---|---|
+| `CONTINUOUS_MOTION` | `spot_explorer/mission/attempt_cruise.py` | stop-and-go as on 03-11 morning (the whole cruise off) |
+| `CHAIN_CELLS` | same file | the robot stops at every cell goal |
+| `PATH_COMMAND_FOR_LEGS` | `spot_explorer/robot/motion.py` | the legs of the stop-and-go with rotation + walk as before |
+| `INCREMENTAL_REFRESH` | `spot_explorer/planning/edge_evaluation.py` | full edge refresh |
+
+To go back at once to the morning's behaviour: `CONTINUOUS_MOTION = False` (and `PATH_COMMAND_FOR_LEGS = False`). The `[CONFIG] SWITCHES` line of the log says which ones were on.
+
+**Plan:** two missions on the same lawn, same grid and start: one with `CONTINUOUS_MOTION = False` as reference, one with it on. Tablet in hand; the first minutes in an open area.
+
+**In the log, during the cruise:**
+- `[CRUISE] Plan N: X m confirmed ahead ... | cycle C s, robot at D cm from the line`: `C` around 0.2 s (above 0.6 s the planning is late), `D` a few cm. `X` around 1 m on open ground; on grass it may be shorter (grass read as roughness or obstacle).
+- `[GAIT] Terrain level: ...` printed again when the level changes in the middle of a cruise: the robot must change gait without stopping. Watch whether it stumbles or hesitates at the change.
+- `[CRUISE] End: <reason>`. Expected: `in the cell ... next cell while walking`, `the confirmed stretch ends ... (obstacle)` near obstacles. To look at: many `(end_of_data)`, `(roughness)` or `(slope)` on open grass; `too far from the path`; `command expired`; `no new plan for ...`.
+- `[CRUISE] New goal ... chosen while walking`, `[CRUISE] +N deg to turn ... without stopping first`.
+- `[STOP] ... I stop and look again standing`: the turns and the cases where the stop-and-go takes over.
+
+**Stop the robot:** Ctrl+C or the tablet. If the program hangs the command expires and the robot stops by itself within 2 s.
+
+**After:** `python3 tools/mission_report.py` (line `Cruise (continuous motion)` and the next one: hand-offs, new goals, path changes, distance from the line, reasons of the ends) and `python3 tools/mission_viewer.py` (the scans of the cruise every 0.5 m, decision `cruise`; light blue contour = area really seen by the cameras).
+
+---
+
 ## Before leaving
 
 All the mission switches and numbers are changed in **`spot_explorer/config.py`**. Those specific to grids and maps stay in `spot_explorer/perception/`, those of the motion in `spot_explorer/robot/motion.py`.

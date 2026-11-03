@@ -15,9 +15,10 @@ from spot_explorer.planning import roadmap
 from spot_explorer.planning import edge_evaluation
 from spot_explorer.mission import mission_prm
 from spot_explorer import config as P
-from spot_explorer.records import (MISSION_STATS, MISSION_CTX, mission_z0, save_npz_async, timing_add, visualize_grid_with_candidates)
+from spot_explorer.records import (MISSION_STATS, MISSION_CTX, save_npz_async, timing_add, visualize_grid_with_candidates)
 from spot_explorer.planning import goal
 from spot_explorer.mission import recovery
+from spot_explorer.mission import planning_cycle
 from spot_explorer.mission.attempt_common import STOP, FAILED
 
 
@@ -293,61 +294,20 @@ class ScanSteps:
             return FAILED
         self.t_scan = time.perf_counter()
 
+        # Robot pose at the same instant as the grid (same snapshot of transforms): the robot
+        # may still be walking from the previous cell (attempt_cruise.CHAIN_CELLS).
+        tf = get_a_tform_b(scan.proto.local_grid.transforms_snapshot, VISION_FRAME_NAME, BODY_FRAME_NAME)
+        q = tf.rotation
+        self.robot_x, self.robot_y = tf.position.x, tf.position.y
+        self.robot_yaw = np.arctan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y ** 2 + q.z ** 2))
         self.scan = scan
-        scan.grid_origin_x, scan.grid_origin_y = self.local_grid.grid_origin(scan)
-        scan.shape = (scan.num_y, scan.num_x)
-
-        self.local_grid.process_scan(scan, self.robot_x, self.robot_y, self.robot_yaw,
-                                ground_label="scan-step")
-
-        self.t_proc = time.perf_counter()
-        body_core = global_maps.fold_scan_into_global_maps(
-            self.global_map, self.global_terrain_map, scan.pts, scan.terrain, scan.obstacle_mask,
-            scan.is_valid, scan.od, scan.shape, (self.robot_x, self.robot_y, self.robot_yaw))
-        self.t_maps = time.perf_counter()
-
-        # 2. Fresh local data into the PRM, then replanning from the current node if needed
-        scan.grad_2d = scan.grad.reshape(scan.shape)
-        scan.rough_2d = scan.rough.reshape(scan.shape)
-        scan.terrain_2d = scan.terrain.reshape(scan.shape)
-
-        # The local data is always injected: it costs nothing (it stores the array references) and
-        # it is needed anyway by sample_terrain_between_points for the gait of the leg about to
-        # be travelled.
-        self.prm_graph.update_local_grid_data(
-            grad_values_2d=scan.grad_2d,
-            rough_values_2d=scan.rough_2d,
-            terrain_values_2d=scan.terrain_2d,
-            valid_2d=spot_grid.slope_usable_mask(scan.is_valid, scan.od, scan.shape),
-            grid_origin_x=scan.grid_origin_x,
-            grid_origin_y=scan.grid_origin_y,
-            cell_size=scan.cell_size
-        )
-
-        # Snapshot of the scan just made: it is needed already here -- by the preliminary edge
-        # discard in the refresh (see edge_evaluation.LIVE_PREFILTER_OD_M), by that of the nodes
-        # in obstacles -- and then by the safe frontier. It must be created ONLY ONCE per scan:
-        # make_grid_snapshot also updates the temporal obstacle filter.
-        self.snap = safe_frontier.make_grid_snapshot(
-            scan.od, scan.rough, scan.is_valid, scan.valid, scan.terrain,
-            scan.num_x, scan.num_y, scan.grid_origin_x, scan.grid_origin_y, scan.cell_size,
-            self.robot_x, self.robot_y, unwritten=scan.unwritten, robot_yaw=self.robot_yaw)
-
-        # Free-space map: HERE, not together with global_map.update, because it needs the
-        # filtered obstacle_distance that lives in the snapshot (see global_maps.update_clearance_map).
-        # It is fed only by the navigation loop, so all observations go through
-        # the same filter.
-        global_maps.update_clearance_map(self.global_map, scan.pts, self.snap, scan.is_valid, scan.unwritten,
-                              body_core, (self.robot_x, self.robot_y))
+        self.snap, self.t_proc, self.t_maps = planning_cycle.scan_into_maps(
+            self.local_grid, self.prm_graph, self.global_map, self.global_terrain_map, scan,
+            (self.robot_x, self.robot_y, self.robot_yaw), ground_label="scan-step")
 
     def _update_graph(self):
         """Edges re-evaluated on the new data (only after a move or an event), nodes in
         obstacles out, rotation refusals still valid. The nodes touched by the refresh."""
-        # The preliminary edge discard reads the FILTERED obstacle_distance
-        # (median over 3 scans + hysteresis), the same as the frontier.
-        self.prm_graph.set_live_obstacles(self.snap.obstacle_dist, self.snap.seen, self.snap.origin_x, self.snap.origin_y,
-                                     self.snap.cell_size, self.robot_x, self.robot_y, self.robot_yaw)
-
         # --- EVENT REFRESH -------------------------------------------------------------
         # Edge weights and slopes change only when the data under them changes,
         # i.e. when the window moves: with the robot still a refresh would recompute the
@@ -364,33 +324,12 @@ class ScanSteps:
         # nothing new to learn, and if something really enters the field the frontier gets
         # shorter, the decision becomes 'wait' or 'blocked' -- which are events, so the
         # refresh triggers anyway. The uncovered case closes by itself.
-        if self.need_refresh or getattr(self.prm_graph, 'needs_refresh', False):
-            self.prm_graph.needs_refresh = False
-            touched_nodes = self.prm_graph.refresh_local_edge_weights(
-                global_map=self.global_map, edge_safety_margin=geometry.PRM_EDGE_SAFETY_MARGIN_M)
+        refresh = self.need_refresh or getattr(self.prm_graph, 'needs_refresh', False)
+        touched_nodes = planning_cycle.refresh_graph(
+            self.prm_graph, self.snap, self.global_map, (self.robot_x, self.robot_y, self.robot_yaw),
+            refresh)
+        if refresh:
             self.need_refresh = False
-            MISSION_STATS['prm_refresh'] += 1
-            n_live = (getattr(self.prm_graph, 'live_veto_last', 0)
-                      + getattr(self.prm_graph, 'live_prune_last', 0))
-            MISSION_STATS['live_arc_vetoes'] = MISSION_STATS.get('live_arc_vetoes', 0) + n_live
-            if n_live:
-                print(f"[EDGES] {n_live} edges out of the graph because of the live scan "
-                      f"({self.prm_graph.live_veto_last} re-evaluated, {self.prm_graph.live_prune_last} "
-                      f"beyond the refresh radius), before the slope.")
-        else:
-            # No new data under the edges: the weights of the previous turn are kept and
-            # there is no replan (the block below runs only if touched_nodes is not empty).
-            touched_nodes = set()
-            MISSION_STATS['prm_refresh_skipped'] += 1
-
-
-        # Nodes INSIDE obstacles: out of the graph (see prune_prm_nodes_in_obstacles).
-        pruned_nodes = safe_frontier.prune_prm_nodes_in_obstacles(self.prm_graph, self.snap)
-        if pruned_nodes:
-            MISSION_STATS['nodes_pruned'] += len(pruned_nodes)
-            print(f"[NODES] {len(pruned_nodes)} nodes discarded: less than "
-                  f"{P.PRM_NODE_MIN_CLEARANCE_M:.2f} m of free space where we see them "
-                  f"(first: {pruned_nodes[:8]}).")
 
         # Edges already refused for rotation FROM THIS NODE: they stay out until the robot
         # moves. The discard is soft, so refresh_local_edge_weights would put them back
@@ -462,8 +401,6 @@ class ScanSteps:
         # A rotation refusal can be recomputed offline from obstacle_distance, robot_xyz,
         # robot_yaw and decision_target.
         if P.SAVE_SCAN_BUNDLES and self.mission_folder is not None:
-            gf = self.local_grid.last_ground_filter
-            shape = self.scan.shape
             extra = {}
             if P.SAVE_EXTRA_LAYERS:
                 t_x = time.perf_counter()
@@ -477,32 +414,8 @@ class ScanSteps:
                              f"scan_it{self.iteration:03d}_cell{self.target_row}_{self.target_col}_{self.loop_iter:03d}.npz"),
                 time=time.time(), iteration=self.iteration, cell=np.array([self.target_row, self.target_col]),
                 loop_iter=self.loop_iter,
-                terrain_raw=np.asarray(self.scan.terrain_raw, dtype=np.float32).reshape(shape),
-                terrain_valid_raw=np.asarray(self.scan.valid, dtype=np.float32).reshape(shape),
-                obstacle_distance=np.asarray(self.scan.od, dtype=np.float32).reshape(shape),
-                # The layer the frontier DECIDES on (median over the last readings + hysteresis,
-                # see safe_frontier._ObstacleHistory) and the latch mask. Without these
-                # two an offline replay cannot reproduce the blocks that come from the
-                # thread's readings during the move. Same orientation as the others:
-                # (num_y, num_x), row = y.
-                obstacle_distance_filtered=np.asarray(self.snap.obstacle_dist, dtype=np.float32),
-                blocked_latch=(np.zeros(shape, bool) if self.snap.blocked_latch is None
-                               else np.asarray(self.snap.blocked_latch, dtype=bool)),
-                terrain_corrected=np.asarray(self.scan.terrain, dtype=np.float32).reshape(shape),
-                is_valid=np.asarray(self.scan.is_valid, dtype=bool).reshape(shape),
-                roughness=np.asarray(self.scan.rough, dtype=np.float32).reshape(shape),
-                gradient=np.asarray(self.scan.grad, dtype=np.float32).reshape(shape),
-                obstacle_mask=np.asarray(self.scan.obstacle_mask, dtype=np.int8).reshape(shape),
-                footprint_mask=(np.zeros(shape, bool) if self.scan.footprint_mask is None
-                                else np.asarray(self.scan.footprint_mask, dtype=bool).reshape(shape)),
-                grid_origin=np.array([self.scan.grid_origin_x, self.scan.grid_origin_y]), cell_size=self.scan.cell_size,
-                robot_xyz=np.array([self.robot_x, self.robot_y, self.robot_z]), robot_yaw=self.robot_yaw,
-                ground_z=np.nan if gf.get('ground_z') is None else gf['ground_z'],
-                ground_n_above=gf.get('n_above', 0),
-                mission_z0=mission_z0(),
-                terrain_raw_zero=np.nan if spot_grid.raw_zero(self.scan.grids_data) is None else spot_grid.raw_zero(self.scan.grids_data),
-                terrain_scale=np.nan if not spot_grid.raw_scale(self.scan.grids_data) else spot_grid.raw_scale(self.scan.grids_data),
-                unwritten=np.asarray(self.scan.unwritten, dtype=bool).reshape(shape),
+                **planning_cycle.scan_bundle_arrays(self.scan, self.snap, self.local_grid,
+                                                    (self.robot_x, self.robot_y, self.robot_z), self.robot_yaw),
                 polyline=np.array(self.polyline), path_node_ids=np.array([w[0] for w in self.path_waypoints]),
                 robot_node_id=self.robot_node_id, goal_xy=np.array([self.target_x, self.target_y]),
                 frontier_dist=self.frontier['dist'], frontier_reason=self.frontier['reason'],

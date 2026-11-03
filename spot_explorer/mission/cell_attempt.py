@@ -19,6 +19,8 @@ from spot_explorer.mission.attempt_common import CONTINUE, STOP, FAILED, battery
 from spot_explorer.mission.attempt_scan import ScanSteps
 from spot_explorer.mission.attempt_obstacles import ObstacleSteps
 from spot_explorer.mission.attempt_legs import LegSteps
+from spot_explorer.mission import attempt_cruise
+from spot_explorer.mission.attempt_cruise import CruiseSteps
 
 
 # =========================================================================
@@ -26,7 +28,7 @@ from spot_explorer.mission.attempt_legs import LegSteps
 # =========================================================================
 
 
-class CellAttempt(ScanSteps, ObstacleSteps, LegSteps):
+class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps):
     """Try to enter cell (target_row, target_col) from the robot's current position.
 
     Scan, update of maps and graph, choice of the goal point, path, then the navigation
@@ -43,6 +45,8 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps):
       _scan_and_graph         _fresh_scan, _update_graph, _replan
       _frontier_and_decision  shortcut, safe frontier, decisions.decide_next_move:
                               move / reached_node / arrived / wait / blocked
+      _moving_check           robot still walking from the previous cell (CHAIN_CELLS):
+                              on only into a cruise with a small turn, else stop first
       _rotation               (move) cannot turn: _advance_in_cone, _back_up_to_turn,
                               trap, leg discarded
       _node_or_arrival        (reached_node, arrived)
@@ -52,11 +56,13 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps):
                               new way or return with GraphNav
       _execute_legs           (move) _check_arrival_pose, then for every leg
                               _prepare_leg and _walk_leg (_leg_terrain,
-                              _move_and_record, outcome)
+                              _move_and_record, outcome); with CONTINUOUS_MOTION
+                              _cruise instead of the legs (attempt_cruise.py)
 
     Files: the loop, the guards, the decision and the shared actions are here; the scan
     phases in attempt_scan.py (ScanSteps), rotation/wait/block in attempt_obstacles.py
-    (ObstacleSteps), the legs in attempt_legs.py (LegSteps). Outcomes and battery checks
+    (ObstacleSteps), the legs in attempt_legs.py (LegSteps), the cruise in
+    attempt_cruise.py (CruiseSteps). Outcomes and battery checks
     in attempt_common.py.
 
     Actions shared by the phases: _use_path, _drop_edge (for now / for the attempt / for
@@ -85,21 +91,29 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps):
 
     def run(self):
         """True if the robot ends up inside the cell (or accepted just outside, see _finish)."""
-        if self._prepare() is FAILED:
-            return False
-
-        while self.path_waypoints and len(self.path_waypoints) > 0:
-            outcome = self._loop_once()
-            if outcome is FAILED:
+        self._handoff = False
+        try:
+            if self._prepare() is FAILED:
                 return False
-            if outcome is STOP:
-                break
-        return self._finish()
+
+            while self.path_waypoints and len(self.path_waypoints) > 0:
+                outcome = self._loop_once()
+                if outcome is FAILED:
+                    return False
+                if outcome is STOP:
+                    break
+            return self._finish()
+        finally:
+            # A successful hand-off leaves the robot walking (see attempt_cruise.CHAIN_CELLS), and
+            # so does an attempt that failed before its loop: only computations, no command (on
+            # 03-11 16:02 five of those stopped the robot for nothing, cells beyond the wall).
+            if not self._handoff and getattr(self, 'loop_iter', 0) > 0:
+                attempt_cruise.stop_if_moving(self.env, self.command_client, "end of the attempt")
 
     def _loop_once(self):
         """One turn of the navigation loop: the phases in order, until one decides the outcome."""
         for phase in (self._guards, self._scan_and_graph, self._frontier_and_decision,
-                     self._rotation, self._timings, self._node_or_arrival, self._wait,
+                     self._moving_check, self._rotation, self._timings, self._node_or_arrival, self._wait,
                      self._block, self._execute_legs):
             outcome = phase()
             if outcome is not None:
@@ -457,7 +471,7 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps):
 
         # Final check of the position at the end of the path
         self.robot_x, self.robot_y, _, _ = connection.getPosition(self.robot_state_client)
-        if self.arrived_near_goal:
+        if self.arrived_near_goal or self._handoff:
             return True
         return self.env.is_point_in_cell(self.robot_x, self.robot_y, self.target_row, self.target_col)
 

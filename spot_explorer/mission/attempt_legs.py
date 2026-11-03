@@ -29,6 +29,8 @@ class LegSteps:
         outcome = self._check_arrival_pose()
         if outcome is not None:
             return outcome
+        if self._can_cruise():
+            return self._cruise()          # continuous motion: see attempt_cruise.py
 
         # --- Execution: one or more LEGS on the polyline already confirmed by the frontier,
         # without scan, refresh or replan in between (see MULTI-NODE
@@ -273,7 +275,8 @@ class LegSteps:
         tilt_recorder.start()
         try:
             self.need_refresh = True              # end of a move: see EVENT REFRESH
-            success_move, distance_traveled, distance_commanded = motion.navigate_to(
+            navigate = motion.navigate_to_path if motion.PATH_COMMAND_FOR_LEGS else motion.navigate_to
+            success_move, distance_traveled, distance_commanded = navigate(
                 move_x, move_y, self.robot_x, self.robot_y, self.robot_state_client, self.command_client,
                 vision_tform_body_current, should_abort=_should_abort_move,
                 keep_heading=self.keep_heading,

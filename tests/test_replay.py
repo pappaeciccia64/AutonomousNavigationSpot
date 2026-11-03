@@ -126,6 +126,9 @@ with _quiet():
     from spot_explorer import records
     from spot_explorer import config as P
 
+# The reference behaviour (replay_reference.json) is that of the full refresh.
+edge_evaluation.INCREMENTAL_REFRESH = False
+
 
 # --------------------------------------------------------------------------------------
 # Reading the mission

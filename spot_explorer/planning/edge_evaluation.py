@@ -47,6 +47,18 @@ REFRESH_RADIUS_M = 1.25
 # False = edge by edge; the result is identical.
 REFRESH_BATCH_SLOPES = True
 
+# INCREMENTAL REFRESH: an edge already evaluated on the live scan keeps its slope profile
+# until the scan sees it better: centre-line coverage (edge extended by half a body)
+# up by REFRESH_COVERAGE_GAIN, or robot REFRESH_CLOSER_M closer to the edge middle than at
+# the last evaluation (the heights read from close by are the reliable ones). Occupancy and
+# the live discard are redone at every refresh anyway: they are cheap and something can
+# enter the edge after it was evaluated. If the edge is as the evaluation left it (validity
+# and weight), it is not touched at all. False = every edge of the radius from scratch.
+# 03-11, end-to-end test: the slopes were 34% of the 190 ms of a refresh.
+INCREMENTAL_REFRESH = True
+REFRESH_COVERAGE_GAIN = 0.15
+REFRESH_CLOSER_M = 0.5
+
 
 def body_slope(prof):
     """
@@ -70,6 +82,17 @@ def body_slope(prof):
 # (test_replay.py checks it).
 DIRTY_MARGIN_M = (slopes.ARC_BODY_EXTENSION_M + slopes.LATERAL_SLICE_HALF_WIDTH_M
                   + geometry.PRM_EDGE_SAFETY_MARGIN_M + 0.10)
+
+
+class _LiveEval:
+    """Last live evaluation of an edge (INCREMENTAL_REFRESH): node positions, centre-line
+    coverage and robot distance from the edge middle at that moment, slope profile, and the
+    validity and weight it left in the graph."""
+    __slots__ = ('xy_a', 'xy_b', 'cov', 'mid_d', 'prof', 'valid', 'weight')
+
+    def __init__(self, xy_a, xy_b, cov, mid_d, prof, valid, weight):
+        self.xy_a, self.xy_b, self.cov, self.mid_d = xy_a, xy_b, cov, mid_d
+        self.prof, self.valid, self.weight = prof, valid, weight
 
 
 class EdgeEvaluation:
@@ -103,6 +126,11 @@ class EdgeEvaluation:
         # see DIRTY_MARGIN_M and mission_graph.MissionGraph.add_edges_to_prm(incremental=True).
         self.dirty_rects = []
         self.hazards_seen = 0         # hazards of the global map already applied (mission_graph)
+
+        # INCREMENTAL_REFRESH: per edge, the last live evaluation (see _LiveEval), and the
+        # counts of the last refresh (recomputed, reused profile, untouched).
+        self._live_eval = {}
+        self.refresh_counts_last = (0, 0, 0)
 
     def set_global_terrain_map(self, global_terrain_map):
         """
@@ -283,14 +311,35 @@ class EdgeEvaluation:
         # occupancy, blocked up close, travelled by the robot (if one of the latter turns out
         # to need re-evaluation, its profile is computed edge by edge).
         live_profs = [None] * len(pairs)
+        reuse, cov, mid_d = self._reusable_profiles(pairs, occ_flags)
         if REFRESH_BATCH_SLOPES and pairs:
-            skip = np.array([bool(o) or (min(a, b), max(a, b)) in self.tracker_blocked_edges
+            skip = np.array([bool(o) or r is not None or (min(a, b), max(a, b)) in self.tracker_blocked_edges
                              or (min(a, b), max(a, b)) in self.traversed_edges
-                             for (a, b, _d), o in zip(pairs, occ_flags)], dtype=bool)
+                             for (a, b, _d), o, r in zip(pairs, occ_flags, reuse)], dtype=bool)
             live_profs = self.precompute_arc_slopes(pairs, skip=skip)
 
-        for (idx1, idx2, dist), occ_flag, live_prof in zip(pairs, occ_flags, live_profs):
-            self._refresh_edge(idx1, idx2, dist, global_map, occ_flag, live_prof)
+        n_new = n_reused = n_untouched = 0
+        for i, ((idx1, idx2, dist), occ_flag, live_prof) in enumerate(zip(pairs, occ_flags, live_profs)):
+            ev = reuse[i]
+            if ev is not None:
+                key = (min(idx1, idx2), max(idx1, idx2))
+                if (self.edge_validity.get(key) == ev.valid
+                        and self._edge_weight(idx1, idx2) == ev.weight):
+                    n_untouched += 1
+                    continue          # as the last evaluation left it: nothing to redo
+                n_reused += 1
+                live_prof = ev.prof
+            prof = self._refresh_edge(idx1, idx2, dist, global_map, occ_flag, live_prof)
+            if INCREMENTAL_REFRESH and prof is not None:
+                if ev is None:
+                    n_new += 1
+                key = (min(idx1, idx2), max(idx1, idx2))
+                self._live_eval[key] = _LiveEval(
+                    self.nodes[idx1], self.nodes[idx2],
+                    float(cov[i]) if ev is None else ev.cov,
+                    float(mid_d[i]) if ev is None else ev.mid_d,
+                    prof, self.edge_validity.get(key), self._edge_weight(idx1, idx2))
+        self.refresh_counts_last = (n_new, n_reused, n_untouched)
 
         # The valid edges of the window outside the refresh radius at least go through the
         # preliminary discard on the live scan (live_prune_valid_edges).
@@ -340,17 +389,78 @@ class EdgeEvaluation:
                 pairs.append((idx1, idx2, float(d_all[j])))
         return pairs
 
+    def _reusable_profiles(self, pairs, occ_flags):
+        """INCREMENTAL_REFRESH: for each pair the _LiveEval whose profile still holds (no
+        better data since), otherwise None; with the coverage and the robot distance of
+        now, to store with a new evaluation. All None when the switch is off."""
+        n = len(pairs)
+        if not INCREMENTAL_REFRESH or n == 0:
+            return [None] * n, np.zeros(n), np.zeros(n)
+        cov = self._live_coverage_many(pairs)
+        lo = self.live_obstacles
+        if lo is not None:
+            rx, ry = lo['rx'], lo['ry']
+        elif self.robot_node in self.nodes:
+            rx, ry = self.nodes[self.robot_node]
+        else:
+            rx = ry = None
+        xy1 = np.array([self.nodes[p[0]] for p in pairs], dtype=np.float64)
+        xy2 = np.array([self.nodes[p[1]] for p in pairs], dtype=np.float64)
+        mid_d = (np.hypot(0.5 * (xy1[:, 0] + xy2[:, 0]) - rx, 0.5 * (xy1[:, 1] + xy2[:, 1]) - ry)
+                 if rx is not None else np.full(n, np.inf))
+        reuse = [None] * n
+        for i, ((a, b, _d), occ) in enumerate(zip(pairs, occ_flags)):
+            if occ:
+                continue
+            ev = self._live_eval.get((min(a, b), max(a, b)))
+            if ev is None or ev.xy_a != self.nodes[min(a, b)] or ev.xy_b != self.nodes[max(a, b)]:
+                continue              # never evaluated live, or the node moved
+            if cov[i] >= ev.cov + REFRESH_COVERAGE_GAIN or mid_d[i] <= ev.mid_d - REFRESH_CLOSER_M:
+                continue              # better data now: it is recomputed
+            reuse[i] = ev
+        return reuse, cov, mid_d
+
+    def _live_coverage_many(self, pairs):
+        """Fraction of the centre line (edge extended by half a body on each side, one
+        sample per cell) on reliable cells of the live grid, for each pair."""
+        out = np.zeros(len(pairs))
+        if self.current_terrain_2d is None or self.cell_size is None:
+            return out
+        ext = slopes.ARC_BODY_EXTENSION_M
+        xy1 = np.array([self.nodes[p[0]] for p in pairs], dtype=np.float64)
+        xy2 = np.array([self.nodes[p[1]] for p in pairs], dtype=np.float64)
+        d = np.maximum(np.hypot(*(xy2 - xy1).T), 1e-9)
+        u = (xy2 - xy1) / d[:, None]
+        a = xy1 - ext * u
+        L = d + 2 * ext
+        ns = np.floor(L / self.cell_size).astype(np.int64) + 1
+        for m in np.unique(ns):
+            sel = np.nonzero(ns == m)[0]
+            t = np.linspace(0.0, 1.0, int(m))
+            sx = a[sel, 0, None] + t[None, :] * (L[sel] * u[sel, 0])[:, None]
+            sy = a[sel, 1, None] + t[None, :] * (L[sel] * u[sel, 1])[:, None]
+            _h, inside = slopes._gather_heights(self.current_terrain_2d, self.grid_origin_x,
+                                                self.grid_origin_y, self.cell_size, sx, sy,
+                                                valid_2d=self.current_valid_2d)
+            out[sel] = inside.mean(axis=1)
+        return out
+
+    def _edge_weight(self, idx1, idx2):
+        """Weight of the edge in the graph, None if it is not there."""
+        return next((w for n, w in self.edges.get(idx1, ()) if n == idx2), None)
+
     def _refresh_edge(self, idx1, idx2, dist, global_map, occ_blocked, live_prof):
         """
         Re-evaluate one edge of the refresh: occ_blocked is the occupancy outcome already
         computed, live_prof the slope profile computed in batch (None = computed here).
+        Returns the slope profile used (None if not computed).
         """
         key = (min(idx1, idx2), max(idx1, idx2))
         if key in self.tracker_blocked_edges:
-            return  # block confirmed up close (safe frontier) -- never recreated
+            return None  # block confirmed up close (safe frontier) -- never recreated
         if key in self.traversed_edges:
             if self._traversed_edge_ok(idx1, idx2, global_map):
-                return  # travelled by the robot: free by construction
+                return None  # travelled by the robot: free by construction
             self.traversed_edges.discard(key)   # now crosses the spot of a fall
 
         old_valid = self.edge_validity.get(key)  # None if the edge had never been evaluated before
@@ -392,6 +502,9 @@ class EdgeEvaluation:
             self.edges[idx1].append((idx2, weight))
             self.edges[idx2].append((idx1, weight))
             self.edge_validity[key] = True
+        # The slope profile used, for INCREMENTAL_REFRESH (None if it was not computed: the
+        # edge was blocked by occupancy).
+        return None if bool(occ_blocked) else prof
 
     def compute_arc_slope_profile(self, x1: float, y1: float, x2: float, y2: float,
                                    perp_sample_spacing_m: float = 0.10, body: bool = False):

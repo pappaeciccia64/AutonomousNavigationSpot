@@ -59,7 +59,7 @@ def main(a, b):
             print("\n".join(diff[:30]))
         else:
             print(f"[SAME] {n} ({len(la)} lines)")
-    print("\nIDENTICI" if not bad else f"\n{bad} SCENARIOS DIFFERENT")
+    print("\nIDENTICAL" if not bad else f"\n{bad} SCENARIOS DIFFERENT")
     return 1 if bad else 0
 
 

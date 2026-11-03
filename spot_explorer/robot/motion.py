@@ -6,6 +6,9 @@ motion.py -- Spot's motion commands and motion safety.
   navigate_to                                          one leg of the navigation loop:
                                                        rotate, then advance (with the
                                                        frontier able to stop it)
+  PathCommand                                          several points of the path in one
+                                                       trajectory, without waiting
+                                                       (continuous motion)
   select_mobility_params                               gait, step and speed limits from
                                                        the terrain of the edge
   check_fall, recover_from_fall, check_and_recover_fall   falls: recognize them, get up,
@@ -22,7 +25,8 @@ from bosdyn.api import robot_state_pb2
 from bosdyn.api.basic_command_pb2 import RobotCommandFeedbackStatus
 from bosdyn.client import math_helpers
 from bosdyn.api.spot import robot_command_pb2 as spot_command_pb2
-from bosdyn.api import geometry_pb2
+from bosdyn.api import geometry_pb2, trajectory_pb2
+from bosdyn.util import seconds_to_duration, seconds_to_timestamp
 from google.protobuf import wrappers_pb2
 
 from spot_explorer import config as P
@@ -439,6 +443,323 @@ def move_to_world_point_without_turning(target_x, target_y, frame_name,
                          max_linear_vel=max_linear_vel, max_angular_vel=max_angular_vel)
 
 
+# =========================================================================
+# PATH COMMAND -- several points, without waiting (continuous motion).
+#
+# One SE2 trajectory along the path of the graph, nose first, that the robot follows
+# without stopping at the nodes. The POSITION stays on the edges: the points are the nodes
+# plus points every PATH_POINT_SPACING_M along each edge, joined by straight lines. The
+# HEADING is the direction of the edge along it, so the body is aligned with the edge as
+# the frontier and the edge checks assume; it changes only within PATH_TURN_ZONE_M of a
+# node, where the robot turns while walking (half before and half after the node, about
+# the area that the rotation in place at the node sweeps today). A corner sharper than
+# PATH_TURN_IN_PLACE_DEG, and the start if the nose is that far from the first edge, is a
+# rotation on the spot at the node inside the same trajectory (at the start the threshold
+# is PATH_START_IN_PLACE_DEG).
+#
+# send() returns at once and sends only the part of the path ahead of the robot
+# (path_ahead); poll() reads the feedback without waiting. Whoever drives sends a new path
+# when the plan changes (it replaces the previous one without stopping the robot) and
+# stops it when needed.
+#
+# Times of the points: the longer of length / speed limit and heading change / angular
+# limit, times PATH_TIME_FACTOR (so the robot slows down only in the sharper turns). Spot follows the trajectory IN
+# TIME: with times it cannot keep, the reference runs ahead and the robot heads for a
+# point further on, cutting the corner. The factor keeps the reference a little slower
+# than the limits. In any case poll() measures the distance of the robot from the line of
+# the trajectory and stops it beyond PATH_MAX_DEVIATION_M.
+#
+# Dead man: the command expires PATH_HOLD_S after it is sent, wherever the robot is
+# along the path. Whoever drives must send again before then; if the program hangs or
+# the WiFi drops, the robot stops by itself within PATH_HOLD_S. With hold_s=None the
+# command lasts the whole path, with the same maximum time as relative_move.
+# =========================================================================
+PATH_TIME_FACTOR = 1.25
+PATH_HOLD_S = 2.0
+PATH_POINT_SPACING_M = 0.15
+PATH_TURN_ZONE_M = 0.20
+PATH_TURN_IN_PLACE_DEG = 60.0
+# At the start of a send the nose may be off the first edge (new send halfway through a
+# turn): beyond this it turns on the spot first. Above half of PATH_TURN_IN_PLACE_DEG, so
+# that a new send in the middle of a turn while walking does not stop the robot.
+PATH_START_IN_PLACE_DEG = 35.0
+PATH_MAX_DEVIATION_M = 0.10
+# During the rotation on the spot at the start Spot moves the body centre by some cm (03-11
+# 15:39: 9.6 cm while turning 90 degrees, then 2 cm): until it ends (+0.5 s) the limit is this.
+PATH_MAX_DEVIATION_TURN_M = 0.20
+PATH_MIN_POINT_GAP_M = 0.01      # path points closer than this to the previous one are dropped
+# Spot's feedback can say that the final point is blocked (final_goal_status, its own
+# planner and obstacle map). It is advice, not a stop: on 03-11 14:45 it came out in 4 legs
+# out of 19 with the robot still walking towards points it then reached, and stopping on
+# it made two of them count as mechanical failures. It counts as blocked only with the
+# robot also standing (less than PATH_STILL_M and PATH_STILL_DEG in PATH_BLOCKED_STILL_S).
+PATH_BLOCKED_STILL_S = 1.5
+PATH_STILL_M = 0.03
+PATH_STILL_DEG = 3.0              # turning on the spot is moving too
+
+
+def _angle_diff(a, b):
+    """a - b in (-pi, pi]."""
+    return float(np.arctan2(np.sin(a - b), np.cos(a - b)))
+
+
+def _wrap(a):
+    return float(np.arctan2(np.sin(a), np.cos(a)))
+
+
+def path_trajectory(path_xy, start_xy, start_yaw, max_linear_vel, max_angular_vel,
+                    time_factor=PATH_TIME_FACTOR, start_in_place_deg=PATH_START_IN_PLACE_DEG):
+    """
+    Points (x, y, heading, t) of the trajectory from the start pose (t=0) along the path,
+    as described above (PATH COMMAND). t in seconds from the start.
+    """
+    pts = [(float(start_xy[0]), float(start_xy[1]))]
+    for x, y in path_xy:
+        if np.hypot(x - pts[-1][0], y - pts[-1][1]) > PATH_MIN_POINT_GAP_M:
+            pts.append((float(x), float(y)))
+    if len(pts) < 2:
+        return [(pts[0][0], pts[0][1], float(start_yaw), 0.0)]
+    seg = [float(np.arctan2(b[1] - a[1], b[0] - a[0])) for a, b in zip(pts, pts[1:])]
+    lengths = [float(np.hypot(b[0] - a[0], b[1] - a[1])) for a, b in zip(pts, pts[1:])]
+    # A short first segment is the step back onto the line (projection of the robot, see
+    # PathCommand.send): sideways, with the nose already on the segment after it.
+    if len(seg) > 1 and lengths[0] < PATH_TURN_ZONE_M:
+        seg[0] = seg[1]
+    in_place = np.radians(PATH_TURN_IN_PLACE_DEG)
+
+    poses = [(pts[0][0], pts[0][1], float(start_yaw))]
+    if abs(_angle_diff(seg[0], start_yaw)) > np.radians(start_in_place_deg):
+        poses.append((pts[0][0], pts[0][1], seg[0]))
+    for k in range(len(seg)):
+        (ax, ay), (bx, by), L = pts[k], pts[k + 1], lengths[k]
+        ux, uy = (bx - ax) / L, (by - ay) / L
+        last = k == len(seg) - 1
+        sharp_end = not last and abs(_angle_diff(seg[k + 1], seg[k])) > in_place
+        zs = min(PATH_TURN_ZONE_M, L / 2)          # turn at the start node (or start pose)
+        ze = 0.0 if (last or sharp_end) else min(PATH_TURN_ZONE_M, L / 2)
+        stops = {round(zs, 4), round(L - ze, 4)}
+        stops.update(round(i * PATH_POINT_SPACING_M, 4)
+                     for i in range(1, int(L / PATH_POINT_SPACING_M) + 1))
+        for d in sorted(stops):
+            if zs - 1e-6 <= d <= L - ze + 1e-6 and PATH_MIN_POINT_GAP_M < d < L - PATH_MIN_POINT_GAP_M:
+                poses.append((ax + d * ux, ay + d * uy, seg[k]))
+        if last:
+            poses.append((bx, by, seg[k]))
+        elif sharp_end:
+            poses.append((bx, by, seg[k]))
+            poses.append((bx, by, seg[k + 1]))
+        else:
+            poses.append((bx, by, _wrap(seg[k] + 0.5 * _angle_diff(seg[k + 1], seg[k]))))
+
+    v, w = abs(float(max_linear_vel)) or 0.1, abs(float(max_angular_vel)) or 0.1
+    out = [(poses[0][0], poses[0][1], _wrap(poses[0][2]), 0.0)]
+    for (px, py, ph), (qx, qy, qh) in zip(poses, poses[1:]):
+        ds = float(np.hypot(qx - px, qy - py))
+        dh = abs(_angle_diff(qh, ph))
+        # Walking and turning happen together: the longer of the two times, not their sum
+        # (with the sum, on 03-11 14:48 a 41-degree turn while walking went at 0.06-0.2 m/s).
+        out.append((qx, qy, _wrap(qh), out[-1][3] + time_factor * max(ds / v, dh / w)))
+    return out
+
+
+def distance_from_polyline(x, y, xy):
+    """Distance of (x, y) from the broken line through the points xy."""
+    if len(xy) == 1:
+        return float(np.hypot(x - xy[0][0], y - xy[0][1]))
+    best = np.inf
+    for (ax, ay), (bx, by) in zip(xy, xy[1:]):
+        abx, aby = bx - ax, by - ay
+        t = float(np.clip(((x - ax) * abx + (y - ay) * aby) / max(abx * abx + aby * aby, 1e-12), 0.0, 1.0))
+        best = min(best, float(np.hypot(x - ax - t * abx, y - ay - t * aby)))
+    return best
+
+
+def path_ahead(path_xy, x, y, from_seg=0, n_seg=2):
+    """
+    The part of the path still ahead of the robot: (x, y) projected on the nearest of the
+    n_seg segments from from_seg on (the first one on a tie), the points before the
+    projection dropped. So the same path can be sent again while walking without the robot
+    going back to the points already passed. Only a few segments are searched, from where
+    the robot was: a path that comes back close to where it passed (a loop, a hairpin)
+    must not make it skip ahead. Returns (points ahead, segment of the projection).
+    """
+    path = [(float(px), float(py)) for px, py in path_xy]
+    if len(path) < 2:
+        return path, 0
+    best, best_k, best_q = np.inf, from_seg, path[min(from_seg, len(path) - 1)]
+    for k in range(from_seg, min(from_seg + n_seg, len(path) - 1)):
+        (ax, ay), (bx, by) = path[k], path[k + 1]
+        abx, aby = bx - ax, by - ay
+        t = float(np.clip(((x - ax) * abx + (y - ay) * aby) / max(abx * abx + aby * aby, 1e-12), 0.0, 1.0))
+        q = (ax + t * abx, ay + t * aby)
+        d = float(np.hypot(x - q[0], y - q[1]))
+        if d < best - 1e-9:
+            best, best_k, best_q = d, k, q
+    return [best_q] + path[best_k + 1:], best_k
+
+
+def _path_command(points, frame_name, params, reference_time_secs):
+    """RobotCommand with the multi-point SE2 trajectory (reference time in client clock:
+    the command client converts it to robot time, like end_time)."""
+    cmd = RobotCommandBuilder.synchro_se2_trajectory_command(
+        math_helpers.SE2Pose(x=points[-1][0], y=points[-1][1], angle=points[-1][2]).to_proto(),
+        frame_name, params=params)
+    traj = cmd.synchronized_command.mobility_command.se2_trajectory_request.trajectory
+    del traj.points[:]
+    for x, y, h, t in points:
+        traj.points.add(pose=geometry_pb2.SE2Pose(position=geometry_pb2.Vec2(x=x, y=y), angle=h),
+                        time_since_reference=seconds_to_duration(t))
+    traj.reference_time.CopyFrom(seconds_to_timestamp(reference_time_secs))
+    traj.interpolation = trajectory_pb2.POS_INTERP_LINEAR
+    return cmd
+
+
+class PathCommand:
+    """
+    Multi-point move that does not block: send(path) and poll() (see PATH COMMAND above).
+
+    poll() returns a dict with 'status' and the pose read with the feedback (x, y, yaw,
+    travelled = metres walked since the first send, along the real track, deviation =
+    distance from the line of the trajectory):
+      moving       the robot is following the path
+      near_goal    close to the last point
+      arrived      at the last point
+      blocked      Spot reports the last point blocked (its own planner) AND the robot has
+                   been standing for PATH_BLOCKED_STILL_S (see the constant)
+      off_path     farther than PATH_MAX_DEVIATION_M from the line: robot stopped here
+      expired      the dead man expired before a new send: the robot has stopped
+      stopped      the command was replaced (stop or another command) or Spot froze it
+      comm_error   feedback not read (pose of the previous poll); after
+                   MOVE_MAX_RPC_ERRORS in a row the robot is stopped and the error raised
+      idle         nothing sent yet, or after stop()
+    """
+
+    def __init__(self, command_client, robot_state_client, frame_name=VISION_FRAME_NAME):
+        self.command_client = command_client
+        self.robot_state_client = robot_state_client
+        self.frame_name = frame_name
+        self.cmd_id = None
+        self.points = []           # last trajectory sent, (x, y, heading, t)
+        self.sent_at = None
+        self.travelled = 0.0
+        self.sends = 0
+        self.deviation = 0.0       # distance from the line of the trajectory at the last poll
+        self.max_deviation = 0.0
+        self._last = None          # (x, y, yaw) of the last pose read
+        self._rpc_errors = 0
+        self._path, self._seg = None, 0   # last path given to send() and segment reached
+        self.goal_blocked = False         # Spot's final_goal_status at the last poll
+        self._still_xy, self._still_t = None, None   # where and since when the robot stands
+
+    def pose(self):
+        tf = get_se2_a_tform_b(self.robot_state_client.get_robot_state().kinematic_state.transforms_snapshot,
+                               self.frame_name, BODY_FRAME_NAME)
+        return float(tf.x), float(tf.y), float(tf.angle)
+
+    def send(self, path_xy, hold_s=PATH_HOLD_S, locomotion_hint=None, ground_mu_hint=None,
+             swing_height=None, disable_foot_obstacle_avoidance=None,
+             max_linear_vel=None, max_angular_vel=None, start_in_place_deg=PATH_START_IN_PLACE_DEG):
+        """Send the path from the current pose, only the part ahead of the robot (path_ahead).
+        Returns the seconds of the trajectory."""
+        x, y, yaw = self.pose()
+        path = [(float(px), float(py)) for px, py in path_xy]
+        from_seg = self._seg if path == self._path else 0
+        path_xy, self._seg = path_ahead(path, x, y, from_seg)
+        self._path = path
+        # The projection stays: the robot goes back onto the line that was checked (with a
+        # short sideways step, see path_trajectory) instead of heading straight for the next
+        # point along a line nobody checked. Dropping it, the robot passed 0.24 m from a wall
+        # corner in the smoke run of 03-11 (the path had changed while it walked).
+        if self._last is None:
+            self._last = (x, y, yaw)
+        v = max_linear_vel if max_linear_vel is not None else DEFAULT_MAX_LINEAR_VEL_MPS
+        w = max_angular_vel if max_angular_vel is not None else DEFAULT_MAX_ANGULAR_VEL_RPS
+        self.points = path_trajectory(path_xy, (x, y), yaw, v, w, start_in_place_deg=start_in_place_deg)
+        duration = self.points[-1][3]
+        params = _build_mobility_params(
+            locomotion_hint=locomotion_hint, ground_mu_hint=ground_mu_hint,
+            swing_height=swing_height,
+            disable_foot_obstacle_avoidance=disable_foot_obstacle_avoidance,
+            max_linear_vel=v, max_angular_vel=w)
+        now = time.time()
+        if hold_s is None:
+            hold_s = MOVE_TIMEOUT_FACTOR * duration + MOVE_TIMEOUT_MARGIN_S
+        self.cmd_id = self.command_client.robot_command(
+            lease=None, command=_path_command(self.points, self.frame_name, params, now),
+            end_time_secs=now + hold_s)
+        self.sent_at = now
+        self.sends += 1
+        return duration
+
+    def poll(self):
+        if self.cmd_id is None:
+            return self._result('idle')
+        try:
+            feedback = self.command_client.robot_command_feedback(self.cmd_id)
+            x, y, yaw = self.pose()
+            self._rpc_errors = 0
+        except Exception as e:
+            self._rpc_errors += 1
+            print(f"[PATH] Communication error while following the path ({self._rpc_errors}/"
+                  f"{MOVE_MAX_RPC_ERRORS}): {e}")
+            if self._rpc_errors >= MOVE_MAX_RPC_ERRORS:
+                self.stop("repeated communication errors")
+                raise
+            return self._result('comm_error')
+        if self._last is not None:
+            self.travelled += float(np.hypot(x - self._last[0], y - self._last[1]))
+        self._last = (x, y, yaw)
+
+        mobility = feedback.feedback.synchronized_feedback.mobility_command_feedback
+        traj = mobility.se2_trajectory_feedback
+        self.deviation = distance_from_polyline(x, y, [(p[0], p[1]) for p in self.points])
+        # Rotation on the spot at the start (first points at the start position): see
+        # PATH_MAX_DEVIATION_TURN_M.
+        turn_end_t = 0.0
+        for px, py, _h, pt in self.points[1:]:
+            if np.hypot(px - self.points[0][0], py - self.points[0][1]) > PATH_MIN_POINT_GAP_M:
+                break
+            turn_end_t = pt
+        turning = time.time() < self.sent_at + turn_end_t + 0.5
+        limit = PATH_MAX_DEVIATION_TURN_M if turning else PATH_MAX_DEVIATION_M
+        if not turning:
+            self.max_deviation = max(self.max_deviation, self.deviation)
+        if (self.deviation > limit
+                and mobility.status == RobotCommandFeedbackStatus.STATUS_PROCESSING):
+            self.stop(f"{100 * self.deviation:.0f} cm away from the path (limit "
+                      f"{100 * limit:.0f} cm{' while turning on the spot' if turning else ''})")
+            return self._result('off_path')
+        if mobility.status == RobotCommandFeedbackStatus.STATUS_COMMAND_TIMED_OUT:
+            return self._result('expired')
+        if mobility.status != RobotCommandFeedbackStatus.STATUS_PROCESSING:
+            return self._result('stopped')
+        now = time.time()
+        if (self._still_xy is None or np.hypot(x - self._still_xy[0], y - self._still_xy[1]) > PATH_STILL_M
+                or abs(_angle_diff(yaw, self._still_xy[2])) > np.radians(PATH_STILL_DEG)):
+            self._still_xy, self._still_t = (x, y, yaw), now
+        blocked = traj.final_goal_status == traj.FINAL_GOAL_STATUS_BLOCKED
+        if blocked and not self.goal_blocked:
+            print(f"[PATH] Spot reports the final point blocked (its obstacle map): carrying on "
+                  f"while the robot moves.")
+        self.goal_blocked = blocked
+        if blocked and now - self._still_t >= PATH_BLOCKED_STILL_S:
+            return self._result('blocked')
+        if traj.status == traj.STATUS_AT_GOAL:
+            return self._result('arrived')
+        if traj.status == traj.STATUS_NEAR_GOAL:
+            return self._result('near_goal')
+        return self._result('moving')
+
+    def stop(self, reason=""):
+        stop_robot(self.command_client, reason=reason)
+        self.cmd_id = None
+
+    def _result(self, status):
+        x, y, yaw = self._last if self._last is not None else (None, None, None)
+        return dict(status=status, x=x, y=y, yaw=yaw, travelled=self.travelled,
+                    deviation=self.deviation)
+
+
 # =========================================================================================
 # ONE MISSION LEG: gait, move with stop check, falls
 # =========================================================================================
@@ -592,3 +913,82 @@ def navigate_to(target_x, target_y, robot_x, robot_y, robot_state_client, comman
         move_success = False
 
     return move_success, distance_traveled, distance
+
+
+# =========================================================================================
+# ONE MISSION LEG WITH THE PATH COMMAND (switch PATH_COMMAND_FOR_LEGS)
+#
+# Same leg as navigate_to -- same target, same stop halfway (should_abort), same maximum
+# time, same check of the real advance -- but rotation and walk are ONE trajectory
+# (PathCommand) instead of two commands each waiting for the body to settle. The rotation
+# is still on the spot at the start, exactly the one the mission has checked
+# (geometry.rotation_is_clear): beyond ROTATION_CHECK_MIN_DYAW_DEG the trajectory starts
+# with it. It is the first step towards the continuous motion: the command on the real
+# robot, with all the safety nets of the stop-and-go.
+# =========================================================================================
+PATH_COMMAND_FOR_LEGS = True
+LEG_START_IN_PLACE_DEG = 10.0     # = geometry.ROTATION_CHECK_MIN_DYAW_DEG
+
+
+def navigate_to_path(target_x, target_y, robot_x, robot_y, robot_state_client, command_client,
+                     vision_tform_body, should_abort=None, keep_heading=False, poll_period_s=0.2,
+                     **mobility_kwargs):
+    """Like navigate_to (same arguments, same return), with PathCommand."""
+    if keep_heading:
+        return navigate_to(target_x, target_y, robot_x, robot_y, robot_state_client, command_client,
+                           vision_tform_body, should_abort=should_abort, keep_heading=True,
+                           **mobility_kwargs)
+    distance = float(np.hypot(target_x - robot_x, target_y - robot_y))
+    pc = PathCommand(command_client, robot_state_client)
+    x0, y0, _ = pc.pose()
+    # The command lasts the whole leg (hold_s=None, maximum time as relative_move): no
+    # new sends, so the trajectory is the one computed at the start.
+    duration = pc.send([(target_x, target_y)], hold_s=None, start_in_place_deg=LEG_START_IN_PLACE_DEG,
+                       **mobility_kwargs)
+    timeout_s = MOVE_TIMEOUT_FACTOR * duration + MOVE_TIMEOUT_MARGIN_S
+    t0 = time.time()
+    ok, why = False, ""
+    while True:
+        time.sleep(poll_period_s)
+        r = pc.poll()
+        if r['status'] == 'arrived':
+            ok = True
+            break
+        if r['status'] in ('expired', 'stopped', 'blocked', 'off_path', 'idle'):
+            why = r['status']
+            if r['status'] == 'blocked':
+                pc.stop(f"Spot reports the point blocked and the robot has not moved for "
+                        f"{PATH_BLOCKED_STILL_S:.1f} s")
+            break
+        if time.time() - t0 > timeout_s:
+            pc.stop(f"time limit {timeout_s:.0f} s exceeded")
+            why = "time limit"
+            break
+        if should_abort is not None:
+            try:
+                abort_now = bool(should_abort())
+            except Exception as e:
+                print(f"[STOP] Error in the stop condition, ignoring it: {e}")
+                abort_now = False
+            if abort_now:
+                lx, ly = (pc._last[0], pc._last[1]) if pc._last is not None else (x0, y0)
+                pc.stop(f"requested by the caller after {float(np.hypot(lx - x0, ly - y0)):.2f}m")
+                why = "stop requested"
+                break
+    x1, y1, _ = pc.pose()
+    distance_traveled = float(np.hypot(x1 - x0, y1 - y0))
+    MISSION_STATS['path_legs'] = MISSION_STATS.get('path_legs', 0) + 1
+    MISSION_STATS['path_legs_max_dev_cm'] = max(MISSION_STATS.get('path_legs_max_dev_cm', 0.0),
+                                                round(100 * pc.max_deviation, 1))
+    print(f"[PATH] Leg {'arrived' if ok else 'not completed (' + why + ')'}: {distance_traveled:.2f} m "
+          f"out of {distance:.2f} in {time.time() - t0:.1f} s (trajectory {duration:.1f} s, "
+          f"{len(pc.points)} points), at most {100 * pc.max_deviation:.1f} cm from the line.")
+
+    # Same plausibility check as navigate_to.
+    required_progress = max(0.05, 0.5 * distance)
+    if ok and distance > 0.05 and distance_traveled < required_progress:
+        print(f"[FAIL] Move reported as successful but only {distance_traveled:.2f}m travelled "
+              f"out of {distance:.2f}m requested -- treated as a real mechanical failure (probably "
+              f"an undetected physical obstacle).")
+        ok = False
+    return ok, distance_traveled, distance

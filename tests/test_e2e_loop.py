@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.dirname(HERE))   # the spot_explorer package
 
 import matplotlib  # noqa: E402
 matplotlib.use("Agg")
-from spot_explorer.mission import attempt_legs, attempt_obstacles, attempt_scan, cell_attempt     # noqa: E402
+from spot_explorer.mission import attempt_cruise, attempt_legs, attempt_obstacles, attempt_scan, cell_attempt     # noqa: E402
 from spot_explorer import config
 from spot_explorer import records
 from spot_explorer.perception import geometry
@@ -38,6 +38,7 @@ from spot_explorer.perception import spot_grid
 from spot_explorer.planning import decisions
 from spot_explorer.planning import safe_frontier
 from spot_explorer.planning import roadmap
+from spot_explorer.planning import edge_evaluation
 from spot_explorer.robot import motion
 from spot_explorer.robot import connection
 
@@ -328,6 +329,11 @@ attempt_scan.get_a_tform_b = attempt_obstacles.get_a_tform_b = attempt_legs.get_
 connection.getPosition = lambda rsc: (ROBOT.x, ROBOT.y, -2.7, quat(ROBOT.yaw))
 motion.navigate_to = fake_navigate_to
 motion.move_to_world_point_without_turning = fake_move_no_turn
+# These scenarios check the stop-and-go, with the full refresh: the fake robot moves only
+# through navigate_to, and the logs are compared with those of the full refresh.
+motion.PATH_COMMAND_FOR_LEGS = False
+attempt_cruise.CONTINUOUS_MOTION = False
+edge_evaluation.INCREMENTAL_REFRESH = False
 config.FRONTIER_RESCAN_WAIT_S = 0.0
 motion.check_fall = fake_check_fall
 motion.recover_from_fall = fake_recover

@@ -193,7 +193,7 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
         flags.append(f"less than {P.TARGET_CELL_BORDER_M:.2f} m from the cell border")
     flag_txt = f" -- {', '.join(flags)}" if flags else ""
     if chosen['center']:
-        state = "libero" if chosen['seen'] else "unknown"
+        state = "free" if chosen['seen'] else "unknown"
         print(f"[TARGET] Cell ({cell_row},{cell_col}): using the geometric centre "
               f"({bx:.2f}, {by:.2f}), {state}{flag_txt}{reach_note}.")
         return bx, by, valid, blocked

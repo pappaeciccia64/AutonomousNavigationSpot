@@ -20,8 +20,8 @@ Keys (interactive mode):
     On the left the scan (layer of choice), on the right the GLOBAL MAP at that moment:
     mosaic of the scans made so far (red obstacle, light green free, white never seen),
     mission cells (green visited, red blocked), PRM graph coloured by slope
-    (green forward, red sideways), real path, planned path, current window (light
-    blue), blocks (red squares).
+    (green forward, red sideways), real path, planned path, area the cameras saw in the
+    current scan (light blue contour; dashed square = the local grid window), blocks (red squares).
     right / left arrow           next / previous scan
     up / down arrow              10 scans forward / back
     1..9, 0                      layer of the left panel (see LAYERS)
@@ -237,6 +237,39 @@ def _extent(d):
     ox, oy = d['grid_origin']
     cs = float(d['cell_size'])
     return [ox, ox + nx * cs, oy, oy + ny * cs]
+
+
+# Cells the sensors really wrote in a scan: terrain_valid at least this (spot_grid.TERRAIN_VALID_MIN)
+# and not "never written" (unwritten, see spot_grid.correct_terrain).
+SEEN_VALID_MIN = 0.5
+
+
+def _draw_seen_area(ax, d):
+    """
+    The area the cameras really saw in scan d: light blue contour of the cells written by the
+    sensors. The local grid window (~3.8 m, aligned with the axes of the fixed frame, not with
+    the robot: that is how Spot gives it) is only a thin dashed square around it.
+    """
+    x0, x1, y0, y1 = _extent(d)
+    ax.add_patch(patches.Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False, edgecolor='cyan', lw=0.8,
+                                   linestyle=(0, (3, 3)), zorder=6))
+    if 'terrain_valid_raw' not in d:
+        return
+    seen = np.asarray(d['terrain_valid_raw']) >= SEEN_VALID_MIN
+    if 'unwritten' in d:
+        seen &= ~np.asarray(d['unwritten'], dtype=bool)
+    if not seen.any():
+        return
+    ny, nx = seen.shape
+    cs = float(d['cell_size'])
+    xs = x0 + (np.arange(nx) + 0.5) * cs
+    ys = y0 + (np.arange(ny) + 0.5) * cs
+    # Padded with False, so the contour also closes along the border of the window.
+    pad = np.zeros((ny + 2, nx + 2))
+    pad[1:-1, 1:-1] = seen
+    xp = np.concatenate(([xs[0] - cs], xs, [xs[-1] + cs]))
+    yp = np.concatenate(([ys[0] - cs], ys, [ys[-1] + cs]))
+    ax.contour(xp, yp, pad, levels=[0.5], colors='cyan', linewidths=2, zorder=6)
 
 
 def _hover(ax, mat, extent):
@@ -1520,8 +1553,7 @@ def draw_global(ax, ctx, i, final=False, raw=False, bg='obstacles', navgraph=Fal
     if not final:
         pl = d['polyline']
         ax.plot(pl[:, 0], pl[:, 1], '-', color='magenta', lw=2.5, zorder=6, label='planned path')
-        x0, x1, y0, y1 = _extent(d)
-        ax.add_patch(patches.Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False, edgecolor='cyan', lw=2, zorder=6))
+        _draw_seen_area(ax, d)
         reason = modern(str(d['frontier_reason']))
         ax.plot(*d['frontier_stop_xy'], 'X', color=REASON_COLORS.get(reason, 'k'), ms=11, mec='white', zorder=8)
     rx, ry = d['robot_xyz'][:2]

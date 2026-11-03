@@ -9,6 +9,7 @@ from spot_explorer.robot import motion
 from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
 from spot_explorer.perception import spot_grid
+from spot_explorer.mission import attempt_cruise
 from spot_explorer.mission import cells
 from spot_explorer.robot import connection
 
@@ -186,6 +187,8 @@ class Mission:
             else:
                 # No neighbouring cell in the frontier: go with GraphNav towards the waypoint
                 # nearest to the lowest-rank cell and attempt from there.
+                attempt_cruise.stop_if_moving(self.env, self.command_client,
+                                              "no neighbouring cell to continue to")
                 choice = self._pick_far_cell()
                 if choice is not None:
                     if self._travel_and_attempt(*choice) == 'caduta':
@@ -201,6 +204,7 @@ class Mission:
 
             if len(self.frontier) == 0:
                 break
+        attempt_cruise.stop_if_moving(self.env, self.command_client, "end of the exploration")
         self._explain_end()
         self._log_progress(final=True)
 

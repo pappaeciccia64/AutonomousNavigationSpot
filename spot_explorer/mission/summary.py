@@ -3,6 +3,7 @@ import os
 import json
 
 from spot_explorer.robot import motion
+from spot_explorer.mission import attempt_cruise
 from spot_explorer.perception import geometry
 from spot_explorer.perception import slopes
 from spot_explorer.perception import spot_grid
@@ -32,6 +33,10 @@ def mission_switches():
         'config.MISSION_GRAPH_SAMPLING': P.MISSION_GRAPH_SAMPLING,
         'mission_graph.BATCH_SLOPES': mission_graph.BATCH_SLOPES,
         'edge_evaluation.REFRESH_BATCH_SLOPES': edge_evaluation.REFRESH_BATCH_SLOPES,
+        'edge_evaluation.INCREMENTAL_REFRESH': edge_evaluation.INCREMENTAL_REFRESH,
+        'motion.PATH_COMMAND_FOR_LEGS': motion.PATH_COMMAND_FOR_LEGS,
+        'attempt_cruise.CONTINUOUS_MOTION': attempt_cruise.CONTINUOUS_MOTION,
+        'attempt_cruise.CHAIN_CELLS': attempt_cruise.CHAIN_CELLS,
         'config.PLAN_ONLY_EXPLORED_CELLS': P.PLAN_ONLY_EXPLORED_CELLS,
         'config.GRAPHNAV_SHORTCUTS': P.GRAPHNAV_SHORTCUTS,
         'config.GRAPHNAV_PRECHECK': P.GRAPHNAV_PRECHECK,

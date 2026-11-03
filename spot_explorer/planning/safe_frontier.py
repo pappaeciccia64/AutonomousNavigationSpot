@@ -261,7 +261,7 @@ def _polyline_samples(polyline, step):
 
 
 def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, body=None,
-                          air_m=None):
+                          air_m=None, allow_escape=True):
     """
     How far the path is confirmed free now.
 
@@ -280,6 +280,12 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
             intrusion, closer than half the width (0.25). The 5 cm between the two thresholds
             avoid stopping on a stretch just declared free. With an air different from the
             nominal one the hysteresis does not apply (it is tuned on the 0.30 threshold).
+
+        allow_escape: the exit rule from a tight space (see below). The cruise passes False:
+            recomputed every 0.4 s from where the robot has got to, the rule lowered the
+            threshold a little at every cycle and the robot crept towards a wall corner
+            (0.24 m from the centre, smoke run of 03-11 on the wall with a gap; 0.34 m with
+            the stop-and-go).
 
         The samples under the robot's body now are never an obstacle (see _under_body).
 
@@ -316,8 +322,8 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
     # obstacle_distance under the robot: decides whether we are already in a tight space
     r0, c0, in0 = _cells(snap, np.array([snap.robot_x]), np.array([snap.robot_y]))
     od_robot = float(snap.obstacle_dist[r0[0], c0[0]]) if in0[0] else np.inf
-    clearance_escape = max(geometry.FRONTIER_MIN_CLEARANCE_M,
-                           min(clearance_nominal, od_robot - 0.02))
+    clearance_escape = (max(geometry.FRONTIER_MIN_CLEARANCE_M, min(clearance_nominal, od_robot - 0.02))
+                        if allow_escape else clearance_nominal)
     thr = np.where(ss < geometry.FRONTIER_ESCAPE_DIST_M, clearance_escape, clearance_nominal)
 
     od = snap.obstacle_dist[rows, cols]
@@ -472,6 +478,13 @@ class ArcVerificationTracker:
 
     The result carries the version of the path it was computed on: after a replan an old
     frontier cannot be mistaken for a new one.
+
+    PLANNING MODE (cruise, continuous motion): start_planning(job) makes the same thread run
+    job() -- the whole planning cycle, see mission/planning_cycle.CruisePlanner -- every
+    period_s instead of the frontier alone, and publish its result as the plan
+    (get_plan, with 'version' and 'time'). While it plans, the thread is the only one
+    touching graph and maps; stop_planning() returns when the cycle running has ended, so
+    after it the main thread can take them back.
     """
 
     def __init__(self, robot):
@@ -486,6 +499,11 @@ class ArcVerificationTracker:
         self._latest = None           # last frontier computed
         self._running = False
         self._thread = None
+        self._job = None              # planning mode: the cycle to run (None = frontier only)
+        self._job_period_s = 0.4
+        self._plan = None
+        self._plan_version = 0
+        self._cycle_lock = threading.Lock()   # held for the whole planning cycle
 
     # --- interface for the main loop -----------------------------------------------------
     def update_path(self, waypoints_xy, extend_end_m=None, body=None):
@@ -510,6 +528,24 @@ class ArcVerificationTracker:
         with self._lock:
             return None if self._latest is None else dict(self._latest)
 
+    def start_planning(self, job, period_s=0.4):
+        """Planning mode: run job() every period_s and publish its result (get_plan)."""
+        with self._lock:
+            self._job, self._job_period_s = job, float(period_s)
+            self._plan = None
+
+    def stop_planning(self):
+        """Back to the frontier alone. Returns when the planning cycle running has ended."""
+        with self._lock:
+            self._job = None
+        with self._cycle_lock:
+            pass
+
+    def get_plan(self):
+        """Last plan published (dict, with 'version' and 'time'), or None."""
+        with self._lock:
+            return self._plan
+
     def start(self):
         if self._running:
             return
@@ -525,6 +561,11 @@ class ArcVerificationTracker:
     # --- background loop -------------------------------------------------------------------
     def _process_loop(self):
         while self._running:
+            with self._lock:
+                job, period = self._job, self._job_period_s
+            if job is not None:
+                self._planning_cycle(job, period)
+                continue
             with self._lock:
                 waypoints = list(self._waypoints)
                 extend = self._extend_end_m
@@ -550,6 +591,23 @@ class ArcVerificationTracker:
             except Exception as e:
                 LOGGER.error(f"Error computing the frontier: {e}")
             time.sleep(0.2)
+
+    def _planning_cycle(self, job, period):
+        t0 = time.time()
+        with self._cycle_lock:
+            with self._lock:
+                if self._job is not job:      # stop_planning in the meantime
+                    return
+            try:
+                plan = job()
+            except Exception as e:
+                LOGGER.error(f"Error in the planning cycle: {e}")
+                plan = dict(status='error', error=repr(e))
+            with self._lock:
+                self._plan_version += 1
+                plan['version'], plan['time'] = self._plan_version, time.time()
+                self._plan = plan
+        time.sleep(max(0.0, period - (time.time() - t0)))
 
     def _fresh_snapshot(self):
         grids_data, main_proto, _ = self._local_grid.return_local_grid(

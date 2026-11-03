@@ -95,8 +95,8 @@ It gets here when the frontier is empty, or earlier if the battery drops below t
 | `spot_explorer/perception/` | `spot_grid.py` the local grid and its processing; `global_maps.py` global maps; `slopes.py` edge slope; `geometry.py` robot footprint and clearances; `gait.py` gait thresholds |
 | `spot_explorer/graphnav/` | `map_recording.py` recording, waypoints, breadcrumbs, loop closure, download; `navigation.py` GraphNav moves and return to `wp_0`; `localization.py` localization, re-anchoring, drift; `map_shortcuts.py` shortcuts; `apriltags.py` starting fiducial and correction of the return |
 | `spot_explorer/robot/` | `connection.py` robot connection and E-Stop; `motion.py` motion commands, gait, falls; `battery.py` charge and early return |
-| `tools/` | `mission_report.py`, `mission_viewer.py`, `live_viewer.py` (no SDK needed); `preflight.py`, `compare_logs.py`; `bench_graph.py` (also the graph command line), `bench_loop_closure.py`, `bench_fiducial.py` bench tests |
-| `tests/` | `test_e2e_loop.py`, `test_mission.py`, `test_replay.py` (+ `replay_reference.json`), `test_goal_selection.py` |
+| `tools/` | `mission_report.py`, `mission_viewer.py`, `live_viewer.py` (no SDK needed); `preflight.py`, `compare_logs.py`; `bench_graph.py` (also the graph command line), `bench_loop_closure.py`, `bench_fiducial.py`, `bench_refresh.py` (edge refresh during a continuous walk) bench tests |
+| `tests/` | `test_e2e_loop.py`, `test_mission.py`, `test_replay.py` (+ `replay_reference.json`), `test_goal_selection.py`, `test_path_command.py` (+ `fake_spot.py`) |
 
 ---
 
@@ -109,6 +109,10 @@ Each one allows an on/off comparison in the field; the log reports them in the `
 | `config.MISSION_GRAPH_SAMPLING` | `random` | How the nodes are generated: `lattice` or `random` (see *Mission graph*) |
 | `mission_graph.BATCH_SLOPES` | `True` | Slopes at cell start computed in batch (same result, faster) |
 | `edge_evaluation.REFRESH_BATCH_SLOPES` | `True` | Slopes of the refresh computed in batch (same result, faster) |
+| `edge_evaluation.INCREMENTAL_REFRESH` | `True` | The refresh recomputes the slope of an edge only when the scan sees it better (coverage +15%, or robot 0.5 m closer); occupancy and live discard at every refresh anyway |
+| `motion.PATH_COMMAND_FOR_LEGS` | `True` | Every leg of the mission with the path command (`motion.navigate_to_path`): rotation on the spot and walk in one trajectory, without waiting for the body to settle between the two; frontier, stop halfway and time limit as with `navigate_to`. A `[PATH]` line per leg with the distance from the line |
+| `attempt_cruise.CONTINUOUS_MOTION` | `True` | Continuous motion: when the stop-and-go decides a move of at least one whole leg, the robot walks along the path without stopping at the nodes while the frontier thread re-plans every 0.4 s (scan, maps, edges, Dijkstra, frontier) and the stretch confirmed free of each plan is sent to `motion.PathCommand`; back to the stop-and-go at the goal, when the confirmed stretch ends, at a corner where the rotation is not clear, with no path, low battery. `[CRUISE]` lines in the log. Better with `INCREMENTAL_REFRESH` on |
+| `attempt_cruise.CHAIN_CELLS` | `True` | With the cruise: no stop at the cell goals (within 0.6 m of the goal, inside the cell, the next attempt starts while the robot walks; stop only for turns above 35 deg, GraphNav or the stop-and-go cases). The new goal when the goal turns out isolated is chosen while walking anyway |
 | `geometry.ROBOT_CLEARANCE_AIR_M` | `0.0` | Air between body and obstacles: the path line stays 0.25 m + this value from the obstacles (frontier and edge veto). 0.05 = with margin |
 | `geometry.PLAN_CLEARANCE_EXTRA_M` | `0.03` | On the global map and in the goal choice, the planner keeps the edges at (frontier distance + this value) from obstacles, so the scan noise does not make the frontier refuse the legs just chosen. 0 = same distance as the frontier |
 | `config.PLAN_ONLY_EXPLORED_CELLS` | `True` | Paths only go through the cells already visited |
@@ -157,6 +161,7 @@ python3 tests/test_replay.py --all --graph random --distribution halton --seed 7
 - **`mission_viewer.py`**: the figures are made here, afterwards; during the mission the robot draws nothing.
 - **`test_replay.py`**: checks a change without the robot, on the real scans of 10 missions (`--all`, about 5 minutes): invariants that must always hold, and comparison with the reference behaviour (`replay_reference.json`). With `--graph` (and `--distribution`, `--density`, `--seed`, `--min-edge`, `--max-edge`) it replays the same scans with another graph: the final table (paths found, length, edges per path, graph time) is compared with that of the lattice.
 - **`test_e2e_loop.py`**: the real navigation loop against a fake robot in synthetic worlds (corridors, traps, walls).
+- **`test_path_command.py`**: the multi-point path command of the continuous motion (`motion.PathCommand`) against `fake_spot.py`, a fake Spot with a simulated clock that reads the real command protos: corner without stopping, new sends while walking, dead man, stop, goal blocked, network errors.
 - **`test_mission.py`**: the whole mission (the real `run.main()`) with a fake robot and GraphNav, in several worlds: walls, closed cell, blocks, returns, forced failures, low-battery return, emergency shutdown, correction of the return to wp_0.
 - **`test_goal_selection.py`**: the goal choice replayed on the real missions.
 - **`compare_logs.py`**: compares the logs of two versions (`E2E_LOG_DIR=<folder> python3 tests/test_e2e_loop.py`, same for `test_mission.py`), removing times and durations: a change that must not alter the behaviour must give identical logs.

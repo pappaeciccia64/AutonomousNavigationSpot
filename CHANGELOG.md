@@ -8,6 +8,107 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-03 (fewer stops between cells: big turns and failed attempts)
+
+Mission of 03-11 16:02 (other start, same room): 6 cruises out of 6 ended with the hand-off (2 with the last stretch closed by an obstacle), 3 new goals while walking, exploration 40 s (57 at 15:39, 73 with the stop-and-go at 14:23), standing 3% and turning on the spot 7% of the cruise, cycle median 0.17 s with the cruise bundles. Five times out of six, though, the attempt on the next cell failed at once (cells beyond the wall: no goal or no path in the graph) and stopped the robot, then the next attempt started from standing.
+
+- **An attempt that fails before its loop leaves the robot walking** (`CellAttempt.run`): it gave no command, only computations; the mission goes on to the next cell with the robot on the stretch already confirmed. An attempt that failed after moving still stops it.
+- **Big turns after a hand-off without stopping first** (`_moving_check`): beyond 35 deg the rotation on the spot is made inside the new command if the swept area, checked at the pose of the scan, is clear with `CHAIN_TURN_EXTRA_AIR_M` = 0.15 m more air (the robot still walks some cm before the command arrives); otherwise it stops and looks again standing as before. Smoke run: +112, -137, +82 deg turned without stopping.
+
+---
+
+## 2026-11-03 (viewer: area really seen; cruise in the viewer and in trajectory.csv)
+
+From the review of 15:39 in the viewer. Cell (0,4) looked explored "far from the centre": the centre is inside a piece of furniture and the only free part reachable is the corridor strip at the corner of the cell, where the goal was chosen (the 10 never-seen candidates are beyond the furniture or outside the room): the choice was right. Two real defects came out instead.
+
+- **The stretch walked after a hand-off was not recorded** (trajectory.csv): the recorder stopped at the hand-off while the robot went on walking to the goal, and the viewer showed an "unrecorded leg". Now it goes on until the next command takes over or the robot is stopped (`attempt_cruise._close_track`).
+- **Scan bundles of the cruise**: only the stop-and-go turns saved one (11 bundles at 15:39 for 34 s of cruise). `CruisePlanner` now saves one every `CRUISE_BUNDLE_STEP_M` = 0.5 m walked, same layers and fields as the stop-and-go (`planning_cycle.scan_bundle_arrays`, shared), decision `cruise`, target the end of the confirmed stretch, name `..._<loop>_cruise<cycle>.npz`; the viewer orders them by time with the others.
+- **Viewer, global panel**: the light blue square was the local grid window (~3.8 m), aligned with the axes of the fixed frame because that is how Spot gives the local grid, not the area the cameras saw. Now the light blue contour is the area really written by the sensors in that scan (`terrain_valid` and not `unwritten`), the window a thin dashed square.
+
+---
+
+## 2026-11-03 (no stop at the cell goals and new goal while walking, with the cruise)
+
+Mission of 03-11 15:21 (11 cruises, 0.27 m/s, standing 1%): 6 cruises out of 11 ended with "no path to the goal from the next node": the thread saw the goal of the cell isolated (too close to furniture and walls) well before getting there, then the robot stopped only so that the main thread could choose another goal. And every cell goal was a stop of about 1 s.
+
+- **New goal while walking** (`CruiseSteps._cruise_repick`): on a plan 'no_path' the planning pauses (the cycle running ends, the robot goes on along the last stretch confirmed), `_repick_goal` chooses as the stop-and-go does (same limits), and a new `CruisePlanner` starts towards it keeping the edge being walked. `[CRUISE] New goal ... chosen while walking`; statistic `cruise_goal_repicks`.
+- **`attempt_cruise.CHAIN_CELLS`** (default `True`, acts only with `CONTINUOUS_MOTION`): inside the target cell and within `CRUISE_HANDOFF_M` = 0.6 m of the goal the attempt ends successfully with the robot still walking towards the goal (`env._moving_pc`); the mission marks the cell and the next attempt starts while it walks. New phase `_moving_check` in the loop: with the robot walking the turn goes on only into a cruise with a turn within 35 deg (rotation clear) or past a path node; anything else (bigger turn, wait, block, partial step) stops the robot first and the turn is made standing. `stop_if_moving` before GraphNav, at the end of the exploration, after an attempt that did not hand off. Statistic `cruise_handoffs`.
+- Mission of 03-11 15:39 (3 hand-offs while walking, a new goal chosen while walking, standing 0% of the cruise): 4 cells out of 6 still ended with a stop, "the confirmed stretch ends (obstacle)" and then the stop-and-go accepting the goal within 0.65 m. The **hand-off now also covers that case**: robot inside the cell, last stretch closed by an obstacle (roughness, slope) and goal within `GOAL_REACHED_TOLERANCE_M` along the path, the arrival the stop-and-go would accept standing.
+- **Rotation on the spot at the start of a path command**: limit from the line 0.20 m (`PATH_MAX_DEVIATION_TURN_M`) until it ends, then 0.10 m; the body centre moved 9.6 cm while turning 90 degrees at 15:39, near stopping the robot for nothing. That part does not count in `max_deviation`.
+- `_fresh_scan` takes the robot pose from the scan (same snapshot of transforms as the grid), as `_first_scan` and the cruise planner already did: the robot may be walking.
+- Smoke run only (end-to-end world, real-time fake robot): two cells in a row, hand-off at 0.56 m from the first goal while walking, stop to turn 72 deg towards the second cell, hand-off again; goal inside a box, new goal chosen while walking. With the switches off the logs of the 25 end-to-end scenarios are unchanged, whole-mission test passes.
+
+---
+
+## 2026-11-03 (first field tests of the path command and of the cruise: fixes)
+
+Two indoor missions in the same room as 14:23 (stop-and-go: legs 49 s, standing 36% of it): 14:45 with `PATH_COMMAND_FOR_LEGS` (standing 27%, 3-7 cm at most from the line), 14:48 with the cruise and `INCREMENTAL_REFRESH` (7 cruises, 38 s, 10.9 m, 0.29 m/s, turning on the spot 3% and standing 1% of the time; cycle of the planning thread 0.15-0.30 s, about 1 m confirmed ahead, at most 6 cm from the line; one cruise stopped in front of an obstacle with 0.04 m left, then the stop-and-go accepted the arrival within tolerance).
+
+- **Spot's "final point blocked" is no longer a stop** (`motion.PathCommand.poll`). At 14:45 Spot's feedback (`final_goal_status`) said blocked in 4 legs out of 19 with the robot still walking; stopping on it gave two arrivals at 5-8 cm and two "mechanical failures" (edge discarded for the mission and return with GraphNav). `relative_move` never read it. Now it counts as blocked only with the robot also standing (less than 3 cm and 3 deg in `PATH_BLOCKED_STILL_S` = 1.5 s); a `[PATH]` line says when Spot reports it.
+- **GraphNav breadcrumb during the cruise in another thread**: at 14:48 creating the waypoint kept the main thread busy up to 1.6 s, without reading plans nor sending. Also the time of the stale-plan check was read before that call, so a plan read right after looked already old: the cruise ended with "no new plan for 1.4 s" while the thread was planning every 0.4 s.
+- **Arrival at the goal of the cruise**: it now waits for the command to end (at most 2 s) before giving back to the stop-and-go; before, the next attempt started (and scanned) with the robot still walking the last 5-10 cm.
+- **Times of the trajectory points**: the longer of walking time and turning time, not their sum. At 14:48 a 41-degree turn while walking went at 0.06-0.2 m/s; now about 0.27 m/s. The rotation on the spot is unchanged.
+- **Log of the planning thread**: no `[REFRESH]` and `[EDGES]` lines at every cycle (two lines every 0.4 s, two thirds of the log at 14:48); their counts are in the `[CRUISE] Plan` line, and the cycles do not add to the mission statistics of the stop-and-go (`live_arc_vetoes` grew by ~200 per cycle); `cruise_cycles` in the statistics.
+- `mission_report.py`: with no stop-and-go leg (14:48) the motion section stopped before reading the trajectory, so neither the cruise nor the GraphNav moves were printed; the cruise line now splits turning on the spot and standing.
+- `[TARGET]` said `libero` (Italian) for a goal seen free.
+- **The path command goes back onto the checked line** (`PathCommand.send` keeps the projection of the robot, with a short sideways step and the nose on the next segment; the cruise stops if a new plan's line passes more than 10 cm from the robot). The frontier checks the stretch from where the robot was at the scan; when the path changed while walking, the projection of the robot fell beside the new line and was dropped when closer than 0.20 m, so the robot headed for the next node along a line nobody had checked. In the smoke run on the wall with a gap the centre passed 0.24-0.27 m from the wall corner in two runs out of five; after the fix 0.31-0.34 m in four runs out of four.
+- **After a stop the cruise waits for the robot to stand** (at most `CRUISE_SETTLE_S` = 1 s) before giving back to the stop-and-go. Mission of 03-11 15:04 (with the fixes above: 9 cruises, 0.33 m/s, standing 1%, no stale plan): a cruise stopped at 0.32 m/s because the goal had become isolated, and 0.28 s later the next one started from a pose still sliding forwards, on a different line, and stopped at once 11 cm off it.
+- **No exit rule from a tight space in the cruise** (`compute_safe_frontier(allow_escape=False)` in `CruisePlanner`; the cruise does not start when the frontier of the stop-and-go has it active). Recomputed every 0.4 s from where the robot had got to, the rule lowered the threshold a little at every cycle: in the smoke run on the wall with a gap the centre passed 0.24 m from the wall corner (0.34 m with the stop-and-go); now 0.30 m.
+
+---
+
+## 2026-11-03 (continuous motion: the cruise, behind a switch, off)
+
+Fourth piece of the continuous motion (TODO "Main work" 4): the robot walks along the path without stopping at the nodes, and the planning runs while it walks.
+
+- **`attempt_cruise.CONTINUOUS_MOTION`** (default `False`), `mission/attempt_cruise.py` (`CruiseSteps`, a phase of `CellAttempt`): when the stop-and-go decides a move with at least one whole leg (after the arrival check and the rotation check of the first leg), `_cruise` sends the stretch confirmed by that frontier to `motion.PathCommand` and puts the frontier thread in planning mode with `CruisePlanner`. At every new plan (every 0.4 s) the main thread sends its confirmed stretch, which replaces the previous one without stopping the robot: the robot never goes beyond the stretch confirmed by the last plan. Back to the stop-and-go (a turn with a fresh scan, as after a move) when it arrives at the goal, when the stretch confirmed ahead of the robot is shorter than `CRUISE_MIN_AHEAD_M` = 0.10 m (obstacle, edge of the data, corner where the rotation is not clear), when the edge being walked leaves the graph, with no path, when the command ends badly (off the path, blocked, expired), with no new plan for `CRUISE_PLAN_STALE_S` = 1.2 s or three plans in a row without data, low battery, after `CRUISE_MAX_S`. Then: walked track into the retreat arcs, robot node where the robot is, path from there, breadcrumb (also every second during the cruise).
+- **`CruisePlanner`**: corners sharper than `motion.PATH_TURN_IN_PLACE_DEG` inside the confirmed stretch are checked with `geometry.rotation_is_clear` (the confirmed stretch stops at the first one that is not clear); the worst slope and roughness of the stretch go with the plan for the gait, chosen again (and printed) only when the level changes. Stretches of the starting path that are not edges (shortcut of the stop-and-go) do not count as `edge_blocked`.
+- Log: `[CRUISE] Start`, a `[CRUISE] Plan` line per plan (metres confirmed ahead, reason, nodes to the goal, path changes, cycle time, distance from the line), `[CRUISE] End` with the reason. Statistics `cruises`, `cruise_s`, `cruise_m`, `cruise_plans`, `cruise_sends`, `cruise_replans`, `cruise_max_dev_cm`, `cruise_exits`; `trajectory.csv` with `move` = `cruise`; `mission_report.py` prints a `Cruise` line (times, metres, time standing).
+- Checked only with a smoke run, not yet a test: two worlds of the end-to-end test with a fake robot walking in real time and the real planning thread. Open field: 6.6 m to the goal in one cruise, 45 plans, cycle 0.3-0.45 s, about 1.1 m confirmed ahead. Wall with a gap: 19 path changes while walking, arrived, minimum distance of the centre from the wall 0.28 m. With the switch off the logs of the 25 end-to-end scenarios are identical.
+
+---
+
+## 2026-11-03 (path command in the legs of the mission, behind a switch, off)
+
+To try the path command on the real robot inside a normal mission, with all its safety nets, instead of the fixed shapes of `try_path.py` that do not look at obstacles.
+
+- **`motion.PATH_COMMAND_FOR_LEGS`** (default `False`): every leg goes through `motion.navigate_to_path` instead of `navigate_to`. Same target, same stop halfway from the frontier thread, same time limit and check of the real advance; rotation and walk are one trajectory (`PathCommand`, sent once for the whole leg) instead of two commands each waiting for the body to settle. The rotation stays on the spot at the start beyond 10 deg (`LEG_START_IN_PLACE_DEG` = `geometry.ROTATION_CHECK_MIN_DYAW_DEG`), the one the mission has already checked. A `[PATH]` line per leg (metres, time, points, distance from the line); `path_legs` and `path_legs_max_dev_cm` in the statistics; the switch is in `mission_summary.json`.
+
+---
+
+## 2026-11-03 (planning cycle shared, planning mode of the frontier thread, not used yet)
+
+Third piece of the continuous motion (TODO "Main work" 3): the planning that today runs standing still at every turn of the loop will run in the frontier thread while the robot walks.
+
+- **`mission/planning_cycle.py`**: `scan_into_maps` (scan processing, global maps, local data into the PRM, snapshot with the temporal filter, free-space map) and `refresh_graph` (live discard, edge refresh with its counts and log lines, nodes in obstacles out), moved out of `attempt_scan._fresh_scan` and `_update_graph`, which now call them. The logs of the 25 end-to-end scenarios are identical line by line; whole-mission test passes.
+- **`CruisePlanner`** (same file): one call = one cycle while the robot walks: scan with the pose of the same instant, maps, the edge being walked stays committed and the next node becomes the robot node, refresh at every cycle, Dijkstra from the next node with the 10% stability margin, safe frontier and the stretch confirmed free (`confirmed`, the points for `motion.PathCommand`). Status `ok`, `edge_blocked` (the edge being walked is out of the graph), `no_path`, `no_scan`, `error`.
+- **`ArcVerificationTracker.start_planning(job, period_s)` / `stop_planning()` / `get_plan()`**: the same thread runs the cycle every 0.4 s instead of the frontier alone and publishes the plan with a version. While it plans it is the only one touching graph and maps; `stop_planning()` returns when the running cycle has ended.
+
+---
+
+## 2026-11-03 (multi-point path command, not used by the mission yet)
+
+Second piece of the continuous motion (TODO "Main work" 1): the command with which the robot will walk along the path without stopping at the nodes. Today every leg is a rotation in place and a straight walk, each waiting for the body to settle: in the mission of 03-11 11:07 the robot stood still 34% of the leg time.
+
+- **`motion.PathCommand`**: one SE2 trajectory along the edges of the path, nose first, without stopping at the nodes. The position stays on the edges (nodes plus points every `PATH_POINT_SPACING_M` = 0.15 m, joined by straight lines); the heading is the direction of the edge along it, so the body stays aligned as the frontier and the edge checks assume, and changes only within `PATH_TURN_ZONE_M` = 0.20 m of a node (turn while walking). Corners sharper than `PATH_TURN_IN_PLACE_DEG` = 60, and a start with the nose more than `PATH_START_IN_PLACE_DEG` = 35 off the first edge, are a rotation on the spot at the node inside the same trajectory. `send()` returns at once and sends only the part of the path ahead of the robot (`path_ahead`, searched in the two segments after where the robot was, so a path that comes back near the start is not cut); `poll()` reads the feedback without waiting and stops the robot farther than `PATH_MAX_DEVIATION_M` = 0.10 m from the line (`off_path`). Point times from the speed limits times `PATH_TIME_FACTOR` = 1.25, so that Spot's reference does not run ahead and cut the corners. Dead man: the command expires `PATH_HOLD_S` = 2 s after the send. Network errors handled like `relative_move`.
+- **`tools/try_path.py`**: field test on the real robot outside the mission: line, L, square, zig-zag (53 deg corners) or gentle curve drawn from where the robot stands, path sent again every 0.5 s like the cruise, every poll in `MissionLogs/try_path_*.csv`, summary with time, distance from the line and time standing; `--stop-and-go` runs the same shape with today's legs for the comparison.
+- **`tests/fake_spot.py`**: fake Spot with a simulated clock, command and state client, reading and answering with the real protos (trajectory in time, speed limits, stop, dead man, command replaced, point blocked). `tests/test_path_command.py` was written for a first version (heading halfway between the edges at every node) and still has to be brought up to date with the points along the edges.
+- The mission does not use it yet: the other tests are unchanged and pass.
+
+---
+
+## 2026-11-03 (incremental edge refresh, behind a switch, off)
+
+First piece of the continuous motion (TODO "Main work" 2): with the scan running while the robot walks, the refresh around the robot runs every ~15 cm instead of every metre, over the whole window ahead and not only within 1.25 m. Most of the edges are then the same as in the previous refresh.
+
+- **`edge_evaluation.INCREMENTAL_REFRESH`** (default `False`): the slope profile of an edge already evaluated on the live scan is kept until the scan sees it better (centre-line coverage up by `REFRESH_COVERAGE_GAIN` = 0.15, or robot `REFRESH_CLOSER_M` = 0.5 m closer to the edge middle); an edge left as that evaluation left it (validity and weight) is not touched at all. Occupancy and live discard are redone at every refresh. The log adds a `[REFRESH]` line with the counts; the switch is in `mission_summary.json`.
+- **`tools/bench_refresh.py`**: the robot of the end-to-end test world walks a straight line in 15 cm steps with a refresh at every step. Random nodes 5/m² (the mission of 03-11): 34 -> 28 ms per refresh within 1.25 m, 52 -> 39 ms on the whole window; at 9 nodes/m², 67 -> 50 ms and 126 -> 77 ms. Validity of the edges identical to the switch off; weights apart by the noise the bench puts on the heights at every step (median 0.5% within 1.25 m, 6.5% on the window).
+- In the end-to-end test (stop-and-go, ~1 m between refreshes, lattice at 0.25 m) there is no gain: about 200 ms per refresh within 1.25 m in both cases, because most of the edges in the radius are new at every refresh. The rest of the refresh time is not the slopes: rebuilding the neighbour lists edge by edge, the live discard of the edges outside the radius and the global slope cache.
+- Switch off: the logs of the 25 end-to-end scenarios identical line by line (`compare_logs.py`); on: end-to-end, whole-mission and replay tests all pass.
+- `compare_logs.py` prints `IDENTICAL` (it still said `IDENTICI`).
+
+---
+
 ## 2026-11-03 (log messages and report times, behaviour unchanged)
 
 From the indoor mission of 03-11 11:07 (room of about 10 x 3 m, 7 cells closed, all the rest behind the walls), messages that contradicted each other or gave the wrong reason. The robot's behaviour does not change.
