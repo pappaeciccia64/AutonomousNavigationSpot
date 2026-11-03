@@ -34,7 +34,8 @@ The sampled trajectory goes in GaitTrials/<terrain>_<config>_<time>.npz.
 
 python3 tools/calibration.py reads trials.csv and compares by terrain and configuration.
 
-Ported on 03-11-2026 from prova_andatura.py of the AdL-version branch, never tried on the robot
+Ported on 03-11-2026 from prova_andatura.py of the AdL-version branch (up to 5bf229f: slope and
+roughness on the same cells and with the same computation as the mission), never tried on the robot
 either: the first time indoors, on 2 m of flat floor (FIELD_TEST.md, "Gait calibration").
 """
 import argparse
@@ -56,7 +57,8 @@ from bosdyn.client.frame_helpers import VISION_FRAME_NAME                    # n
 from bosdyn.client.robot_command import RobotCommandClient, blocking_stand, blocking_sit   # noqa: E402
 
 from spot_explorer.perception import gait, slopes, spot_grid                 # noqa: E402
-from spot_explorer.planning.edge_evaluation import body_slope                # noqa: E402
+from spot_explorer.planning.edge_evaluation import (OCCUPANCY_SAMPLES_MIN, OCCUPANCY_SAMPLES_PER_M,  # noqa: E402
+                                                    body_slope)
 from spot_explorer.records import MISSION_STATS, _ground_plane_slopes_deg, _quat_to_roll_pitch_deg  # noqa: E402
 from spot_explorer.robot import connection, motion                           # noqa: E402
 
@@ -197,10 +199,14 @@ def estimate_track(local_grid, robot_state_client, dist):
         gx, gy, _ = slopes.plane_gradient_field(np.where(usable, terrain_2d, np.nan), usable, scan.cell_size,
                                                 half_window_m=slopes.PLANE_EDGE_HALF_WINDOW_M)
         plo, pla, phas = slopes.plane_slope_along(gx, gy, ox, oy, scan.cell_size, x, y, x2, y2)
-        t = np.linspace(0.0, 1.0, max(2, int(L / scan.cell_size) + 1))
+        # Roughness as the mission (PRM.sample_terrain_between_points): 90th percentile of the
+        # samples along the line, OCCUPANCY_SAMPLES_PER_M per metre, every cell of the grid (the
+        # same correction as 5bf229f of the old prova_andatura.py).
+        k = max(OCCUPANCY_SAMPLES_MIN, int(L * OCCUPANCY_SAMPLES_PER_M))
+        t = np.linspace(0.0, 1.0, k)
         r, inside = slopes._gather_heights(np.asarray(scan.rough).reshape(shape), ox, oy, scan.cell_size,
-                                           x + t * (x2 - x), y + t * (y2 - y), valid_2d=usable)
-        rough = float(np.nanmean(r[inside])) if inside.any() else np.nan
+                                           x + t * (x2 - x), y + t * (y2 - y))
+        rough = float(slopes.p90(r[inside])) if inside.any() else np.nan
         deg = lambda v: float(np.degrees(np.arctan(v)))
         print(f"[ESTIMATE] First {L:.1f} m: slope long {lo:.3f} ({deg(lo):.1f}°), lat {la:.3f} ({deg(la):.1f}°), "
               f"roughness {rough:.3f}, {'with data' if has else 'NOT ENOUGH DATA'} | local plane: long "
