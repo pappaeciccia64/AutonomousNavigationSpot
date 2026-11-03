@@ -8,6 +8,12 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-03 (why GraphNav stops, behaviour unchanged)
+
+`[GRAPHNAV]` gives the reason when GraphNav stops: `stuck_reason` (e.g. `OBSTACLE`, `GOAL_BLOCKED`), `blockage_status`, `route_following_status` and the metres left; while moving it prints the changes of route and blockage status (e.g. `RETURNING_TO_ROUTE`, `ROUTE_BLOCKED_TEMPORARILY` before a `STUCK`). Why: the return to wp_0 of 28-10 13:50 stopped in the grass at 0.63 m with only `bloccato (STUCK)` in the log, and GraphNav walks with Spot's default mobility parameters (foot obstacle avoidance on, our edges carry no `mobility_params`, see TODO, grass): without the reason we cannot tell if that is the cause.
+
+---
+
 ## 2026-11-03 (slopes: measured against the robot, plane estimate behind a switch, off)
 
 - **`tools/slope_check.py`**: for every sample of trajectory.csv the slope under the robot from the last scan saved before it, with several methods, against the measured one (body tilt; from 04-11 also the ground plane from the legs). 46800 samples of 40 missions, longitudinal, against the body pitch: today's differences on a base mean error 2.15 deg, bias +2.0 (the 90th percentile along a segment extended beyond the body inflates it); a plane on a square window as long as the body at the robot centre 0.91 deg, bias -0.1, correlation 0.95 (0.97 signed); on the slopes (22-10, 26-10, 28-10, 29-10) 3.0 -> 1.2 deg. Lateral: not checkable on the body: with the robot walking 45-90 deg off the fall line of a 10-15 deg slope the estimated pitch matches the measured one (3.6 / 3.5 deg) but the body roll stays 0.5 deg whatever the angle: Spot keeps the body level sideways.
