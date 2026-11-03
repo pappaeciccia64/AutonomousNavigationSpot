@@ -48,12 +48,16 @@ All the mission switches and numbers are changed in **`spot_explorer/config.py`*
 
 ---
 
-## Indoors first (03-11, a few minutes, before going out)
+## Indoors first (04-11 morning, before going out)
 
 1. **Why GraphNav stops.** Put a box on a GraphNav stretch (the return to wp_0, or a move between cells) once the robot is on its way; in a passage it cannot go around (GraphNav may deviate up to 1.5 m from the recorded path). Expected: `[GRAPHNAV] …: route …, blockage ROUTE_BLOCKED_TEMPORARILY …` while it tries, then `interrupted -- blocked (STUCK) (reason OBSTACLE, …)`. If a field shows `-`, the SDK on the PC does not have it: note the `bosdyn` version (`pip show bosdyn-api`).
 2. **Photos at the stop.** Same move: `[PHOTO] graphnav_…: 5 photos in X s` and in `MissionMap/<mission>/photos/` five JPEGs plus a `.json`. Also at a confirmed block (`[DATA SAVE] Block data saved in …BLOCKED_n.npz` followed by `[PHOTO]`). Look at one photo: it must show what was in front of the robot.
 3. **Spot's own margin.** We send `obstacle_avoidance_padding` = 0, i.e. Spot's default, unknown. With a GraphNav move passing next to a box, note by eye (or tape measure) how close the body passes and whether Spot goes around it by itself.
 4. **`tools/capture_scene.py`** once, in front of the box: it must print the layers (5), 5 photos and the obstacle cells with their height above the ground (the box: median close to its real height).
+5. **A mission as on 03-11**, everything as it is: `[CRUISE]` lines, `next cell while walking`, `New goal ... chosen while walking`; `trajectory.csv` has the `gpe_long_deg` and `gpe_lat_deg` columns filled (the ground plane of the legs). Then `python3 tools/mission_report.py` and `python3 tools/slope_check.py <mission>` (on the flat floor every estimate and gpe close to 0).
+6. **Someone steps in front of the robot during a cruise**, 1-1.5 m ahead. Expected: the `[CRUISE] Plan` lines show the confirmed stretch getting shorter (`(obstacle)`) or `PATH CHANGED`, and the robot goes around or stops before; never closer than the frontier allows. Then a **low box** (15-20 cm) on the path: the same. In the offline test (`test_cruise.py`) a 0.4 m box appearing 1.2 m ahead is passed with the centre 0.30 m from it.
+7. **Bigger cells** (`MISSION_GRID_*` in `config.py`, e.g. 3 m): longer cruises; compare the report with the 2 m one.
+8. **Gait trial**, standing and on 2 m: `python3 tools/gait_trial.py --terrain floor --true-slope 0 --estimate-only --repetitions 5`, then `--config auto_mu08 --dist 2 --repetitions 1 --backwards --protected-feet` (section "Gait calibration" below).
 
 ---
 
