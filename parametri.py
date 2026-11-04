@@ -25,6 +25,25 @@ MISSION_GRID_ROWS = 8
 MISSION_GRID_COLS = 7
 MISSION_CELL_SIZE_M = 2.0
 
+# Dove sta il robot, all'avvio, dentro la griglia: in quale cella parte. Guardando la griglia
+# dall'alto con l'avanti del robot verso l'alto (vedi environmentMap.py):
+#     'alto-sinistra'    'alto-centro'    'alto-destra'
+#     'centro-sinistra'  'centro'         'centro-destra'
+#     'basso-sinistra'   'basso-centro'   'basso-destra'
+# 'basso-destra' = cella (0, 0): la griglia si apre davanti e a sinistra del robot (com'era
+# prima). 'basso-sinistra': davanti e a destra; 'alto-...': la griglia e' DIETRO il robot;
+# 'centro': il robot nel mezzo dell'area. Si puo' dare anche la cella, "riga,colonna".
+# Con righe o colonne pari il centro cade fra due celle: si prende la n//2.
+# Da riga di comando: --partenza (es. --partenza centro, --partenza 3,2).
+MISSION_START_POSITION = 'basso-destra'
+
+# Ordine in cui si propongono le celle (il rango della frontiera):
+#   'serpentina' righe percorse avanti e indietro, a partire dall'angolo del robot;
+#   'anelli'     anelli sempre piu' larghi intorno alla cella di partenza;
+#   'auto'       serpentina se il robot parte da un angolo, anelli se no.
+# Da riga di comando: --ordine.
+MISSION_VISIT_ORDER = 'auto'
+
 # Come si generano i nodi del grafo (vedi mission_graph.py, NODI CASUALI):
 #   'reticolo' reticolo rettangolare, deterministico; il centro di ogni cella e' un nodo;
 #   'casuale'  nodi sparsi con MISSION_RANDOM_DISTRIBUTION ('uniforme', 'poisson',

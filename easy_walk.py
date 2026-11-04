@@ -2509,7 +2509,14 @@ class Missione:
         self.verification_tracker = verification_tracker
         self.mission_folder = mission_folder
         self.mobility_kwargs = mobility_kwargs
-        self.path = env.generate_serpentine_path(start_cell=env.start_cell)
+        self.path = env.generate_visit_path(P.MISSION_VISIT_ORDER, start_cell=env.start_cell)
+        _ordine = P.MISSION_VISIT_ORDER
+        if _ordine == 'auto':
+            _ordine = ('serpentina' if environmentMap.is_corner_cell(env.start_cell, env.rows, env.cols)
+                       else 'anelli')
+        print(f"[CONFIG] Ordine di visita: {_ordine} (da {P.MISSION_VISIT_ORDER}), prime celle "
+              + " ".join(f"({r},{c})" for r, c in self.path[:8])
+              + (" ..." if len(self.path) > 8 else ""))
         self.frontier = []
         self.visualization_counter = 0   # numero progressivo delle immagini salvate
         # Avanzamento (vedi _progresso): istante d'inizio, celle chiuse all'inizio e
@@ -3124,8 +3131,8 @@ def _stampa_configurazione():
           f"valido anche col robot fuori dalla cella fino a {P.ARRIVAL_OUTSIDE_CELL_M:.2f} m")
 
 
-def _griglia_di_missione(options):
-    """La griglia di missione: EnvironmentMap con colonne davanti e righe a sinistra.
+def _dimensioni_griglia(options, verbose=True):
+    """Righe, colonne e lato della cella della griglia di missione, e da dove vengono.
 
     Default P.MISSION_GRID_ROWS x P.MISSION_GRID_COLS celle da P.MISSION_CELL_SIZE_M. Si
     cambiano SENZA toccare il codice, in ordine di precedenza:
@@ -3141,8 +3148,9 @@ def _griglia_di_missione(options):
             grid_rows, grid_cols, grid_cell = int(_r), int(_c), float(_cs)
             _grid_source = f"SPOT_MISSION_GRID='{_env_grid}'"
         except Exception:
-            print(f"[CONFIG] SPOT_MISSION_GRID='{_env_grid}' non valido (atteso 'righe,colonne,lato'): "
-                  f"uso {grid_rows},{grid_cols},{grid_cell:g}.")
+            if verbose:
+                print(f"[CONFIG] SPOT_MISSION_GRID='{_env_grid}' non valido (atteso 'righe,colonne,lato'): "
+                      f"uso {grid_rows},{grid_cols},{grid_cell:g}.")
     _cli = (getattr(options, 'grid_rows', None), getattr(options, 'grid_cols', None),
             getattr(options, 'grid_cell', None))
     if any(v is not None for v in _cli):
@@ -3150,9 +3158,36 @@ def _griglia_di_missione(options):
         grid_cols = int(_cli[1]) if _cli[1] is not None else grid_cols
         grid_cell = float(_cli[2]) if _cli[2] is not None else grid_cell
         _grid_source = "argomenti --rows/--cols/--cell"
+    return grid_rows, grid_cols, grid_cell, _grid_source
+
+
+def _cella_di_partenza(options, rows, cols):
+    """La cella di partenza (vedi P.MISSION_START_POSITION, argomento --partenza) e da dove
+    viene. ValueError se non e' valida per una griglia rows x cols."""
+    pos = getattr(options, 'start_position', None)
+    source = "argomento --partenza" if pos is not None else "parametri.MISSION_START_POSITION"
+    if pos is None:
+        pos = P.MISSION_START_POSITION
+    return environmentMap.start_cell_for(pos, rows, cols), source
+
+
+def _griglia_di_missione(options):
+    """La griglia di missione: EnvironmentMap con colonne davanti e righe a sinistra, e la
+    cella di partenza del robot (vedi _dimensioni_griglia e _cella_di_partenza)."""
+    grid_rows, grid_cols, grid_cell, _grid_source = _dimensioni_griglia(options)
     print(f"[CONFIG] Griglia di missione: {grid_rows} x {grid_cols} celle da {grid_cell:.1f} m "
-          f"({grid_rows * grid_cell:.0f} m a sinistra x {grid_cols * grid_cell:.0f} m davanti; "
+          f"({grid_rows * grid_cell:.0f} m x {grid_cols * grid_cell:.0f} m; "
           f"fonte: {_grid_source})")
+    # Gia' controllata in main() prima di accendere il robot.
+    start_cell, _pos_source = _cella_di_partenza(options, grid_rows, grid_cols)
+    _name = environmentMap.describe_start_cell(start_cell, grid_rows, grid_cols)
+    r0, c0 = start_cell
+    # Estensione della griglia intorno al robot: celle davanti/dietro, a sinistra/destra.
+    _ahead, _behind = (grid_cols - 1 - c0 + 0.5) * grid_cell, (c0 + 0.5) * grid_cell
+    _left, _right = (grid_rows - 1 - r0 + 0.5) * grid_cell, (r0 + 0.5) * grid_cell
+    print(f"[CONFIG] Partenza: cella ({r0},{c0}){' ' + _name if _name else ''}; dal robot la "
+          f"griglia va {_ahead:.1f} m davanti, {_behind:.1f} m dietro, {_left:.1f} m a sinistra, "
+          f"{_right:.1f} m a destra (fonte: {_pos_source})")
     print(f"[CONFIG] Reticolo: passo richiesto "
           f"{'suggerito' if P.MISSION_LATTICE_SPACING_M is None else '%.3f m' % P.MISSION_LATTICE_SPACING_M}, "
           f"anelli {P.MISSION_LATTICE_RINGS if P.MISSION_LATTICE_RINGS is not None else 'tutti'}")
@@ -3163,7 +3198,9 @@ def _griglia_di_missione(options):
              f"{'a caso' if P.MISSION_RANDOM_SEED is None else P.MISSION_RANDOM_SEED})"
              if P.MISSION_GRAPH_SAMPLING == 'casuale' else "")
           + f"; archi da {P.PRM_MIN_EDGE_M:g} a {P.PRM_MAX_EDGE_M:g} m")
-    return environmentMap.EnvironmentMap(rows=grid_rows, cols=grid_cols, cell_size=grid_cell)
+    env = environmentMap.EnvironmentMap(rows=grid_rows, cols=grid_cols, cell_size=grid_cell)
+    env.start_cell = env.current_cell = start_cell   # set_origin la conferma con la posa
+    return env
 
 
 def _chiudi_missione(robot, robot_state_client, command_client, recordingInterface):
@@ -3293,12 +3330,11 @@ def easy_walk(options):
                       f"visto in {P.START_FIDUCIAL_WAIT_S:.0f} s da nessuna telecamera: si parte senza. "
                       f"Spot riconosce solo gli AprilTag 36h11 (i fiducial di Boston Dynamics).")
 
-            start_row, start_col = 0, 0
+            env = _griglia_di_missione(options)
+            start_row, start_col = env.start_cell
             recordingInterface.create_default_waypoint(cell_row=start_row, cell_col=start_col)
             if fiducials:
                 recordingInterface.initialize_with_fiducial(robot_state_client, fiducials[0]['id'])
-
-            env = _griglia_di_missione(options)
 
             # --- Andatura per tutta la missione ---
             # Vuoto: andatura, altezza del passo e ground_mu_hint si scelgono TRATTO PER TRATTO in
@@ -3376,6 +3412,12 @@ def _parse_args(argv=None):
                    help=f"colonne di celle, davanti al robot (default {P.MISSION_GRID_COLS})")
     p.add_argument('--cell', type=float, default=None,
                    help=f"lato della cella in m (default {P.MISSION_CELL_SIZE_M:g})")
+    p.add_argument('--partenza', default=None,
+                   help=f"cella di partenza del robot nella griglia: "
+                        f"{', '.join(environmentMap.START_POSITIONS)}, oppure 'riga,colonna' "
+                        f"(default {P.MISSION_START_POSITION})")
+    p.add_argument('--ordine', choices=environmentMap.VISIT_ORDERS, default=None,
+                   help=f"ordine di visita delle celle (default {P.MISSION_VISIT_ORDER})")
     p.add_argument('--spacing', type=float, default=None,
                    help=f"passo fra i nodi del reticolo in m, arrotondato a cell/n; gli archi "
                         f"restano >= {P.PRM_MIN_EDGE_M:g} m (default {P.MISSION_LATTICE_SPACING_M}; "
@@ -3400,6 +3442,12 @@ def _parse_args(argv=None):
         p.error("--rows e --cols devono essere almeno 1")
     if a.cell is not None and a.cell <= 0:
         p.error("--cell deve essere positivo")
+    if a.partenza is not None:
+        try:
+            # Qui solo la forma; che la cella stia nella griglia lo controlla main().
+            environmentMap.start_cell_for(a.partenza, 10 ** 6, 10 ** 6)
+        except ValueError as e:
+            p.error(f"--partenza: {e}")
     if a.densita is not None and a.densita <= 0:
         p.error("--densita deve essere positiva")
     lo = P.PRM_MIN_EDGE_M if a.min_edge is None else a.min_edge
@@ -3433,6 +3481,19 @@ def main():
     options.grid_rows = args.rows
     options.grid_cols = args.cols
     options.grid_cell = args.cell
+    options.start_position = args.partenza
+    if args.ordine is not None:
+        P.MISSION_VISIT_ORDER = args.ordine
+    # Partenza e ordine si controllano qui, prima di collegarsi al robot.
+    _rows, _cols, _cell, _src = _dimensioni_griglia(options, verbose=False)
+    try:
+        _cella_di_partenza(options, _rows, _cols)
+        if P.MISSION_VISIT_ORDER not in environmentMap.VISIT_ORDERS:
+            raise ValueError(f"MISSION_VISIT_ORDER {P.MISSION_VISIT_ORDER!r} sconosciuto: uno di "
+                             f"{environmentMap.VISIT_ORDERS}")
+    except ValueError as e:
+        print(f"[CONFIG] {e} (griglia {_rows} x {_cols}, fonte: {_src}). Missione non avviata.")
+        sys.exit(2)
     options.name = "easyWalk"
     options.hostname = "192.168.80.3"
     options.verbose = False

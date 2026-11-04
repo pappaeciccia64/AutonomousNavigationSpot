@@ -391,7 +391,7 @@ def _con_batteria(da_pct=36.0, punti_a_lettura=1.0):
         parametri.BATTERY_SAMPLE_S = real_s
 
 
-def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0_m=None, wp0_offset_m=None):
+def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0_m=None, wp0_offset_m=None, extra_args=()):
     global FIDUCIAL_TAG
     FIDUCIAL_TAG = fiducial
     T.WORLD, T.ROBOT = T.World(WALLS if walls is None else walls, ghosts=True), T.Robot(*START)
@@ -413,7 +413,7 @@ def run(walls=None, name='MISSIONE', fiducial=None, stuck_wp0_m=None, wp0_offset
     easy_walk.__file__ = os.path.join(root, "easy_walk.py")      # cartelle dei dati qui
     argv = sys.argv
     sys.argv = ["easy_walk.py", "--rows", str(ROWS), "--cols", str(COLS), "--cell", str(CELL),
-                "--grafo", "reticolo", "--spacing", "0.5"]
+                "--grafo", "reticolo", "--spacing", "0.5"] + list(extra_args)
     t0 = time.time()
     out = io.StringIO()
     try:
@@ -528,6 +528,49 @@ def _controlli_emergenza():
         check("[EMERGENZA] Mappa GraphNav scaricata." in log, f"{nome}: mappa GraphNav scaricata")
 
 
+def _controlli_partenza():
+    """Cella di partenza scelta per nome (angoli, centro, meta' dei lati, 'riga,colonna') e
+    ordine di visita: completo, senza ripetizioni, dalla cella di partenza, e la serpentina
+    di sempre con la partenza in (0, 0)."""
+    print("\nCella di partenza e ordine di visita")
+    import environmentMap as E
+    attese = {'basso-destra': (0, 0), 'basso-sinistra': (7, 0), 'alto-destra': (0, 6),
+              'alto-sinistra': (7, 6), 'centro': (4, 3), 'basso-centro': (4, 0),
+              'alto-centro': (4, 6), 'centro-destra': (0, 3), 'centro-sinistra': (7, 3),
+              'Alto Sinistra': (7, 6), '2,5': (2, 5)}
+    trovate = {k: E.start_cell_for(k, 8, 7) for k in attese}
+    check(trovate == attese, f"posizioni con nome su una griglia 8 x 7: {trovate}")
+    for bad in ('7,7', 'in-mezzo', '1;2'):
+        try:
+            E.start_cell_for(bad, 8, 7)
+            check(False, f"partenza {bad!r} rifiutata")
+        except ValueError:
+            pass
+    env = E.EnvironmentMap(rows=8, cols=7, cell_size=2.0)
+    vecchia = [(r, c) for r in range(8) for c in (range(7) if r % 2 == 0 else range(6, -1, -1))]
+    check(env.generate_visit_path('auto', start_cell=(0, 0)) == vecchia,
+          "partenza in (0, 0): la serpentina di sempre")
+    ok, salti_angoli = True, 0
+    for rows, cols in ((8, 7), (3, 3), (4, 5), (1, 5), (6, 6)):
+        env = E.EnvironmentMap(rows=rows, cols=cols, cell_size=2.0)
+        for pos in E.START_POSITIONS:
+            st = E.start_cell_for(pos, rows, cols)
+            for ordine in E.VISIT_ORDERS:
+                p = env.generate_visit_path(ordine, start_cell=st)
+                ok &= p[0] == st and len(p) == len(set(p)) == rows * cols
+                if E.is_corner_cell(st, rows, cols) and ordine != 'anelli':
+                    salti_angoli += sum(abs(a[0] - b[0]) + abs(a[1] - b[1]) > 1 for a, b in zip(p, p[1:]))
+    check(ok, "ogni ordine, da ogni partenza: tutte le celle una volta, prima la partenza")
+    check(salti_angoli == 0, f"serpentina da un angolo: sempre fra celle confinanti (salti {salti_angoli})")
+    env = E.EnvironmentMap(rows=3, cols=3, cell_size=3.0)
+    with contextlib.redirect_stdout(io.StringIO()):
+        env.set_origin(1.5, 1.5, 0.0, *E.start_cell_for('centro', 3, 3))
+    check(env.get_world_position_from_cell(1, 1) == (1.5, 1.5)
+          and env.get_cell_from_world(-0.5, -0.5) == (0, 0)
+          and env.update_position(4.4, 4.4) == (2, 2),
+          "partenza al centro: il robot e' nel centro della (1,1), la (0,0) dietro a destra")
+
+
 def _controlli_scelta_celle():
     """
     Il caso del 28-10 13:50, griglia 8 x 7 da 2 m: la (7,2) e' stata visitata con il robot
@@ -599,8 +642,18 @@ if __name__ == '__main__':
     _controlli_comuni(r, ritorno=False)
     _controlli_fallimenti(r)
     shutil.rmtree(r['root'], ignore_errors=True)
+    _controlli_partenza()
     _controlli_scelta_celle()
     _controlli_emergenza()
+    print("\nMissione intera nel mondo H: area libera, il robot parte dal CENTRO della griglia.")
+    r = run([], "MISSIONE_H", extra_args=["--partenza", "centro"])
+    _controlli_comuni(r)
+    log = r['log']
+    check("[CONFIG] Partenza: cella (1,1) centro" in log, "partenza nella cella (1,1), al centro")
+    check("[CONFIG] Ordine di visita: anelli" in log, "dal centro l'ordine di visita e' ad anelli")
+    check("[PROGRESSO] Fine esplorazione: 9/9 celle chiuse (100%): 9 visitate" in log,
+          "visitate tutte le 9 celle, anche quelle dietro il robot")
+    shutil.rmtree(r['root'], ignore_errors=True)
     print("\nMissione intera nel mondo G: il mondo A con il ritorno a wp_0 'arrivato' ma 0.8 m di lato "
           "(29-10 10:57: 1.2 m).")
     r = run(WORLDS['A'], "MISSIONE_G", fiducial=(7, START[0] - 1.0, START[1]), wp0_offset_m=0.8)

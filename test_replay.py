@@ -135,6 +135,9 @@ def mission_setup(name):
     yaw = float(re.search(r'(?:Initial orientation|Orientamento iniziale): ([-\d.]+)', log).group(1))
     g = re.search(r'Griglia di missione: (\d+) x (\d+) celle da ([\d.]+) m', log)
     rows, cols, cell = (int(g.group(1)), int(g.group(2)), float(g.group(3))) if g else (2, 4, 5.0)
+    # Cella di partenza (env.set_origin); dal 04-11 si sceglie, prima era sempre (0, 0).
+    sc = re.search(r'(?:Starting cell|Cella di partenza) \((\d+), (\d+)\)', log)
+    start_cell = (int(sc.group(1)), int(sc.group(2))) if sc else (0, 0)
     s = re.search(r'Reticolo: passo richiesto ([\d.]+) m', log)
     spacing = float(s.group(1)) if s else 0.25
     # Dal 22-10: metodo dei nodi e lunghezza degli archi; per i nodi casuali distribuzione,
@@ -151,6 +154,7 @@ def mission_setup(name):
     scans.sort(key=lambda f: float(np.load(f)['time']))
     seg_path = os.path.join(HERE, 'MissionLogs', f'Mission_{name}', 'segments.csv')
     return dict(origin=(ox, oy), yaw_deg=yaw, rows=rows, cols=cols, cell=cell, spacing=spacing,
+                start_cell=start_cell,
                 graph=graph,
                 scans=scans, segments=seg_path if os.path.exists(seg_path) else None)
 
@@ -205,7 +209,7 @@ def replay_mission(job):
     out = dict(cell_starts=[], invariants={}, notes=[], tempo_grafo_s=0.0)
     with _quiet():
         env = environmentMap.EnvironmentMap(rows=m['rows'], cols=m['cols'], cell_size=m['cell'])
-        env.set_origin(m['origin'][0], m['origin'][1], math.radians(m['yaw_deg']))
+        env.set_origin(m['origin'][0], m['origin'][1], math.radians(m['yaw_deg']), *m['start_cell'])
         P.MISSION_LATTICE_SPACING_M = m['spacing']
         g = m['graph']
         P.MISSION_GRAPH_SAMPLING = g['sampling']

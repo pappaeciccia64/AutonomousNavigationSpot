@@ -18,6 +18,7 @@ lo stesso grafo, nella stessa posizione rispetto al punto di partenza.
 import os
 import subprocess
 
+import environmentMap
 import mission_graph
 import parametri as P
 
@@ -28,6 +29,8 @@ import parametri as P
 RIGHE = None                 # parametri.MISSION_GRID_ROWS
 COLONNE = None               # parametri.MISSION_GRID_COLS
 LATO_CELLA_M = None          # parametri.MISSION_CELL_SIZE_M
+# Cella di partenza del robot: 'basso-destra', 'centro', ... o 'riga,colonna'.
+PARTENZA = None              # parametri.MISSION_START_POSITION
 
 # Archi: tutte le coppie di nodi distanti fra ARCO_MIN_M e ARCO_MAX_M.
 ARCO_MIN_M = None            # parametri.PRM_MIN_EDGE_M
@@ -64,6 +67,7 @@ def main():
     rows = _scelta(RIGHE, P.MISSION_GRID_ROWS)
     cols = _scelta(COLONNE, P.MISSION_GRID_COLS)
     cell = _scelta(LATO_CELLA_M, P.MISSION_CELL_SIZE_M)
+    start_cell = environmentMap.start_cell_for(_scelta(PARTENZA, P.MISSION_START_POSITION), rows, cols)
     e_min = _scelta(ARCO_MIN_M, P.PRM_MIN_EDGE_M)
     e_max = _scelta(ARCO_MAX_M, P.PRM_MAX_EDGE_M)
     spacing = _scelta(PASSO_RETICOLO_M, P.MISSION_LATTICE_SPACING_M)
@@ -72,16 +76,16 @@ def main():
     seed = _scelta(SEME, P.MISSION_RANDOM_SEED)
     if seed is None:
         seed = mission_graph.draw_seed()
-    print(f"Area {rows} x {cols} celle da {cell:g} m, archi {e_min:g}-{e_max:g} m, "
+    print(f"Area {rows} x {cols} celle da {cell:g} m, partenza nella cella {start_cell}, archi {e_min:g}-{e_max:g} m, "
           f"passo del reticolo {spacing}, anelli {rings if rings is not None else 'tutti'}, "
           f"densita' {density}, seme {seed}"
-          + ("" if all(v is None for v in (RIGHE, COLONNE, LATO_CELLA_M, ARCO_MIN_M, ARCO_MAX_M,
+          + ("" if all(v is None for v in (RIGHE, COLONNE, LATO_CELLA_M, PARTENZA, ARCO_MIN_M, ARCO_MAX_M,
                                            PASSO_RETICOLO_M, ANELLI, DENSITA_NODI_M2))
              else "  (alcuni valori dal blocco PROVA, non da parametri.py)"))
 
     path, graphs = mission_graph.compare_methods_png(
         IMMAGINE, zoom=ZOOM, seed=seed, methods=METODI, verbose=True,
-        rows=rows, cols=cols, cell_size_m=cell,
+        rows=rows, cols=cols, cell_size_m=cell, start_cell=start_cell,
         spacing_m=spacing, rings=rings,
         min_edge_length=e_min, max_edge_length=e_max,
         density_per_m2=None if density == 'come_reticolo' else density)

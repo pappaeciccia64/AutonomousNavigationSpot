@@ -31,6 +31,21 @@ SPOT_MISSION_GRID="2,3,4" python3 easy_walk.py       # variabile d'ambiente
 ```
 La riga `[CONFIG] Griglia di missione` del log dice quale valore è stato usato e da dove.
 
+**Dove parte il robot nella griglia.** `parametri.MISSION_START_POSITION`, o per una sola missione `--partenza`. Guardando la griglia dall'alto con l'avanti del robot verso l'alto:
+
+| | sinistra | centro | destra |
+|---|---|---|---|
+| **alto** (griglia dietro) | `alto-sinistra` | `alto-centro` | `alto-destra` |
+| **centro** | `centro-sinistra` | `centro` | `centro-destra` |
+| **basso** (griglia davanti) | `basso-sinistra` | `basso-centro` | `basso-destra` (default, cella (0,0)) |
+
+```bash
+python3 easy_walk.py --partenza centro               # il robot nel mezzo dell'area
+python3 easy_walk.py --partenza basso-sinistra       # griglia davanti e a DESTRA del robot
+python3 easy_walk.py --partenza 3,2                  # una cella qualsiasi (riga,colonna)
+```
+L'ordine di visita (`--ordine`, `parametri.MISSION_VISIT_ORDER`) è `auto`: serpentina che parte dall'angolo del robot, oppure ad anelli intorno alla partenza se il robot non è in un angolo; si può forzare `serpentina` o `anelli`. Le righe `[CONFIG] Partenza` e `[CONFIG] Ordine di visita` del log dicono cella, quanto si estende la griglia davanti, dietro, a sinistra e a destra, e le prime celle in ordine. Partenza non valida (cella fuori dalla griglia, nome sconosciuto): la missione non parte. In `prova_grafo.py`, `PARTENZA` mostra il grafo con quella partenza.
+
 **Grafo della missione.** I nodi si generano in due modi (`--grafo`, default in `parametri.MISSION_GRAPH_SAMPLING`):
 ```bash
 python3 easy_walk.py --grafo casuale --distribuzione poisson --densita 5 --seme 7       # nodi casuali (default: poisson, 5 nodi/m², seme a caso)
@@ -56,7 +71,7 @@ python3 mission_graph.py --grafo casuale --distribuzione halton --seme 7 --previ
 ## Come funziona una missione
 
 ### Celle ed esplorazione
-L'area è una griglia di celle (`environmentMap.py`) riferita alla posa del robot all'avvio: le **colonne** vanno in avanti, le **righe** a sinistra. Le celle si visitano a serpentina; a ogni passo si sceglie la cella di frontiera confinante di rango più basso. Se nessuna confina con la posizione attuale, il robot va con GraphNav al waypoint più vicino a quella di rango più basso e prova da lì. Una cella fallita da un lato resta candidata e si ritenta più avanti da un altro lato; diventa bloccata solo quando tutti i lati sono stati provati, o subito se l'obiettivo risulta dentro un ostacolo.
+L'area è una griglia di celle (`environmentMap.py`) riferita alla posa del robot all'avvio: le **colonne** vanno in avanti, le **righe** a sinistra, e il robot parte nella cella scelta con `--partenza` (default l'angolo (0,0)). Le celle si visitano a serpentina dall'angolo di partenza, o ad anelli se il robot parte dal centro o dal mezzo di un lato; a ogni passo si sceglie la cella di frontiera confinante di rango più basso. Se nessuna confina con la posizione attuale, il robot va con GraphNav al waypoint più vicino a quella di rango più basso e prova da lì. Una cella fallita da un lato resta candidata e si ritenta più avanti da un altro lato; diventa bloccata solo quando tutti i lati sono stati provati, o subito se l'obiettivo risulta dentro un ostacolo.
 
 ### Un tentativo di cella (`TentativoCella` in `easy_walk.py`)
 Il tentativo prepara scansione, mappe, grafo e percorso (`_prepara`), poi ripete un giro di fasi (`_guardie`, `_scansione_e_grafo`, `_fronte_e_decisione`, `_rotazione`, `_nodo_o_arrivo`, `_attesa`, `_blocco`, `_esegui_tratti`) finché il robot arriva o il tentativo fallisce.

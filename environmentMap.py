@@ -8,9 +8,97 @@ Sud 0b0010, Ovest 0b0001).
 
 Il frame della griglia e' fissato all'accensione (set_origin): il centro della cella di
 partenza e' nell'origine, l'asse x della griglia e' l'avanti del robot in quel momento
-(colonne), l'asse y la sua sinistra (righe). L'ordine di visita e' a serpentina.
+(colonne), l'asse y la sua sinistra (righe).
+
+La cella di partenza si sceglie (start_cell_for, parametri.MISSION_START_POSITION): il robot
+puo' stare in uno dei quattro angoli, al centro di un lato o al centro della griglia. Guardando
+la griglia dall'alto con l'avanti del robot verso l'alto:
+
+    alto-sinistra    alto-centro    alto-destra          ^ avanti (colonne crescenti)
+    centro-sinistra  centro         centro-destra        |
+    basso-sinistra   basso-centro   basso-destra    <----+ sinistra (righe crescenti)
+
+'basso-destra' e' la cella (0, 0): la griglia si apre davanti e a sinistra del robot (com'era
+sempre stato). 'alto-...' mette la griglia DIETRO il robot, '...-destra' a sinistra,
+'...-sinistra' a destra.
+
+L'ordine di visita (generate_visit_path) e' una serpentina che parte dall'angolo del robot,
+oppure, se il robot non e' in un angolo, ad anelli intorno alla cella di partenza.
 """
 import numpy as np
+
+
+# =========================================================================================
+# CELLA DI PARTENZA E ORDINE DI VISITA
+# =========================================================================================
+# Posizioni con nome della cella di partenza: (verticale, orizzontale) guardando la griglia
+# dall'alto con l'avanti del robot verso l'alto. Verticale -> colonna (basso = colonna 0, la
+# griglia e' davanti al robot), orizzontale -> riga (destra = riga 0, la griglia e' a sinistra).
+START_POSITIONS = (
+    'basso-destra', 'basso-sinistra', 'alto-destra', 'alto-sinistra', 'centro',
+    'basso-centro', 'alto-centro', 'centro-destra', 'centro-sinistra',
+)
+VISIT_ORDERS = ('auto', 'serpentina', 'anelli')
+
+_START_ALIASES = {'centro-centro': 'centro', 'center': 'centro'}
+
+
+def _axis_index(where, n):
+    """Indice lungo un asse: 'basso'/'destra' = 0, 'alto'/'sinistra' = n-1, 'centro' = n//2."""
+    if where in ('basso', 'destra'):
+        return 0
+    if where in ('alto', 'sinistra'):
+        return n - 1
+    return n // 2
+
+
+def start_cell_for(position, rows, cols):
+    """
+    La cella di partenza (riga, colonna) per una griglia rows x cols.
+
+    position: uno di START_POSITIONS ('basso-destra', 'centro', ...; spazi e '_' valgono come
+    '-'), oppure la cella esplicita, come tupla (riga, colonna) o stringa "riga,colonna".
+    Con un numero pari di righe o colonne il centro non e' una cella: 'centro' prende la
+    cella n//2 (quella piu' a sinistra / piu' avanti delle due centrali).
+
+    Solleva ValueError se la posizione non e' valida o la cella e' fuori dalla griglia.
+    """
+    if isinstance(position, (tuple, list)):
+        cell = (int(position[0]), int(position[1]))
+    else:
+        text = str(position).strip().lower().replace(' ', '-').replace('_', '-')
+        text = _START_ALIASES.get(text, text)
+        if ',' in text:
+            try:
+                r, c = text.split(',')
+                cell = (int(r), int(c))
+            except ValueError:
+                raise ValueError(f"cella di partenza {position!r} non valida: atteso 'riga,colonna'")
+        elif text == 'centro':
+            cell = (rows // 2, cols // 2)
+        elif text in START_POSITIONS:
+            vert, horiz = text.split('-')
+            cell = (_axis_index(horiz, rows), _axis_index(vert, cols))
+        else:
+            raise ValueError(f"posizione di partenza {position!r} sconosciuta: una di "
+                             f"{', '.join(START_POSITIONS)}, oppure 'riga,colonna'")
+    if not (0 <= cell[0] < rows and 0 <= cell[1] < cols):
+        raise ValueError(f"cella di partenza {cell} fuori dalla griglia {rows} x {cols}")
+    return cell
+
+
+def describe_start_cell(cell, rows, cols):
+    """Nome della posizione della cella nella griglia ('basso-destra', 'centro', ...) o ''."""
+    for name in START_POSITIONS:
+        if start_cell_for(name, rows, cols) == tuple(cell):
+            return name
+    return ''
+
+
+def is_corner_cell(cell, rows, cols):
+    """True se la cella e' in un angolo della griglia (vale anche per griglie di una riga)."""
+    r, c = cell
+    return r in (0, rows - 1) and c in (0, cols - 1)
 
 class EnvironmentMap(object):
     def __init__(self, rows=12, cols=12, cell_size=2.0):
@@ -326,33 +414,99 @@ class EnvironmentMap(object):
 
     def generate_serpentine_path(self, start_cell=None):
         """
-        L'ordine di visita a serpentina, lista di (riga, colonna):
+        L'ordine di visita a serpentina, lista di (riga, colonna). Si percorre una riga lungo
+        le colonne (in avanti o indietro), poi si passa alla riga accanto e si torna:
             1  2  3  4  5
             10 9  8  7  6
             11 12 13 14 15
-        ruotato in modo da partire da start_cell (default: self.start_cell).
+        Se start_cell (default: self.start_cell) e' un angolo, la serpentina parte da quel
+        angolo: righe a partire da quella di start_cell, colonne a partire dal suo lato. Con
+        (0, 0) e' la serpentina di sempre. Se non e' un angolo, la serpentina da (0, 0)
+        ruotata in modo da partire da start_cell (meglio generate_visit_path('anelli')).
         """
+        effective_start = tuple(start_cell if start_cell is not None else self.start_cell)
+        r0, c0 = effective_start
+        corner = is_corner_cell(effective_start, self.rows, self.cols)
+        row_order = range(self.rows - 1, -1, -1) if corner and r0 == self.rows - 1 and self.rows > 1 \
+            else range(self.rows)
+        forward = not (corner and c0 == self.cols - 1 and self.cols > 1)
         path = []
-        for row in range(self.rows):
-            if row % 2 == 0:
-                # righe pari: da sinistra a destra
-                for col in range(self.cols):
-                    path.append((row, col))
-            else:
-                # righe dispari: da destra a sinistra
-                for col in range(self.cols - 1, -1, -1):
-                    path.append((row, col))
+        for row in row_order:
+            cols = range(self.cols) if forward else range(self.cols - 1, -1, -1)
+            path.extend((row, col) for col in cols)
+            forward = not forward
 
         if not path:
             return path
 
-        effective_start = start_cell if start_cell is not None else self.start_cell
         if effective_start in path:
             start_idx = path.index(effective_start)
             if start_idx > 0:
                 path = path[start_idx:] + path[:start_idx]
 
         return path
+
+    def generate_ring_path(self, start_cell=None):
+        """
+        L'ordine di visita ad anelli, lista di (riga, colonna): prima la cella di partenza,
+        poi l'anello di celle a distanza 1 (le 8 intorno), poi quello a distanza 2, ...
+        (distanza = max(|delta riga|, |delta colonna|)). Ogni anello si percorre passando da
+        una cella alla confinante, in senso antiorario, cominciando dalla cella piu' vicina
+        all'ultima dell'anello prima; se l'anello e' tagliato dal bordo della griglia si
+        comincia da un suo estremo, cosi' non restano pezzi indietro. Adatto quando il robot
+        parte dal centro o dal mezzo di un lato.
+        """
+        start = tuple(start_cell if start_cell is not None else self.start_cell)
+        r0, c0 = start
+        rings = {}
+        for r in range(self.rows):
+            for c in range(self.cols):
+                rings.setdefault(max(abs(r - r0), abs(c - c0)), []).append((r, c))
+
+        n4 = ((-1, 0), (1, 0), (0, 1), (0, -1))
+
+        def angle(cell):
+            return float(np.arctan2(cell[0] - r0, cell[1] - c0)) % (2 * np.pi)
+
+        def ccw(a, b):
+            # > 0 se da a a b si gira in senso antiorario intorno alla partenza
+            return (a[1] - c0) * (b[0] - r0) - (a[0] - r0) * (b[1] - c0)
+
+        path, cur = [], start
+        for d in sorted(rings):
+            todo = set(rings[d])
+            while todo:
+                def degree(cell):
+                    return sum((cell[0] + dr, cell[1] + dc) in todo for dr, dc in n4)
+                # Ingresso nell'anello (o in un suo pezzo): se l'anello e' tagliato dal bordo,
+                # l'estremo piu' vicino; se e' chiuso, la cella piu' vicina.
+                nxt = min(todo, key=lambda x: (degree(x) > 1,
+                                               abs(x[0] - cur[0]) + abs(x[1] - cur[1]),
+                                               angle(x)))
+                while nxt is not None:
+                    path.append(nxt)
+                    todo.discard(nxt)
+                    cur = nxt
+                    near = [(cur[0] + dr, cur[1] + dc) for dr, dc in n4
+                            if (cur[0] + dr, cur[1] + dc) in todo]
+                    nxt = max(near, key=lambda x: (ccw(cur, x), -angle(x))) if near else None
+        return path
+
+    def generate_visit_path(self, order='auto', start_cell=None):
+        """
+        L'ordine di visita delle celle, lista di (riga, colonna), che comincia dalla cella di
+        partenza. order: 'serpentina' (generate_serpentine_path), 'anelli'
+        (generate_ring_path) o 'auto' = serpentina se la partenza e' in un angolo, anelli se
+        no.
+        """
+        start = tuple(start_cell if start_cell is not None else self.start_cell)
+        if order not in VISIT_ORDERS:
+            raise ValueError(f"ordine di visita {order!r} sconosciuto: uno di {VISIT_ORDERS}")
+        if order == 'auto':
+            order = 'serpentina' if is_corner_cell(start, self.rows, self.cols) else 'anelli'
+        if order == 'serpentina':
+            return self.generate_serpentine_path(start_cell=start)
+        return self.generate_ring_path(start_cell=start)
 
     def get_world_position_from_cell(self, row, col):
         """
