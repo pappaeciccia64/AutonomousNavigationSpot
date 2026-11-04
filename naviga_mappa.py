@@ -44,8 +44,11 @@ USO
   Sul robot (robot alla partenza della missione, con il tag di partenza in vista):
     python3 naviga_mappa.py 26-10-2026_15-11-21 --verso 6,2
     python3 naviga_mappa.py 26-10-2026_15-11-21 --interattivo        # chiede gli obiettivi
+    python3 naviga_mappa.py 26-10-2026_15-11-21 --clic               # obiettivi con un clic
+    python3 naviga_mappa.py 26-10-2026_15-11-21 --clic --anteprima piano.png   # clic, senza robot
   Obiettivi: --verso X,Y (frame della missione), --cella R,C (centro della cella),
-  --waypoint wp_N (un waypoint del grafo GraphNav). Senza nome della missione: l'ultima
+  --waypoint wp_N (un waypoint del grafo GraphNav), oppure --clic: clic sinistro sulla mappa,
+  il percorso compare subito, Invio conferma, Esc esce. Senza nome della missione: l'ultima
   che ha mappe globali, log e grafo GraphNav.
 """
 import argparse
@@ -449,24 +452,38 @@ class MappaMissione:
         return min(cands)[1] if cands else None
 
     # --- figura ---------------------------------------------------------------------------
-    def anteprima(self, png, piano=None, da_xy=None, a_xy=None, titolo=""):
-        """Mappa (rosso occupato, verde visto libero), archi del PRM sul visto, waypoint
-        GraphNav, percorso. Tutto nel frame della missione: x avanti, y a sinistra."""
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
+    # Tutto nel frame della missione: in figura l'asse orizzontale e' y (a sinistra della
+    # partenza, invertito: la sinistra del robot sta a sinistra) e quello verticale e' x
+    # (avanti). Un punto (xm, ym) si disegna in (ym, xm).
+    def disegna_mappa(self, ax):
+        """Sfondo: mappa (rosso occupato, verde visto libero), archi del PRM sul visto,
+        waypoint GraphNav."""
         from matplotlib.collections import LineCollection
         fr = self.frame
+        # Mappa come immagine, ricampionata nel frame della missione (ruotato rispetto al
+        # VISION): 0 mai vista, 1 vista libera, 2 occupata.
+        from matplotlib.colors import ListedColormap
         r = self.gm.resolution
-        keys = np.array(list(self.gm.grid.keys()), dtype=np.float64)
+        keys = np.array(list(self.gm.grid.keys()), dtype=np.int64)
         vals = np.array(list(self.gm.grid.values()))
-        cx, cy = (keys[:, 0] + 0.5) * r, (keys[:, 1] + 0.5) * r
-        mx, my = fr.da_vision(cx, cy)
-        fig, ax = plt.subplots(figsize=(10, 10))
-        free = vals > 0
-        ax.scatter(my[free], mx[free], s=0.4, c='#b8dfb0', marker='s', linewidths=0, zorder=1)
-        ax.scatter(my[~free], mx[~free], s=0.8, c='#d0342c', marker='s', linewidths=0, zorder=2,
-                   label='occupato')
+        gx0, gy0 = keys.min(axis=0)
+        ras = np.zeros(tuple(keys.max(axis=0) - (gx0, gy0) + 1), dtype=np.uint8)
+        ras[keys[:, 0] - gx0, keys[:, 1] - gy0] = np.where(vals > 0, 1, 2)
+        mx, my = fr.da_vision((keys[:, 0] + 0.5) * r, (keys[:, 1] + 0.5) * r)
+        xs = np.arange(mx.min(), mx.max() + r, r)
+        ys = np.arange(my.min(), my.max() + r, r)
+        XM, YM = np.meshgrid(xs, ys, indexing='ij')
+        vx, vy = fr.a_vision(XM, YM)
+        ix = np.floor(vx / r).astype(np.int64) - gx0
+        iy = np.floor(vy / r).astype(np.int64) - gy0
+        ok = (ix >= 0) & (ix < ras.shape[0]) & (iy >= 0) & (iy < ras.shape[1])
+        img = np.zeros(XM.shape, dtype=np.uint8)
+        img[ok] = ras[ix[ok], iy[ok]]
+        ax.imshow(img, origin='lower', interpolation='nearest', zorder=1,
+                  cmap=ListedColormap(['#ffffff', '#b8dfb0', '#d0342c']), vmin=0, vmax=2,
+                  extent=(ys[0] - r / 2, ys[-1] + r / 2, xs[0] - r / 2, xs[-1] + r / 2))
+        ax.plot([], [], 's', c='#d0342c', label='occupato')
+        ax.plot([], [], 's', c='#b8dfb0', label='visto libero')
         segs = []
         for a, lst in self.prm.edges.items():
             for b, _w in lst:
@@ -474,30 +491,140 @@ class MappaMissione:
                     (x1, y1), (x2, y2) = fr.da_vision(*self.prm.nodes[a]), fr.da_vision(*self.prm.nodes[b])
                     segs.append([(y1, x1), (y2, x2)])
         ax.add_collection(LineCollection(segs, colors='#888888', linewidths=0.3, alpha=0.5, zorder=3))
-        if self.ng:
+        if self.ng and self.ng['wp']:
             w = np.array([fr.da_vision(v['x'], v['y']) for v in self.ng['wp'].values()])
             ax.scatter(w[:, 1], w[:, 0], s=8, c='#2b6cb0', zorder=4, label='waypoint GraphNav')
-        if piano is not None:
-            p = np.array([fr.da_vision(*self.prm.nodes[n]) for n in piano['path']])
-            ax.plot(p[:, 1], p[:, 0], '-', c='#ff8c00', lw=2.5, zorder=5,
-                    label=f"percorso PRM {piano['lunghezza']:.1f} m")
-        if da_xy is not None:
-            m = fr.da_vision(*da_xy)
-            ax.plot(m[1], m[0], 'o', c='k', ms=9, zorder=6, label='partenza')
-        if a_xy is not None:
-            m = fr.da_vision(*a_xy)
-            ax.plot(m[1], m[0], '*', c='#ffd400', mec='k', ms=18, zorder=6, label='obiettivo')
         ax.set_aspect('equal')
-        ax.invert_xaxis()              # sinistra del robot a sinistra della figura
+        ax.set_xlim(ys[-1] + 0.5, ys[0] - 0.5)       # invertito: la sinistra del robot a sinistra
+        ax.set_ylim(xs[0] - 0.5, xs[-1] + 0.5)
         ax.set_xlabel("y: a sinistra della partenza [m]")
         ax.set_ylabel("x: avanti dalla partenza [m]")
+        ax.grid(alpha=0.3)
+
+    def disegna_piano(self, ax, piano=None, da_xy=None, a_xy=None, etichetta_da='partenza'):
+        """Percorso, partenza e obiettivo (punti VISION della missione). Restituisce gli
+        oggetti disegnati, da togliere quando il piano cambia."""
+        fr = self.frame
+        out = []
+        if piano is not None:
+            p = np.array([fr.da_vision(*self.prm.nodes[n]) for n in piano['path']])
+            out += ax.plot(p[:, 1], p[:, 0], '-', c='#ff8c00', lw=2.5, zorder=5,
+                           label=f"percorso PRM {piano['lunghezza']:.1f} m")
+        if da_xy is not None:
+            m = fr.da_vision(*da_xy)
+            out += ax.plot(m[1], m[0], 'o', c='k', ms=9, zorder=6, label=etichetta_da)
+        if a_xy is not None:
+            m = fr.da_vision(*a_xy)
+            out += ax.plot(m[1], m[0], '*', c='#ffd400', mec='k', ms=18, zorder=6, label='obiettivo')
+        return out
+
+    def anteprima(self, png, piano=None, da_xy=None, a_xy=None, titolo=""):
+        """La figura del piano in un file (senza finestra)."""
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(figsize=(10, 10))
+        self.disegna_mappa(ax)
+        self.disegna_piano(ax, piano, da_xy, a_xy)
         ax.set_title(titolo or f"Missione {self.name}")
         ax.legend(loc='upper right', fontsize=8)
-        ax.grid(alpha=0.3)
         fig.tight_layout()
         fig.savefig(png, dpi=130)
         plt.close(fig)
         print(f"{LOG_TAG} Anteprima salvata in {png}")
+
+
+def descrivi_piano(piano, da_xy, a_xy):
+    if piano is None:
+        return "nessun percorso sul visto"
+    return (f"{len(piano['path']) - 1} archi, {piano['lunghezza']:.1f} m (linea d'aria "
+            f"{np.hypot(a_xy[0] - da_xy[0], a_xy[1] - da_xy[1]):.1f} m)"
+            + (f", arrivo a {piano['mancano_m']:.2f} m dall'obiettivo" if piano['mancano_m'] > 0.05 else ""))
+
+
+class SceltaConClic:
+    """
+    L'obiettivo scelto con un clic sulla mappa. Clic sinistro: obiettivo in quel punto, con il
+    percorso pianificato subito (un altro clic lo sposta); Invio: conferma; Esc, q o finestra
+    chiusa: nessun obiettivo. Con lo zoom o lo spostamento della barra degli strumenti attivi i
+    clic servono a quelli e non scelgono niente.
+
+    da_xy: partenza del piano (VISION della missione): il robot adesso, o la partenza.
+    """
+
+    def __init__(self, mappa, da_xy, titolo="", etichetta_da='partenza'):
+        import matplotlib.pyplot as plt
+        self.plt = plt
+        self.mappa, self.da_xy = mappa, da_xy
+        self.titolo = titolo or f"Missione {mappa.name}"
+        self.goal = self.piano = None
+        self.confermato = False
+        self.fig, self.ax = plt.subplots(figsize=(10, 10))
+        mappa.disegna_mappa(self.ax)
+        self._artisti = mappa.disegna_piano(self.ax, None, da_xy, None, etichetta_da=etichetta_da)
+        self.etichetta_da = etichetta_da
+        self.ax.legend(loc='upper right', fontsize=8)
+        self._titolo("clic sinistro: obiettivo | Invio: conferma | Esc: esci")
+        self.fig.tight_layout()
+        self.fig.canvas.mpl_connect('button_press_event', self._clic)
+        self.fig.canvas.mpl_connect('key_press_event', self._tasto)
+
+    def _titolo(self, riga):
+        self.ax.set_title(f"{self.titolo}\n{riga}", fontsize=10)
+
+    def _strumento_attivo(self):
+        tb = getattr(getattr(self.fig.canvas, 'manager', None), 'toolbar', None)
+        return bool(getattr(tb, 'mode', ''))
+
+    def _clic(self, ev):
+        if ev.inaxes is not self.ax or ev.button != 1 or ev.xdata is None or self._strumento_attivo():
+            return
+        xm, ym = float(ev.ydata), float(ev.xdata)          # (y, x) in figura
+        self.goal = self.mappa.frame.a_vision(xm, ym)
+        self.piano = self.mappa.pianifica(self.da_xy, self.goal)
+        for art in self._artisti:
+            art.remove()
+        self._artisti = self.mappa.disegna_piano(self.ax, self.piano, self.da_xy, self.goal,
+                                                 etichetta_da=self.etichetta_da)
+        testo = descrivi_piano(self.piano, self.da_xy, self.goal)
+        print(f"{LOG_TAG} Clic in ({xm:.2f}, {ym:.2f}) nel frame della missione: {testo}.")
+        self._titolo(f"obiettivo ({xm:.2f}, {ym:.2f}): {testo}\n"
+                     + ("Invio: conferma | clic: un altro punto | Esc: esci" if self.piano is not None
+                        else "clic: un altro punto | Esc: esci"))
+        self.ax.legend(loc='upper right', fontsize=8)
+        self.fig.canvas.draw_idle()
+
+    def _tasto(self, ev):
+        if ev.key == 'enter' and self.goal is not None and self.piano is not None:
+            self.confermato = True
+            self.plt.close(self.fig)
+        elif ev.key in ('escape', 'q'):
+            self.confermato = False
+            self.plt.close(self.fig)
+
+    def scegli(self):
+        """Apre la finestra e aspetta. (obiettivo VISION, descrizione) o None."""
+        self.plt.show()
+        if not self.confermato:
+            return None
+        xm, ym = self.mappa.frame.da_vision(*self.goal)
+        return self.goal, f"({xm:.2f}, {ym:.2f}) nel frame della missione, scelto con un clic"
+
+    def salva(self, png):
+        self.fig.savefig(png, dpi=130)
+
+
+def _finestra_disponibile():
+    """Serve un backend con finestre: su Linux senza DISPLAY matplotlib non ne apre."""
+    import matplotlib
+    if sys.platform.startswith('linux') and not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')):
+        print(f"{LOG_TAG} --clic apre una finestra, ma qui non c'e' uno schermo (DISPLAY vuoto).")
+        return False
+    if matplotlib.get_backend().lower() in ('agg', 'pdf', 'svg', 'ps', 'cairo', 'template'):
+        print(f"{LOG_TAG} --clic apre una finestra, ma matplotlib usa il backend "
+              f"'{matplotlib.get_backend()}', senza finestre.")
+        return False
+    return True
 
 
 # =========================================================================================
@@ -868,6 +995,9 @@ def _parse_args(argv=None):
     g.add_argument('--waypoint', metavar='wp_N', help="un waypoint del grafo GraphNav")
     g.add_argument('--interattivo', action='store_true',
                    help="sul robot: chiede un obiettivo dopo l'altro (X,Y | c R,C | wp_N | q)")
+    g.add_argument('--clic', action='store_true',
+                   help="obiettivo scelto con un clic sulla mappa (Invio conferma, Esc esce); sul "
+                        "robot uno dopo l'altro, con --anteprima solo il piano")
     p.add_argument('--anteprima', metavar='PNG',
                    help="SENZA ROBOT: pianifica e salva la figura del piano, poi esce")
     p.add_argument('--da', type=_coppia, metavar='X,Y',
@@ -894,8 +1024,16 @@ def _obiettivo_da_testo(mappa, s):
 def anteprima(args):
     """Senza robot: piano dalla partenza (o da --da) all'obiettivo, e figura."""
     mappa = MappaMissione.carica(args.missione, con_scansioni=args.con_scansioni)
-    goal, descr = mappa.obiettivo_vision(args.verso, args.cella, args.waypoint)
     da = mappa.frame.a_vision(*(args.da or (0.0, 0.0)))
+    if args.clic:
+        scelta = SceltaConClic(mappa, da, titolo=f"Missione {mappa.name} (senza robot)")
+        if scelta.scegli() is None:
+            print(f"{LOG_TAG} Nessun obiettivo confermato.")
+            return False
+        goal = scelta.goal
+        descr = "il punto scelto con un clic"
+    else:
+        goal, descr = mappa.obiettivo_vision(args.verso, args.cella, args.waypoint)
     piano = mappa.pianifica(da, goal)
     if piano is None:
         print(f"{LOG_TAG} Nessun percorso verso {descr}.")
@@ -916,7 +1054,7 @@ def sul_robot(args):
 
     mappa = MappaMissione.carica(args.missione, con_scansioni=args.con_scansioni)
     goals = []
-    if not args.interattivo:
+    if not (args.interattivo or args.clic):
         goals.append(mappa.obiettivo_vision(args.verso, args.cella, args.waypoint))
 
     log_folder = os.path.join(HERE, 'MissionLogs', f"Naviga_{datetime.now().strftime('%d-%m-%Y_%H-%M-%S')}")
@@ -944,7 +1082,14 @@ def sul_robot(args):
             try:
                 esito = True
                 while True:
-                    if args.interattivo:
+                    if args.clic:
+                        _new, qui = nav.posa_robot()
+                        r = SceltaConClic(mappa, qui, titolo=f"Missione {mappa.name}: dove vado?",
+                                          etichetta_da='robot adesso').scegli()
+                        if r is None:
+                            break
+                        goals = [r]
+                    elif args.interattivo:
                         try:
                             s = input("\nObiettivo (X,Y avanti/sinistra | c R,C | wp_N | q per finire): ")
                         except EOFError:
@@ -962,7 +1107,7 @@ def sul_robot(args):
                     esito = nav.vai(goal, descr, ripiego_graphnav=not args.senza_ripiego)
                     if not esito:
                         print(f"{LOG_TAG} Obiettivo {descr} NON raggiunto.")
-                    if not args.interattivo:
+                    if not (args.interattivo or args.clic):
                         break
                 return esito
             finally:
@@ -983,13 +1128,15 @@ def sul_robot(args):
 
 def main(argv=None):
     args = _parse_args(argv)
+    if args.clic and not _finestra_disponibile():
+        return False
     if args.anteprima:
-        if not (args.verso or args.cella or args.waypoint):
-            print("Con --anteprima serve un obiettivo: --verso, --cella o --waypoint.")
+        if not (args.verso or args.cella or args.waypoint or args.clic):
+            print("Con --anteprima serve un obiettivo: --verso, --cella, --waypoint o --clic.")
             return False
         return anteprima(args)
-    if not (args.verso or args.cella or args.waypoint or args.interattivo):
-        print("Serve un obiettivo (--verso, --cella, --waypoint) oppure --interattivo.")
+    if not (args.verso or args.cella or args.waypoint or args.interattivo or args.clic):
+        print("Serve un obiettivo (--verso, --cella, --waypoint) oppure --interattivo o --clic.")
         return False
     return sul_robot(args)
 
