@@ -104,6 +104,8 @@ Si arriva qui quando la frontiera è vuota, oppure prima se la batteria scende s
 | `prova_fiducial.py` | Quali fiducial vede Spot adesso e quale sceglierebbe la missione (sola lettura, robot fermo) |
 | `prova_andatura.py` | Prova d'andatura su tracciato rettilineo con configurazione fissa: una riga per passaggio in `ProveAndatura/prove.csv` (vedi PROVA_CAMPO.md, "Taratura") |
 | `taratura.py` | Pesi del costo del PRM e soglie dell'andatura misurati sui `segments.csv` delle missioni e sulle prove su tracciato (solo lettura) |
+| `naviga_mappa.py` | «Vai lì» su una zona già esplorata: mappa, PRM e grafo GraphNav di una missione finita (vedi *Navigare su una mappa già fatta*) |
+| `test_naviga.py` | Prova senza robot di `naviga_mappa.py`, col robot finto di `test_e2e_loop.py` |
 
 ---
 
@@ -170,6 +172,18 @@ python3 test_replay.py --tutte --grafo casuale --distribuzione halton --seme 7  
 - **`preflight.py`**: controlla che i moduli siano coerenti fra loro.
 
 Ogni modifica si verifica con `test_replay.py --tutte`, `test_e2e_loop.py`, `test_missione.py` e `preflight.py` prima di andare sul robot.
+
+---
+
+## Navigare su una mappa già fatta
+
+`naviga_mappa.py` porta il robot in un punto di una zona esplorata da una missione finita, senza rifare l'esplorazione (prima bozza, mai provata sul robot: vedi `TODO.md`, idee, punto 3).
+```bash
+python3 naviga_mappa.py 26-10-2026_15-11-21 --verso 6,2 --anteprima piano.png   # senza robot: solo il piano, in figura
+python3 naviga_mappa.py 26-10-2026_15-11-21 --verso 6,2                          # sul robot
+python3 naviga_mappa.py 26-10-2026_15-11-21 --interattivo                        # un obiettivo dopo l'altro
+```
+Obiettivo: `--verso X,Y` (metri, X avanti e Y a sinistra della partenza della missione), `--cella R,C` (centro della cella) o `--waypoint wp_N`. Il robot va messo alla partenza della missione con il tag di partenza in vista (o, senza tag, esattamente sulla posa di partenza: `--localizzazione wp_0`). Pianifica sul PRM della missione con le mappe globali finali, segue il percorso con il fronte sicuro e la trasformazione fra il frame della missione e quello di oggi data da GraphNav; se il PRM non ce la fa, ripiega su GraphNav. Log in `MissionLogs/Naviga_<data>/`.
 
 ---
 
