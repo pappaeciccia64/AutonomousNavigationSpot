@@ -12,7 +12,10 @@ Scenari:
   1  muro con un varco: il percorso lo aggira e il robot arriva;
   2  un ostacolo che a fine missione non c'era: il fronte lo vede, l'arco si scarta, nuovo
      piano, il robot arriva lo stesso;
-  3  obiettivo dentro un ostacolo: il robot si ferma sul nodo raggiungibile piu' vicino.
+  3  obiettivo dentro un ostacolo: il robot si ferma sul nodo raggiungibile piu' vicino;
+  4  scelta dell'obiettivo con un clic (SceltaConClic), con eventi finti al posto del mouse:
+     punto giusto, percorso subito, conferma con Invio, clic ignorati fuori dalla mappa e
+     senza conferma nessun obiettivo.
 
     python3 test_naviga.py
 """
@@ -175,7 +178,36 @@ def main():
     check(r['ok'], "arrivato al nodo raggiungibile piu' vicino")
     check(1.0 < r['d_goal'] < 2.0, f"fermo fuori dall'ostacolo, a {r['d_goal']:.2f} m dal centro")
 
-    # 4. Le trasformazioni: andata e ritorno.
+    # 4. Scelta con un clic: eventi finti, figura senza finestra (backend Agg).
+    print("\n=== 4 obiettivo con un clic ===")
+    mappa = mappa_dal_mondo(T.World(muro, ghosts=False), (1.5, 1.5), 0.0)
+    da = _vecchio_da_nuovo(1.5, 1.5)
+    with contextlib.redirect_stdout(io.StringIO()):
+        sc = nm.SceltaConClic(mappa, da)
+        # Obiettivo (9, 2) di oggi = (7.5, 0.5) nel frame della missione (partenza in (1.5, 1.5),
+        # muso lungo +x); in figura il punto (xm, ym) sta in (ym, xm).
+        sc._clic(NS(inaxes=sc.ax, button=1, xdata=0.5, ydata=7.5))
+    gx, gy = _nuovo_da_vecchio(*sc.goal)
+    check(np.hypot(gx - 9.0, gy - 2.0) < 1e-6, f"clic in (7.5, 0.5) del frame della missione -> "
+                                               f"({gx:.2f}, {gy:.2f}) di oggi")
+    check(sc.piano is not None and sc.piano['lunghezza'] > 9.0,
+          f"percorso pianificato subito, attorno al muro ({sc.piano['lunghezza']:.1f} m)")
+    with contextlib.redirect_stdout(io.StringIO()):
+        sc._clic(NS(inaxes=None, button=1, xdata=None, ydata=None))           # fuori dagli assi
+        sc._clic(NS(inaxes=sc.ax, button=3, xdata=3.0, ydata=3.0))            # tasto destro
+    check(np.hypot(*np.subtract(_nuovo_da_vecchio(*sc.goal), (9.0, 2.0))) < 1e-6,
+          "clic fuori dalla mappa e col tasto destro ignorati")
+    check(len(sc._artisti) == 3, "un solo percorso disegnato (il vecchio tolto)")
+    sc._tasto(NS(key='enter'))
+    r = sc.scegli()
+    check(r is not None and r[0] == sc.goal, "Invio: obiettivo confermato")
+    with contextlib.redirect_stdout(io.StringIO()):
+        sc2 = nm.SceltaConClic(mappa, da)
+        sc2._clic(NS(inaxes=sc2.ax, button=1, xdata=2.0, ydata=2.0))
+    sc2._tasto(NS(key='escape'))
+    check(sc2.scegli() is None, "Esc: nessun obiettivo")
+
+    # 5. Le trasformazioni: andata e ritorno.
     t = nm.Trasformazione2D.da_pose((3.0, 4.0, 1.0), (1.0, -2.0, 0.3))
     x, y = t.inversa(*t.applica(5.0, 6.0))
     check(np.hypot(x - 5.0, y - 6.0) < 1e-9 and np.hypot(*np.subtract(t.applica(1.0, -2.0), (3.0, 4.0))) < 1e-9,

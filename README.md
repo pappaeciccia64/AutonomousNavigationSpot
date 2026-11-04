@@ -195,9 +195,11 @@ Ogni modifica si verifica con `test_replay.py --tutte`, `test_e2e_loop.py`, `tes
 ```bash
 python3 naviga_mappa.py 26-10-2026_15-11-21 --verso 6,2 --anteprima piano.png   # senza robot: solo il piano, in figura
 python3 naviga_mappa.py 26-10-2026_15-11-21 --verso 6,2                          # sul robot
-python3 naviga_mappa.py 26-10-2026_15-11-21 --interattivo                        # un obiettivo dopo l'altro
+python3 naviga_mappa.py 26-10-2026_15-11-21 --interattivo                        # un obiettivo dopo l'altro, da terminale
+python3 naviga_mappa.py 26-10-2026_15-11-21 --clic                               # un obiettivo dopo l'altro, con un clic sulla mappa
+python3 naviga_mappa.py 26-10-2026_15-11-21 --clic --anteprima piano.png         # clic senza robot: solo il piano
 ```
-Obiettivo: `--verso X,Y` (metri, X avanti e Y a sinistra della partenza della missione), `--cella R,C` (centro della cella) o `--waypoint wp_N`. Il robot va messo alla partenza della missione con il tag di partenza in vista (o, senza tag, esattamente sulla posa di partenza: `--localizzazione wp_0`). Pianifica sul PRM della missione con le mappe globali finali, segue il percorso con il fronte sicuro e la trasformazione fra il frame della missione e quello di oggi data da GraphNav; se il PRM non ce la fa, ripiega su GraphNav. Log in `MissionLogs/Naviga_<data>/`.
+Obiettivo: `--verso X,Y` (metri, X avanti e Y a sinistra della partenza della missione), `--cella R,C` (centro della cella), `--waypoint wp_N`, oppure `--clic`: si apre la mappa con il robot, un clic sinistro mette l'obiettivo e disegna subito il percorso (un altro clic lo sposta), Invio conferma e il robot parte, Esc o la finestra chiusa finiscono; zoom e spostamento con la barra della finestra. Serve uno schermo e un backend di matplotlib con finestre (come per `visualizzatore_live.py`). Il robot va messo alla partenza della missione con il tag di partenza in vista (o, senza tag, esattamente sulla posa di partenza: `--localizzazione wp_0`). Pianifica sul PRM della missione con le mappe globali finali, segue il percorso con il fronte sicuro e la trasformazione fra il frame della missione e quello di oggi data da GraphNav; se il PRM non ce la fa, ripiega su GraphNav. Log in `MissionLogs/Naviga_<data>/`.
 
 ---
 
