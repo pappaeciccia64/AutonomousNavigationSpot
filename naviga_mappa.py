@@ -204,13 +204,17 @@ def configurazione_missione(name):
         raise ValueError("origine o orientamento della missione non trovati nel log")
     g = re.search(r'Griglia di missione: (\d+) x (\d+) celle da ([\d.]+) m', log)
     rows, cols, cell = (int(g.group(1)), int(g.group(2)), float(g.group(3))) if g else (2, 4, 5.0)
+    # Cella di partenza (env.set_origin); dal 04-11 si sceglie, prima era sempre (0, 0).
+    sc = re.search(r'(?:Starting cell|Cella di partenza) \((\d+), (\d+)\)', log)
     s = re.search(r'Reticolo: passo richiesto ([\d.]+) m', log)
     gr = re.search(r'\[CONFIG\] Grafo: nodi (\w+).*; archi da ([\d.]+) a ([\d.]+) m', log)
     rnd = re.search(r"\[GRAFO\] Nodi casuali: distribuzione (\w+), densita' ([\d.]+) nodi/m2, "
                     r"seme (\d+)", log)
     return dict(
         name=name, origin=(float(m.group(1)), float(m.group(2))), yaw=np.radians(float(a.group(1))),
-        rows=rows, cols=cols, cell=cell, spacing=float(s.group(1)) if s else 0.25,
+        rows=rows, cols=cols, cell=cell,
+        start_cell=(int(sc.group(1)), int(sc.group(2))) if sc else (0, 0),
+        spacing=float(s.group(1)) if s else 0.25,
         sampling=gr.group(1) if gr else 'reticolo',
         min_edge=float(gr.group(2)) if gr else 0.5, max_edge=float(gr.group(3)) if gr else 1.25,
         distribution=rnd.group(1) if rnd else None,
@@ -442,7 +446,8 @@ class MappaMissione:
         cfg = self.cfg
         with _quiet():
             self.env = environmentMap.EnvironmentMap(rows=cfg['rows'], cols=cfg['cols'], cell_size=cfg['cell'])
-            self.env.set_origin(cfg['origin'][0], cfg['origin'][1], cfg['yaw'])
+            self.env.set_origin(cfg['origin'][0], cfg['origin'][1], cfg['yaw'],
+                                *cfg.get('start_cell', (0, 0)))
             _imposta_grafo_della_missione(cfg)
             self.prm, _sampler, self.mg = mission_graph.build_mission_prm(self.env, verbose=False)
             self.prm.set_global_terrain_map(self.tm)
