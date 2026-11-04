@@ -3235,16 +3235,7 @@ def easy_walk(options):
     """La missione intera: avvio del robot e di GraphNav, grafo, esplorazione cella per cella
     (Missione), scansione finale, riepilogo, ritorno alla partenza e spegnimento."""
     robot, lease_client, robot_state_client, client_metadata = spotLogInUtils.setLogInfo(options)
-    if options.estop == 'esterno':
-        # L'E-Stop lo tiene qualcun altro (tablet o PC con l'esempio estop dell'SDK): la
-        # missione non registra il suo, cosi' chi sorveglia puo' sempre fermare il robot.
-        # Serve quando la missione gira a bordo (CORE I/O): un E-Stop tenuto vivo dal robot
-        # stesso non scatta mai se si perde il collegamento con l'operatore.
-        estop = None
-        print("[ESTOP] E-Stop esterno: la missione non ne registra uno suo "
-              "(deve essere gia' configurato e rilasciato dal tablet o dal PC)")
-    else:
-        estop = spotLogInUtils.SimpleEstop(robot, options.name + "_estop")
+    estop = spotLogInUtils.SimpleEstop(robot, options.name + "_estop")
 
     local_grid = spotGrid.LocalGrid(robot)
     MISSION_CTX['local_grid'] = local_grid
@@ -3360,8 +3351,7 @@ def easy_walk(options):
             _emit_mission_summary_once()
 
             _chiudi_missione(robot, robot_state_client, command_client, recordingInterface)
-            if estop is not None:
-                estop.stop()
+            estop.stop()
         except BaseException as exc:
             _chiusura_di_emergenza(robot, command_client, recordingInterface, exc)
             raise
@@ -3405,12 +3395,6 @@ def _parse_args(argv=None):
                    help=f"lunghezza minima degli archi in m (default {P.PRM_MIN_EDGE_M:g})")
     p.add_argument('--max-edge', type=float, default=None,
                    help=f"lunghezza massima degli archi in m (default {P.PRM_MAX_EDGE_M:g})")
-    p.add_argument('--robot', default=os.environ.get('SPOT_ROBOT_IP', '192.168.80.3'),
-                   help="indirizzo del robot (default SPOT_ROBOT_IP o 192.168.80.3, il Wi-Fi di "
-                        "Spot; dalla CORE I/O a bordo e' 192.168.50.3)")
-    p.add_argument('--estop', choices=('interno', 'esterno'), default='interno',
-                   help="interno: la missione registra e tiene il suo E-Stop software (come "
-                        "sempre); esterno: lo tiene il tablet o il PC (da usare a bordo)")
     a = p.parse_args(argv)
     if a.rows is not None and a.rows < 1 or a.cols is not None and a.cols < 1:
         p.error("--rows e --cols devono essere almeno 1")
@@ -3450,8 +3434,7 @@ def main():
     options.grid_cols = args.cols
     options.grid_cell = args.cell
     options.name = "easyWalk"
-    options.hostname = args.robot
-    options.estop = args.estop
+    options.hostname = "192.168.80.3"
     options.verbose = False
     options.recording_user_name = ""
     options.recording_session_name = ""

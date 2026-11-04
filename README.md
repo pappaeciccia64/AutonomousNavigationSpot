@@ -51,20 +51,6 @@ python3 mission_graph.py --confronta-metodi metodi.png --seme 7 --zoom -2 2 -2 2
 python3 mission_graph.py --grafo casuale --distribuzione halton --seme 7 --preview halton.png --zoom -2 2 -2 2   # uno solo
 ```
 
-### Missione a bordo (CORE I/O, la Jetson del payload lidar)
-Tutti i calcoli girano sul robot; il PC serve solo per avviare e, dopo, scaricare i log. Lo script `a_bordo.sh` fa tutto via SSH (Spot inoltra la porta 20022 alla CORE I/O):
-```bash
-./a_bordo.sh installa                                  # una volta: requisiti Python sulla CORE I/O
-export BOSDYN_CLIENT_USERNAME=... BOSDYN_CLIENT_PASSWORD=...   # utente del ROBOT
-./a_bordo.sh avvia --rows 2 --cols 3 --cell 4          # copia, preflight, avvio in tmux
-./a_bordo.sh log                                       # segue il log (si puo' chiudere quando si vuole)
-./a_bordo.sh scarica                                   # a fine missione: MissionLogs/, MissionMap/, graph/ sul PC
-```
-- Dalla CORE I/O il robot è `192.168.50.3`, non `192.168.80.3`: lo script lo passa con `SPOT_ROBOT_IP` (oppure `easy_walk.py --robot 192.168.50.3`).
-- La missione gira in una sessione `tmux` sulla CORE I/O: chiudere il terminale o perdere il Wi-Fi non la ferma. `./a_bordo.sh guarda` riapre il terminale della missione.
-- A bordo la missione parte con `--estop esterno`: non registra il suo E-Stop software (tenuto vivo dal robot stesso non scatterebbe mai se si perde il collegamento), quindi l'E-Stop va configurato e rilasciato prima **dal tablet o da un PC**, che resta l'unico modo di fermare il robot.
-- Utente della CORE I/O: `spot`, con la password scelta al primo accesso al portale (`https://192.168.80.3:21443`). Servono `tmux`, `rsync` e `pip` sulla CORE I/O.
-
 ---
 
 ## Come funziona una missione
