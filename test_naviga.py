@@ -10,9 +10,13 @@ fronte sicuro, decisioni, scarto degli archi e nuova pianificazione) e' il codic
 
 Scenari:
   1  muro con un varco: il percorso lo aggira e il robot arriva;
-  2  un ostacolo che a fine missione non c'era: il fronte lo vede, l'arco si scarta, nuovo
-     piano, il robot arriva lo stesso;
+  2  un ostacolo che a fine missione non c'era: entra nella mappa, il percorso cambia per
+     strada e il robot arriva lo stesso (2b: con le mappe fisse, scartando gli archi);
   3  obiettivo dentro un ostacolo: il robot si ferma sul nodo raggiungibile piu' vicino;
+  5  un ostacolo della mappa che oggi non c'e' piu': con le mappe aggiornate la cella torna
+     libera e il robot va dritto, senza (--senza-aggiornare) fa il giro;
+  6  le mappe aggiornate: quota di oggi riportata a quella della missione, l'ostacolo nuovo
+     dello scenario 2 occupato nella mappa, salvataggio e ricarica da --mappe;
   4  scelta dell'obiettivo con un clic (SceltaConClic), con eventi finti al posto del mouse:
      punto giusto, percorso subito, conferma con Invio, clic ignorati fuori dalla mappa e
      senza conferma nessun obiettivo.
@@ -122,7 +126,7 @@ def _snapshot():
                                  T.ROBOT.x, T.ROBOT.y, robot_yaw=T.ROBOT.yaw)
 
 
-def navigatore(mappa):
+def navigatore(mappa, aggiorna=True):
     nav = object.__new__(nm.NavigatoreRobot)     # senza robot: niente RecordingInterface
     nav.mappa, nav.robot, nav.rsc, nav.cc = mappa, None, None, None
     nav.ri = NS(waypoint_poses={})
@@ -130,16 +134,18 @@ def navigatore(mappa):
     nav.T = None
     nav.tracker = T.FakeTracker()
     nav.tracker._fresh_snapshot = _snapshot
+    nav.local_grid = T.FakeLocalGrid()
+    nav._init_mappe(aggiorna=aggiorna)
     return nav
 
 
-def run(name, rects_mappa, rects_oggi, start, goal_new):
+def run(name, rects_mappa, rects_oggi, start, goal_new, aggiorna=True):
     print(f"\n=== {name} ===")
     av.OBSTACLE_HISTORY.reset()
     mappa = mappa_dal_mondo(T.World(rects_mappa, ghosts=False), start[:2], start[2])
     T.WORLD = T.World(rects_oggi, ghosts=False)
     T.ROBOT = T.Robot(*start)
-    nav = navigatore(mappa)
+    nav = navigatore(mappa, aggiorna)
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
         ok_loc = nav.aggiorna_trasformazione("prova") is not None
@@ -152,7 +158,7 @@ def run(name, rects_mappa, rects_oggi, start, goal_new):
     check(ok_loc and dm < 0.01 and dg < 0.1,
           f"frame stimato {nav.T} contro il vero {T_VERA} (scarto {dm:.3f} m, {dg:.2f} gradi)")
     d_goal = float(np.hypot(T.ROBOT.x - goal_new[0], T.ROBOT.y - goal_new[1]))
-    return dict(ok=ok, d_goal=d_goal, min_clear=T.ROBOT.min_clear, walked=T.ROBOT.walked,
+    return dict(ok=ok, d_goal=d_goal, min_clear=T.ROBOT.min_clear, walked=T.ROBOT.walked, nav=nav,
                 log=log, piani=log.count('] Piano '), scartati=log.count('scarto') + log.count('scartato'))
 
 
@@ -169,8 +175,42 @@ def main():
     nuovo = muro + [(5.4, 7.0, 8.3, 8.7)]
     r = run("2 ostacolo nuovo", muro, nuovo, (1.5, 1.5, 0.0), (9.0, 2.0))
     check(r['ok'], f"arrivato lo stesso ({r['piani']} piani)")
-    check(r['piani'] >= 2, "almeno una nuova pianificazione dopo l'ostacolo nuovo")
+    check(r['piani'] >= 2 or 'nuovo percorso' in r['log'],
+          f"strada cambiata dopo l'ostacolo nuovo ({r['piani']} piani, "
+          f"{r['log'].count('nuovo percorso')} cambi di percorso per strada)")
     check(r['min_clear'] > 0.2, f"distanza minima dagli ostacoli {r['min_clear']:.2f} m")
+
+    r0 = run("2b ostacolo nuovo, mappe fisse", muro, nuovo, (1.5, 1.5, 0.0), (9.0, 2.0), aggiorna=False)
+    check(r0['ok'], f"arrivato anche con le mappe fisse ({r0['piani']} piani)")
+    gm = r['nav'].mappa.gm
+    ox, oy = _vecchio_da_nuovo(6.2, 8.5)                       # dentro l'ostacolo nuovo
+    check(gm.is_occupied(ox, oy), "6: l'ostacolo nuovo e' occupato nella mappa aggiornata")
+    check(r['nav'].dz is not None and abs(r['nav'].dz - 3.23) < 0.02,
+          f"6: scarto di quota stimato {r['nav'].dz:+.3f} m (vero +3.23: quote finte di oggi a -3.23)")
+    check(r['nav'].n_scansioni_in_mappa > 10,
+          f"6: {r['nav'].n_scansioni_in_mappa} scansioni nelle mappe, {r['nav'].t_mappe_s:.1f} s in tutto")
+    import os, tempfile
+    tmp = tempfile.mkdtemp(prefix="naviga_mappe_")
+    with contextlib.redirect_stdout(io.StringIO()):
+        r['nav'].salva_mappe(tmp)
+    gm2 = nm.carica_mappa_occupazione(os.path.join(tmp, 'global_occupancy_map.pkl'))
+    tm2 = nm.carica_mappa_terreno(os.path.join(tmp, 'global_terrain_map.pkl'))
+    check(gm2.is_occupied(ox, oy) and len(gm2.grid) == len(gm.grid) and len(tm2.height_count) == len(r['nav'].mappa.tm.height_count),
+          "6: mappe salvate e ricaricate uguali")
+    h = tm2.get_height(*_vecchio_da_nuovo(8.0, 1.0))
+    check(h is not None and abs(h) < 0.02, f"6: quota della mappa invariata dove il robot e' passato ({h:+.3f} m)")
+
+    # 5. Ostacolo nella mappa, oggi sparito: davanti alla partenza, sulla retta verso (9, 1.5).
+    # Tutto dentro la finestra della scansione dalla partenza (3.8 m di lato attorno al robot):
+    # una parte lontana resterebbe occupata finche' il robot non ci arriva vicino.
+    vecchio = [(2.6, 3.2, 0.5, 2.5)]
+    r = run("5 ostacolo sparito, mappe aggiornate", vecchio, [], (1.5, 1.5, 0.0), (9.0, 1.5))
+    r0 = run("5b ostacolo sparito, mappe fisse", vecchio, [], (1.5, 1.5, 0.0), (9.0, 1.5), aggiorna=False)
+    check(r['ok'] and r0['ok'], "arrivato in tutti e due i casi")
+    check(r['walked'] < 8.0, f"mappe aggiornate: {r['walked']:.1f} m percorsi (linea d'aria 7.5 m)")
+    check(r0['walked'] > r['walked'] + 0.3, f"mappe fisse: {r0['walked']:.1f} m, il giro attorno "
+                                            f"all'ostacolo che non c'e' piu'")
+    check('nuovo percorso' in r['log'], "con le mappe aggiornate il percorso cambia per strada")
 
     # 3. Obiettivo dentro un ostacolo pieno.
     blocco = [(7.0, 9.0, 3.0, 5.0)]

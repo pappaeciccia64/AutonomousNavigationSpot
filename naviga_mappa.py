@@ -24,15 +24,20 @@ COSA FA
   2. Segue il percorso con il fronte sicuro sulla scansione dal vivo (arcVerification), come
      il ciclo di missione: arresto a meta' movimento, attesa, blocco confermato -> arco
      scartato e nuova pianificazione.
-  3. Se il PRM non ce la fa (blocchi ripetuti, nessun percorso), ripiego: GraphNav fino al
+  3. Ogni scansione di oggi entra nelle mappe globali (nel frame della missione, vedi
+     NavigatoreRobot.aggiorna_mappe), e gli archi del PRM si rivalutano dove sono arrivati
+     dati nuovi: un ostacolo comparso toglie archi, uno sparito li restituisce. Se il
+     percorso si rompe, o ce n'e' uno piu' corto di almeno il 10%, si cambia subito.
+     Le mappe aggiornate si salvano nella cartella del log, e con --mappe si riparte da li'.
+  4. Se il PRM non ce la fa (blocchi ripetuti, nessun percorso), ripiego: GraphNav fino al
      waypoint piu' vicino all'obiettivo, poi ultimo tentativo col PRM da li'.
 
 COSA NON FA (ancora)
   - niente cono, arretramento, trappole, ritorni sulle briciole: un tratto che richiede una
     rotazione impossibile si scarta e si ripianifica;
-  - le mappe NON si aggiornano con le scansioni di oggi: il fronte vede gli ostacoli nuovi
-    e prima di ogni piano si scartano gli archi che la scansione di adesso vede bloccati
-    (scarta_archi_dal_vivo), ma fuori dalla finestra della scansione decide la mappa vecchia;
+  - con AGGIORNA_MAPPE = False (--senza-aggiornare) le mappe restano quelle della missione:
+    si scartano soltanto, per sempre, gli archi che la scansione di adesso vede bloccati
+    (scarta_archi_dal_vivo), come nella prima versione;
   - la deriva DENTRO la mappa globale della missione (TODO, lavori principali punto 3) resta:
     un ostacolo visto a fine missione puo' essere spostato di decine di cm rispetto a GraphNav.
 
@@ -78,6 +83,16 @@ LOG_TAG = "[NAVIGA]"
 # Piani al massimo per un obiettivo, prima del ripiego su GraphNav. Un piano nuovo si fa dopo
 # un blocco confermato da fermo e quando la scansione vede bloccato un arco del percorso.
 MAX_PIANI = 10
+# Le scansioni di oggi entrano nelle mappe globali e il PRM si rivaluta dove cambiano (vedi
+# NavigatoreRobot.aggiorna_mappe). False = mappe della missione fisse, solo lo scarto
+# permanente degli archi visti bloccati (scarta_archi_dal_vivo).
+AGGIORNA_MAPPE = True
+# Ripianificazione durante il percorso: si cambia strada se la nuova costa almeno questa
+# frazione in meno (come in missione, vedi PRM.find_path_dijkstra).
+MARGINE_NUOVO_PERCORSO = 0.10
+# Quante celle in comune con la mappa del terreno servono per stimare lo scarto di quota
+# fra il frame di oggi e quello della missione (mediana delle differenze).
+MIN_CELLE_QUOTA = 200
 
 
 def _quiet():
@@ -119,6 +134,18 @@ class Trasformazione2D:
         c, s = np.cos(self.th), np.sin(self.th)
         dx, dy = x - self.tx, y - self.ty
         return float(c * dx + s * dy), float(-s * dx + c * dy)
+
+    def applica_molti(self, x, y):
+        """applica() su array."""
+        c, s = np.cos(self.th), np.sin(self.th)
+        x, y = np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64)
+        return self.tx + c * x - s * y, self.ty + s * x + c * y
+
+    def inversa_molti(self, x, y):
+        """inversa() su array."""
+        c, s = np.cos(self.th), np.sin(self.th)
+        dx, dy = np.asarray(x, dtype=np.float64) - self.tx, np.asarray(y, dtype=np.float64) - self.ty
+        return c * dx + s * dy, -s * dx + c * dy
 
     def applica_yaw(self, yaw):
         return _wrap(yaw + self.th)
@@ -204,6 +231,22 @@ def carica_mappa_occupazione(path):
     for key in ('clear_near_sum', 'clear_near_n', 'clear_all_sum', 'clear_all_n'):
         setattr(gm, key, dict(d.get(key, {})))
     return gm
+
+
+def prepara_isteresi(gm):
+    """
+    Il .pkl non salva i contatori delle osservazioni (obs_count): senza, una cella occupata
+    della missione tornerebbe libera alla prima scansione di oggi che la vede libera. Si
+    rimette il contatore di un ostacolo appena confermato (GLOBAL_OCC_CONFIRM_OBS): per
+    sparire servono tante osservazioni libere quante ne servono a un ostacolo per comparire.
+    Le celle gia' con un contatore restano come sono.
+    """
+    n = 0
+    for k, v in gm.grid.items():
+        if v == -1.0 and k not in gm.obs_count:
+            gm.obs_count[k] = sg.GLOBAL_OCC_CONFIRM_OBS
+            n += 1
+    return n
 
 
 def carica_mappa_terreno(path):
@@ -316,25 +359,44 @@ def _frazione_vista(gm, x1, y1, x2, y2, step=0.05):
 MIN_FRAZIONE_VISTA = 0.9
 
 
-def limita_alla_zona_vista(prm, gm, min_frazione=MIN_FRAZIONE_VISTA):
+def _togli_arco(prm, a, b):
+    """Toglie un arco SENZA renderlo permanente (al contrario di mark_edge_invalid): la
+    prossima rivalutazione con dati nuovi puo' rimetterlo."""
+    prm.edge_validity[(min(a, b), max(a, b))] = False
+    prm.edges[a] = [(n, w) for n, w in prm.edges.get(a, []) if n != b]
+    prm.edges[b] = [(n, w) for n, w in prm.edges.get(b, []) if n != a]
+
+
+def limita_alla_zona_vista(prm, gm, min_frazione=MIN_FRAZIONE_VISTA, rect=None):
     """
     Il PRM della missione copre TUTTA l'area, e un arco su terreno mai visto non ha veti
     (nessun dato = nessun motivo per scartarlo). Qui si naviga solo sul visto: nodi su celle
-    osservate, archi osservati per almeno min_frazione della loro lunghezza. Restituisce
-    (nodi ammessi, archi tolti).
+    osservate, archi osservati per almeno min_frazione della loro lunghezza. rect (xmin,
+    xmax, ymin, ymax): solo i nodi e gli archi che lo toccano (dopo un aggiornamento della
+    mappa); None = tutto il grafo. Lo scarto non e' permanente: quando il robot vede una zona
+    nuova, i suoi archi tornano. Restituisce (nodi ammessi, archi tolti).
     """
-    allowed = [nid for nid, (x, y) in prm.nodes.items() if gm.is_known(x, y)]
-    ok = set(allowed)
+    def tocca(x1, y1, x2, y2):
+        return rect is None or (max(x1, x2) >= rect[0] and min(x1, x2) <= rect[1]
+                                and max(y1, y2) >= rect[2] and min(y1, y2) <= rect[3])
+    allowed = set(prm.allowed_nodes) if (rect is not None and prm.allowed_nodes is not None) else set()
+    for nid, (x, y) in prm.nodes.items():
+        if tocca(x, y, x, y):
+            if gm.is_known(x, y):
+                allowed.add(nid)
+            else:
+                allowed.discard(nid)
     tolti = 0
     for a in list(prm.edges):
         for b, _w in list(prm.edges.get(a, ())):
-            if a >= b:
+            if a >= b or not tocca(*prm.nodes[a], *prm.nodes[b]):
                 continue
-            if a not in ok or b not in ok or _frazione_vista(gm, *prm.nodes[a], *prm.nodes[b]) < min_frazione:
-                prm.mark_edge_invalid(a, b)
+            if (a not in allowed or b not in allowed
+                    or _frazione_vista(gm, *prm.nodes[a], *prm.nodes[b]) < min_frazione):
+                _togli_arco(prm, a, b)
                 tolti += 1
     prm.set_allowed_nodes(allowed)
-    return allowed, tolti
+    return sorted(allowed), tolti
 
 
 class MappaMissione:
@@ -344,17 +406,22 @@ class MappaMissione:
         """Dai pezzi gia' pronti (le prove li costruiscono in memoria); dai file: carica()."""
         self.name, self.cfg, self.gm, self.tm, self.ng = name, cfg, gm, tm, ng
         self.frame = FrameMissione(cfg['origin'][0], cfg['origin'][1], cfg['yaw'])
+        prepara_isteresi(gm)
         self._costruisci_prm()
 
     @classmethod
-    def carica(cls, name=None, con_scansioni=False, senza_graphnav=False):
-        """La missione dai suoi file: log, mappe .pkl (e scansioni), grafo GraphNav scaricato."""
+    def carica(cls, name=None, con_scansioni=False, senza_graphnav=False, cartella_mappe=None):
+        """La missione dai suoi file: log, mappe .pkl (e scansioni), grafo GraphNav scaricato.
+        cartella_mappe: i .pkl da un'altra cartella, per esempio quelli aggiornati da una
+        navigazione precedente (MissionLogs/Naviga_<data>/); stesso frame della missione."""
         name = name or _ultima_missione_completa()
         if name is None:
             raise FileNotFoundError("nessuna missione con mappe globali, log e grafo GraphNav")
         name = name[len('Mission_'):] if name.startswith('Mission_') else name
         cfg = configurazione_missione(name)
-        folder = os.path.join(HERE, 'MissionMap', f'Mission_{name}')
+        folder = cartella_mappe or os.path.join(HERE, 'MissionMap', f'Mission_{name}')
+        if cartella_mappe:
+            print(f"{LOG_TAG} Mappe da {cartella_mappe} (non quelle di fine missione).")
         gm = carica_mappa_occupazione(os.path.join(folder, 'global_occupancy_map.pkl'))
         tm = carica_mappa_terreno(os.path.join(folder, 'global_terrain_map.pkl'))
         n_scan = 0
@@ -646,6 +713,15 @@ class NavigatoreRobot:
         self.gn = self.ri._graph_nav_client
         self.T = None                       # Trasformazione2D vecchio -> nuovo VISION
         self.tracker = arcVerification.ArcVerificationTracker(robot)
+        self.local_grid = sg.LocalGrid(robot)
+        self._init_mappe()
+
+    def _init_mappe(self, aggiorna=None):
+        """Stato dell'aggiornamento delle mappe (anche per le prove, che non passano da __init__)."""
+        self.aggiorna = AGGIORNA_MAPPE if aggiorna is None else bool(aggiorna)
+        self.dz = None                      # quota della missione - quota di oggi (m)
+        self.n_scansioni_in_mappa = 0
+        self.t_mappe_s = 0.0
 
     # --- grafo e localizzazione ----------------------------------------------------------
     def carica_grafo(self):
@@ -752,6 +828,145 @@ class NavigatoreRobot:
         x, y, _z, q = spotUtils.getPosition(self.rsc)
         return (x, y, _yaw_of_quat(q)), self.T.inversa(x, y)
 
+    # --- scansione e mappe ---------------------------------------------------------------
+    def scansione(self):
+        """
+        Una scansione come nel ciclo di missione (TentativoCella._scansione_fresca): layer,
+        elaborazione, fotografia per il fronte; con l'aggiornamento acceso entra anche nelle
+        mappe (aggiorna_mappe). La fotografia, o None se la scansione non arriva.
+        """
+        from bosdyn.client.frame_helpers import VISION_FRAME_NAME, BODY_FRAME_NAME
+        scan = self.local_grid.fetch_scan(self.rsc)
+        if scan is None:
+            return None
+        v_T_body = sg.get_a_tform_b(scan.proto.local_grid.transforms_snapshot,
+                                    VISION_FRAME_NAME, BODY_FRAME_NAME)
+        rx, ry = v_T_body.position.x, v_T_body.position.y
+        ryaw = _yaw_of_quat(v_T_body.rotation)
+        self.local_grid.process_scan(scan, rx, ry, ryaw)
+        ox, oy = self.local_grid.grid_origin(scan)
+        snap = arcVerification.make_grid_snapshot(
+            scan.od, scan.rough, scan.is_valid, scan.valid, scan.terrain, scan.num_x, scan.num_y,
+            ox, oy, scan.cell_size, rx, ry, unwritten=scan.unwritten, robot_yaw=ryaw)
+        if self.aggiorna:
+            self.aggiorna_mappe(scan, rx, ry, ryaw)
+        return snap
+
+    def _stima_quota(self, xo, yo, h_oggi, usable):
+        """
+        Le quote di oggi sono riferite a dove il robot e' stato acceso oggi, quelle della
+        mappa a dove era acceso il giorno della missione: senza correggerle, una cella vista
+        nei due giorni avrebbe la media di due quote diverse, cioe' gradini finti nella
+        pendenza. Scarto = mediana di (quota della missione - quota di oggi) sulle celle che
+        la mappa del terreno ha gia'; con meno di MIN_CELLE_QUOTA celle in comune resta lo
+        scarto di prima (None se non ce n'e' ancora uno).
+        """
+        h_old = self.mappa.tm._sample_heights(xo[usable], yo[usable])
+        d = h_old - np.asarray(h_oggi, dtype=np.float64)[usable]
+        d = d[np.isfinite(d)]
+        if d.size < MIN_CELLE_QUOTA:
+            return self.dz
+        dz = float(np.median(d))
+        if self.dz is None:
+            print(f"{LOG_TAG} Quota: la mappa della missione sta {dz:+.3f} m rispetto alle quote di oggi "
+                  f"(mediana su {d.size} celle in comune, dispersione "
+                  f"{float(np.percentile(np.abs(d - dz), 90)):.3f} m al 90%).")
+        elif abs(dz - self.dz) > 0.05:
+            print(f"{LOG_TAG} Quota: scarto cambiato da {self.dz:+.3f} a {dz:+.3f} m.")
+        return dz
+
+    def aggiorna_mappe(self, scan, rx, ry, ryaw):
+        """
+        La scansione di oggi nelle mappe globali della missione, con la funzione stessa della
+        missione (spotGrid.fold_scan_into_global_maps): punti e posa del robot portati nel
+        frame della missione con la trasformazione di adesso, quote corrette dello scarto
+        stimato (_stima_quota). Poi il PRM si rivaluta solo dove sono arrivati dati nuovi
+        (rebuild_prm_edges incrementale, come a inizio tentativo in missione) e si rifa' il
+        filtro sul visto in quella zona. Le celle occupate della missione tornano libere solo
+        dopo GLOBAL_OCC_CONFIRM_OBS osservazioni libere (prepara_isteresi), e quelle nuove
+        compaiono con le stesse regole della missione.
+        Restituisce il rettangolo aggiornato (frame della missione) o None.
+        """
+        t0 = time.perf_counter()
+        m = self.mappa
+        sc = self._ricampiona(scan)
+        if sc is None:
+            return None
+        xo, yo, terrain, omask, valid, od, shape = sc
+        usable = sg.slope_usable_mask(valid, od, shape).ravel()
+        self.dz = self._stima_quota(xo, yo, terrain, usable)
+        pose_old = (*self.T.inversa(rx, ry), _wrap(ryaw - self.T.th))
+        pts_old = np.column_stack([xo, yo, terrain + (self.dz or 0.0)])
+        if self.dz is None:
+            # Nessuno scarto di quota stimabile: si aggiorna solo l'occupazione, il terreno no.
+            gm_mask, core = sg.mask_for_global_map(omask, valid, pts_old, pose_old, return_core=True)
+            m.gm.update(pts_old, gm_mask, walked=core)
+        else:
+            sg.fold_scan_into_global_maps(m.gm, m.tm, pts_old, terrain + self.dz, omask, valid, od,
+                                          shape, pose_old)
+        rect = (float(xo.min()), float(xo.max()), float(yo.min()), float(yo.max()))
+        prm = m.prm
+        prm.dirty_rects = list(getattr(prm, 'dirty_rects', [])) + [rect]
+        robot_node = prm.robot_node
+        with _quiet():
+            mission_graph.rebuild_prm_edges(prm, m.gm, incremental=True)
+        if robot_node is not None:
+            prm.set_robot_node(robot_node, 0.0)
+        # Archi rivalutati in zona senza dati tornano senza veti: di nuovo fuori se non visti.
+        # Il rettangolo si allarga della lunghezza massima di un arco: un arco rivalutato puo'
+        # uscire dalla finestra.
+        e = m.prm.max_edge_length + 0.5
+        limita_alla_zona_vista(prm, m.gm, rect=(rect[0] - e, rect[1] + e, rect[2] - e, rect[3] + e))
+        self.n_scansioni_in_mappa += 1
+        self.t_mappe_s += time.perf_counter() - t0
+        return rect
+
+    def _ricampiona(self, scan):
+        """
+        La scansione sulla griglia della MAPPA (frame della missione, stessa risoluzione).
+        Le due griglie sono ruotate l'una rispetto all'altra dell'angolo fra i frame: portando
+        i punti della scansione uno per uno, alcune celle della mappa non verrebbero mai
+        colpite (e un ostacolo sparito vi resterebbe per sempre, a celle isolate). Qui invece
+        ogni cella della mappa dentro la finestra legge la cella della scansione che le sta
+        sotto (il vicino). Restituisce (x, y, quota di oggi, maschera ostacoli, attendibile,
+        obstacle_distance, forma), appiattiti, o None se la finestra e' vuota.
+        """
+        r = self.mappa.gm.resolution
+        ny, nx, cs = scan.num_y, scan.num_x, scan.cell_size
+        ox, oy = self.local_grid.grid_origin(scan)
+        cx = np.array([ox, ox + nx * cs, ox, ox + nx * cs])
+        cy = np.array([oy, oy, oy + ny * cs, oy + ny * cs])
+        bx, by = self.T.inversa_molti(cx, cy)
+        gx = np.arange(int(np.floor(bx.min() / r)), int(np.ceil(bx.max() / r)))
+        gy = np.arange(int(np.floor(by.min() / r)), int(np.ceil(by.max() / r)))
+        if not gx.size or not gy.size:
+            return None
+        GY, GX = np.meshgrid(gy, gx, indexing='ij')
+        xo, yo = ((GX + 0.5) * r).ravel(), ((GY + 0.5) * r).ravel()
+        xn, yn = self.T.applica_molti(xo, yo)
+        col = np.floor((xn - ox) / cs).astype(np.int64)
+        row = np.floor((yn - oy) / cs).astype(np.int64)
+        inside = (row >= 0) & (row < ny) & (col >= 0) & (col < nx)
+        k = (np.clip(row, 0, ny - 1) * nx + np.clip(col, 0, nx - 1))
+        terrain = np.where(inside, np.asarray(scan.terrain, dtype=np.float64).ravel()[k], np.nan)
+        omask = np.where(inside, np.asarray(scan.obstacle_mask, dtype=np.float64).ravel()[k], 0.0)
+        valid = inside & np.asarray(scan.is_valid, dtype=bool).ravel()[k]
+        od = np.where(inside, np.asarray(scan.od, dtype=np.float64).ravel()[k], 9.0)
+        return xo, yo, terrain, omask, valid, od, GX.shape
+
+    def salva_mappe(self, cartella):
+        """Le mappe aggiornate (frame della missione), da riusare con --mappe."""
+        if not self.n_scansioni_in_mappa:
+            return
+        try:
+            self.mappa.gm.save_map(os.path.join(cartella, 'global_occupancy_map.pkl'))
+            self.mappa.tm.save_map(os.path.join(cartella, 'global_terrain_map.pkl'))
+            print(f"{LOG_TAG} Mappe aggiornate con {self.n_scansioni_in_mappa} scansioni di oggi "
+                  f"({self.t_mappe_s:.1f} s in tutto) salvate in {cartella}: per ripartire da qui, "
+                  f"--mappe {cartella}")
+        except Exception as e:
+            print(f"{LOG_TAG} Mappe aggiornate non salvate: {e}")
+
     # --- navigazione ---------------------------------------------------------------------
     def scarta_archi_dal_vivo(self, snap):
         """
@@ -802,8 +1017,8 @@ class NavigatoreRobot:
         print(f"\n{LOG_TAG} ===== Obiettivo: {descr} =====")
         for n_piano in range(1, MAX_PIANI + 1):
             self.aggiorna_trasformazione(f"prima del piano {n_piano}")
-            snap = self.tracker._fresh_snapshot()
-            if snap is not None:
+            snap = self.scansione()
+            if snap is not None and not self.aggiorna:
                 self.scarta_archi_dal_vivo(snap)
             _new, old = self.posa_robot()
             piano = self.mappa.pianifica(old, goal_xy)
@@ -855,16 +1070,35 @@ class NavigatoreRobot:
         no_progress = 0
         while wps_old:
             self.aggiorna_trasformazione("nel giro")
-            snap = self.tracker._fresh_snapshot()
+            snap = self.scansione()
             if snap is None:
                 print(f"{LOG_TAG} Scansione non riuscita: riprovo.")
                 time.sleep(0.3)
                 continue
             rx, ry, ryaw = snap.robot_x, snap.robot_y, snap.robot_yaw
+            seq = [robot_node] + [n for n, _x, _y in wps_old]
+            if self.aggiorna:
+                # Mappe appena aggiornate: percorso rotto o uno nettamente migliore -> si
+                # cambia strada adesso, dal nodo del robot (come _ripianifica in missione).
+                nuovo = prm.find_path_dijkstra(robot_node, piano['goal'], current_path_ids=seq,
+                                               margin=MARGINE_NUOVO_PERCORSO)
+                if nuovo is None:
+                    print(f"{LOG_TAG} Con le mappe aggiornate il percorso non regge e da qui non ce "
+                          f"n'e' un altro: ripianifico da capo.")
+                    return 'bloccato'
+                if nuovo != seq:
+                    print(f"{LOG_TAG} Mappe aggiornate: nuovo percorso, {prm.path_length(nuovo):.1f} m "
+                          f"invece di {prm.path_length(seq):.1f} m"
+                          + (" (il vecchio passava da un arco tolto)"
+                             if not np.isfinite(prm.compute_path_cost(seq, allow_direct_first_hop=True))
+                             else "") + ".")
+                    wps_old = [(n, *prm.nodes[n]) for n in nuovo[1:]]
+                    no_progress = 0
+                    if not wps_old:
+                        return 'arrivato'
             # Come [SUBITO] in missione: un arco del resto del percorso che la scansione vede
             # bloccato adesso fa ripianificare subito, senza aspettare il fronte da fermo.
-            if self.scarta_archi_dal_vivo(snap):
-                seq = [robot_node] + [n for n, _x, _y in wps_old]
+            elif self.scarta_archi_dal_vivo(snap):
                 if any((min(a, b), max(a, b)) in prm.tracker_blocked_edges for a, b in zip(seq[:-1], seq[1:])):
                     print(f"{LOG_TAG} Il percorso passa da un arco appena scartato: ripianifico subito.")
                     return 'bloccato'
@@ -1006,6 +1240,11 @@ def _parse_args(argv=None):
                    help="come localizzarsi sul grafo caricato (default: fiducial, poi wp_0)")
     p.add_argument('--con-scansioni', action='store_true',
                    help="aggiunge alle mappe .pkl le scansioni salvate in scans/ (piu' completo, piu' lento)")
+    p.add_argument('--mappe', metavar='CARTELLA',
+                   help="mappe .pkl da questa cartella invece che da quelle di fine missione (per "
+                        "esempio quelle aggiornate da una navigazione: MissionLogs/Naviga_<data>/)")
+    p.add_argument('--senza-aggiornare', action='store_true',
+                   help="le scansioni di oggi non entrano nelle mappe (solo scarto degli archi visti bloccati)")
     p.add_argument('--senza-ripiego', action='store_true',
                    help="niente ripiego su GraphNav quando il PRM non ce la fa")
     p.add_argument('--hostname', default='192.168.80.3')
@@ -1023,7 +1262,8 @@ def _obiettivo_da_testo(mappa, s):
 
 def anteprima(args):
     """Senza robot: piano dalla partenza (o da --da) all'obiettivo, e figura."""
-    mappa = MappaMissione.carica(args.missione, con_scansioni=args.con_scansioni)
+    mappa = MappaMissione.carica(args.missione, con_scansioni=args.con_scansioni,
+                                 cartella_mappe=args.mappe)
     da = mappa.frame.a_vision(*(args.da or (0.0, 0.0)))
     if args.clic:
         scelta = SceltaConClic(mappa, da, titolo=f"Missione {mappa.name} (senza robot)")
@@ -1052,7 +1292,8 @@ def sul_robot(args):
     import spotLogInUtils
     from registro import MISSION_CTX, install_stdout_tee, remove_stdout_tee
 
-    mappa = MappaMissione.carica(args.missione, con_scansioni=args.con_scansioni)
+    mappa = MappaMissione.carica(args.missione, con_scansioni=args.con_scansioni,
+                                 cartella_mappe=args.mappe)
     goals = []
     if not (args.interattivo or args.clic):
         goals.append(mappa.obiettivo_vision(args.verso, args.cella, args.waypoint))
@@ -1074,6 +1315,7 @@ def sul_robot(args):
             assert robot.is_powered_on(), "Accensione del robot non riuscita."
             blocking_stand(cc)
             nav = NavigatoreRobot(mappa, robot, rsc, cc, client_metadata, log_folder)
+            nav._init_mappe(aggiorna=not args.senza_aggiornare)
             nav.carica_grafo()
             if not nav.localizza(args.localizzazione):
                 print(f"{LOG_TAG} Non localizzato sulla mappa: non mi muovo.")
@@ -1112,6 +1354,7 @@ def sul_robot(args):
                 return esito
             finally:
                 nav.tracker.stop()
+                nav.salva_mappe(log_folder)
                 try:
                     cc.robot_command(RobotCommandBuilder.synchro_sit_command(), end_time_secs=time.time() + 20)
                     time.sleep(3)
