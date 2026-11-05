@@ -31,6 +31,16 @@ COSA FA
      Le mappe aggiornate si salvano nella cartella del log, e con --mappe si riparte da li'.
   4. Se il PRM non ce la fa (blocchi ripetuti, nessun percorso), ripiego: GraphNav fino al
      waypoint piu' vicino all'obiettivo, poi ultimo tentativo col PRM da li'.
+  5. Batteria (batteria.MonitorBatteria, soglia BATTERY_RETURN_PCT come in missione): sotto
+     soglia si smette e si torna a casa (wp_0), prima con GraphNav, poi col PRM. «Casa» si
+     puo' chiedere anche a mano (--casa, «casa» da terminale, tasto h nella finestra).
+  6. GraphNav perso (rilevatore di perdita, o nessun waypoint per MAX_GIRI_SENZA_LOC letture):
+     da fermi riaggancio sul waypoint piu' vicino, poi sul fiducial; se non riesce il robot
+     non si muove piu' (la trasformazione fra i frame sarebbe sbagliata).
+  7. Registrazione nella cartella del log (MissionLogs/Naviga_<data>/): naviga_log.txt,
+     naviga.csv (un giro per riga, frame della missione), trajectory.csv e segments.csv come
+     in missione, battery.csv, drift.csv; per il visualizzatore dal vivo (--guarda)
+     naviga_info.json, naviga_stato.json e naviga_mappa.npz.
 
 COSA NON FA (ancora)
   - niente cono, arretramento, trappole, ritorni sulle briciole: un tratto che richiede una
@@ -51,6 +61,8 @@ USO
     python3 naviga_mappa.py 26-10-2026_15-11-21 --interattivo        # chiede gli obiettivi
     python3 naviga_mappa.py 26-10-2026_15-11-21 --clic               # obiettivi con un clic
     python3 naviga_mappa.py 26-10-2026_15-11-21 --clic --anteprima piano.png   # clic, senza robot
+    python3 naviga_mappa.py 26-10-2026_15-11-21 --casa               # ritorno a wp_0
+    python3 naviga_mappa.py --guarda                                 # in un altro terminale: dal vivo
   Obiettivi: --verso X,Y (frame della missione), --cella R,C (centro della cella),
   --waypoint wp_N (un waypoint del grafo GraphNav), oppure --clic: clic sinistro sulla mappa,
   il percorso compare subito, Invio conferma, Esc esce. Senza nome della missione: l'ultima
@@ -93,10 +105,39 @@ MARGINE_NUOVO_PERCORSO = 0.10
 # Quante celle in comune con la mappa del terreno servono per stimare lo scarto di quota
 # fra il frame di oggi e quello della missione (mediana delle differenze).
 MIN_CELLE_QUOTA = 200
+# Giri di fila senza localizzazione GraphNav (o con il rilevatore di perdita che dice PERSO)
+# prima di fermarsi a riagganciare: un giro solo puo' essere una lettura mancata.
+MAX_GIRI_SENZA_LOC = 2
+# Ogni quanto si riscrive l'immagine della mappa per il visualizzatore (--guarda) e ogni
+# quanto si salvano le mappe complete (.pkl, ~35 MB) nella cartella del log.
+IMMAGINE_MAPPA_OGNI_S = 10.0
+PKL_OGNI_S = 300.0
 
 
 def _quiet():
     return contextlib.redirect_stdout(io.StringIO())
+
+
+def MISSION_STATS_get(key, default=None):
+    """Una voce di registro.MISSION_STATS (per esempio l'ultima carica letta dal monitor)."""
+    from registro import MISSION_STATS
+    return MISSION_STATS.get(key, default)
+
+
+def _gn_dice_perso(state):
+    """True se il rilevatore di perdita di GraphNav dice PERSO (False se non c'e')."""
+    try:
+        if hasattr(state, 'HasField') and not state.HasField('lost_detector_state'):
+            return False
+        return bool(getattr(getattr(state, 'lost_detector_state', None), 'is_lost', False))
+    except Exception:
+        return False
+
+
+# Una riga per giro del ciclo di navigazione, nel frame della missione (vedi _riga_csv).
+_NAVIGA_COLUMNS = ['time', 'obiettivo', 'piano', 'giro', 'fase', 'x_m', 'y_m', 'yaw_deg',
+                   'nodo', 'prossimo', 'decisione', 'fronte', 'avanzamento_m', 'rimanente_m',
+                   'batteria_pct', 'giri_senza_loc', 'T_tx', 'T_ty', 'T_th_deg', 'dz', 'scansioni_in_mappa']
 
 
 # =========================================================================================
@@ -532,28 +573,9 @@ class MappaMissione:
         waypoint GraphNav."""
         from matplotlib.collections import LineCollection
         fr = self.frame
-        # Mappa come immagine, ricampionata nel frame della missione (ruotato rispetto al
-        # VISION): 0 mai vista, 1 vista libera, 2 occupata.
-        from matplotlib.colors import ListedColormap
-        r = self.gm.resolution
-        keys = np.array(list(self.gm.grid.keys()), dtype=np.int64)
-        vals = np.array(list(self.gm.grid.values()))
-        gx0, gy0 = keys.min(axis=0)
-        ras = np.zeros(tuple(keys.max(axis=0) - (gx0, gy0) + 1), dtype=np.uint8)
-        ras[keys[:, 0] - gx0, keys[:, 1] - gy0] = np.where(vals > 0, 1, 2)
-        mx, my = fr.da_vision((keys[:, 0] + 0.5) * r, (keys[:, 1] + 0.5) * r)
-        xs = np.arange(mx.min(), mx.max() + r, r)
-        ys = np.arange(my.min(), my.max() + r, r)
-        XM, YM = np.meshgrid(xs, ys, indexing='ij')
-        vx, vy = fr.a_vision(XM, YM)
-        ix = np.floor(vx / r).astype(np.int64) - gx0
-        iy = np.floor(vy / r).astype(np.int64) - gy0
-        ok = (ix >= 0) & (ix < ras.shape[0]) & (iy >= 0) & (iy < ras.shape[1])
-        img = np.zeros(XM.shape, dtype=np.uint8)
-        img[ok] = ras[ix[ok], iy[ok]]
-        ax.imshow(img, origin='lower', interpolation='nearest', zorder=1,
-                  cmap=ListedColormap(['#ffffff', '#b8dfb0', '#d0342c']), vmin=0, vmax=2,
-                  extent=(ys[0] - r / 2, ys[-1] + r / 2, xs[0] - r / 2, xs[-1] + r / 2))
+        img, ext = raster_missione(self.gm, fr)
+        disegna_raster(ax, img, ext)
+        xs, ys = (ext[2], ext[3]), (ext[0], ext[1])
         ax.plot([], [], 's', c='#d0342c', label='occupato')
         ax.plot([], [], 's', c='#b8dfb0', label='visto libero')
         segs = []
@@ -567,8 +589,8 @@ class MappaMissione:
             w = np.array([fr.da_vision(v['x'], v['y']) for v in self.ng['wp'].values()])
             ax.scatter(w[:, 1], w[:, 0], s=8, c='#2b6cb0', zorder=4, label='waypoint GraphNav')
         ax.set_aspect('equal')
-        ax.set_xlim(ys[-1] + 0.5, ys[0] - 0.5)       # invertito: la sinistra del robot a sinistra
-        ax.set_ylim(xs[0] - 0.5, xs[-1] + 0.5)
+        ax.set_xlim(ys[1] + 0.5, ys[0] - 0.5)       # invertito: la sinistra del robot a sinistra
+        ax.set_ylim(xs[0] - 0.5, xs[1] + 0.5)
         ax.set_xlabel("y: a sinistra della partenza [m]")
         ax.set_ylabel("x: avanti dalla partenza [m]")
         ax.grid(alpha=0.3)
@@ -606,6 +628,39 @@ class MappaMissione:
         print(f"{LOG_TAG} Anteprima salvata in {png}")
 
 
+def raster_missione(gm, fr):
+    """
+    La mappa di occupazione come immagine nel frame della missione (ruotato rispetto al
+    VISION, stessa risoluzione): 0 mai vista, 1 vista libera, 2 occupata. Righe = x (avanti),
+    colonne = y (a sinistra). Restituisce (immagine, extent per imshow in (y, x)).
+    """
+    r = gm.resolution
+    keys = np.array(list(gm.grid.keys()), dtype=np.int64)
+    if not keys.size:
+        return np.zeros((1, 1), dtype=np.uint8), (0.0, r, 0.0, r)
+    vals = np.array(list(gm.grid.values()))
+    gx0, gy0 = keys.min(axis=0)
+    ras = np.zeros(tuple(keys.max(axis=0) - (gx0, gy0) + 1), dtype=np.uint8)
+    ras[keys[:, 0] - gx0, keys[:, 1] - gy0] = np.where(vals > 0, 1, 2)
+    mx, my = fr.da_vision((keys[:, 0] + 0.5) * r, (keys[:, 1] + 0.5) * r)
+    xs = np.arange(mx.min(), mx.max() + r, r)
+    ys = np.arange(my.min(), my.max() + r, r)
+    XM, YM = np.meshgrid(xs, ys, indexing='ij')
+    vx, vy = fr.a_vision(XM, YM)
+    ix = np.floor(vx / r).astype(np.int64) - gx0
+    iy = np.floor(vy / r).astype(np.int64) - gy0
+    ok = (ix >= 0) & (ix < ras.shape[0]) & (iy >= 0) & (iy < ras.shape[1])
+    img = np.zeros(XM.shape, dtype=np.uint8)
+    img[ok] = ras[ix[ok], iy[ok]]
+    return img, (float(ys[0] - r / 2), float(ys[-1] + r / 2), float(xs[0] - r / 2), float(xs[-1] + r / 2))
+
+
+def disegna_raster(ax, img, ext):
+    from matplotlib.colors import ListedColormap
+    return ax.imshow(img, origin='lower', interpolation='nearest', zorder=1,
+                     cmap=ListedColormap(['#ffffff', '#b8dfb0', '#d0342c']), vmin=0, vmax=2, extent=ext)
+
+
 def descrivi_piano(piano, da_xy, a_xy):
     if piano is None:
         return "nessun percorso sul visto"
@@ -617,8 +672,8 @@ def descrivi_piano(piano, da_xy, a_xy):
 class SceltaConClic:
     """
     L'obiettivo scelto con un clic sulla mappa. Clic sinistro: obiettivo in quel punto, con il
-    percorso pianificato subito (un altro clic lo sposta); Invio: conferma; Esc, q o finestra
-    chiusa: nessun obiettivo. Con lo zoom o lo spostamento della barra degli strumenti attivi i
+    percorso pianificato subito (un altro clic lo sposta); Invio: conferma; h: torna a casa
+    (wp_0); Esc, q o finestra chiusa: nessun obiettivo. Con lo zoom o lo spostamento della barra degli strumenti attivi i
     clic servono a quelli e non scelgono niente.
 
     da_xy: partenza del piano (VISION della missione): il robot adesso, o la partenza.
@@ -631,12 +686,13 @@ class SceltaConClic:
         self.titolo = titolo or f"Missione {mappa.name}"
         self.goal = self.piano = None
         self.confermato = False
+        self.casa = False
         self.fig, self.ax = plt.subplots(figsize=(10, 10))
         mappa.disegna_mappa(self.ax)
         self._artisti = mappa.disegna_piano(self.ax, None, da_xy, None, etichetta_da=etichetta_da)
         self.etichetta_da = etichetta_da
         self.ax.legend(loc='upper right', fontsize=8)
-        self._titolo("clic sinistro: obiettivo | Invio: conferma | Esc: esci")
+        self._titolo("clic sinistro: obiettivo | Invio: conferma | h: torna a casa | Esc: esci")
         self.fig.tight_layout()
         self.fig.canvas.mpl_connect('button_press_event', self._clic)
         self.fig.canvas.mpl_connect('key_press_event', self._tasto)
@@ -670,13 +726,18 @@ class SceltaConClic:
         if ev.key == 'enter' and self.goal is not None and self.piano is not None:
             self.confermato = True
             self.plt.close(self.fig)
+        elif ev.key == 'h':
+            self.casa = True
+            self.plt.close(self.fig)
         elif ev.key in ('escape', 'q'):
             self.confermato = False
             self.plt.close(self.fig)
 
     def scegli(self):
-        """Apre la finestra e aspetta. (obiettivo VISION, descrizione) o None."""
+        """Apre la finestra e aspetta. (obiettivo VISION, descrizione), CASA o None."""
         self.plt.show()
+        if self.casa:
+            return CASA
         if not self.confermato:
             return None
         xm, ym = self.mappa.frame.da_vision(*self.goal)
@@ -684,6 +745,10 @@ class SceltaConClic:
 
     def salva(self, png):
         self.fig.savefig(png, dpi=130)
+
+
+# Obiettivo speciale: il ritorno al punto di partenza della missione (wp_0).
+CASA = 'casa'
 
 
 def _finestra_disponibile():
@@ -720,6 +785,7 @@ class NavigatoreRobot:
         self.tracker = arcVerification.ArcVerificationTracker(robot)
         self.local_grid = sg.LocalGrid(robot)
         self._init_mappe()
+        self._init_sessione(log_folder)
 
     def _init_mappe(self, aggiorna=None):
         """Stato dell'aggiornamento delle mappe (anche per le prove, che non passano da __init__)."""
@@ -727,6 +793,27 @@ class NavigatoreRobot:
         self.dz = None                      # quota della missione - quota di oggi (m)
         self.n_scansioni_in_mappa = 0
         self.t_mappe_s = 0.0
+
+    def _init_sessione(self, log_folder=None, batteria=None):
+        """
+        Stato della sessione: cartella del log (None = niente file), monitor della batteria
+        (batteria.MonitorBatteria, None = nessun controllo), perche' l'ultimo obiettivo e'
+        finito (motivo_fine: None, 'fermo', 'batteria', 'perso'), fase e contatori per il log.
+        """
+        self.log_folder = log_folder
+        self.batteria = batteria
+        self.motivo_fine = None
+        self.in_ritorno = False
+        self.giri_senza_loc = 0
+        self.fase = 'pronto'
+        self.obiettivo = None               # (x, y) VISION della missione, descrizione
+        self.percorso = []                  # nodi del PRM ancora da fare
+        self.n_piano = 0
+        self.giro = 0
+        self.ultimo = {}                    # ultima decisione e fronte, per naviga.csv
+        self._t_immagine = self._t_pkl = 0.0
+        if log_folder:
+            self._scrivi_info()
 
     # --- grafo e localizzazione ----------------------------------------------------------
     def carica_grafo(self):
@@ -796,9 +883,14 @@ class NavigatoreRobot:
         """
         import spotUtils
         try:
-            loc = self.gn.get_localization_state().localization
+            st = self.gn.get_localization_state()
+            loc = st.localization
         except Exception as e:
             print(f"{LOG_TAG} Stato di GraphNav non leggibile ({where}): {e}")
+            return None
+        if _gn_dice_perso(st):
+            print(f"{LOG_TAG} Il rilevatore di perdita di GraphNav dice PERSO ({where}): tengo la "
+                  f"stima di prima.")
             return None
         w = self.mappa.ng['wp'].get(loc.waypoint_id)
         if not loc.waypoint_id or w is None:
@@ -826,6 +918,46 @@ class NavigatoreRobot:
                             yaw=nuova.applica_yaw(v['yaw']), waypoint_id=wid, t=None)
             for wid, v in self.mappa.ng['wp'].items()}
         return nuova
+
+    def localizzazione_ok(self, where):
+        """
+        Aggiorna la trasformazione; se non si puo' per MAX_GIRI_SENZA_LOC volte di fila, il
+        robot (fermo: si chiama solo fra un movimento e l'altro) prova a riagganciarsi. False
+        se resta perso: allora non si muove piu'. Senza localizzazione la trasformazione
+        resta quella vecchia, e con la deriva di oggi il robot andrebbe nel punto sbagliato
+        della mappa, convinto di essere nel giusto.
+        """
+        if self.aggiorna_trasformazione(where) is not None:
+            self.giri_senza_loc = 0
+            return True
+        self.giri_senza_loc += 1
+        if self.giri_senza_loc < MAX_GIRI_SENZA_LOC:
+            return True
+        print(f"{LOG_TAG} PERSO: {self.giri_senza_loc} letture di fila senza localizzazione GraphNav. "
+              f"Fermo e provo a riagganciarmi.")
+        self.fase = 'perso'
+        for how, fn in (("sul waypoint piu' vicino", self._riaggancia),
+                        ("sul fiducial in vista", self._riaggancia_fiducial)):
+            try:
+                ok = fn()
+            except Exception as e:
+                print(f"{LOG_TAG} Riaggancio {how} non riuscito: {e}")
+                ok = False
+            if ok and self.aggiorna_trasformazione(f"dopo il riaggancio {how}") is not None:
+                print(f"{LOG_TAG} Riagganciato {how}: riprendo.")
+                self.giri_senza_loc = 0
+                self.fase = 'in viaggio'
+                return True
+        print(f"{LOG_TAG} Localizzazione non recuperata: il robot resta fermo. Riportarlo vicino "
+              f"alla partenza (o a un fiducial della mappa) e riavviare.")
+        return False
+
+    def _riaggancia(self):
+        import navGraphUtils
+        return navGraphUtils.graphnav_relocalize(self.ri, self.rsc, "durante la navigazione su mappa")
+
+    def _riaggancia_fiducial(self):
+        return self.ri.initialize_with_fiducial(self.rsc, None)
 
     def posa_robot(self):
         """(x, y, yaw) nel frame di oggi e (x, y) nel frame della missione."""
@@ -959,13 +1091,17 @@ class NavigatoreRobot:
         od = np.where(inside, np.asarray(scan.od, dtype=np.float64).ravel()[k], 9.0)
         return xo, yo, terrain, omask, valid, od, GX.shape
 
-    def salva_mappe(self, cartella):
+    def salva_mappe(self, cartella, quiet=False):
         """Le mappe aggiornate (frame della missione), da riusare con --mappe."""
         if not self.n_scansioni_in_mappa:
             return
         try:
-            self.mappa.gm.save_map(os.path.join(cartella, 'global_occupancy_map.pkl'))
-            self.mappa.tm.save_map(os.path.join(cartella, 'global_terrain_map.pkl'))
+            for nome, m in (('global_occupancy_map.pkl', self.mappa.gm), ('global_terrain_map.pkl', self.mappa.tm)):
+                path = os.path.join(cartella, nome)
+                m.save_map(path + '.tmp')
+                os.replace(path + '.tmp', path)
+            if quiet:
+                return
             print(f"{LOG_TAG} Mappe aggiornate con {self.n_scansioni_in_mappa} scansioni di oggi "
                   f"({self.t_mappe_s:.1f} s in tutto) salvate in {cartella}: per ripartire da qui, "
                   f"--mappe {cartella}")
@@ -1013,6 +1149,142 @@ class NavigatoreRobot:
                   f"che la mappa della missione non ha (o non aveva li'): scartati.")
         return tolti
 
+    def batteria_scarica(self, where=None):
+        """True se la batteria e' sotto la soglia di rientro (batteria.MonitorBatteria). Durante
+        il ritorno a casa non conta piu': si torna comunque."""
+        if self.batteria is None or self.in_ritorno:
+            return False
+        return bool(self.batteria.controlla(where))
+
+    def wp0_xy(self):
+        wid = self.mappa.ng['by_name'].get('wp_0')
+        if wid is None:
+            return None
+        w = self.mappa.ng['wp'][wid]
+        return (w['x'], w['y'])
+
+    def torna_a_casa(self, perche):
+        """
+        Ritorno al punto di partenza della missione (wp_0). Con la batteria scarica prima
+        GraphNav, come a fine missione (graphnav_return_to_start: strada gia' percorsa,
+        niente soste a ogni scansione), poi il PRM se GraphNav non arriva; chiesto a mano,
+        prima il PRM (con il ripiego su GraphNav). True se arriva.
+        """
+        xy = self.wp0_xy()
+        if xy is None:
+            print(f"{LOG_TAG} Ritorno a casa impossibile: wp_0 non e' nel grafo GraphNav.")
+            return False
+        self.in_ritorno = True
+        print(f"\n{LOG_TAG} ===== Ritorno a casa (wp_0): {perche} =====")
+        try:
+            if perche == 'batteria':
+                self.fase = 'ritorno'
+                self.obiettivo = (xy, 'casa (wp_0)')
+                self._scrivi_stato()
+                if self._graphnav_a_wp0():
+                    self.fase = 'arrivato'
+                    self._riga_qui()
+                    self._scrivi_stato()
+                    return True
+                print(f"{LOG_TAG} GraphNav non e' arrivato a wp_0: provo con il PRM.")
+            return self.vai(xy, 'casa (wp_0)')
+        finally:
+            self.in_ritorno = False
+
+    def _graphnav_a_wp0(self):
+        import navGraphUtils
+        return navGraphUtils.graphnav_return_to_start(self.ri, self.rsc, self.cc) == 'arrivato'
+
+    # --- registrazione ---------------------------------------------------------------------
+    def _scrivi_json(self, nome, dati):
+        if not self.log_folder:
+            return
+        try:
+            import json
+            path = os.path.join(self.log_folder, nome)
+            with open(path + '.tmp', 'w') as f:
+                json.dump(dati, f)
+            os.replace(path + '.tmp', path)        # chi legge non vede mai un file a meta'
+        except Exception as e:
+            print(f"{LOG_TAG} {nome} non scritto: {e}")
+
+    def _scrivi_info(self):
+        """naviga_info.json, una volta: cio' che al visualizzatore serve e non cambia (frame
+        della missione, waypoint GraphNav nel frame della missione, wp_0)."""
+        fr = self.mappa.frame
+        wps = [list(fr.da_vision(v['x'], v['y'])) for v in (self.mappa.ng or {}).get('wp', {}).values()]
+        xy = self.wp0_xy() if self.mappa.ng else None
+        self._scrivi_json('naviga_info.json', dict(
+            missione=self.mappa.name, frame=[fr.ox, fr.oy, fr.yaw], waypoint=wps,
+            wp0=list(fr.da_vision(*xy)) if xy else None, inizio=time.time()))
+
+    def _scrivi_stato(self):
+        """
+        naviga_stato.json (sovrascritto a ogni giro: dove e' il robot, cosa sta facendo, verso
+        dove e per quale strada, tutto nel frame della missione) e, ogni
+        IMMAGINE_MAPPA_OGNI_S, naviga_mappa.npz con l'immagine della mappa aggiornata. Li legge
+        `naviga_mappa.py --guarda`. Ogni PKL_OGNI_S anche le mappe complete. Mai eccezioni.
+        """
+        if not self.log_folder:
+            return
+        try:
+            fr = self.mappa.frame
+            robot = None
+            if self.T is not None:
+                (x, y, yaw), _old = self.posa_robot()
+                xm, ym = fr.da_vision(*self.T.inversa(x, y))
+                robot = [xm, ym, _wrap(yaw - self.T.th - fr.yaw)]
+            goal = None
+            if self.obiettivo is not None:
+                goal = [*fr.da_vision(*self.obiettivo[0]), self.obiettivo[1]]
+            prm = self.mappa.prm
+            path = [list(fr.da_vision(*prm.nodes[n])) for n in self.percorso if n in prm.nodes]
+            b = None if self.batteria is None else MISSION_STATS_get('battery_last_pct')
+            self._scrivi_json('naviga_stato.json', dict(
+                t=time.time(), fase=self.fase, robot=robot, obiettivo=goal, percorso=path,
+                piano=self.n_piano, giro=self.giro, batteria_pct=b,
+                decisione=self.ultimo.get('decisione'), fronte=self.ultimo.get('fronte'),
+                perso=self.giri_senza_loc > 0, scansioni_in_mappa=self.n_scansioni_in_mappa))
+            now = time.time()
+            if self.n_scansioni_in_mappa and now - self._t_immagine >= IMMAGINE_MAPPA_OGNI_S:
+                self._t_immagine = now
+                img, ext = raster_missione(self.mappa.gm, fr)
+                path = os.path.join(self.log_folder, 'naviga_mappa.npz')
+                np.savez_compressed(path + '.tmp.npz', img=img, ext=np.array(ext))
+                os.replace(path + '.tmp.npz', path)
+            if self.n_scansioni_in_mappa and now - self._t_pkl >= PKL_OGNI_S:
+                self._t_pkl = now
+                self.salva_mappe(self.log_folder, quiet=True)
+        except Exception as e:
+            print(f"{LOG_TAG} Stato per il visualizzatore non scritto: {e}")
+
+    def _riga_csv(self, rx, ry, ryaw):
+        """Una riga di naviga.csv per giro, nel frame della missione."""
+        from registro import append_csv
+        fr = self.mappa.frame
+        xm, ym = fr.da_vision(*self.T.inversa(rx, ry))
+        append_csv('naviga.csv', _NAVIGA_COLUMNS, [[
+            round(time.time(), 2), self.obiettivo[1] if self.obiettivo else '', self.n_piano, self.giro,
+            self.fase, round(xm, 3), round(ym, 3), round(np.degrees(_wrap(ryaw - self.T.th - fr.yaw)), 1),
+            self.percorso[0] if self.percorso else '', self.percorso[1] if len(self.percorso) > 1 else '',
+            self.ultimo.get('decisione', ''), self.ultimo.get('fronte', ''),
+            self.ultimo.get('avanzamento', ''), self.ultimo.get('rimanente', ''),
+            MISSION_STATS_get('battery_last_pct', ''), self.giri_senza_loc,
+            round(self.T.tx, 3), round(self.T.ty, 3), round(np.degrees(self.T.th), 2),
+            '' if self.dz is None else round(self.dz, 3), self.n_scansioni_in_mappa]])
+
+    def _riga_qui(self):
+        """Riga di naviga.csv con la posa di adesso (all'arrivo, a fine obiettivo): le righe
+        del giro si scrivono prima di muoversi, e senza questa l'ultimo tratto mancherebbe."""
+        if self.T is None:
+            return
+        try:
+            (x, y, yaw), _old = self.posa_robot()
+            self.ultimo = dict(decisione=self.fase)
+            self._riga_csv(x, y, yaw)
+        except Exception as e:
+            print(f"{LOG_TAG} Riga finale di naviga.csv non scritta: {e}")
+
     def vai(self, goal_xy, descr, ripiego_graphnav=True):
         """
         Porta il robot verso goal_xy (VISION della missione). Prima il PRM, ripianificando
@@ -1020,8 +1292,15 @@ class NavigatoreRobot:
         waypoint piu' vicino all'obiettivo e un ultimo tentativo col PRM da li'. True se arriva.
         """
         print(f"\n{LOG_TAG} ===== Obiettivo: {descr} =====")
+        self.motivo_fine = None
+        self.obiettivo = (tuple(goal_xy), descr)
+        self.fase = 'ritorno' if self.in_ritorno else 'in viaggio'
         for n_piano in range(1, MAX_PIANI + 1):
-            self.aggiorna_trasformazione(f"prima del piano {n_piano}")
+            self.n_piano = n_piano
+            if self.batteria_scarica("prima del piano"):
+                return self._fine('batteria')
+            if not self.localizzazione_ok(f"prima del piano {n_piano}"):
+                return self._fine('perso')
             snap = self.scansione()
             if snap is not None and not self.aggiorna:
                 self.scarta_archi_dal_vivo(snap)
@@ -1034,17 +1313,31 @@ class NavigatoreRobot:
                   f"dal nodo {piano['start']} al nodo {piano['goal']}"
                   + (f" (a {piano['mancano_m']:.2f} m dall'obiettivo: piu' vicino non si arriva sul visto)"
                      if piano['mancano_m'] > 0.3 else "") + ".")
+            self.percorso = list(piano['path'])
             esito = self._segui(piano)
             if esito == 'arrivato':
                 _new, old = self.posa_robot()
                 print(f"{LOG_TAG} ARRIVATO: a {np.hypot(old[0] - goal_xy[0], old[1] - goal_xy[1]):.2f} m "
                       f"dall'obiettivo (frame della missione).")
+                self.percorso = []
+                self.fase = 'arrivato'
+                self._riga_qui()
+                self._scrivi_stato()
                 return True
-            if esito == 'fermo':
-                return False
+            if esito in ('fermo', 'batteria', 'perso'):
+                return self._fine(esito)
         if not ripiego_graphnav:
-            return False
+            return self._fine(None)
         return self._ripiego_graphnav(goal_xy, descr)
+
+    def _fine(self, motivo):
+        """Obiettivo non raggiunto: perche' (motivo_fine), stato per il visualizzatore."""
+        self.motivo_fine = motivo
+        self.percorso = []
+        self.fase = {'batteria': 'batteria scarica', 'perso': 'perso', 'fermo': 'fermo'}.get(motivo, 'non arrivato')
+        self._riga_qui()
+        self._scrivi_stato()
+        return False
 
     def _ripiego_graphnav(self, goal_xy, descr):
         import navGraphUtils
@@ -1055,9 +1348,11 @@ class NavigatoreRobot:
         print(f"{LOG_TAG} Ripiego: GraphNav fino a {w['name']}, a "
               f"{np.hypot(w['x'] - goal_xy[0], w['y'] - goal_xy[1]):.2f} m dall'obiettivo.")
         face = self.T.applica(*goal_xy)
+        self.fase = 'ripiego GraphNav'
+        self._scrivi_stato()
         if not navGraphUtils.graphnav_navigate_to(self.ri, wid, self.rsc, self.cc,
                                                   f"ripiego verso {descr}", face_xy=face):
-            return False
+            return self._fine(None)
         return self.vai(goal_xy, descr + " (dopo il ripiego)", ripiego_graphnav=False)
 
     def _segui(self, piano):
@@ -1065,7 +1360,8 @@ class NavigatoreRobot:
         Il percorso, un giro per scansione: fronte sicuro sul resto del percorso (nel frame
         di oggi), decisione come in missione (arcVerification.decide_next_move), movimento con
         arresto a meta' se il fronte si accorcia. 'arrivato', 'bloccato' (arco scartato:
-        ripianificare) o 'fermo' (caduta o errore: smettere).
+        ripianificare), 'fermo' (caduta), 'batteria' (sotto la soglia di rientro) o 'perso'
+        (GraphNav non localizzato e riaggancio non riuscito): negli ultimi tre si smette.
         """
         import movements
         import spotUtils
@@ -1074,7 +1370,13 @@ class NavigatoreRobot:
         wps_old = [(n, *prm.nodes[n]) for n in piano['path'][1:]]
         no_progress = 0
         while wps_old:
-            self.aggiorna_trasformazione("nel giro")
+            self.giro += 1
+            self.percorso = [robot_node] + [n for n, _x, _y in wps_old]
+            if self.batteria_scarica():
+                print(f"{LOG_TAG} Batteria sotto la soglia di rientro: smetto e torno a casa.")
+                return 'batteria'
+            if not self.localizzazione_ok("nel giro"):
+                return 'perso'
             snap = self.scansione()
             if snap is None:
                 print(f"{LOG_TAG} Scansione non riuscita: riprovo.")
@@ -1113,6 +1415,12 @@ class NavigatoreRobot:
             print(arcVerification.describe_frontier(frontier))
             version = self.tracker.update_path(polyline[1:])
             dec = arcVerification.decide_next_move((rx, ry), wps, frontier, no_progress, in_target_cell=True)
+            self.percorso = [robot_node] + [n for n, _x, _y in wps_old]
+            self.ultimo = dict(decisione=dec['kind'], fronte=frontier['reason'],
+                               avanzamento=round(arcVerification.allowed_advance(frontier), 2),
+                               rimanente=round(frontier['path_len'], 2))
+            self._riga_csv(rx, ry, ryaw)
+            self._scrivi_stato()
 
             if dec['kind'] == 'reached_node':
                 robot_node = wps_old.pop(0)[0]
@@ -1162,7 +1470,10 @@ class NavigatoreRobot:
                 print(f"{LOG_TAG} Tratto {robot_node}->{nid}"
                       + ("" if n_legs else f" (passo parziale di {dec['dist']:.2f} m)")
                       + f": verso ({tx:.2f}, {ty:.2f}).")
-                ok, trav, cmd, why = self._muovi(tx, ty, cx, cy, v_T_body, version, mob)
+                ok, trav, cmd, why = self._muovi(tx, ty, cx, cy, v_T_body, version, mob,
+                                                 seg=dict(node_from=robot_node, node_to=nid,
+                                                          long_slope=long_s, lat_slope=lat_s,
+                                                          roughness=rough))
                 if movements.check_and_recover_fall(self.rsc, self.cc, None, "durante la navigazione"):
                     return 'fermo'
                 if why is not None:
@@ -1181,10 +1492,13 @@ class NavigatoreRobot:
             no_progress = 0
         return 'arrivato'
 
-    def _muovi(self, tx, ty, rx, ry, v_T_body, version, mob):
+    def _muovi(self, tx, ty, rx, ry, v_T_body, version, mob, seg=None):
         """movements.navigate_to con l'arresto a meta' del ciclo di missione (vedi
-        TentativoCella._muovi_e_registra): (riuscito, percorsi, comandati, motivo o None)."""
+        TentativoCella._muovi_e_registra): (riuscito, percorsi, comandati, motivo o None).
+        Come in missione, il tratto finisce in trajectory.csv (move 'naviga') e in
+        segments.csv, con l'inclinazione reale del corpo."""
         import movements
+        import registro
         stato = {'bad': 0, 'why': None}
         t0 = time.time()
 
@@ -1209,8 +1523,32 @@ class NavigatoreRobot:
                 stato['bad'] = 0
             return False
 
-        ok, trav, cmd = movements.navigate_to(tx, ty, rx, ry, self.rsc, self.cc, v_T_body,
-                                              should_abort=_abort, **mob)
+        tilt = registro.BodyTiltRecorder(self.rsc)
+        tilt.start()
+        try:
+            ok, trav, cmd = movements.navigate_to(tx, ty, rx, ry, self.rsc, self.cc, v_T_body,
+                                                  should_abort=_abort, **mob)
+        finally:
+            ts = tilt.stop() or {}
+        try:   # solo log: non deve mai fermare la navigazione
+            seg = seg or {}
+            registro.append_trajectory(list(getattr(tilt, 'samples', []) or []), 'naviga', (tx, ty),
+                                       ['', '', '', self.giro, seg.get('node_from', ''), seg.get('node_to', '')])
+            registro.log_segment(dict(
+                timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S'), iteration=self.n_piano,
+                node_from=seg.get('node_from'), node_to=seg.get('node_to'),
+                x_from=rx, y_from=ry, x_to=tx, y_to=ty, dist_m=float(np.hypot(tx - rx, ty - ry)),
+                slope_source=getattr(self.mappa.prm, 'last_slope_source', None),
+                long_slope=seg.get('long_slope'), lat_slope=seg.get('lat_slope'),
+                roughness=seg.get('roughness'), tier=registro.MISSION_STATS.get('last_tier'),
+                gait_override=False, success=bool(ok), dist_traveled_m=trav, dist_commanded_m=cmd,
+                duration_s=time.time() - t0,
+                roll_start_deg=ts.get('roll_start'), pitch_start_deg=ts.get('pitch_start'),
+                roll_end_deg=ts.get('roll_end'), pitch_end_deg=ts.get('pitch_end'),
+                roll_peak_abs_deg=ts.get('roll_peak_abs'), pitch_peak_abs_deg=ts.get('pitch_peak_abs'),
+                tilt_samples=ts.get('samples'), tilt_errors=ts.get('errors')))
+        except Exception as e:
+            print(f"{LOG_TAG} Tratto non registrato: {e}")
         return ok, trav, cmd, stato['why']
 
 
@@ -1232,8 +1570,10 @@ def _parse_args(argv=None):
                    help="obiettivo nel frame della missione: X avanti, Y a sinistra della partenza (m)")
     g.add_argument('--cella', type=lambda s: _coppia(s, int), metavar='R,C', help="centro della cella")
     g.add_argument('--waypoint', metavar='wp_N', help="un waypoint del grafo GraphNav")
+    g.add_argument('--casa', action='store_true',
+                   help="sul robot: torna al punto di partenza della missione (wp_0)")
     g.add_argument('--interattivo', action='store_true',
-                   help="sul robot: chiede un obiettivo dopo l'altro (X,Y | c R,C | wp_N | q)")
+                   help="sul robot: chiede un obiettivo dopo l'altro (X,Y | c R,C | wp_N | casa | q)")
     g.add_argument('--clic', action='store_true',
                    help="obiettivo scelto con un clic sulla mappa (Invio conferma, Esc esce); sul "
                         "robot uno dopo l'altro, con --anteprima solo il piano")
@@ -1250,14 +1590,22 @@ def _parse_args(argv=None):
                         "esempio quelle aggiornate da una navigazione: MissionLogs/Naviga_<data>/)")
     p.add_argument('--senza-aggiornare', action='store_true',
                    help="le scansioni di oggi non entrano nelle mappe (solo scarto degli archi visti bloccati)")
+    p.add_argument('--torna-alla-fine', action='store_true',
+                   help="sul robot: finiti gli obiettivi, torna a wp_0 prima di sedersi")
     p.add_argument('--senza-ripiego', action='store_true',
                    help="niente ripiego su GraphNav quando il PRM non ce la fa")
+    p.add_argument('--guarda', nargs='?', const='', metavar='CARTELLA',
+                   help="SENZA ROBOT: segue dal vivo una navigazione (default: l'ultima, "
+                        "MissionLogs/Naviga_<data>); con --png salva una figura ed esce")
+    p.add_argument('--png', metavar='PNG', help="con --guarda: una figura invece della finestra")
     p.add_argument('--hostname', default='192.168.80.3')
     return p.parse_args(argv)
 
 
 def _obiettivo_da_testo(mappa, s):
     s = s.strip()
+    if s.lower() in ('casa', 'h', 'wp0'):
+        return CASA
     if re.fullmatch(r'wp_\d+', s):
         return mappa.obiettivo_vision(waypoint=s)
     if s.lower().startswith('c'):
@@ -1295,19 +1643,24 @@ def sul_robot(args):
     import bosdyn.client.lease
     from bosdyn.client.robot_command import RobotCommandClient, RobotCommandBuilder, blocking_stand
     import spotLogInUtils
-    from registro import MISSION_CTX, install_stdout_tee, remove_stdout_tee
+    import batteria
+    from registro import MISSION_CTX, SegmentLog, install_stdout_tee, remove_stdout_tee
 
     mappa = MappaMissione.carica(args.missione, con_scansioni=args.con_scansioni,
                                  cartella_mappe=args.mappe)
     goals = []
-    if not (args.interattivo or args.clic):
+    if args.casa:
+        goals.append(CASA)
+    elif not (args.interattivo or args.clic):
         goals.append(mappa.obiettivo_vision(args.verso, args.cella, args.waypoint))
 
     log_folder = os.path.join(HERE, 'MissionLogs', f"Naviga_{datetime.now().strftime('%d-%m-%Y_%H-%M-%S')}")
     os.makedirs(log_folder, exist_ok=True)
     MISSION_CTX['log_folder'] = log_folder
     install_stdout_tee(os.path.join(log_folder, 'naviga_log.txt'))
+    MISSION_CTX['segment_log'] = SegmentLog(os.path.join(log_folder, 'segments.csv'))
     print(f"{LOG_TAG} Mappa della missione {mappa.name}; log in {log_folder}")
+    print(f"{LOG_TAG} Per seguirla dal vivo, in un altro terminale: python3 naviga_mappa.py --guarda {log_folder}")
 
     options = SimpleNamespace(name="navigaMappa", hostname=args.hostname, verbose=False,
                               recording_user_name="", recording_session_name="")
@@ -1321,45 +1674,20 @@ def sul_robot(args):
             blocking_stand(cc)
             nav = NavigatoreRobot(mappa, robot, rsc, cc, client_metadata, log_folder)
             nav._init_mappe(aggiorna=not args.senza_aggiornare)
+            monitor = batteria.MonitorBatteria(rsc)
+            nav._init_sessione(log_folder, batteria=monitor)
+            monitor.controlla("avvio")
             nav.carica_grafo()
             if not nav.localizza(args.localizzazione):
                 print(f"{LOG_TAG} Non localizzato sulla mappa: non mi muovo.")
                 return False
             nav.tracker.start()
             try:
-                esito = True
-                while True:
-                    if args.clic:
-                        _new, qui = nav.posa_robot()
-                        r = SceltaConClic(mappa, qui, titolo=f"Missione {mappa.name}: dove vado?",
-                                          etichetta_da='robot adesso').scegli()
-                        if r is None:
-                            break
-                        goals = [r]
-                    elif args.interattivo:
-                        try:
-                            s = input("\nObiettivo (X,Y avanti/sinistra | c R,C | wp_N | q per finire): ")
-                        except EOFError:
-                            break
-                        if s.strip().lower() in ('q', 'quit', 'esci', ''):
-                            break
-                        try:
-                            goals = [_obiettivo_da_testo(mappa, s)]
-                        except Exception as e:
-                            print(f"{LOG_TAG} Obiettivo non valido: {e}")
-                            continue
-                    if not goals:
-                        break
-                    goal, descr = goals.pop(0)
-                    esito = nav.vai(goal, descr, ripiego_graphnav=not args.senza_ripiego)
-                    if not esito:
-                        print(f"{LOG_TAG} Obiettivo {descr} NON raggiunto.")
-                    if not (args.interattivo or args.clic):
-                        break
-                return esito
+                return esegui_obiettivi(nav, mappa, args, goals)
             finally:
                 nav.tracker.stop()
                 nav.salva_mappe(log_folder)
+                monitor.controlla("fine")
                 try:
                     cc.robot_command(RobotCommandBuilder.synchro_sit_command(), end_time_secs=time.time() + 20)
                     time.sleep(3)
@@ -1374,8 +1702,216 @@ def sul_robot(args):
         remove_stdout_tee()
 
 
+def esegui_obiettivi(nav, mappa, args, goals):
+    """
+    Il giro degli obiettivi, robot gia' in piedi e localizzato: dalla riga di comando, da
+    terminale (--interattivo) o con un clic (--clic). Batteria scarica: ritorno a casa e fine.
+    Robot perso o caduto: fine, fermo dov'e'. True se l'ultimo obiettivo e' stato raggiunto.
+    """
+    esito = True
+    while True:
+        if nav.batteria_scarica("prima di un obiettivo"):
+            nav.motivo_fine = 'batteria'
+        elif args.clic:
+            _new, qui = nav.posa_robot()
+            r = SceltaConClic(mappa, qui, titolo=f"Missione {mappa.name}: dove vado?",
+                              etichetta_da='robot adesso').scegli()
+            if r is None:
+                break
+            goals = [r]
+        elif args.interattivo:
+            try:
+                s = input("\nObiettivo (X,Y avanti/sinistra | c R,C | wp_N | casa | q per finire): ")
+            except EOFError:
+                break
+            if s.strip().lower() in ('q', 'quit', 'esci', ''):
+                break
+            try:
+                goals = [_obiettivo_da_testo(mappa, s)]
+            except Exception as e:
+                print(f"{LOG_TAG} Obiettivo non valido: {e}")
+                continue
+        if nav.motivo_fine != 'batteria':
+            if not goals:
+                break
+            g = goals.pop(0)
+            if g == CASA:
+                esito = nav.torna_a_casa("chiesto")
+            else:
+                esito = nav.vai(g[0], g[1], ripiego_graphnav=not args.senza_ripiego)
+                if not esito:
+                    print(f"{LOG_TAG} Obiettivo {g[1]} NON raggiunto.")
+        if nav.motivo_fine == 'batteria':
+            print(f"{LOG_TAG} Batteria sotto il {nav.batteria.soglia_pct:.0f}%: niente altri obiettivi, "
+                  f"torno a casa.")
+            nav.torna_a_casa('batteria')
+            return False          # gli obiettivi chiesti non sono stati fatti tutti
+        if nav.motivo_fine in ('perso', 'fermo'):
+            print(f"{LOG_TAG} Sessione interrotta ({nav.motivo_fine}): il robot resta dov'e'.")
+            return False
+        if not (args.interattivo or args.clic):
+            break
+    if getattr(args, 'torna_alla_fine', False) and nav.motivo_fine is None:
+        esito = nav.torna_a_casa("fine degli obiettivi") and esito
+    return esito
+
+
+# =========================================================================================
+# VISUALIZZATORE DAL VIVO (--guarda): legge solo i file della cartella del log
+# =========================================================================================
+def _ultima_navigazione():
+    dirs = [d for d in glob.glob(os.path.join(HERE, 'MissionLogs', 'Naviga_*'))
+            if os.path.exists(os.path.join(d, 'naviga_info.json'))]
+    return max(dirs, key=os.path.getmtime) if dirs else None
+
+
+class Guarda:
+    """
+    La navigazione dal vivo, in un secondo terminale: mappa aggiornata, strada fatta, percorso,
+    obiettivo, robot, casa; nel titolo fase, batteria, ultima decisione e da quanto non arriva
+    niente. Non tocca il robot: legge naviga_info.json, naviga_stato.json, naviga_mappa.npz e
+    naviga.csv dalla cartella del log, e ridisegna quando cambiano. Funziona anche a
+    navigazione finita (l'ultimo stato). Tasti: q esce.
+    """
+
+    def __init__(self, cartella):
+        import json
+        self.dir = cartella
+        self.info = json.load(open(os.path.join(cartella, 'naviga_info.json')))
+        self.frame = FrameMissione(*self.info['frame'])
+        self._mt = {}
+        self._img = None
+
+    def _cambiato(self, nome):
+        path = os.path.join(self.dir, nome)
+        try:
+            mt = os.path.getmtime(path)
+        except OSError:
+            return False
+        if self._mt.get(nome) == mt:
+            return False
+        self._mt[nome] = mt
+        return True
+
+    def _immagine(self):
+        """Immagine della mappa: quella aggiornata dalla navigazione, se c'e'; prima che ce ne
+        sia una, la mappa della missione (piu' lenta da leggere: 20 MB)."""
+        if self._cambiato('naviga_mappa.npz') or self._img is None:
+            path = os.path.join(self.dir, 'naviga_mappa.npz')
+            if os.path.exists(path):
+                d = np.load(path)
+                self._img = (d['img'], tuple(float(v) for v in d['ext']))
+            else:
+                pkl = os.path.join(HERE, 'MissionMap', f"Mission_{self.info['missione']}",
+                                   'global_occupancy_map.pkl')
+                if os.path.exists(pkl):
+                    self._img = raster_missione(carica_mappa_occupazione(pkl), self.frame)
+        return self._img
+
+    def _stato(self):
+        import json
+        try:
+            return json.load(open(os.path.join(self.dir, 'naviga_stato.json')))
+        except Exception:
+            return {}
+
+    def _traccia(self):
+        import csv
+        path = os.path.join(self.dir, 'naviga.csv')
+        if not os.path.exists(path):
+            return np.zeros((0, 2))
+        with open(path) as f:
+            rows = [(float(r['x_m']), float(r['y_m'])) for r in csv.DictReader(f) if r.get('x_m')]
+        return np.array(rows) if rows else np.zeros((0, 2))
+
+    def disegna(self, ax):
+        ax.clear()
+        img = self._immagine()
+        if img is not None:
+            disegna_raster(ax, *img)
+        st = self._stato()
+        w = np.array(self.info.get('waypoint') or [])
+        if w.size:
+            ax.scatter(w[:, 1], w[:, 0], s=6, c='#2b6cb0', zorder=4, label='waypoint GraphNav')
+        if self.info.get('wp0'):
+            ax.plot(self.info['wp0'][1], self.info['wp0'][0], 'H', c='#6b46c1', ms=12, zorder=6,
+                    label='casa (wp_0)')
+        tr = self._traccia()
+        if len(tr):
+            ax.plot(tr[:, 1], tr[:, 0], '-', c='#1f4e9c', lw=1.5, zorder=5, label='strada fatta')
+        if st.get('percorso'):
+            p = np.array(st['percorso'])
+            ax.plot(p[:, 1], p[:, 0], '-', c='#ff8c00', lw=2.5, zorder=5, label='percorso')
+        if st.get('obiettivo'):
+            g = st['obiettivo']
+            ax.plot(g[1], g[0], '*', c='#ffd400', mec='k', ms=18, zorder=7, label='obiettivo')
+        if st.get('robot'):
+            x, y, yaw = st['robot']
+            ax.annotate('', xy=(y + 0.6 * np.sin(yaw), x + 0.6 * np.cos(yaw)), xytext=(y, x),
+                        arrowprops=dict(arrowstyle='-|>', color='k', lw=2), zorder=8)
+            ax.plot(y, x, 'o', c='k', ms=7, zorder=8, label='robot')
+        if img is not None:
+            ext = img[1]
+            ax.set_xlim(ext[1] + 0.5, ext[0] - 0.5)      # invertito: la sinistra del robot a sinistra
+            ax.set_ylim(ext[2] - 0.5, ext[3] + 0.5)
+        ax.set_aspect('equal')
+        ax.set_xlabel("y: a sinistra della partenza [m]")
+        ax.set_ylabel("x: avanti dalla partenza [m]")
+        ax.grid(alpha=0.3)
+        ax.legend(loc='upper right', fontsize=8)
+        eta = time.time() - st['t'] if st.get('t') else None
+        g = st.get('obiettivo')
+        riga1 = (f"{st.get('fase', '?')}" + (f" verso {g[2]}" if g else "")
+                 + (f" | piano {st.get('piano')} giro {st.get('giro')}" if st.get('giro') else ""))
+        riga2 = " | ".join(t for t in (
+            f"batteria {st['batteria_pct']:.0f}%" if st.get('batteria_pct') is not None else "",
+            (f"decisione {st.get('decisione')}" + (f" ({st['fronte']})" if st.get('fronte') else ""))
+            if st.get('decisione') else "",
+            "GraphNav NON localizzato" if st.get('perso') else "",
+            f"aggiornato {eta:.0f} s fa" if eta is not None else "") if t)
+        ax.set_title(f"Navigazione su mappa: missione {self.info['missione']}\n{riga1}\n{riga2}", fontsize=10)
+
+    def png(self, path):
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(figsize=(10, 10))
+        self.disegna(ax)
+        fig.tight_layout()
+        fig.savefig(path, dpi=110)
+        plt.close(fig)
+        print(f"{LOG_TAG} Figura salvata in {path}")
+
+    def dal_vivo(self, periodo_s=1.0):
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(figsize=(10, 10))
+        stato = {'esci': False}
+        fig.canvas.mpl_connect('key_press_event', lambda ev: stato.update(esci=ev.key in ('q', 'escape')))
+        fig.canvas.mpl_connect('close_event', lambda ev: stato.update(esci=True))
+        self.disegna(ax)
+        fig.tight_layout()
+        while not stato['esci']:
+            if any([self._cambiato(n) for n in ('naviga_stato.json', 'naviga.csv')]):
+                self.disegna(ax)
+                fig.canvas.draw_idle()
+            plt.pause(periodo_s)
+
+
 def main(argv=None):
     args = _parse_args(argv)
+    if args.guarda is not None:
+        cartella = args.guarda or _ultima_navigazione()
+        if not cartella or not os.path.exists(os.path.join(cartella, 'naviga_info.json')):
+            print(f"{LOG_TAG} Nessuna navigazione da guardare (serve MissionLogs/Naviga_<data>/naviga_info.json).")
+            return False
+        g = Guarda(cartella)
+        if args.png:
+            g.png(args.png)
+            return True
+        if not _finestra_disponibile():
+            return False
+        g.dal_vivo()
+        return True
     if args.clic and not _finestra_disponibile():
         return False
     if args.anteprima:
@@ -1383,8 +1919,8 @@ def main(argv=None):
             print("Con --anteprima serve un obiettivo: --verso, --cella, --waypoint o --clic.")
             return False
         return anteprima(args)
-    if not (args.verso or args.cella or args.waypoint or args.interattivo or args.clic):
-        print("Serve un obiettivo (--verso, --cella, --waypoint) oppure --interattivo o --clic.")
+    if not (args.verso or args.cella or args.waypoint or args.casa or args.interattivo or args.clic):
+        print("Serve un obiettivo (--verso, --cella, --waypoint, --casa) oppure --interattivo o --clic.")
         return False
     return sul_robot(args)
 

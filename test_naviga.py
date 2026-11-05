@@ -17,6 +17,12 @@ Scenari:
      libera e il robot va dritto, senza (--senza-aggiornare) fa il giro;
   6  le mappe aggiornate: quota di oggi riportata a quella della missione, l'ostacolo nuovo
      dello scenario 2 occupato nella mappa, salvataggio e ricarica da --mappe;
+  7  batteria scarica a meta' strada: niente altri obiettivi, ritorno a casa (GraphNav finto
+     che non arriva, poi il PRM);
+  8  GraphNav perso: riaggancio riuscito e si riprende; riaggancio fallito e il robot resta
+     fermo dov'e';
+  9  registrazione: naviga.csv, segments.csv, stato e immagine della mappa per --guarda, la
+     figura del visualizzatore; obiettivo «casa» da esegui_obiettivi;
   4  scelta dell'obiettivo con un clic (SceltaConClic), con eventi finti al posto del mouse:
      punto giusto, percorso subito, conferma con Invio, clic ignorati fuori dalla mappa e
      senza conferma nessun obiettivo.
@@ -83,9 +89,10 @@ def mappa_dal_mondo(world, start_xy, start_yaw):
     cfg = dict(name='finta', origin=(ox, oy), yaw=start_yaw - T_VERA.th, rows=5, cols=5, cell=2.0,
                spacing=0.5, sampling='reticolo', min_edge=0.5, max_edge=1.25,
                distribution=None, density=None, seed=None)
-    # Waypoint GraphNav ogni 1.5 m sul libero, orientati a caso (nel frame vecchio).
+    # wp_0 sulla posa di partenza, come in missione; poi waypoint GraphNav ogni 1.5 m sul
+    # libero, orientati a caso (nel frame vecchio).
     rng = np.random.default_rng(3)
-    wps = {}
+    wps = {'id0': dict(name='wp_0', x=ox, y=oy, yaw=start_yaw - T_VERA.th)}
     for x in np.arange(1.0, ext - 0.5, 1.5):
         for y in np.arange(1.0, ext - 0.5, 1.5):
             if world.od_at(x, y) > 0.5:
@@ -102,8 +109,16 @@ class FakeGraphNav:
 
     def __init__(self, wps):
         self.wps = wps
+        self.n = 0                 # letture fatte
+        self.perso_da = None       # dalla lettura n in poi: robot perso
+        self.perso_per = None      # per quante letture (None = per sempre)
 
     def get_localization_state(self):
+        self.n += 1
+        if (self.perso_da is not None and self.n >= self.perso_da
+                and (self.perso_per is None or self.n < self.perso_da + self.perso_per)):
+            return NS(localization=NS(waypoint_id='', waypoint_tform_body=None),
+                      lost_detector_state=NS(is_lost=True))
         ox, oy = _vecchio_da_nuovo(T.ROBOT.x, T.ROBOT.y)
         oyaw = T.ROBOT.yaw - T_VERA.th
         wid = min(self.wps, key=lambda k: np.hypot(self.wps[k]['x'] - ox, self.wps[k]['y'] - oy))
@@ -136,6 +151,7 @@ def navigatore(mappa, aggiorna=True):
     nav.tracker._fresh_snapshot = _snapshot
     nav.local_grid = T.FakeLocalGrid()
     nav._init_mappe(aggiorna=aggiorna)
+    nav._init_sessione(None)
     return nav
 
 
@@ -246,6 +262,110 @@ def main():
         sc2._clic(NS(inaxes=sc2.ax, button=1, xdata=2.0, ydata=2.0))
     sc2._tasto(NS(key='escape'))
     check(sc2.scegli() is None, "Esc: nessun obiettivo")
+    with contextlib.redirect_stdout(io.StringIO()):
+        sc3 = nm.SceltaConClic(mappa, da)
+    sc3._tasto(NS(key='h'))
+    check(sc3.scegli() == nm.CASA, "h: torna a casa")
+    check(nm._obiettivo_da_testo(mappa, 'casa') == nm.CASA and nm._obiettivo_da_testo(mappa, 'c 1,2')[1]
+          == "centro della cella (1,2)", "da terminale: «casa» e «c R,C»")
+
+    # 7. Batteria scarica a meta' strada.
+    print("\n=== 7 batteria scarica ===")
+    av.OBSTACLE_HISTORY.reset()
+    mappa = mappa_dal_mondo(T.World(muro, ghosts=False), (1.5, 1.5), 0.0)
+    T.WORLD, T.ROBOT = T.World(muro, ghosts=False), T.Robot(1.5, 1.5, 0.0)
+    nav = navigatore(mappa)
+
+    class FakeBatteria:
+        soglia_pct = 30.0
+        n = 0
+
+        def controlla(self, where=None):
+            self.n += 1
+            return self.n > 12
+    nav._init_sessione(None, batteria=FakeBatteria())
+    gn_chiamato = []
+    nav._graphnav_a_wp0 = lambda: gn_chiamato.append(1) and False
+    args = NS(clic=False, interattivo=False, senza_ripiego=True, torna_alla_fine=False)
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        nav.aggiorna_trasformazione("prova")
+        ok = nm.esegui_obiettivi(nav, mappa, args, [(_vecchio_da_nuovo(9.0, 2.0), "lontano")])
+    log = out.getvalue()
+    d_casa = float(np.hypot(T.ROBOT.x - 1.5, T.ROBOT.y - 1.5))
+    check(not ok and 'Batteria sotto la soglia' in log, "obiettivo interrotto dalla batteria")
+    check(gn_chiamato == [1], "ritorno provato prima con GraphNav")
+    check(d_casa < 0.8 and nav.fase == 'arrivato', f"poi col PRM: a casa, a {d_casa:.2f} m da wp_0")
+    check(not nav.in_ritorno and nav.batteria.n <= 14,
+          f"durante il ritorno la batteria non lo interrompe ({nav.batteria.n} letture)")
+
+    # 8. GraphNav perso.
+    print("\n=== 8 GraphNav perso ===")
+    for fix, nome in ((True, "riaggancio riuscito"), (False, "riaggancio fallito")):
+        av.OBSTACLE_HISTORY.reset()
+        mappa = mappa_dal_mondo(T.World([], ghosts=False), (1.5, 1.5), 0.0)
+        T.WORLD, T.ROBOT = T.World([], ghosts=False), T.Robot(1.5, 1.5, 0.0)
+        nav = navigatore(mappa)
+        with contextlib.redirect_stdout(io.StringIO()):
+            nav.aggiorna_trasformazione("prova")
+        nav.gn.perso_da = nav.gn.n + 6
+        tentativi, comandi_al_riaggancio = [], []
+
+        def riaggancia(nav=nav, fix=fix):
+            tentativi.append(1)
+            comandi_al_riaggancio.append(T.ROBOT.commands)
+            if fix:
+                nav.gn.perso_da = None
+            return fix
+        nav._riaggancia = riaggancia
+        nav._riaggancia_fiducial = lambda: False
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            ok = nav.vai(_vecchio_da_nuovo(9.0, 1.5), "dritto", ripiego_graphnav=False)
+        if fix:
+            check(ok and tentativi, f"{nome}: arrivato ({len(tentativi)} riagganci)")
+        else:
+            check(not ok and nav.motivo_fine == 'perso' and nav.fase == 'perso',
+                  f"{nome}: obiettivo abbandonato, motivo 'perso'")
+            check(T.ROBOT.commands == comandi_al_riaggancio[0],
+                  f"{nome}: nessun movimento dopo la perdita ({T.ROBOT.commands} comandi in tutto)")
+            check('PERSO' in out.getvalue() and 'resta fermo' in out.getvalue(), f"{nome}: detto nel log")
+
+    # 9. Registrazione, visualizzatore, obiettivo «casa».
+    print("\n=== 9 registrazione e casa ===")
+    import os, json, tempfile, registro
+    tmp = tempfile.mkdtemp(prefix="naviga_log_")
+    registro.MISSION_CTX['log_folder'] = tmp
+    registro.MISSION_CTX['segment_log'] = registro.SegmentLog(os.path.join(tmp, 'segments.csv'))
+    try:
+        av.OBSTACLE_HISTORY.reset()
+        mappa = mappa_dal_mondo(T.World(muro, ghosts=False), (1.5, 1.5), 0.0)
+        T.WORLD, T.ROBOT = T.World(muro, ghosts=False), T.Robot(9.0, 2.0, np.pi)
+        nav = navigatore(mappa)
+        nav._init_sessione(tmp)
+        args = NS(clic=False, interattivo=False, senza_ripiego=True, torna_alla_fine=False)
+        with contextlib.redirect_stdout(io.StringIO()):
+            nav.aggiorna_trasformazione("prova")
+            ok = nm.esegui_obiettivi(nav, mappa, args, [nm.CASA])
+        d_casa = float(np.hypot(T.ROBOT.x - 1.5, T.ROBOT.y - 1.5))
+        check(ok and d_casa < 0.8, f"«casa»: da (9, 2) a wp_0, arrivato a {d_casa:.2f} m")
+        righe = open(os.path.join(tmp, 'naviga.csv')).read().splitlines()
+        segm = open(os.path.join(tmp, 'segments.csv')).read().splitlines()
+        check(len(righe) > 10 and len(segm) > 5, f"naviga.csv {len(righe) - 1} righe, segments.csv {len(segm) - 1} tratti")
+        st = json.load(open(os.path.join(tmp, 'naviga_stato.json')))
+        check(st['fase'] == 'arrivato' and np.hypot(*st['robot'][:2]) < 0.8,
+              f"stato: fase {st['fase']}, robot in ({st['robot'][0]:.2f}, {st['robot'][1]:.2f}) del frame "
+              f"della missione (casa = 0, 0)")
+        info = json.load(open(os.path.join(tmp, 'naviga_info.json')))
+        check(np.hypot(*info['wp0']) < 1e-6 and len(info['waypoint']) == len(mappa.ng['wp']),
+              "info: wp_0 nell'origine del frame della missione, tutti i waypoint")
+        png = os.path.join(tmp, 'guarda.png')
+        with contextlib.redirect_stdout(io.StringIO()):
+            nm.Guarda(tmp).png(png)
+        check(os.path.exists(os.path.join(tmp, 'naviga_mappa.npz')) and os.path.getsize(png) > 10000,
+              "visualizzatore: immagine della mappa scritta e figura disegnata")
+    finally:
+        registro.MISSION_CTX['log_folder'] = None
+        registro.MISSION_CTX['segment_log'] = None
+    print(f"  (figura del visualizzatore: {png})")
 
     # 5. Le trasformazioni: andata e ritorno.
     t = nm.Trasformazione2D.da_pose((3.0, 4.0, 1.0), (1.0, -2.0, 0.3))
