@@ -8,6 +8,13 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-06 (a cell is done when it is seen)
+
+- **The cruise hands off as soon as the target cell is seen for 90%** (`attempt_cruise.CHAIN_ON_SEEN`, with `cell_attempt.CELL_SEEN_EXPLORED` and `CELL_SEEN_FRACTION`): the planning thread computes at every cycle how much of the cell the global map has seen (`CruisePlanner.seen_cell`, plan `cell_seen`, in the `[CRUISE] Plan` lines as `cell seen N%`), and at the threshold the cell is done wherever the robot is; the arrival at the goal keeps counting as before. User's rule: the cell exists to be seen, the goal is only where to see it from. Stat `cruise_seen_handoffs`.
+- **A cell visited from outside gets no GraphNav waypoint of its own** (`Mission._on_visited`): waypoint and robot cell of the grid only if the robot is in the cell or within `ARRIVAL_OUTSIDE_CELL_M`; before, the waypoint was made where the robot was, labelled with the cell, and `update_position` marked the cell the robot was in as visited.
+- `test_cruise`: scenario "open field, two cells: the cell is done when seen" (threshold 50% there: cells of 5 m, scan window 3.84 m). The "box appears" scenario fails in about half of the runs, also before today's changes (first run of the morning): to look at.
+- `tools/bench_edges.py --b-radius window`: the refresh over the whole scan window instead of 1.25 m costs 35.4 ms median on the laptop (19.6 with the radius), on the 349 cycles of 04-11.
+
 ## 2026-11-06 (continuous motion, step B: no scan at the start of a chained attempt)
 
 - **The attempt that starts with the robot still walking reuses the last scan of the cruise** (`attempt_cruise.CHAIN_REUSE_SCAN`, `CHAIN_SCAN_MAX_AGE_S` = 2 s, `attempt_scan._chained_scan`): already processed and in the global maps, with the robot pose of now; no download, processing and folding of a new scan. It serves the graph update and the goal choice; the first move still waits for the fresh scan and frontier of the first turn. Log `[ATTEMPT] Scan of the cruise reused`, stat `chained_scans_reused`. Why: on 04-11 16:52 (CORE I/O) that scan cost ~0.5-1 s of the 4.1-4.7 s hand-offs, on data 0.4 s newer than those the cruise had just put in the maps. First step towards the motion without stops (B: no work done twice; C: the next cell prepared in the planning thread while walking). In `test_cruise` the biggest piece of the hand-off is now the graph update of the attempt start (0.75-1.4 s there, ~0.4 s on the CORE).

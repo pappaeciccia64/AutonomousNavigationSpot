@@ -99,9 +99,17 @@ class Mission:
 
     def _on_visited(self, row, col, x, y):
         """Cell (row, col) visited with the robot at (x, y): GraphNav waypoint of the cell and
-        new candidates around it."""
-        self.env.update_position(x, y)
-        self.recordingInterface.create_default_waypoint(cell_row=row, cell_col=col)
+        new candidates around it. The waypoint (and the robot cell of the grid) only if the
+        robot is in the cell or within ARRIVAL_OUTSIDE_CELL_M of it: a cell seen from afar
+        (cell seen at the attempt start, or in cruise, see attempt_cruise.CHAIN_ON_SEEN) gets
+        no waypoint of its own, and the cell the robot is in is not marked visited for it."""
+        border = cells.cell_border_distance(self.env, row, col, x, y)
+        if border is not None and -border <= P.ARRIVAL_OUTSIDE_CELL_M:
+            self.env.update_position(x, y)
+            self.recordingInterface.create_default_waypoint(cell_row=row, cell_col=col)
+        else:
+            print(f"[VISITED] Cell ({row},{col}) seen from {-border:.1f} m outside: no GraphNav "
+                  f"waypoint of its own.")
         HANDOFF.mark("waypoint of the visited cell")
         self.env.mark_cell_visited(row, col)
         self._last_visited = (int(row), int(col))

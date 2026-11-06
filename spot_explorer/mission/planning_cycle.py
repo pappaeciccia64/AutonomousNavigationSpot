@@ -20,6 +20,7 @@ import numpy as np
 from bosdyn.client.frame_helpers import BODY_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b
 
 from spot_explorer import config as P
+from spot_explorer.mission import cells
 from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
 from spot_explorer.perception import spot_grid
@@ -254,6 +255,9 @@ class CruisePlanner:
         self._bundle_xy = None
         self._bundle_why = None          # (frontier reason, time) of the last bundle saved
         self.bundle_seq = 0              # added to the cycle number in the bundle names
+        # (env, row, col) of the target cell: every plan says how much of it the global map
+        # has seen ('cell_seen', see cells.cell_seen_fraction). None = not computed.
+        self.seen_cell = None
         # Times of the cycle, for the log: seconds per phase (PHASES) of every cycle, and the
         # interval between the acquisition times of two consecutive Spot grids (0 = the same
         # grid read again: the cycle was faster than Spot's update).
@@ -329,6 +333,8 @@ class CruisePlanner:
         path_len = float(sum(np.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(polyline, polyline[1:])))
         self._save_bundle(scan, snap, robot, polyline, remainder, next_id, frontier, advance, confirmed)
         terrain = self._terrain(confirmed, remainder)
+        cell_seen = (cells.cell_seen_fraction(self.seen_cell[0], self.global_map, *self.seen_cell[1:])
+                     if self.seen_cell is not None and self.global_map is not None else None)
         ph['other'] = time.perf_counter() - t
         for k, v in ph.items():
             self.phase_s[k].append(v)
@@ -336,7 +342,7 @@ class CruisePlanner:
                     frontier=frontier, advance=advance, confirmed=confirmed, replanned=replanned,
                     turn_stop=turn_stop, terrain=terrain,
                     to_goal=(turn_stop is None and advance >= path_len - 0.01),
-                    edges=getattr(self.prm, 'cycle_counts', None),
+                    edges=getattr(self.prm, 'cycle_counts', None), cell_seen=cell_seen,
                     phases=ph, grid_dt=grid_dt, cycle_s=time.perf_counter() - t0)
 
     def timing_summary(self):

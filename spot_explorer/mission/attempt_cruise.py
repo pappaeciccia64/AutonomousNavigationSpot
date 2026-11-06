@@ -82,6 +82,10 @@ CRUISE_HANDOFF_M = 1.0
 # with its processing and maps cost ~0.5-1 s of the 4.1-4.7 s hand-offs, on data 0.4 s newer
 # than those the cruise had just put in the maps.
 CHAIN_REUSE_SCAN = True
+# The cruise also hands off as soon as the target cell is seen for at least
+# cell_attempt.CELL_SEEN_FRACTION in the global map (with CELL_SEEN_EXPLORED), wherever the
+# robot is: the cell exists to be seen, the goal is only where to see it from (06-11).
+CHAIN_ON_SEEN = True
 CHAIN_SCAN_MAX_AGE_S = 2.0
 # Gait in cruise: back to a lighter level only after the plans have asked for it this long
 # (04-11 14:08: 239 changes in 20 min, one every 5 s, without it).
@@ -114,6 +118,12 @@ def stop_if_moving(env, command_client, reason):
     pc.stop(reason)
     CruiseSteps._cruise_settle(pc)
     _close_track(env)
+
+
+def cell_attempt_seen_fraction():
+    """cell_attempt.CELL_SEEN_FRACTION (imported here: cell_attempt imports this module)."""
+    from spot_explorer.mission import cell_attempt
+    return cell_attempt.CELL_SEEN_FRACTION
 
 
 def _close_track(env):
@@ -230,6 +240,7 @@ class CruiseSteps:
         planner = planning_cycle.CruisePlanner(self.local_grid, self.global_grid, self.prm_graph,
                                                self.robot_state_client, self.goal_id, ids)
         planner.bundle = self._cruise_bundle_info()
+        planner.seen_cell = self._seen_cell()
         # First stretch: the one confirmed by the frontier of this turn, with the same corner
         # check the planner will make.
         adv, turn_stop = planner._turns_within(self.polyline, ids[1:],
@@ -376,6 +387,7 @@ class CruiseSteps:
                          if plan.get('phases') else "")
                       + (f", Spot grid +{plan['grid_dt']:.2f} s" if plan.get('grid_dt') is not None else "")
                       + f", robot at {100 * r['deviation']:.0f} cm from the line"
+                      + (f", cell seen {100 * plan['cell_seen']:.0f}%" if plan.get('cell_seen') is not None else "")
                       + (" | edges: slopes {0} recomputed, {1} kept, {2} untouched, {3} out (live scan)".format(*plan['edges'])
                          + (f", {plan['edges'][4]} nodes pruned" if plan['edges'][4] else "")
                          if plan.get('edges') else ""))
@@ -394,6 +406,20 @@ class CruiseSteps:
                 to_go = (sum(float(np.hypot(b[0] - a[0], b[1] - a[1]))
                              for a, b in zip(plan['polyline'], plan['polyline'][1:]))
                          - _along(plan['polyline'], rx, ry))
+                # Or the cell already seen enough (CELL_SEEN_FRACTION of it in the global map),
+                # wherever the robot is: the cell exists to be seen (06-11).
+                seen = plan.get('cell_seen')
+                if (CHAIN_CELLS and CHAIN_ON_SEEN and seen is not None
+                        and seen >= cell_attempt_seen_fraction()):
+                    reason, handoff = (f"cell seen {100 * seen:.0f}% (threshold "
+                                       f"{100 * cell_attempt_seen_fraction():.0f}%), {to_go:.2f} m from "
+                                       f"the goal: next cell while walking"), True
+                    pc.send(plan['confirmed'][1:], hold_s=None, **self._cruise_gait(plan['terrain']))
+                    n_sends += 1
+                    self.env._handoff_t = time.time()
+                    MISSION_STATS['cruise_seen_handoffs'] = MISSION_STATS.get('cruise_seen_handoffs', 0) + 1
+                    HANDOFF.start("hand-off (end of the cruise -> first command of the next move)")
+                    break
                 if CHAIN_CELLS and self.env.is_point_in_cell(rx, ry, self.target_row, self.target_col):
                     if plan['to_goal'] and to_go <= CRUISE_HANDOFF_M:
                         why = f"{to_go:.2f} m from the goal"
@@ -462,6 +488,14 @@ class CruiseSteps:
             return STOP
         return outcome
 
+    def _seen_cell(self):
+        """(env, row, col) of the target cell for the planner's 'cell_seen', None if the seen
+        rule is off."""
+        from spot_explorer.mission import cell_attempt
+        if not (CHAIN_ON_SEEN and cell_attempt.CELL_SEEN_EXPLORED):
+            return None
+        return (self.env, self.target_row, self.target_col)
+
     def _cruise_repick(self, planner, plan):
         """
         The goal is isolated (no path from the next node): new goal in the cell while the robot
@@ -497,6 +531,7 @@ class CruiseSteps:
         new_planner = planning_cycle.CruisePlanner(self.local_grid, self.global_grid, self.prm_graph,
                                                    self.robot_state_client, self.goal_id, ids)
         new_planner.bundle = self._cruise_bundle_info()
+        new_planner.seen_cell = self._seen_cell()
         # Its bundles go on numbering from those of the previous planner (same attempt turn):
         # from 1 again they overwrote them (04-11 14:08, cell (0,2)).
         new_planner.bundle_seq = planner.bundle_seq + planner.cycles

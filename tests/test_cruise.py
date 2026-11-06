@@ -233,6 +233,21 @@ def main():
     check(len(big) >= 1, f"big turn towards the next cell without stopping first ({len(big)})")
     check(r['clear'] >= clear_min, f"centre at least {clear_min:.2f} m from the wall ({r['clear']:.2f})")
 
+    # The cell counts as explored as soon as the global map has seen 90% of it, wherever the
+    # robot is (attempt_cruise.CHAIN_ON_SEEN, 06-11): open field, two cells in a row. The cells
+    # here are 5 m and the scan window 3.84 m: before arriving the robot sees ~55% of the cell,
+    # so the threshold is 50% here (90% in the mission, cells of 2 m).
+    cell_attempt.CELL_SEEN_EXPLORED, frac0 = True, cell_attempt.CELL_SEEN_FRACTION
+    cell_attempt.CELL_SEEN_FRACTION = 0.50
+    try:
+        r = run("open field, two cells: the cell is done when seen", [], (2.0, 2.0, 0.785), [(0, 1), (1, 1)])
+    finally:
+        cell_attempt.CELL_SEEN_EXPLORED, cell_attempt.CELL_SEEN_FRACTION = False, frac0
+    seen_ends = [e for e in r['ends'] if e.startswith('cell seen')]
+    check(r['oks'] == [True, True], f"two cells done ({r['oks']})")
+    check(len(seen_ends) >= 1, f"hand-off because the cell is seen ({r['ends']})")
+    check("cell seen" in r['log'] and "[CRUISE] Plan" in r['log'], "the [CRUISE] Plan lines give the share seen")
+
     # The robot falls halfway (recoverable): the cruise ends at once, the stop-and-go gets it up.
     fall = {'done': False, 'xy': None}
 

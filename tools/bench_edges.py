@@ -44,6 +44,8 @@ from spot_explorer.planning import edge_evaluation, roadmap, safe_frontier   # n
 # test_replay turns the incremental refresh off for its reference: here as in the mission.
 edge_evaluation.INCREMENTAL_REFRESH = True
 
+RADIUS0 = edge_evaluation.REFRESH_RADIUS_M
+
 # Pieces of refresh_local_edge_weights timed one by one (methods of the PRM).
 PIECES = ['_refresh_nodes', '_refresh_pairs', '_sync_global_slope_cache', '_occupancy_blocked_many',
           '_prefill_global_slope_nodata', '_reusable_profiles', 'precompute_arc_slopes',
@@ -101,7 +103,7 @@ def first_difference(sa, sb):
     return None
 
 
-def replay(name, max_scans=None):
+def replay(name, max_scans=None, b_radius='same'):
     m = R.mission_setup(name)
     if m is None:
         print(f"{name}: no scans or log on this PC")
@@ -141,6 +143,7 @@ def replay(name, max_scans=None):
             p, gm_, tm_ = side[k]
             label[0] = k
             edge_evaluation.FAST_REFRESH = (k == 'B')
+            edge_evaluation.REFRESH_RADIUS_M = (b_radius if k == 'B' and b_radius != 'same' else RADIUS0)
             with R._quiet():
                 R.feed_scan(a, p, gm_, tm_)
                 node = int(d['robot_node_id']) if int(d['robot_node_id']) in p.nodes else \
@@ -167,6 +170,7 @@ def replay(name, max_scans=None):
                     first_diff = f"{os.path.basename(f)}: {diff}"
         prev_it, prev_node = it, new_node
     edge_evaluation.FAST_REFRESH = True
+    edge_evaluation.REFRESH_RADIUS_M = RADIUS0
     return n_cmp, n_diff, first_diff, len(prm.nodes)
 
 
@@ -189,11 +193,15 @@ def main():
     p = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     p.add_argument('--missions', nargs='+', default=['04-11-2026_16-52-30'])
     p.add_argument('--max-scans', type=int, default=None)
+    p.add_argument('--b-radius', default='same',
+                   help="refresh radius of the NEW side only, in m, or 'window' (all the scan window): "
+                        "the states then differ on purpose, the times are what counts")
     a = p.parse_args()
     bad = 0
     for name in a.missions:
         t0 = time.perf_counter()
-        r = replay(name, a.max_scans)
+        br = a.b_radius if a.b_radius == 'same' else (None if a.b_radius == 'window' else float(a.b_radius))
+        r = replay(name, a.max_scans, br)
         if r is None:
             continue
         n_cmp, n_diff, first, n_nodes = r
