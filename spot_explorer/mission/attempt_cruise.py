@@ -74,6 +74,15 @@ CHAIN_CELLS = True              # from a cell goal to the next cell without stop
 # Distance from the goal at which the next cell is chosen: the robot walks it while the next
 # attempt is computed. With 0.6 m (~2 s) it stood still at 46 hand-offs out of 58 on 04-11 14:08.
 CRUISE_HANDOFF_M = 1.0
+# The attempt that starts with the robot still walking (CHAIN_CELLS) uses the last scan of the
+# cruise, already processed and in the global maps, instead of downloading and processing a
+# new one (attempt_scan._first_scan), if it is at most CHAIN_SCAN_MAX_AGE_S old. It serves
+# the graph update and the goal choice; the first move still waits for the fresh scan and
+# frontier of the first turn. Why: on 04-11 16:52 (CORE I/O) the scan at the attempt start
+# with its processing and maps cost ~0.5-1 s of the 4.1-4.7 s hand-offs, on data 0.4 s newer
+# than those the cruise had just put in the maps.
+CHAIN_REUSE_SCAN = True
+CHAIN_SCAN_MAX_AGE_S = 2.0
 # Gait in cruise: back to a lighter level only after the plans have asked for it this long
 # (04-11 14:08: 239 changes in 20 min, one every 5 s, without it).
 GAIT_DOWN_HOLD_S = 2.0
@@ -429,6 +438,9 @@ class CruiseSteps:
                                    f"{self.loop_iter:03d}_{time.strftime('%H-%M-%S')}",
                                    extra={'reason': reason})
             tracker.stop_planning()
+            # The last scan of the cruise, for the next attempt (CHAIN_REUSE_SCAN).
+            self.env._chain_scan = ((planner.last_scan, time.time())
+                                    if handoff and planner.last_scan is not None else None)
             if crumb is not None:
                 crumb.join(timeout=5.0)
             self.env._moving_track = (recorder, (self.target_x, self.target_y),

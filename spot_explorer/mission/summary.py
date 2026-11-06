@@ -44,6 +44,7 @@ def mission_switches():
         'motion.PATH_COMMAND_FOR_LEGS': motion.PATH_COMMAND_FOR_LEGS,
         'attempt_cruise.CONTINUOUS_MOTION': attempt_cruise.CONTINUOUS_MOTION,
         'attempt_cruise.CHAIN_CELLS': attempt_cruise.CHAIN_CELLS,
+        'attempt_cruise.CHAIN_REUSE_SCAN': attempt_cruise.CHAIN_REUSE_SCAN,
         'config.PLAN_ONLY_EXPLORED_CELLS': P.PLAN_ONLY_EXPLORED_CELLS,
         'mission_prm.PLAN_ALSO_SHARED_NEIGHBOUR_CELLS': mission_prm.PLAN_ALSO_SHARED_NEIGHBOUR_CELLS,
         'cell_attempt.CELL_SEEN_EXPLORED': cell_attempt.CELL_SEEN_EXPLORED,

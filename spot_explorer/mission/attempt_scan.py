@@ -8,6 +8,7 @@ from bosdyn.client.frame_helpers import BODY_FRAME_NAME, VISION_FRAME_NAME, get_
 from spot_explorer.graphnav import map_recording
 from spot_explorer.robot import motion
 from spot_explorer.robot import photos
+from spot_explorer.robot import connection
 from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
 from spot_explorer.perception import spot_grid
@@ -20,6 +21,7 @@ from spot_explorer.records import (HANDOFF, MISSION_STATS, MISSION_CTX, save_npz
 from spot_explorer.planning import goal
 from spot_explorer.mission import recovery
 from spot_explorer.mission import planning_cycle
+from spot_explorer.mission import attempt_cruise
 from spot_explorer.mission.attempt_common import STOP, FAILED
 
 # The global maps on disk (global_occupancy_map.pkl, global_terrain_map.pkl in the mission
@@ -65,6 +67,10 @@ class ScanSteps:
                                    self.global_grid.global_occupancy_map, "at the start of the attempt") is not None:
             recovery.retreat_along_traveled_path(self.env, self.robot_state_client, self.command_client,
                                         mobility_kwargs=self.mobility_kwargs)
+
+        reused = self._chained_scan()
+        if reused is not None:
+            return reused
 
         # 1. The scan: the layers in one request, then (below) their processing
         scan = self.local_grid.fetch_scan(self.robot_state_client)
@@ -117,6 +123,34 @@ class ScanSteps:
         HANDOFF.mark("global maps")
 
         # Global maps on disk (.pkl): at most every MAPS_SAVE_EVERY_S
+        save_global_maps(self.global_grid, self.mission_folder)
+        HANDOFF.mark("maps on disk")
+        return scan
+
+    def _chained_scan(self):
+        """
+        attempt_cruise.CHAIN_REUSE_SCAN: robot still walking after a hand-off and the last scan
+        of the cruise at most CHAIN_SCAN_MAX_AGE_S old -> that scan (already processed and in
+        the global maps), with the robot pose of NOW (the robot kept walking). None otherwise.
+        """
+        reuse = getattr(self.env, '_chain_scan', None)
+        if (not attempt_cruise.CHAIN_REUSE_SCAN or reuse is None
+                or getattr(self.env, '_moving_pc', None) is None or self.global_grid.global_occupancy_map is None):
+            return None
+        scan, t_scan = reuse
+        age = time.time() - t_scan
+        if age > attempt_cruise.CHAIN_SCAN_MAX_AGE_S:
+            return None
+        self.global_map = self.global_grid.global_occupancy_map
+        self.global_terrain_map = self.global_grid.global_terrain_map
+        x, y, z, quat = connection.getPosition(self.robot_state_client)
+        self.robot_x, self.robot_y, self.robot_z = x, y, z
+        self.robot_yaw = np.arctan2(2.0 * (quat.w * quat.z + quat.x * quat.y), 1.0 - 2.0 * (quat.y ** 2 + quat.z ** 2))
+        self.prm_graph.set_global_terrain_map(self.global_terrain_map)
+        print(f"[ATTEMPT] Scan of the cruise reused ({age:.1f} s old, already in the maps): no new scan "
+              f"at the start of the attempt.")
+        MISSION_STATS['chained_scans_reused'] = MISSION_STATS.get('chained_scans_reused', 0) + 1
+        HANDOFF.mark("scan of the cruise reused")
         save_global_maps(self.global_grid, self.mission_folder)
         HANDOFF.mark("maps on disk")
         return scan
