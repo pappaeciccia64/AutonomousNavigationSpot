@@ -56,6 +56,10 @@ REFRESH_BATCH_SLOPES = True
 # and weight), it is not touched at all. False = every edge of the radius from scratch.
 # 03-11, end-to-end test: the slopes were 34% of the 190 ms of a refresh.
 INCREMENTAL_REFRESH = True
+
+# FAST REFRESH (06-11): the same refresh with the fixed costs cut (see tools/bench_edges.py,
+# which checks the result identical to the bit on the real scans). False = the code before.
+FAST_REFRESH = True
 REFRESH_COVERAGE_GAIN = 0.15
 REFRESH_CLOSER_M = 0.5
 
@@ -95,6 +99,27 @@ class _LiveEval:
         self.prof, self.valid, self.weight = prof, valid, weight
 
 
+class _SlopeCache(dict):
+    """The global slope cache (dict edge -> profile) that remembers the keys added since the
+    last look (new_keys): FAST_REFRESH indexes every edge once, when it enters, instead of
+    rebuilding the arrays of all the keys at every cycle (see _sync_global_slope_cache)."""
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.new_keys = list(self.keys())
+        self.cleared = True
+
+    def __setitem__(self, key, value):
+        if key not in self:
+            self.new_keys.append(key)
+        super().__setitem__(key, value)
+
+    def clear(self):
+        super().clear()
+        self.new_keys = []
+        self.cleared = True
+
+
 class EdgeEvaluation:
     """Mixin of roadmap.PRM: occupancy, slope and weight of the edges."""
 
@@ -119,7 +144,7 @@ class EdgeEvaluation:
         self.global_terrain_map = None
         # Cache of the slope from the global map, per edge: an entry stays valid as long as the
         # map does not change near the edge (see _sync_global_slope_cache).
-        self._gslope_cache = {}
+        self._gslope_cache = _SlopeCache()
         self._gslope_map_id = None
         self._gslope_seen_updates = 0
 
@@ -233,6 +258,13 @@ class EdgeEvaluation:
         xy1 = np.array([self.nodes[p[0]] for p in pairs], dtype=np.float64)
         xy2 = np.array([self.nodes[p[1]] for p in pairs], dtype=np.float64)
         d = np.array([p[2] for p in pairs], dtype=np.float64)
+        return self._live_blocked_xy(xy1, xy2, d)
+
+    def _live_blocked_xy(self, xy1, xy2, d):
+        """_live_blocked_many on the arrays of the ends (N, 2) and of the lengths (N)."""
+        out = np.zeros(len(d), dtype=bool)
+        if len(d) == 0 or self.live_obstacles is None or LIVE_PREFILTER_OD_M is None:
+            return out
         ns = np.maximum(OCCUPANCY_SAMPLES_MIN,
                         np.ceil(d * OCCUPANCY_SAMPLES_PER_M).astype(np.int64) + 1)
         for m in np.unique(ns):
@@ -258,6 +290,8 @@ class EdgeEvaluation:
         x0, y0 = lo['ox'], lo['oy']
         x1, y1 = x0 + nx * lo['cs'], y0 + ny * lo['cs']
         reach = self.max_edge_length
+        if FAST_REFRESH:
+            return self._live_prune_fast(skip_keys, x0, x1, y0, y1, reach)
         cand = []
         for a, nbrs in self.edges.items():
             xa, ya = self.nodes.get(a, (None, None))
@@ -284,6 +318,48 @@ class EdgeEvaluation:
             self._record_occupancy_veto((a, b))
             n += 1
         return n
+
+    def _live_prune_fast(self, skip_keys, x0, x1, y0, y1, reach):
+        """live_prune_valid_edges on the node arrays: the nodes near the window picked in one
+        go, lengths and samples on arrays (np.hypot as edge by edge: same numbers). The order
+        of the candidates does not change the outcome: every edge is judged on its own."""
+        ids, xy, _nb = self._node_arrays()
+        if not ids:
+            return 0
+        pos = self._node_pos()
+        near = np.nonzero((x0 - reach <= xy[:, 0]) & (xy[:, 0] <= x1 + reach)
+                          & (y0 - reach <= xy[:, 1]) & (xy[:, 1] <= y1 + reach))[0].tolist()
+        ia, ib = [], []
+        trav = self.traversed_edges
+        for i in near:
+            a = ids[i]
+            for b, _w in self.edges.get(a, ()):
+                if b <= a or (a, b) in skip_keys or (a, b) in trav:
+                    continue
+                ia.append(i)
+                ib.append(pos[b])
+        if not ia:
+            return 0
+        xy1, xy2 = xy[ia], xy[ib]
+        d = np.hypot(xy2[:, 0] - xy1[:, 0], xy2[:, 1] - xy1[:, 1])
+        flags = self._live_blocked_xy(xy1, xy2, d)
+        n = 0
+        for k in np.nonzero(flags)[0].tolist():
+            a, b = ids[ia[k]], ids[ib[k]]
+            self.edge_validity[(a, b)] = False
+            self.edges[a] = [(q, w) for q, w in self.edges.get(a, []) if q != b]
+            self.edges[b] = [(q, w) for q, w in self.edges.get(b, []) if q != a]
+            self._record_occupancy_veto((a, b))
+            n += 1
+        return n
+
+    def _node_pos(self):
+        """{node id: row in the node arrays} (see _node_arrays)."""
+        ids, _xy, nb = self._node_arrays()
+        pos = nb.get('pos')
+        if pos is None:
+            pos = nb['pos'] = {n: i for i, n in enumerate(ids)}
+        return pos
 
     def refresh_local_edge_weights(self, global_map=None, edge_safety_margin: float = 0.05):
         """
@@ -351,9 +427,22 @@ class EdgeEvaluation:
 
         return set(local_nodes)
 
+    def _node_arrays(self):
+        """FAST_REFRESH: (ids, xy) of all the nodes in the order of self.nodes, rebuilt only
+        when a node is added (roadmap.PRM.add_node: nodes_version); the nodes never move."""
+        key = (getattr(self, 'nodes_version', 0), len(self.nodes))
+        c = getattr(self, '_node_arrays_cache', None)
+        if c is None or c[0] != key:
+            ids = list(self.nodes.keys())
+            xy = np.array([self.nodes[i] for i in ids], dtype=np.float64) if ids else np.empty((0, 2))
+            c = self._node_arrays_cache = (key, ids, xy, {})
+        return c[1], c[2], c[3]
+
     def _refresh_nodes(self):
         """The nodes in the scan window and within REFRESH_RADIUS_M of the robot node (if unknown,
         of the centre of the window, which is the robot anyway)."""
+        if FAST_REFRESH:
+            return self._refresh_nodes_fast()
         num_rows, num_cols = self.current_grad_2d.shape
         center = None
         if REFRESH_RADIUS_M is not None:
@@ -373,9 +462,29 @@ class EdgeEvaluation:
             local_nodes.append(idx)
         return local_nodes
 
+    def _refresh_nodes_fast(self):
+        """_refresh_nodes on the node arrays: same test, same order."""
+        num_rows, num_cols = self.current_grad_2d.shape
+        ids, xy, _nb = self._node_arrays()
+        if not ids:
+            return []
+        col = np.floor((xy[:, 0] - self.grid_origin_x) / self.cell_size)
+        row = np.floor((xy[:, 1] - self.grid_origin_y) / self.cell_size)
+        keep = (row >= 0) & (row < num_rows) & (col >= 0) & (col < num_cols)
+        if REFRESH_RADIUS_M is not None:
+            if self.robot_node is not None and self.robot_node in self.nodes:
+                center = self.nodes[self.robot_node]
+            else:
+                center = (self.grid_origin_x + num_cols * self.cell_size / 2.0,
+                          self.grid_origin_y + num_rows * self.cell_size / 2.0)
+            keep &= ~(np.hypot(xy[:, 0] - center[0], xy[:, 1] - center[1]) > REFRESH_RADIUS_M)
+        return [ids[i] for i in np.nonzero(keep)[0]]
+
     def _refresh_pairs(self, local_nodes):
         """[(idx1, idx2, dist)]: every pair of nodes at edge distance with idx1 local, each
         pair once."""
+        if FAST_REFRESH:
+            return self._refresh_pairs_fast(local_nodes)
         local_set = set(local_nodes)
         all_ids = list(self.nodes.keys())
         all_xy = np.array([self.nodes[i] for i in all_ids], dtype=np.float64) if all_ids else np.empty((0, 2))
@@ -389,6 +498,30 @@ class EdgeEvaluation:
                 if idx2 == idx1 or (idx2 in local_set and idx2 < idx1):
                     continue           # local-local pair already considered from the other end
                 pairs.append((idx1, idx2, float(d_all[j])))
+        return pairs
+
+    def _refresh_pairs_fast(self, local_nodes):
+        """_refresh_pairs with the neighbours of every node computed once (same distances,
+        same order) and kept until a node is added."""
+        ids, xy, nb = self._node_arrays()
+        reach = min(self.connection_radius, self.max_edge_length)
+        lim = (self.min_edge_length, reach)
+        if nb.get('lim') != lim:
+            nb.clear()
+            nb['lim'] = lim
+        local_set = set(local_nodes)
+        pairs = []
+        for idx1 in local_nodes:
+            lst = nb.get(idx1)
+            if lst is None:
+                x1, y1 = self.nodes[idx1]
+                d_all = np.hypot(xy[:, 0] - x1, xy[:, 1] - y1)
+                js = np.nonzero((d_all >= self.min_edge_length) & (d_all <= reach))[0]
+                lst = nb[idx1] = [(ids[j], float(d_all[j])) for j in js]
+            for idx2, d in lst:
+                if idx2 == idx1 or (idx2 in local_set and idx2 < idx1):
+                    continue
+                pairs.append((idx1, idx2, d))
         return pairs
 
     def _reusable_profiles(self, pairs, occ_flags):
@@ -688,6 +821,9 @@ class EdgeEvaluation:
         self._gslope_seen_updates = len(rects)
         if not new or not self._gslope_cache:
             return
+        if FAST_REFRESH and isinstance(self._gslope_cache, _SlopeCache):
+            self._sync_global_slope_cache_fast(tm, new)
+            return
         keys = [k for k in self._gslope_cache if k[0] in self.nodes and k[1] in self.nodes]
         if len(keys) != len(self._gslope_cache):
             self._gslope_cache = {k: self._gslope_cache[k] for k in keys}
@@ -703,6 +839,53 @@ class EdgeEvaluation:
             stale |= (exmax >= rxmin) & (exmin <= rxmax) & (eymax >= rymin) & (eymin <= rymax)
         for j in np.nonzero(stale)[0]:
             del self._gslope_cache[keys[j]]
+
+    def _sync_global_slope_cache_fast(self, tm, new):
+        """
+        FAST_REFRESH: _sync_global_slope_cache with an index of the cached edges (key, box)
+        kept up to date as the keys enter the cache, instead of the arrays of all the keys
+        rebuilt at every cycle. Same boxes (same formula), same stale entries dropped.
+        """
+        cache = self._gslope_cache
+        if cache.cleared or getattr(self, '_gs_index_of', None) is not cache:
+            self._gs_index_of = cache
+            self._gs_keys, self._gs_box, self._gs_alive = [], np.empty((0, 4)), np.empty(0, dtype=bool)
+            cache.cleared = False
+        # The keys added since the last look: into the index (those whose nodes are no longer
+        # in the graph out of the cache, as in the old code).
+        if cache.new_keys:
+            add = []
+            for k in cache.new_keys:
+                if k not in cache:
+                    continue
+                if k[0] in self.nodes and k[1] in self.nodes:
+                    add.append(k)
+                else:
+                    dict.__delitem__(cache, k)
+            cache.new_keys = []
+            if add:
+                a = np.array([self.nodes[k[0]] for k in add]); b = np.array([self.nodes[k[1]] for k in add])
+                m = slopes.LATERAL_SLICE_HALF_WIDTH_M + 2 * tm.resolution + slopes.ARC_BODY_EXTENSION_M
+                box = np.column_stack([np.minimum(a[:, 0], b[:, 0]) - m, np.maximum(a[:, 0], b[:, 0]) + m,
+                                       np.minimum(a[:, 1], b[:, 1]) - m, np.maximum(a[:, 1], b[:, 1]) + m])
+                self._gs_keys.extend(add)
+                self._gs_box = np.vstack([self._gs_box, box])
+                self._gs_alive = np.concatenate([self._gs_alive, np.ones(len(add), dtype=bool)])
+        if not cache:
+            return
+        box, alive = self._gs_box, self._gs_alive
+        stale = np.zeros(len(alive), dtype=bool)
+        for (rxmin, rxmax, rymin, rymax) in new:
+            stale |= (box[:, 1] >= rxmin) & (box[:, 0] <= rxmax) & (box[:, 3] >= rymin) & (box[:, 2] <= rymax)
+        stale &= alive
+        for j in np.nonzero(stale)[0]:
+            dict.__delitem__(cache, self._gs_keys[j])
+        alive &= ~stale
+        # Compaction when most of the index is dead.
+        if len(alive) > 1024 and alive.sum() < len(alive) // 2:
+            keep = np.nonzero(alive)[0]
+            self._gs_keys = [self._gs_keys[j] for j in keep]
+            self._gs_box, self._gs_alive = box[keep], alive[keep]
 
     def _traversed_edge_ok(self, a, b, global_map) -> bool:
         """

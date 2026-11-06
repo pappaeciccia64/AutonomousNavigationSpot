@@ -142,6 +142,7 @@ class PRM(EdgeEvaluation, EdgeStats):
     def add_node(self, point_idx: int, x: float, y: float, gradient: float = 0.0, roughness: float = 0.0):
         """Add a node with its mean slope and roughness (used only as a last resort)."""
         self.nodes[point_idx] = (x, y)
+        self.nodes_version = getattr(self, 'nodes_version', 0) + 1   # caches of edge_evaluation
         self.node_gradients[point_idx] = gradient
         self.node_roughness[point_idx] = roughness
         self.edges[point_idx] = []
