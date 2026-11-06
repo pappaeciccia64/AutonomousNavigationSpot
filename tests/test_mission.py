@@ -588,6 +588,56 @@ def _check_start():
           "start in the centre: the robot is in the centre of (1,1), (0,0) behind to the right")
 
 
+def _check_seen_before_moving():
+    """
+    The case of 04-11 16:52: the robot stands in (1,3), which is already 93% in the global
+    map, and the mission would take it with GraphNav to the waypoint of (0,3) to find that
+    out. With SEEN_BEFORE_MOVING the cell is visited where it is (waypoint there, since the
+    robot is in it); a cell seen from afar is visited without a waypoint of its own; a cell
+    seen less than the threshold stays in the frontier.
+    """
+    print("\nCells already seen, before moving (04-11 16:52)")
+    from spot_explorer.mission import cells
+    from spot_explorer.perception import global_maps
+    env = cells.EnvironmentMap(rows=3, cols=4, cell_size=2.0)
+    gmap = global_maps.GlobalGrid(resolution=0.03)
+    with contextlib.redirect_stdout(io.StringIO()):
+        env.set_origin(0.0, 0.0, 0.0)
+        env.mark_cell_visited(0, 1)
+        # (1,1) all seen, (0,3) all seen (far), (1,0) half seen
+        for (r, c, part) in ((1, 1, 1.0), (0, 3, 1.0), (1, 0, 0.5)):
+            cx, cy = env.get_world_position_from_cell(r, c)
+            for gx in range(int(np.floor((cx - 1.0) / 0.03)), int(np.floor((cx - 1.0 + 2.0 * part) / 0.03))):
+                for gy in range(int(np.floor((cy - 1.0) / 0.03)), int(np.floor((cy + 1.0) / 0.03))):
+                    gmap._set_state((gx, gy), 1.0)
+    made = []
+    ri = NS(create_default_waypoint=lambda cell_row=None, cell_col=None: made.append((cell_row, cell_col)))
+    m = exploration.Mission.__new__(exploration.Mission)
+    m.env, m.recordingInterface, m.robot_state_client = env, ri, None
+    m.global_grid = NS(global_occupancy_map=gmap)
+    m.path = env.generate_visit_path('auto', start_cell=(0, 0))
+    m._last_visited = (0, 1)
+    rank = {cell: i for i, cell in enumerate(m.path)}
+    m.frontier = [(1, 1, rank[(1, 1)]), (0, 3, rank[(0, 3)]), (1, 0, rank[(1, 0)])]
+    T.ROBOT = T.Robot(2.3, 1.7, 0.0)              # inside (1,1), 0.3 m from its border
+    was = _cell_attempt.CELL_SEEN_EXPLORED
+    _cell_attempt.CELL_SEEN_EXPLORED = True
+    try:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            n = m._close_seen_cells()
+    finally:
+        _cell_attempt.CELL_SEEN_EXPLORED = was
+    log = out.getvalue()
+    check(n == 2 and env.map[1][1] == 1 and env.map[0][3] == 1 and env.map[1][0] == 0,
+          f"(1,1) and (0,3) visited without moving, (1,0) half seen still to do (closed {n})")
+    check(made == [(1, 1)], f"GraphNav waypoint only for the cell the robot is in: {made}")
+    check("the robot is in it" in log and "no GraphNav waypoint of its own" in log,
+          "the [SEEN] lines say where the robot is")
+    check(any(f[:2] == (1, 0) for f in m.frontier) and not any(f[:2] in ((1, 1), (0, 3)) for f in m.frontier),
+          f"frontier after: {[f[:2] for f in m.frontier]}")
+
+
 def _check_cell_choice():
     """
     The case of 28-10 13:50, 8 x 7 grid of 2 m: (7,2) was visited with the robot just
@@ -660,6 +710,7 @@ if __name__ == '__main__':
     _check_failures(r)
     shutil.rmtree(r['root'], ignore_errors=True)
     _check_start()
+    _check_seen_before_moving()
     _check_cell_choice()
     _check_emergency()
     print("\nWhole mission in world H: open area, the robot starts in the CENTRE of the grid.")

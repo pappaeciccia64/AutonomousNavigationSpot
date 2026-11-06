@@ -606,6 +606,8 @@ def cell_seen_fraction(env, global_map, row, col, step=0.05):
     c, s = np.cos(yaw), np.sin(yaw)
     xs = center[0] + U * c - V * s
     ys = center[1] + U * s + V * c
+    if hasattr(global_map, 'known_many'):
+        return float(np.mean(global_map.known_many(xs, ys)))
     res = global_map.resolution
     keys = zip(np.floor(xs.ravel() / res).astype(int).tolist(), np.floor(ys.ravel() / res).astype(int).tolist())
     grid = global_map.grid

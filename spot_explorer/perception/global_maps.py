@@ -467,6 +467,17 @@ class GlobalGrid:
         gy = int(np.floor(y / self.resolution))
         return (gx, gy) in self.grid
 
+    def known_many(self, xs, ys):
+        """is_known on many points together, same keys: from the state layer of the raster
+        (written only by _set_state, together with `grid`)."""
+        gx, gy = _keys(np.column_stack([np.ravel(xs), np.ravel(ys)]), self.resolution)
+        st, g = self._g.a['st'], self._g
+        i, j = gx - g.gx0, gy - g.gy0
+        inside = (i >= 0) & (i < st.shape[0]) & (j >= 0) & (j < st.shape[1])
+        out = np.zeros(gx.shape, dtype=bool)
+        out[inside] = st[i[inside], j[inside]] != 0
+        return out
+
     def save_map(self, file_path):
         """Save the global occupancy map to a pickle file."""
         with open(file_path, 'wb') as f:

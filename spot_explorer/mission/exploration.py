@@ -26,6 +26,15 @@ from spot_explorer.mission import recovery
 # THE MISSION: the cell-by-cell loop, start-up and closure
 # =========================================================================
 
+# Before moving towards a cell (GraphNav trip or attempt), the frontier cells already seen
+# for at least cell_attempt.CELL_SEEN_FRACTION in the global map are marked visited where
+# they are (only with cell_attempt.CELL_SEEN_EXPLORED). The GraphNav waypoint of the cell is
+# made only if the robot is in it (or just outside, ARRIVAL_OUTSIDE_CELL_M), as after an
+# attempt; a cell seen from afar gets none. Why: on 04-11 16:52 the robot, standing in (1,3)
+# and in (1,0), went with GraphNav to a neighbouring waypoint (9 s and 4 s) and only there
+# found the cells 93% and 100% seen: the check was made only at the start of the attempt.
+SEEN_BEFORE_MOVING = True
+
 
 class Mission:
     """The mission cell by cell, after start-up (see run.py).
@@ -179,6 +188,8 @@ class Mission:
                 print(f"[BATTERY] End of exploration for low battery: "
                       f"{len(self.frontier)} cells left in the frontier {[(f[0], f[1]) for f in self.frontier]}.")
                 break
+            if self._close_seen_cells() and len(self.frontier) == 0:
+                break
             robot_row, robot_col = self._robot_cell()
 
             borders = self.env.get_adjacent_frontier_cells(robot_row, robot_col, self.path)
@@ -211,6 +222,47 @@ class Mission:
         attempt_cruise.stop_if_moving(self.env, self.command_client, "end of the exploration")
         self._explain_end()
         self._log_progress(final=True)
+
+    def _close_seen_cells(self):
+        """SEEN_BEFORE_MOVING: the frontier cells already seen enough become visited without
+        moving, in rank order; the neighbours they add to the frontier are checked too.
+        Returns how many."""
+        if not (SEEN_BEFORE_MOVING and cell_attempt.CELL_SEEN_EXPLORED):
+            return 0
+        gmap = self.global_grid.global_occupancy_map
+        if gmap is None or not self.frontier:
+            return 0
+        x, y, _, _ = connection.getPosition(self.robot_state_client)
+        closed, changed = 0, True
+        while changed:
+            changed = False
+            for entry in sorted(self.frontier, key=lambda f: f[2]):
+                r, c = int(entry[0]), int(entry[1])
+                if self.env.map[r][c] != 0:
+                    continue
+                frac = cells.cell_seen_fraction(self.env, gmap, r, c)
+                if frac is None or frac < cell_attempt.CELL_SEEN_FRACTION:
+                    continue
+                border = cells.cell_border_distance(self.env, r, c, x, y)
+                here = border is not None and -border <= P.ARRIVAL_OUTSIDE_CELL_M
+                center = self.env.get_world_position_from_cell(r, c)
+                dist = float(np.hypot(center[0] - x, center[1] - y))
+                print(f"[SEEN] Cell ({r},{c}): {100 * frac:.0f}% of it already in the global map "
+                      f"(threshold {100 * cell_attempt.CELL_SEEN_FRACTION:.0f}%) before moving there: "
+                      f"explored without going, "
+                      + ("the robot is in it: its GraphNav waypoint here." if here else
+                         f"centre {dist:.1f} m from the robot: no GraphNav waypoint of its own."))
+                self.frontier.remove(entry)
+                if here:
+                    self._on_visited(r, c, x, y)
+                else:
+                    self.env.mark_cell_visited(r, c)
+                    self.frontier.extend(cells.find_new_borders(self.env, r, c, self.path, self.frontier))
+                MISSION_STATS['cells_seen_before_moving'] = MISSION_STATS.get('cells_seen_before_moving', 0) + 1
+                closed += 1
+                changed = True
+                break
+        return closed
 
     def _explain_end(self):
         """If exploration ends with cells not closed, an [END] line saying why (28-10 14:17:
