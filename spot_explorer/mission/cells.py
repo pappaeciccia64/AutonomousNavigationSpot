@@ -432,3 +432,23 @@ def find_new_borders(env, robot_row, robot_col, path, frontier):
             if new_border not in frontier and env.is_cell_visited(new_border[0], new_border[1]) != 1:
                 new_borders_cells.append(new_border)
     return new_borders_cells
+
+
+def cell_seen_fraction(env, global_map, row, col, step=0.05):
+    """Share of cell (row, col) already observed in the global map (free or occupied,
+    GlobalGrid.is_known), on a lattice of `step` in the rotated grid frame. None if the cell
+    does not exist."""
+    center = env.get_world_position_from_cell(row, col)
+    if center is None:
+        return None
+    h = env.cell_size / 2.0
+    u = np.arange(-h + step / 2.0, h, step)
+    U, V = np.meshgrid(u, u)
+    yaw = float(getattr(env, 'origin_yaw', 0.0))
+    c, s = np.cos(yaw), np.sin(yaw)
+    xs = center[0] + U * c - V * s
+    ys = center[1] + U * s + V * c
+    res = global_map.resolution
+    keys = zip(np.floor(xs.ravel() / res).astype(int).tolist(), np.floor(ys.ravel() / res).astype(int).tolist())
+    grid = global_map.grid
+    return float(np.mean([k in grid for k in keys]))

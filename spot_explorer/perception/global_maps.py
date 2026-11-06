@@ -1,6 +1,6 @@
 """Global maps accumulated over the whole mission: occupancy, free space, terrain."""
 import numpy as np
-from scipy.ndimage import binary_dilation
+from scipy.ndimage import binary_dilation, convolve
 import pickle
 from spot_explorer.perception.geometry import ROBOT_HALF_WIDTH_M
 from spot_explorer.perception.slopes import (LATERAL_SLICE_HALF_WIDTH_M, MIN_ARC_SAMPLE_FRACTION, _no_slope_data, _slope_profile_from_sampler, arc_slope_profiles_batch)
@@ -32,6 +32,92 @@ GLOBAL_OCC_CONFIRM_WALKED = 4
 CLEARANCE_NEAR_M = 1.0
 
 
+class _GrowRaster:
+    """
+    Arrays indexed [gx - gx0, gy - gy0] over the cells of a global map, grown (with
+    GROW_PAD_CELLS of margin) when a key falls outside: the maps keep their rasters up to
+    date cell by cell instead of rebuilding them from the dictionaries over the whole
+    explored area at every change (04-11 14:08: 0.32 s per planning cycle after 20 min).
+    layers: {name: (dtype, fill)}.
+    """
+    GROW_PAD_CELLS = 128
+
+    def __init__(self, layers):
+        self.layers = layers
+        self.gx0 = self.gy0 = 0
+        self.a = {k: np.full((0, 0), fill, dtype=dt) for k, (dt, fill) in layers.items()}
+
+    def ensure(self, gxmin, gxmax, gymin, gymax):
+        """Grow so that the cells gxmin..gxmax x gymin..gymax are inside."""
+        nx, ny = self.a[next(iter(self.a))].shape
+        if nx and self.gx0 <= gxmin and gxmax < self.gx0 + nx and self.gy0 <= gymin and gymax < self.gy0 + ny:
+            return
+        pad = self.GROW_PAD_CELLS
+        x0 = min(gxmin, self.gx0) - pad if nx else gxmin - pad
+        y0 = min(gymin, self.gy0) - pad if nx else gymin - pad
+        x1 = max(gxmax, self.gx0 + nx - 1) + pad if nx else gxmax + pad
+        y1 = max(gymax, self.gy0 + ny - 1) + pad if nx else gymax + pad
+        for k, (dt, fill) in self.layers.items():
+            new = np.full((x1 - x0 + 1, y1 - y0 + 1), fill, dtype=dt)
+            if nx:
+                new[self.gx0 - x0:self.gx0 - x0 + nx, self.gy0 - y0:self.gy0 - y0 + ny] = self.a[k]
+            self.a[k] = new
+        self.gx0, self.gy0 = x0, y0
+
+
+class _RasterMap:
+    """Dictionary-like view {(gx, gy): value} of one layer of a _GrowRaster, for the code that
+    reads or sets single cells (obs_count of a test, mark_hazard): get / [] / in / items."""
+
+    def __init__(self, raster, layer, default):
+        self.r, self.layer, self.default = raster, layer, default
+
+    def _ij(self, key):
+        i, j = key[0] - self.r.gx0, key[1] - self.r.gy0
+        a = self.r.a[self.layer]
+        return (i, j) if 0 <= i < a.shape[0] and 0 <= j < a.shape[1] else None
+
+    def get(self, key, default=None):
+        ij = self._ij(key)
+        v = self.default if ij is None else self.r.a[self.layer][ij]
+        return default if (default is not None and v == self.default) else v.item() if hasattr(v, 'item') else v
+
+    def __getitem__(self, key):
+        return self.get(key)
+
+    def __setitem__(self, key, value):
+        self.r.ensure(key[0], key[0], key[1], key[1])
+        self.r.a[self.layer][key[0] - self.r.gx0, key[1] - self.r.gy0] = value
+
+    def __contains__(self, key):
+        ij = self._ij(key)
+        return ij is not None and self.r.a[self.layer][ij] != self.default
+
+    def items(self):
+        a = self.r.a[self.layer]
+        ii, jj = np.nonzero(a != self.default)
+        return [((int(i) + self.r.gx0, int(j) + self.r.gy0), a[i, j].item()) for i, j in zip(ii, jj)]
+
+    def __len__(self):
+        return int(np.count_nonzero(self.r.a[self.layer] != self.default))
+
+
+def _counted_view(raster, value_layer, count_layer):
+    """{(gx, gy): value} of the cells with a count above zero (a sum can be 0.0)."""
+    n = raster.a[count_layer]
+    ii, jj = np.nonzero(n > 0)
+    v = raster.a[value_layer]
+    return {(int(i) + raster.gx0, int(j) + raster.gy0): v[i, j].item() for i, j in zip(ii, jj)}
+
+
+def _keys(pts, resolution):
+    """Map keys floor(x / resolution), floor(y / resolution) of the points (N, 2 or 3)."""
+    p = np.asarray(pts)
+    p = p.reshape(-1, p.shape[-1] if p.ndim > 1 else 2)
+    return (np.floor(p[:, 0] / resolution).astype(np.int64),
+            np.floor(p[:, 1] / resolution).astype(np.int64))
+
+
 class GlobalGrid:
     def __init__(self, resolution=0.03):
         self.resolution = resolution
@@ -39,7 +125,14 @@ class GlobalGrid:
         #  1.0 -> Free/Safe
         # -1.0 -> Occupied/Obstacle
         self.grid = {}
-        self.obs_count = {}
+        # Per-cell layers (see _GrowRaster): evidence counter (obs_count), state mirror of
+        # `grid` (0 never seen), hazard and walked masks, free-space sums and counts. update()
+        # and update_clearance() work on them with numpy; `grid` and its coarse index change
+        # only on the cells whose state changes (_set_state).
+        self._g = _GrowRaster({'cnt': (np.int8, 0), 'st': (np.int8, 0), 'haz': (bool, False),
+                               'walk': (bool, False), 'cn_s': (np.float64, 0.0), 'cn_n': (np.int32, 0),
+                               'ca_s': (np.float64, 0.0), 'ca_n': (np.int32, 0)})
+        self.obs_count = _RasterMap(self._g, 'cnt', 0)
         self._cached_margin = None
         self._cached_offsets = []
         self.global_occupancy_map = None
@@ -56,11 +149,8 @@ class GlobalGrid:
         # GLOBAL_OCC_CONFIRM_WALKED confirmations instead of GLOBAL_OCC_CONFIRM_OBS.
         self.walked_cells = set()
         # FREE-SPACE MAP (see CLEARANCE_NEAR_M): mean of the observed obstacle_distance,
-        # kept separately for close-up views and all views.
-        self.clear_near_sum = {}
-        self.clear_near_n = {}
-        self.clear_all_sum = {}
-        self.clear_all_n = {}
+        # kept separately for close-up views and all views (layers cn_* and ca_* of _g;
+        # clear_near_sum & co. are dictionary views of them).
         # Version of the occupied cells: grows at every change to/from -1. Used
         # to reuse the dilated raster of occupied_many until the map changes.
         self._occ_version = 0
@@ -76,8 +166,13 @@ class GlobalGrid:
         if old_state == new_state:
             return
         self.grid[key] = new_state
+        g = self._g
+        g.ensure(key[0], key[0], key[1], key[1])
+        g.a['st'][key[0] - g.gx0, key[1] - g.gy0] = -1 if new_state == -1.0 else 1
         if new_state == -1.0 or old_state == -1.0:
             self._occ_version = getattr(self, '_occ_version', 0) + 1
+            if getattr(self, '_occ_r', None) is not None:
+                self._occ_raster_set(key, new_state == -1.0)
         ck = self._coarse_key(*key)
         if new_state == -1.0:
             self._coarse_occ[ck] = self._coarse_occ.get(ck, 0) + 1
@@ -93,12 +188,21 @@ class GlobalGrid:
         Free space remembered at that point (m), or None if never observed. Mean of the
         close-up views when there are some, otherwise mean of all (see CLEARANCE_NEAR_M).
         """
-        key = (int(np.floor(x / self.resolution)), int(np.floor(y / self.resolution)))
-        n = self.clear_near_n.get(key, 0)
+        g = self._g
+        i = int(np.floor(x / self.resolution)) - g.gx0
+        j = int(np.floor(y / self.resolution)) - g.gy0
+        if not (0 <= i < g.a['cn_n'].shape[0] and 0 <= j < g.a['cn_n'].shape[1]):
+            return None
+        n = int(g.a['cn_n'][i, j])
         if n:
-            return self.clear_near_sum[key] / n
-        n = self.clear_all_n.get(key, 0)
-        return (self.clear_all_sum[key] / n) if n else None
+            return float(g.a['cn_s'][i, j] / n)
+        n = int(g.a['ca_n'][i, j])
+        return float(g.a['ca_s'][i, j] / n) if n else None
+
+    clear_near_sum = property(lambda self: _counted_view(self._g, 'cn_s', 'cn_n'))
+    clear_near_n = property(lambda self: _counted_view(self._g, 'cn_n', 'cn_n'))
+    clear_all_sum = property(lambda self: _counted_view(self._g, 'ca_s', 'ca_n'))
+    clear_all_n = property(lambda self: _counted_view(self._g, 'ca_n', 'ca_n'))
 
     def update_clearance(self, pts, obstacle_distance, usable, near=None):
         """
@@ -108,24 +212,28 @@ class GlobalGrid:
         usable: cells it can learn from (reliable, or under the body).
         near: observations taken within CLEARANCE_NEAR_M of the robot -- they go into a
             separate accumulator, which takes precedence (see clearance()).
+        The sums are made point by point in the order of the scan (np.add.at): the same
+        values as the dictionary version of before 04-11.
         """
         p = np.asarray(pts).reshape(-1, pts.shape[-1] if np.ndim(pts) > 1 else 2)
         od = np.asarray(obstacle_distance, dtype=np.float64).ravel()
         us = np.asarray(usable, dtype=bool).ravel()
         if od.size != len(p) or us.size != len(p):
             return
-        gx = np.floor(p[:, 0] / self.resolution).astype(np.int64)
-        gy = np.floor(p[:, 1] / self.resolution).astype(np.int64)
+        gx, gy = _keys(p, self.resolution)
         nr = (np.zeros(len(p), dtype=bool) if near is None
               else np.asarray(near, dtype=bool).ravel())
-        for k, v, ok, isnear in zip(zip(gx.tolist(), gy.tolist()), od, us, nr):
-            if not ok:
-                continue
-            self.clear_all_sum[k] = self.clear_all_sum.get(k, 0.0) + float(v)
-            self.clear_all_n[k] = self.clear_all_n.get(k, 0) + 1
-            if isnear:
-                self.clear_near_sum[k] = self.clear_near_sum.get(k, 0.0) + float(v)
-                self.clear_near_n[k] = self.clear_near_n.get(k, 0) + 1
+        if not us.any():
+            return
+        g = self._g
+        g.ensure(int(gx[us].min()), int(gx[us].max()), int(gy[us].min()), int(gy[us].max()))
+        ix, iy = gx - g.gx0, gy - g.gy0
+        np.add.at(g.a['ca_s'], (ix[us], iy[us]), od[us])
+        np.add.at(g.a['ca_n'], (ix[us], iy[us]), 1)
+        m = us & nr
+        if m.any():
+            np.add.at(g.a['cn_s'], (ix[m], iy[m]), od[m])
+            np.add.at(g.a['cn_n'], (ix[m], iy[m]), 1)
 
     def update(self, pts, obstacle_mask, walked=None):
         """
@@ -144,44 +252,43 @@ class GlobalGrid:
         They are remembered (walked_cells) and declaring them occupied requires
         GLOBAL_OCC_CONFIRM_WALKED observations instead of GLOBAL_OCC_CONFIRM_OBS.
         """
-        pts_flat = pts.reshape(-1, 3)
-        mask_flat = obstacle_mask.ravel()
-
-        # Cell key = floor(x / resolution), as in is_occupied (np.round on the cell centres
-        # would round to even and leave keys never written).
-        gx_array = np.floor(pts_flat[:, 0] / self.resolution).astype(int)
-        gy_array = np.floor(pts_flat[:, 1] / self.resolution).astype(int)
-
-        hazard_cells = self.hazard_cells
-        walked_cells = self.walked_cells
+        # The same rule as the cell-by-cell loop of before 04-11, on numpy arrays: a scan
+        # rarely holds the same key twice, and when it does the repeats are applied in
+        # order, one round per occurrence, so the result is the same to the cell.
+        gx, gy = _keys(pts, self.resolution)
+        mask_flat = np.asarray(obstacle_mask).ravel()
+        g = self._g
         if walked is not None:
             w = np.asarray(walked, dtype=bool).ravel()
-            if w.size == gx_array.size:
-                walked_cells.update(zip(gx_array[w].tolist(), gy_array[w].tolist()))
-        for gx, gy, state in zip(gx_array, gy_array, mask_flat):
-            if state == 0:
-                continue
-            key = (int(gx), int(gy))
-            if key in hazard_cells:
-                continue
-            curr_count = self.obs_count.get(key, 0)
-
-            if state == -1.0:
-                new_count = min(curr_count + 1 if curr_count >= 0 else 1, GLOBAL_OCC_MAX_COUNT)
-                self.obs_count[key] = new_count
-                confirm = (GLOBAL_OCC_CONFIRM_WALKED if key in walked_cells
-                           else GLOBAL_OCC_CONFIRM_OBS)
-                if new_count >= confirm:
-                    self._set_state(key, -1.0)
-                elif key not in self.grid:
-                    self._set_state(key, 1.0)    # seen, but not yet confirmed occupied
-            else:
-                new_count = max(curr_count - 1, -GLOBAL_OCC_MAX_COUNT)
-                self.obs_count[key] = new_count
-                if new_count <= 0:
-                    self._set_state(key, 1.0)
-                elif key not in self.grid:
-                    self._set_state(key, 1.0)
+            if w.size == gx.size and w.any():
+                self.walked_cells.update(zip(gx[w].tolist(), gy[w].tolist()))
+                g.ensure(int(gx[w].min()), int(gx[w].max()), int(gy[w].min()), int(gy[w].max()))
+                g.a['walk'][gx[w] - g.gx0, gy[w] - g.gy0] = True
+        sel = np.nonzero(mask_flat != 0)[0]
+        if sel.size == 0:
+            return
+        g.ensure(int(gx[sel].min()), int(gx[sel].max()), int(gy[sel].min()), int(gy[sel].max()))
+        ix, iy = gx[sel] - g.gx0, gy[sel] - g.gy0
+        obs_all = mask_flat[sel] == -1.0
+        lin = ix * g.a['cnt'].shape[1] + iy
+        todo = np.arange(sel.size)
+        while todo.size:
+            _u, first = np.unique(lin[todo], return_index=True)
+            k = todo[first]
+            todo = np.delete(todo, first)
+            i, j, obs = ix[k], iy[k], obs_all[k]
+            keep = ~g.a['haz'][i, j]
+            i, j, obs = i[keep], j[keep], obs[keep]
+            cur = g.a['cnt'][i, j].astype(np.int16)
+            new = np.where(obs, np.minimum(np.where(cur >= 0, cur + 1, 1), GLOBAL_OCC_MAX_COUNT),
+                           np.maximum(cur - 1, -GLOBAL_OCC_MAX_COUNT))
+            g.a['cnt'][i, j] = new
+            st = g.a['st'][i, j]
+            confirm = np.where(g.a['walk'][i, j], GLOBAL_OCC_CONFIRM_WALKED, GLOBAL_OCC_CONFIRM_OBS)
+            want = np.where(obs, np.where(new >= confirm, -1, np.where(st == 0, 1, st)),
+                            np.where((new <= 0) | (st == 0), 1, st))
+            for c in np.nonzero(want != st)[0]:
+                self._set_state((int(i[c]) + g.gx0, int(j[c]) + g.gy0), float(want[c]))
 
     def is_occupied(self, x, y, safety_margin=0.0):
         """
@@ -226,33 +333,70 @@ class GlobalGrid:
 
         return False
 
+    # Keys within this many cells of an occupied cell stay inside the rasters (the disks of
+    # the margins up to ~1.9 m); a larger margin is computed by dilation, as before.
+    _NEAR_MAX_STEPS = 64
+
+    def _occ_rasters(self):
+        """The occupied cells as a raster ('occ') plus, for every margin asked so far, the
+        count of occupied cells within its disk ('near<steps>'), built from the dictionary
+        the first time and then kept up to date by _set_state."""
+        if getattr(self, '_occ_r', None) is None:
+            self._occ_steps = []
+            self._occ_n = 0
+            self._occ_r = _GrowRaster({'occ': (bool, False)})
+            for k, v in self.grid.items():
+                if v == -1.0:
+                    self._occ_raster_set(k, True)
+        return self._occ_r
+
+    def _occ_raster_set(self, key, occupied):
+        r = self._occ_r
+        gx, gy = key
+        m = self._NEAR_MAX_STEPS
+        r.ensure(gx - m, gx + m, gy - m, gy + m)
+        ix, iy = gx - r.gx0, gy - r.gy0
+        r.a['occ'][ix, iy] = occupied
+        self._occ_n += 1 if occupied else -1
+        for steps in self._occ_steps:
+            r.a[f'near{steps}'][ix - steps:ix + steps + 1, iy - steps:iy + steps + 1] += (
+                self._disk(steps) if occupied else -self._disk(steps))
+
+    @staticmethod
+    def _disk(steps):
+        d = np.arange(-steps, steps + 1)
+        return ((d[:, None] ** 2 + d[None, :] ** 2) <= steps ** 2).astype(np.int32)
+
     def _get_margin_raster(self, safety_margin):
         """
         Raster of the cells for which is_occupied(x, y, safety_margin) is True: the
         occupied cells dilated with THE SAME disk as is_occupied (dx^2 + dy^2 <= steps^2,
         steps = ceil(margin / resolution)). Returns (raster, gx0, gy0) or None if there is
-        no occupied cell. Rebuilt only when the map changes (_occ_version).
+        no occupied cell. The disk counts are kept up to date cell by cell (_occ_rasters);
+        the boolean raster is redone only when the map changes (_occ_version).
         """
         steps = int(np.ceil(safety_margin / self.resolution)) if safety_margin > 0.0 else 0
         ver = getattr(self, '_occ_version', 0)
         cached = getattr(self, '_margin_raster', None)
         if cached is not None and cached[0] == ver and cached[1] == steps:
             return cached[2]
-        occ = [k for k, v in self.grid.items() if v == -1.0]
-        if not occ:
+        r = self._occ_rasters()
+        if self._occ_n <= 0:
             result = None
+        elif steps == 0:
+            result = (r.a['occ'].copy(), r.gx0, r.gy0)
+        elif steps > self._NEAR_MAX_STEPS:
+            d = np.arange(-steps, steps + 1)
+            disk = (d[:, None] ** 2 + d[None, :] ** 2) <= steps ** 2
+            occ = np.pad(r.a['occ'], steps)
+            result = (binary_dilation(occ, structure=disk), r.gx0 - steps, r.gy0 - steps)
         else:
-            k = np.array(occ, dtype=np.int64)
-            gx0, gy0 = int(k[:, 0].min()) - steps, int(k[:, 1].min()) - steps
-            nx = int(k[:, 0].max()) - gx0 + steps + 1
-            ny = int(k[:, 1].max()) - gy0 + steps + 1
-            raster = np.zeros((nx, ny), dtype=bool)
-            raster[k[:, 0] - gx0, k[:, 1] - gy0] = True
-            if steps > 0:
-                d = np.arange(-steps, steps + 1)
-                disk = (d[:, None] ** 2 + d[None, :] ** 2) <= steps ** 2
-                raster = binary_dilation(raster, structure=disk)
-            result = (raster, gx0, gy0)
+            name = f'near{steps}'
+            if name not in r.a:
+                r.layers[name] = (np.int32, 0)
+                r.a[name] = convolve(r.a['occ'].astype(np.int32), self._disk(steps), mode='constant')
+                self._occ_steps.append(steps)
+            result = (r.a[name] > 0, r.gx0, r.gy0)
         self._margin_raster = (ver, steps, result)
         return result
 
@@ -298,6 +442,7 @@ class GlobalGrid:
                     self.obs_count[key] = GLOBAL_OCC_MAX_COUNT
                     self._set_state(key, -1.0)
                     self.hazard_cells.add(key)
+                    self._g.a['haz'][key[0] - self._g.gx0, key[1] - self._g.gy0] = True
                     n += 1
         return n
 
@@ -355,8 +500,10 @@ class GlobalTerrainGrid:
     """
     def __init__(self, resolution=0.03):
         self.resolution = resolution
-        self.height_sum = {}    # (gx, gy) -> sum of the valid heights observed
-        self.height_count = {}  # (gx, gy) -> number of valid observations
+        # Sum, count, mean (NaN where never seen) and seen mask of the valid heights, per cell
+        # (see _GrowRaster); height_sum / height_count are dictionary views of them.
+        self._h_r = _GrowRaster({'sum': (np.float64, 0.0), 'n': (np.int64, 0),
+                                 'mean': (np.float64, np.nan), 'has': (bool, False)})
         # Rectangles (xmin, xmax, ymin, ymax) updated, one per call to update: they tell
         # the PRM which cached slopes to redo (roadmap._sync_global_slope_cache).
         self.update_rects = []
@@ -385,22 +532,30 @@ class GlobalTerrainGrid:
                 self.update_rects = []
             self.update_rects.append((float(xv.min()), float(xv.max()), float(yv.min()), float(yv.max())))
 
-        for gx, gy, h, v in zip(gx_array, gy_array, heights_flat, valid_flat):
-            if not v:
-                continue
-            key = (gx, gy)
-            self.height_sum[key] = self.height_sum.get(key, 0.0) + float(h)
-            self.height_count[key] = self.height_count.get(key, 0) + 1
+        r = self._h_r
+        v = valid_flat.astype(bool)
+        if v.any():
+            # The same sums in the same order (np.add.at goes point by point): the raster
+            # means are those of get_height to the bit.
+            gx, gy = gx_array[v], gy_array[v]
+            r.ensure(int(gx.min()), int(gx.max()), int(gy.min()), int(gy.max()))
+            ix, iy = gx - r.gx0, gy - r.gy0
+            np.add.at(r.a['sum'], (ix, iy), heights_flat[v].astype(np.float64))
+            np.add.at(r.a['n'], (ix, iy), 1)
+            r.a['mean'][ix, iy] = r.a['sum'][ix, iy] / r.a['n'][ix, iy]
+            r.a['has'][ix, iy] = True
 
     def get_height(self, x, y):
         """Mean height observed at that position, or None if never seen."""
-        gx = int(np.floor(x / self.resolution))
-        gy = int(np.floor(y / self.resolution))
-        key = (gx, gy)
-        count = self.height_count.get(key, 0)
-        if count == 0:
+        r = self._h_r
+        i = int(np.floor(x / self.resolution)) - r.gx0
+        j = int(np.floor(y / self.resolution)) - r.gy0
+        if not (0 <= i < r.a['n'].shape[0] and 0 <= j < r.a['n'].shape[1]) or r.a['n'][i, j] == 0:
             return None
-        return self.height_sum[key] / count
+        return float(r.a['sum'][i, j] / r.a['n'][i, j])
+
+    height_sum = property(lambda self: _counted_view(self._h_r, 'sum', 'n'))
+    height_count = property(lambda self: _counted_view(self._h_r, 'n', 'n'))
 
     def compute_arc_slope_profiles_batch(self, x1, y1, x2, y2, perp_sample_spacing_m=0.10, body_ext_m=0.0):
         """compute_arc_slope_profile of the global map for many edges (arrays), same early
@@ -457,29 +612,15 @@ class GlobalTerrainGrid:
             sample_array=self._sample_heights, body_ext_m=body_ext_m
         )
 
+    def _height_rasters(self):
+        """Sum, count, mean (NaN where never seen) and seen-mask rasters of the heights."""
+        return self._h_r
+
     def _mean_height_raster(self):
-        """
-        Raster of the mean heights (height_sum / height_count, NaN where never seen),
-        rebuilt only when the map changes. Same division as get_height, so the same
-        values to the bit.
-        """
-        ver = (len(self.height_count), len(getattr(self, 'update_rects', None) or []))
-        cached = getattr(self, '_mh_raster', None)
-        if cached is not None and cached[0] == ver:
-            return cached[1]
-        keys = [key for key, c in self.height_count.items() if c > 0]
-        if not keys:
-            result = None
-        else:
-            k = np.array(keys, dtype=np.int64)
-            s = np.array([self.height_sum[key] for key in keys], dtype=np.float64)
-            c = np.array([self.height_count[key] for key in keys], dtype=np.float64)
-            gx0, gy0 = int(k[:, 0].min()), int(k[:, 1].min())
-            raster = np.full((int(k[:, 0].max()) - gx0 + 1, int(k[:, 1].max()) - gy0 + 1), np.nan)
-            raster[k[:, 0] - gx0, k[:, 1] - gy0] = s / c
-            result = (raster, gx0, gy0)
-        self._mh_raster = (ver, result)
-        return result
+        """Raster of the mean heights (height_sum / height_count, NaN where never seen):
+        (raster, gx0, gy0), or None if nothing was seen. Same division as get_height."""
+        r = self._height_rasters()
+        return (r.a['mean'], r.gx0, r.gy0) if r.a['mean'].size else None
 
     def _sample_heights(self, xs, ys):
         """get_height on an array of points (NaN where never seen), same key floor(x / res)."""
@@ -497,24 +638,9 @@ class GlobalTerrainGrid:
         return out
 
     def _has_height_raster(self):
-        """Boolean raster of the cells with at least one height (height_count > 0), cached."""
-        ver = (len(self.height_count), len(getattr(self, 'update_rects', None) or []))
-        cached = getattr(self, '_hh_raster', None)
-        if cached is not None and cached[0] == ver:
-            return cached[1]
-        if not self.height_count:
-            result = None
-        else:
-            k = np.array([key for key, c in self.height_count.items() if c > 0], dtype=np.int64)
-            if k.size == 0:
-                result = None
-            else:
-                gx0, gy0 = int(k[:, 0].min()), int(k[:, 1].min())
-                raster = np.zeros((int(k[:, 0].max()) - gx0 + 1, int(k[:, 1].max()) - gy0 + 1), dtype=bool)
-                raster[k[:, 0] - gx0, k[:, 1] - gy0] = True
-                result = (raster, gx0, gy0)
-        self._hh_raster = (ver, result)
-        return result
+        """Boolean raster of the cells with at least one height (height_count > 0)."""
+        r = self._height_rasters()
+        return (r.a['has'], r.gx0, r.gy0) if r.a['has'].size else None
 
     def certainly_no_slope_data(self, x1, y1, x2, y2, min_sample_fraction=MIN_ARC_SAMPLE_FRACTION):
         """

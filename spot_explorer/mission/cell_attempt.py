@@ -28,6 +28,10 @@ from spot_explorer.mission.attempt_cruise import CruiseSteps
 # =========================================================================
 
 
+# A cell already seen almost all from outside counts as explored (see _cell_already_seen).
+CELL_SEEN_EXPLORED = True
+CELL_SEEN_FRACTION = 0.90
+
 class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps):
     """Try to enter cell (target_row, target_col) from the robot's current position.
 
@@ -92,9 +96,12 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps):
     def run(self):
         """True if the robot ends up inside the cell (or accepted just outside, see _finish)."""
         self._handoff = False
+        self._seen_only = False
         try:
             if self._prepare() is FAILED:
                 return False
+            if self._seen_only:
+                return True
 
             while self.path_waypoints and len(self.path_waypoints) > 0:
                 outcome = self._loop_once()
@@ -130,11 +137,35 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps):
         scan = self._first_scan()
         if scan is None:
             return FAILED
+        if self._cell_already_seen():
+            return STOP
         self._local_data_into_graph(scan)
         outcome = self._goal_and_path(scan)
         if outcome is not None:
             return outcome
         self._reset_counters()
+
+    def _cell_already_seen(self):
+        """
+        CELL_SEEN_EXPLORED: the cell counts as explored without entering it when at least
+        CELL_SEEN_FRACTION of it is already in the global map (seen free or obstacle, after the
+        first scan of this attempt). The robot stays where it is (still walking after a
+        hand-off: like an attempt that ends before its loop) and the mission marks the cell
+        visited, its GraphNav waypoint where the robot is. Why: on 04-11 16:10 (1,3), (1,0) and
+        the second attempt on (1,4) were 95-100% seen from the corridor before their attempt, and
+        entering them (goal against the furniture) cost back-offs, rotations refused and two
+        returns with GraphNav; the cells ahead of the robot were 5-45% seen.
+        """
+        if not CELL_SEEN_EXPLORED or self.global_map is None:
+            return False
+        frac = cells.cell_seen_fraction(self.env, self.global_map, self.target_row, self.target_col)
+        if frac is None or frac < CELL_SEEN_FRACTION:
+            return False
+        print(f"[SEEN] Cell ({self.target_row},{self.target_col}): {100 * frac:.0f}% of it already in the "
+              f"global map (threshold {100 * CELL_SEEN_FRACTION:.0f}%): explored without entering it.")
+        MISSION_STATS['cells_seen_only'] = MISSION_STATS.get('cells_seen_only', 0) + 1
+        self._seen_only = True
+        return True
 
     def _reset_counters(self):
         """Counters and memories of the attempt, before the first turn."""

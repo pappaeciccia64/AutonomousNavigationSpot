@@ -24,10 +24,12 @@ WITHOUT STOPPING, while the robot walks on the last stretch confirmed (the comma
 PATH_HOLD_S, so the main thread has that long):
   - goal isolated (plan 'no_path'): the planning pauses for the cycle running to end, a new
     goal is chosen in the cell (_repick_goal, as the stop-and-go does) and the cruise goes
-    on towards it (_cruise_repick);
+    on towards it (_cruise_repick); with no other goal the robot stops and the attempt ends
+    (FAILED: the side is marked as tried);
   - CHAIN_CELLS: inside the target cell and within CRUISE_HANDOFF_M of the goal (or within
     GOAL_REACHED_TOLERANCE_M with the last stretch closed by an obstacle), the attempt
-    ends successfully with the robot still walking towards the goal (env._moving_pc): the
+    ends successfully with the robot still walking towards the goal (env._moving_pc, last
+    command over the whole confirmed stretch, not PATH_HOLD_S): the
     mission marks the cell and the next attempt starts while the robot walks. Its first turn
     goes on in cruise if the rotation is clear: within PATH_START_IN_PLACE_DEG of the nose it
     turns while walking, beyond it on the spot inside the new command if the swept area is
@@ -46,7 +48,7 @@ import numpy as np
 from spot_explorer import config as P
 from spot_explorer.graphnav import map_recording
 from spot_explorer.mission import planning_cycle
-from spot_explorer.mission.attempt_common import CONTINUE, STOP, battery_return_due
+from spot_explorer.mission.attempt_common import CONTINUE, STOP, FAILED, battery_return_due
 from spot_explorer.perception import gait
 from spot_explorer.perception import geometry
 from spot_explorer.planning import decisions
@@ -54,6 +56,7 @@ from spot_explorer.planning import safe_frontier
 from spot_explorer.records import MISSION_STATS, BodyTiltRecorder, append_trajectory, timing_add
 from spot_explorer.robot import connection
 from spot_explorer.robot import motion
+from spot_explorer.robot import photos
 
 CONTINUOUS_MOTION = True
 CRUISE_POLL_S = 0.2             # main thread: one feedback reading every 0.2 s
@@ -68,7 +71,18 @@ CRUISE_FALL_CHECK_S = 1.0       # how often the fall is checked (the stop-and-go
 CRUISE_ARRIVAL_WAIT_S = 2.0     # at the goal: wait at most this for the command to end
 CRUISE_SETTLE_S = 1.0           # after a stop: wait at most this for the robot to stand still
 CHAIN_CELLS = True              # from a cell goal to the next cell without stopping (see above)
-CRUISE_HANDOFF_M = 0.6          # distance from the goal at which the next cell is chosen
+# Distance from the goal at which the next cell is chosen: the robot walks it while the next
+# attempt is computed. With 0.6 m (~2 s) it stood still at 46 hand-offs out of 58 on 04-11 14:08.
+CRUISE_HANDOFF_M = 1.0
+# Gait in cruise: back to a lighter level only after the plans have asked for it this long
+# (04-11 14:08: 239 changes in 20 min, one every 5 s, without it).
+GAIT_DOWN_HOLD_S = 2.0
+# The locomotion_hint (AUTO <-> CRAWL) changes only after this long of plans asking for it,
+# both ways: at every change while walking Spot made a side step of 10-15 cm (04-11 14:08:
+# 10 of the 12 sideways jumps of the cruise came within 2 s of one of the 118 changes; cell
+# (0,1): MODERATE, PLAIN, MODERATE in one second, then 15 cm sideways). On that mission it
+# would leave 29 changes instead of 117.
+GAIT_HINT_HOLD_S = 3.0
 # A bigger turn than PATH_START_IN_PLACE_DEG with the robot still walking: rotation on the spot
 # inside the new command, without stopping first, if the swept area is clear with this much
 # more air. The check is made at the pose of the scan, and the robot still walks some cm
@@ -124,11 +138,15 @@ def _along(polyline, x, y):
     return best_s
 
 
+_TIERS = ('PLAIN', 'MODERATE', 'HARD')
+
+
 def _tier(grad, rough):
     """The level of motion.select_mobility_params, without choosing (and printing)."""
-    if grad < gait.GAIT_PLAIN_SLOPE_MAX and rough < gait.GAIT_PLAIN_ROUGH_MAX:
+    plain_max, moderate_max = gait.slope_thresholds()
+    if grad < plain_max and rough < gait.GAIT_PLAIN_ROUGH_MAX:
         return 'PLAIN'
-    if grad < gait.GAIT_MODERATE_SLOPE_MAX and rough < gait.GAIT_MODERATE_ROUGH_MAX:
+    if grad < moderate_max and rough < gait.GAIT_MODERATE_ROUGH_MAX:
         return 'MODERATE'
     return 'HARD'
 
@@ -154,15 +172,46 @@ class CruiseSteps:
                     cell=(self.target_row, self.target_col), loop_iter=self.loop_iter)
 
     def _cruise_gait(self, terrain):
-        """Gait for the worst terrain of the confirmed stretch; chosen again (and printed) only
-        when the level changes."""
+        """
+        Gait for the worst terrain of the first metre of the confirmed stretch. The level: a
+        harder one at once, a lighter one only after GAIT_DOWN_HOLD_S of plans asking for it.
+        The locomotion_hint (AUTO <-> CRAWL) changes only after GAIT_HINT_HOLD_S of plans asking
+        for the new one, both ways; until then the new level's speed, friction and step go
+        with the old hint. The state lives on env: it carries over the hand-offs.
+        """
         if self.mobility_kwargs:
             return self.mobility_kwargs
+        g, now = self.env, time.time()
         tier = _tier(*terrain)
-        if tier != getattr(self, '_cruise_tier', None):
-            self._cruise_kwargs = motion.select_mobility_params(*terrain)
-            self._cruise_tier = tier
-        return self._cruise_kwargs
+        cur = getattr(g, '_gait_tier', None)
+        if cur is not None and _TIERS.index(tier) < _TIERS.index(cur):
+            if getattr(g, '_gait_down_since', None) is None:
+                g._gait_down_since = now
+            if now - g._gait_down_since < GAIT_DOWN_HOLD_S:
+                tier = cur
+            else:
+                g._gait_down_since = None
+        else:
+            g._gait_down_since = None
+        if tier != cur:
+            g._gait_params = motion.select_mobility_params(*terrain)
+            g._gait_tier = tier
+        kwargs = dict(g._gait_params)
+        hint = getattr(g, '_gait_hint', None)
+        if hint is None:
+            g._gait_hint = hint = kwargs['locomotion_hint']
+        if kwargs['locomotion_hint'] != hint:
+            if getattr(g, '_gait_hint_since', None) is None:
+                g._gait_hint_since = now
+            if now - g._gait_hint_since >= GAIT_HINT_HOLD_S:
+                print(f"[GAIT] locomotion_hint {hint} -> {kwargs['locomotion_hint']} after "
+                      f"{now - g._gait_hint_since:.1f} s of plans asking for it.")
+                g._gait_hint, g._gait_hint_since = kwargs['locomotion_hint'], None
+            else:
+                kwargs['locomotion_hint'] = hint
+        else:
+            g._gait_hint_since = None
+        return kwargs
 
     def _cruise(self):
         """The cruise (see the module docstring). Returns CONTINUE: the loop looks again
@@ -190,6 +239,11 @@ class CruiseSteps:
         # one, turning while walking (_moving_check has let only small turns through).
         start_in_place = (motion.PATH_START_IN_PLACE_DEG if getattr(self.env, '_moving_pc', None) is not None
                           else motion.LEG_START_IN_PLACE_DEG)
+        t_hand = getattr(self.env, '_handoff_t', None)
+        self.env._handoff_t = None
+        if t_hand is not None and getattr(self.env, '_moving_pc', None) is not None:
+            print(f"[CRUISE] Hand-off: this cruise starts {time.time() - t_hand:.1f} s after the previous "
+                  f"one ended, with the robot still walking.")
         self.env._moving_pc = None
         _close_track(self.env)
         handoff = False
@@ -200,7 +254,7 @@ class CruiseSteps:
         recorder.start()
         t0 = time.time()
         track = [(self.robot_x, self.robot_y)]
-        reason, arrived = None, False
+        reason, arrived, no_path_end = None, False, False
         n_plans = n_sends = bad = 0
         last_version, last_plan_t = 0, t0
         last_crumb_t, last_battery_t, last_fall_t = t0, t0, t0
@@ -285,10 +339,16 @@ class CruiseSteps:
                         pc.send(plan['confirmed'][1:], **self._cruise_gait(plan['terrain']))
                         n_sends += 1
                     if new_planner is None:
-                        reason = "no path to the goal from the next node"
+                        # No other goal with a path: the attempt ends here, once, and the side
+                        # is marked as tried. Going on with a new cruise at every turn gave eight
+                        # cruises of 4-9 cm in a row on 04-11 11:38, cell (1,3).
+                        reason, no_path_end = "no path in the graph to the goal and no other goal in the cell", True
                         break
                     cycles_done += planner.cycles
                     replans_done += planner.replans
+                    for k, v in planner.phase_s.items():
+                        new_planner.phase_s[k] = v + new_planner.phase_s[k]
+                    new_planner.grid_dt = planner.grid_dt + new_planner.grid_dt
                     planner, to_goal, last_plan_t = new_planner, False, time.time()
                     n_repicks += 1
                     continue
@@ -300,7 +360,11 @@ class CruiseSteps:
                       + (f", rotation not clear at node {plan['turn_stop']}" if plan['turn_stop'] else "")
                       + f", {len(plan['ids'])} nodes to the goal"
                       + (", PATH CHANGED" if plan['replanned'] else "")
-                      + f" | cycle {plan['cycle_s']:.2f} s, robot at {100 * r['deviation']:.0f} cm from the line"
+                      + f" | cycle {plan['cycle_s']:.2f} s"
+                      + (" (" + " ".join(f"{k} {v:.2f}" for k, v in plan['phases'].items()) + ")"
+                         if plan.get('phases') else "")
+                      + (f", Spot grid +{plan['grid_dt']:.2f} s" if plan.get('grid_dt') is not None else "")
+                      + f", robot at {100 * r['deviation']:.0f} cm from the line"
                       + (" | edges: slopes {0} recomputed, {1} kept, {2} untouched, {3} out (live scan)".format(*plan['edges'])
                          + (f", {plan['edges'][4]} nodes pruned" if plan['edges'][4] else "")
                          if plan.get('edges') else ""))
@@ -330,6 +394,12 @@ class CruiseSteps:
                         why = None
                     if why is not None:
                         reason, handoff = f"in the cell, {why}: next cell while walking", True
+                        # The last send covers the whole confirmed stretch (dead man of the
+                        # trajectory time, as a leg): the next attempt takes 2-4 s, and with
+                        # PATH_HOLD_S the robot stopped after 2 s at every cell (04-11 14:08).
+                        pc.send(plan['confirmed'][1:], hold_s=None, **self._cruise_gait(plan['terrain']))
+                        n_sends += 1
+                        self.env._handoff_t = time.time()
                         break
                 if ahead < CRUISE_MIN_AHEAD_M:
                     if plan['to_goal']:
@@ -349,6 +419,12 @@ class CruiseSteps:
             elif not arrived:
                 pc.stop(f"end of the cruise: {reason}")
                 self._cruise_settle(pc)
+                # What the robot had in front when the cruise stopped on the terrain (only the
+                # confirmed blocks had photos: one on 04-11 14:08, tall grass, against 23 stops).
+                if reason and re.search(r'obstacle|slope|roughness|out of the graph', reason):
+                    photos.capture(f"cruise_it{self.iteration:03d}_cell{self.target_row}_{self.target_col}_"
+                                   f"{self.loop_iter:03d}_{time.strftime('%H-%M-%S')}",
+                                   extra={'reason': reason})
             tracker.stop_planning()
             if crumb is not None:
                 crumb.join(timeout=5.0)
@@ -361,6 +437,10 @@ class CruiseSteps:
         planner.replans += replans_done
         MISSION_STATS['cruise_goal_repicks'] = MISSION_STATS.get('cruise_goal_repicks', 0) + n_repicks
         outcome = self._after_cruise(planner, track, t0, reason, n_plans, n_sends, pc, handoff)
+        if no_path_end:
+            print(f"[CRUISE] Attempt on cell ({self.target_row},{self.target_col}) ended: no path in "
+                  f"the graph to any goal of the cell from here.")
+            return FAILED
         if handoff:
             self._handoff = True
             MISSION_STATS['cruise_handoffs'] = MISSION_STATS.get('cruise_handoffs', 0) + 1
@@ -402,6 +482,9 @@ class CruiseSteps:
         new_planner = planning_cycle.CruisePlanner(self.local_grid, self.global_grid, self.prm_graph,
                                                    self.robot_state_client, self.goal_id, ids)
         new_planner.bundle = self._cruise_bundle_info()
+        # Its bundles go on numbering from those of the previous planner (same attempt turn):
+        # from 1 again they overwrote them (04-11 14:08, cell (0,2)).
+        new_planner.bundle_seq = planner.bundle_seq + planner.cycles
         tracker.start_planning(new_planner, planning_cycle.PLAN_PERIOD_S)
         print(f"[CRUISE] New goal ({self.target_x:.2f}, {self.target_y:.2f}) chosen while walking: "
               f"{len(ids) - 1} nodes from node {ids[0]}.")
@@ -520,4 +603,13 @@ class CruiseSteps:
               f"{planner.replans} path changes), {n_sends} sends, at most {100 * pc.max_deviation:.1f} cm "
               f"from the line. Robot at ({x:.2f}, {y:.2f}), node {self.robot_node_id}, "
               f"{len(self.path_waypoints)} nodes to the goal.")
+        times = planner.timing_summary()
+        if times:
+            print(f"[CRUISE] Cycle times (median, s): {times}")
+        for k, v in planner.phase_s.items():
+            st = MISSION_STATS.setdefault('cruise_phase_s', {}).setdefault(k, [0.0, 0])
+            st[0] += float(sum(v)); st[1] += len(v)
+        g = MISSION_STATS.setdefault('cruise_grid_dt', [0.0, 0, 0])     # sum of the new, new, repeated
+        new = [d for d in planner.grid_dt if d > 1e-6]
+        g[0] += float(sum(new)); g[1] += len(new); g[2] += len(planner.grid_dt) - len(new)
         return CONTINUE

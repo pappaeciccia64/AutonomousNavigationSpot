@@ -10,6 +10,7 @@ try:
     from bosdyn.client.local_grid import LocalGridClient
 except ImportError:
     get_a_tform_b = local_grid_pb2 = LocalGridClient = None
+from spot_explorer.perception import low_obstacles
 from spot_explorer.perception.geometry import OBSTACLE_THRESHOLD
 from spot_explorer.perception.slopes import SLOPE_BASELINE_M
 ROUGH_THRESHOLD = 0.15      # local roughness (std-dev of terrain height, m)
@@ -348,6 +349,19 @@ class LocalGrid:
             unwritten_scale=raw_scale(s.grids_data), return_unwritten=True)
         if ground_label:
             log_ground_filter(self, ground_label)
+        # Spot's obstacle_distance without the low intermittent obstacles (grass): see
+        # low_obstacles. The original stays in od_spot (scan bundles).
+        s.od_spot = s.od
+        if low_obstacles.LOW_OBSTACLE_FILTER:
+            ox, oy = self.grid_origin(s)
+            seen = np.asarray(s.valid, dtype=np.float64).ravel() >= TERRAIN_VALID_MIN
+            if s.unwritten is not None:
+                seen &= ~np.asarray(s.unwritten, dtype=bool).ravel()
+            s.od = low_obstacles.filter_obstacle_distance(s.od, s.terrain_raw, seen, s.num_x, s.num_y,
+                                                          ox, oy, s.cell_size)
+            if ground_label and low_obstacles.HISTORY.dropped_last:
+                print(f"[LOW-OBSTACLES] {ground_label}: {low_obstacles.HISTORY.dropped_last} obstacle cells "
+                      f"low and intermittent ignored (see low_obstacles).")
         s.grad, s.rough = self.compute_gradient_and_roughness(
             s.terrain, s.valid, s.num_x, s.num_y, s.cell_size, is_valid=s.is_valid)
         s.obstacle_mask = None

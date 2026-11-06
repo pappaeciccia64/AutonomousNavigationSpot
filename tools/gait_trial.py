@@ -178,7 +178,7 @@ def charge(robot_state_client):
 def estimate_track(local_grid, robot_state_client, dist):
     """Slope (with the body) and roughness of the track ahead of the robot, from the scan of now,
     with the PRM computation and with the local plane. Sees only the first ESTIMATE_MAX_M metres."""
-    empty = dict(long=np.nan, lat=np.nan, rough=np.nan, has=False, plane_long=np.nan, plane_lat=np.nan)
+    empty = dict(long=np.nan, lat=np.nan, rough=np.nan, has=False, grad=np.nan, plane_long=np.nan, plane_lat=np.nan)
     try:
         scan = local_grid.fetch_scan(robot_state_client)
         if scan is None:
@@ -211,7 +211,9 @@ def estimate_track(local_grid, robot_state_client, dist):
         print(f"[ESTIMATE] First {L:.1f} m: slope long {lo:.3f} ({deg(lo):.1f}°), lat {la:.3f} ({deg(la):.1f}°), "
               f"roughness {rough:.3f}, {'with data' if has else 'NOT ENOUGH DATA'} | local plane: long "
               f"{deg(plo):.1f}°, lat {deg(pla):.1f}°{'' if phas else ' (not enough data)'}")
-        return dict(long=float(lo), lat=float(la), rough=rough, has=bool(has),
+        # The slope the gait level is chosen on: the estimate of the mission (slopes.PLANE_SLOPES).
+        grad = max(plo, pla) if slopes.PLANE_SLOPES and phas else max(lo, la)
+        return dict(long=float(lo), lat=float(la), rough=rough, has=bool(has), grad=float(grad),
                     plane_long=deg(plo) if phas else np.nan, plane_lat=deg(pla) if phas else np.nan)
     except Exception as e:
         print(f"[ESTIMATE] Estimate failed: {e}")
@@ -260,16 +262,17 @@ def one_pass(a, direction, rep, robot_state_client, command_client, local_grid, 
         if not np.isfinite(est['long']):
             print("[TRIAL] Config 'mission' without a slope estimate: pass skipped.")
             return
-        params = motion.select_mobility_params(max(est['long'], est['lat']),
+        params = motion.select_mobility_params(est['grad'],
                                                est['rough'] if np.isfinite(est['rough']) else 0.0)
         level = MISSION_STATS['last_tier']
     else:
         params = dict(CONFIG[a.config])
         if np.isfinite(est['long']):
-            g = max(est['long'], est['lat'])
+            g = est['grad']
             r = est['rough'] if np.isfinite(est['rough']) else 0.0
-            level = ('PLAIN' if g < gait.GAIT_PLAIN_SLOPE_MAX and r < gait.GAIT_PLAIN_ROUGH_MAX
-                     else 'MODERATE' if g < gait.GAIT_MODERATE_SLOPE_MAX
+            plain_max, moderate_max = gait.slope_thresholds()
+            level = ('PLAIN' if g < plain_max and r < gait.GAIT_PLAIN_ROUGH_MAX
+                     else 'MODERATE' if g < moderate_max
                      and r < gait.GAIT_MODERATE_ROUGH_MAX else 'HARD')
     if a.vel is not None:
         params['max_linear_vel'] = a.vel

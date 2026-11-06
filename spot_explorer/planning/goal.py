@@ -9,6 +9,9 @@ from spot_explorer.mission import cells
 from spot_explorer import config as P
 from spot_explorer.records import MISSION_STATS
 
+# Criterion 3 of find_best_point_in_cell: nearest to the centre before the free space.
+GOAL_CENTRE_FIRST = True
+
 
 
 # =========================================================================
@@ -57,15 +60,12 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
          nearest to the centre when the graph does not get there is not enough: they lie in
          the same isolated area (on 22-10 16:04 that fallback failed 9 times out of 10). If
          no point is reachable the best one is chosen anyway, and the attempt fails;
-      3. with at least TARGET_CLEARANCE_M (0.33) of free space;
-      4. the geometric centre, whether free or unknown (CENTRE RULE: a point already seen
-         free is usually the last strip scanned from the previous cell, i.e. on the
-         border);
-      5. seen free before never seen: if the centre is discarded the area is known, and
-         going back to look at an unknown spot next to the obstacle would be a wasted trip;
+      3. nearest to the centre, in rings of 0.25 m (the centre itself, free or unknown, is
+         the first): from there the robot sees the whole cell. Within a ring:
+      4. with at least TARGET_CLEARANCE_M (0.33) of free space;
+      5. seen free before never seen;
       6. at least TARGET_CELL_BORDER_M from the cell border;
-      7. nearest to the centre (in steps of 0.25 m), then nearest to the robot: on a tie,
-         the one on its side of the obstacle.
+      7. nearest to the robot: on a tie, the one on its side of the obstacle.
 
     If no point is left the cell has no valid goal and the function returns
     (None, None, ...): the caller already treats it as an entry failure and moves on to
@@ -166,8 +166,14 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
         return None, None, [], blocked
 
     step = 0.25
-    rows.sort(key=lambda r: (r['tight'], not r['center'], not r['seen'], r['edge'],
-                             round(r['dc'] / step), r['dr']))
+    # Nearest to the centre first (in rings of `step`): from there the robot sees the whole cell
+    # (04-11 16:10: with the free space first, the goal of (1,2) went 0.94 m from the centre,
+    # against the furniture on the border). The rest only decides within a ring.
+    if GOAL_CENTRE_FIRST:
+        rows.sort(key=lambda r: (round(r['dc'] / step), r['tight'], not r['seen'], r['edge'], r['dr']))
+    else:                       # until 04-11: free space, centre, seen, border, then distance
+        rows.sort(key=lambda r: (r['tight'], not r['center'], not r['seen'], r['edge'],
+                                 round(r['dc'] / step), r['dr']))
     fresh = [r for r in rows if not r['refused']]
     pool = fresh if fresh else rows
     chosen, reach_note = None, ""

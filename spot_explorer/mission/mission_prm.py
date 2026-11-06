@@ -101,18 +101,11 @@ def _reach_from(prm, env, from_xy, row, col, global_map):
     graph_reaches_cell; None if the graph has no nodes."""
     start = prm.anchor_node(float(from_xy[0]), float(from_xy[1]), global_map,
                             geometry.PRM_EDGE_SAFETY_MARGIN_M,
-                            ignore_near_m=roadmap.ANCHOR_IGNORE_NEAR_M)
+                            ignore_near_m=roadmap.ANCHOR_IGNORE_NEAR_M, connected_first=True)
     if start is None:
         return None
     cells = node_cells(prm, env)
-    target = (int(row), int(col))
-    if P.PLAN_ONLY_EXPLORED_CELLS:
-        ok_cells = {(r, c) for r in range(env.rows) for c in range(env.cols)
-                    if env.is_cell_visited(r, c)}
-        ok_cells.add(target)
-        ok_cells.add(tuple(int(v) for v in env.get_cell_from_world(from_xy[0], from_xy[1])))
-    else:
-        ok_cells = None
+    ok_cells = planning_cells(env, row, col, from_xy) if P.PLAN_ONLY_EXPLORED_CELLS else None
     seen, queue = {start}, [start]
     while queue:
         u = queue.pop()
@@ -126,6 +119,33 @@ def _reach_from(prm, env, from_xy, row, col, global_map):
     return seen, cells
 
 
+# The cells next to both the robot's and the goal's are allowed too (see planning_cells).
+PLAN_ALSO_SHARED_NEIGHBOUR_CELLS = True
+
+
+def planning_cells(env, target_row, target_col, from_xy):
+    """
+    The cells a path to (target_row, target_col) from from_xy may use (PLAN_ONLY_EXPLORED_CELLS):
+    the visited ones, the robot's, the goal's, and the cells next to both the robot's and the
+    goal's (8-neighbourhood): the way around an obstacle on the border between the two
+    cells. On 04-11 11:38 three cells out of eight were disconnected only by the cells
+    around the border, and the cruise ended eight times in a row on (1,3); the path is
+    checked live by the frontier anyway.
+    """
+    target = (int(target_row), int(target_col))
+    here = tuple(int(v) for v in env.get_cell_from_world(from_xy[0], from_xy[1]))
+    cells = {(r, c) for r in range(env.rows) for c in range(env.cols) if env.is_cell_visited(r, c)}
+    cells |= {target, here}
+    if not PLAN_ALSO_SHARED_NEIGHBOUR_CELLS:
+        return cells
+
+    def around(rc):
+        return {(rc[0] + dr, rc[1] + dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1)}
+    cells |= {rc for rc in around(target) & around(here)
+              if 0 <= rc[0] < env.rows and 0 <= rc[1] < env.cols}
+    return cells
+
+
 def restrict_planning_to_explored_cells(prm, env, target_row, target_col, robot_xy):
     """
     Limit the path search to the nodes of the visited cells, of the robot's cell and of the
@@ -135,9 +155,7 @@ def restrict_planning_to_explored_cells(prm, env, target_row, target_col, robot_
     if not P.PLAN_ONLY_EXPLORED_CELLS:
         prm.set_allowed_nodes(None)
         return
-    cells = {(r, c) for r in range(env.rows) for c in range(env.cols) if env.is_cell_visited(r, c)}
-    cells.add((int(target_row), int(target_col)))
-    cells.add(tuple(int(v) for v in env.get_cell_from_world(robot_xy[0], robot_xy[1])))
+    cells = planning_cells(env, target_row, target_col, robot_xy)
     allowed = [nid for nid, cell in node_cells(prm, env).items() if cell in cells]
     prm.set_allowed_nodes(allowed)
     print(f"[PLAN] Paths allowed only in cells {sorted(cells)}: {len(allowed)} nodes out of "

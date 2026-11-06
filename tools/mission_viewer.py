@@ -26,6 +26,8 @@ Keys (interactive mode):
     up / down arrow              10 scans forward / back
     1..9, 0                      layer of the left panel (see LAYERS)
     i / x                        Spot's intensity / no_step layer (missions since 26-10)
+    s                            Spot's obstacle_distance before the grass filter (from 04-11;
+                                 layer 3 is the filtered one, the one the robot used)
     l                            next layer
     o                            right panel: end of mission <-> moment of the scan
     g                            PRM graph over the scan: show / hide
@@ -168,9 +170,14 @@ LAYERS = [
      "intensity of the sensor return", 'intensity'),
     ("no_step (Spot)", lambda d: _extra(d, 'no_step'), 'RdBu', -0.3, 0.3,
      "distance from the no-step boundary (m): < 0 = Spot does not put its feet there", 'no_step'),
+    # Spot's own obstacle_distance, before the filter of the low intermittent obstacles
+    # (perception/low_obstacles.py, from 04-11): 'obstacle_distance' is the filtered one.
+    ("obstacle_distance of Spot (before the grass filter)",
+     lambda d: d['obstacle_distance_spot'] if 'obstacle_distance_spot' in d else d['obstacle_distance'],
+     'plasma', 0, 1.0, "distance from the obstacle (m)"),
 ]
 # Layer keys: 1..9, 0 for the first ten, then these.
-LAYER_KEYS = {'i': 10, 'x': 11}
+LAYER_KEYS = {'i': 10, 'x': 11, 's': 12}
 
 
 def _extra(d, key):

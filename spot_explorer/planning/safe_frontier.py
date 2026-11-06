@@ -11,6 +11,7 @@ from spot_explorer.robot import connection
 from spot_explorer.perception import geometry
 from spot_explorer.perception import slopes
 from spot_explorer.perception import spot_grid
+from spot_explorer.perception import low_obstacles
 
 
 LOGGER = logging.getLogger(__name__)
@@ -149,7 +150,8 @@ class GridSnapshot:
     blocked_latch: hysteresis mask (see _ObstacleHistory); None = no filter.
     """
     __slots__ = ('obstacle_dist', 'rough_veto', 'seen', 'terrain', 'origin_x', 'origin_y',
-                 'cell_size', 'robot_x', 'robot_y', 'time', 'valid', 'blocked_latch', 'robot_yaw')
+                 'cell_size', 'robot_x', 'robot_y', 'time', 'valid', 'blocked_latch', 'robot_yaw',
+                 'plane_field')
 
     def __init__(self, obstacle_dist, rough_veto, seen, terrain, origin_x, origin_y, cell_size,
                  robot_x, robot_y, timestamp=None, valid=None, blocked_latch=None, robot_yaw=None):
@@ -168,6 +170,7 @@ class GridSnapshot:
         self.robot_y = float(robot_y)
         self.time = time.time() if timestamp is None else timestamp
         self.valid = valid      # is_valid 2D (None = all reliable): for the slope profile
+        self.plane_field = None  # slopes.PLANE_SLOPES: computed at the first use (_plane_field)
 
 
 def make_grid_snapshot(cells_obstacle_dist, rough_values, is_valid, terrain_valid_raw,
@@ -205,6 +208,19 @@ def make_grid_snapshot(cells_obstacle_dist, rough_values, is_valid, terrain_vali
         terrain=np.asarray(terrain_corrected, dtype=np.float64).reshape(shape),
         origin_x=origin_x, origin_y=origin_y, cell_size=cell_size,
         robot_x=robot_x, robot_y=robot_y, valid=valid, blocked_latch=latch, robot_yaw=robot_yaw)
+
+
+def _plane_field(snap):
+    """Plane gradient field of the snapshot (slopes.PLANE_SLOPES), on the cells usable as
+    terrain (spot_grid.slope_usable_mask, as the PRM), once per snapshot."""
+    if snap.plane_field is None:
+        t = np.asarray(snap.terrain, dtype=np.float64)
+        v = np.ones(t.shape, dtype=bool) if snap.valid is None else np.asarray(snap.valid, dtype=bool)
+        v = spot_grid.slope_usable_mask(v, snap.obstacle_dist, t.shape)
+        gx, gy, _ = slopes.plane_gradient_field(np.where(v, t, np.nan), v, snap.cell_size,
+                                                half_window_m=slopes.PLANE_EDGE_HALF_WINDOW_M)
+        snap.plane_field = (gx, gy)
+    return snap.plane_field
 
 
 def _under_body(snap, xs, ys):
@@ -396,9 +412,17 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
             free_len = min(L, dist - s_start)
             if free_len >= slopes.FRONTIER_SLOPE_MIN_LENGTH_M:
                 f = free_len / L
-                long_s, lat_s, has = slopes.compute_arc_slope_profile(
-                    snap.terrain, snap.origin_x, snap.origin_y, snap.cell_size,
-                    x1, y1, x1 + f * (x2 - x1), y1 + f * (y2 - y1), valid_2d=snap.valid)
+                if slopes.PLANE_SLOPES:
+                    # The same estimate as the PRM (the plane reads lower than the height
+                    # differences: with these the frontier would refuse edges the PRM accepted).
+                    gx, gy = _plane_field(snap)
+                    long_s, lat_s, has = slopes.plane_slope_along(
+                        gx, gy, snap.origin_x, snap.origin_y, snap.cell_size,
+                        x1, y1, x1 + f * (x2 - x1), y1 + f * (y2 - y1))
+                else:
+                    long_s, lat_s, has = slopes.compute_arc_slope_profile(
+                        snap.terrain, snap.origin_x, snap.origin_y, snap.cell_size,
+                        x1, y1, x1 + f * (x2 - x1), y1 + f * (y2 - y1), valid_2d=snap.valid)
                 if has and max(long_s, lat_s) > slopes.SLOPE_THRESHOLD:
                     reason, value = 'slope', float(max(long_s, lat_s))
                     dist, stop_xy = s_start, (x1, y1)
@@ -643,6 +667,13 @@ class ArcVerificationTracker:
 
         grid_frame_name = main_proto.local_grid.frame_name_local_grid_data
         vision_tform_grid = get_a_tform_b(transforms_snapshot, VISION_FRAME_NAME, grid_frame_name)
+        # The same filter of the low intermittent obstacles as process_scan (shared history).
+        seen = np.asarray(valid_vals, dtype=np.float64).ravel() >= spot_grid.TERRAIN_VALID_MIN
+        if unwritten is not None:
+            seen &= ~np.asarray(unwritten, dtype=bool).ravel()
+        cells_obs = low_obstacles.filter_obstacle_distance(
+            cells_obs, terrain_vals, seen, num_x, num_y, vision_tform_grid.position.x,
+            vision_tform_grid.position.y, cell_size)
         return make_grid_snapshot(cells_obs, rough_vals, is_valid, valid_vals, terrain_corrected,
                                   num_x, num_y, vision_tform_grid.position.x,
                                   vision_tform_grid.position.y, cell_size, robot_x, robot_y,

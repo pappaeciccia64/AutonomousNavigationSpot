@@ -820,26 +820,29 @@ def select_mobility_params(gradient, roughness):
     Levels:
       PLAIN    -- flat, regular terrain: normal gait (HINT_AUTO), medium step,
                   high ground_mu_hint (good grip)
-      MODERATE -- some slope or roughness: CRAWL, high step, medium ground_mu_hint
+      MODERATE -- some slope or roughness: normal gait (HINT_AUTO), high step, medium
+                  ground_mu_hint, lower speed
       HARD     -- difficult but not forbidden terrain (the veto is a separate, much
                   higher threshold, in fuse_obstacle_mask): CRAWL, high step, low
                   ground_mu_hint (less grip, caution)
     """
     # Tuned for OUTDOORS: even a flat lawn is not a floor, so at least a medium
     # step for all levels, and limited speeds at every level.
-    if gradient < gait.GAIT_PLAIN_SLOPE_MAX and roughness < gait.GAIT_PLAIN_ROUGH_MAX:
+    plain_max, moderate_max = gait.slope_thresholds()
+    if gradient < plain_max and roughness < gait.GAIT_PLAIN_ROUGH_MAX:
         tier = "PLAIN"
         params = dict(locomotion_hint=spot_command_pb2.HINT_AUTO,
                       swing_height=spot_command_pb2.SWING_HEIGHT_MEDIUM,
                       ground_mu_hint=gait.GAIT_MU_PLAIN,
                       max_linear_vel=gait.GAIT_VEL_PLAIN,
                       max_angular_vel=gait.GAIT_ANG_PLAIN)
-    elif gradient < gait.GAIT_MODERATE_SLOPE_MAX and roughness < gait.GAIT_MODERATE_ROUGH_MAX:
+    elif gradient < moderate_max and roughness < gait.GAIT_MODERATE_ROUGH_MAX:
         tier = "MODERATE"
-        # CRAWL here too, at the user's request. On grass MODERATE takes ~60% of the
-        # steps, so crawl is the prevailing gait and the mission is slower;
-        # with HINT_AUTO here MODERATE goes back to the normal gait.
-        params = dict(locomotion_hint=spot_command_pb2.HINT_CRAWL,
+        # Normal gait: the care is in speed, friction and step. With CRAWL here (until 04-11)
+        # the gait went AUTO <-> CRAWL at every PLAIN/MODERATE change, and at each change while
+        # walking Spot made a side step of 10-15 cm (04-11 14:08); the ground under MODERATE
+        # was 5 deg median, 14 at most, and Spot walks up to 30 deg in AUTO.
+        params = dict(locomotion_hint=spot_command_pb2.HINT_AUTO,
                       swing_height=spot_command_pb2.SWING_HEIGHT_HIGH,
                       ground_mu_hint=gait.GAIT_MU_MODERATE,
                       max_linear_vel=gait.GAIT_VEL_MODERATE,

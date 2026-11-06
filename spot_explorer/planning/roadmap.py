@@ -171,16 +171,22 @@ class PRM(EdgeEvaluation, EdgeStats):
         return float(np.sum(np.hypot(np.diff(xy[:, 0]), np.diff(xy[:, 1]))))
 
     def anchor_node(self, x: float, y: float, global_map=None, edge_safety_margin: float = 0.0,
-                    ignore_near_m: float = 0.0) -> Optional[int]:
+                    ignore_near_m: float = 0.0, connected_first: bool = False) -> Optional[int]:
         """
         The EXISTING node to attach the position (x, y) to, without creating new ones.
 
         Not simply the nearest (after a stop halfway along an edge the nearest may lie beyond
         what stopped the robot): the nearest, within ANCHOR_SEARCH_M, that
+          - with connected_first (the robot), has at least one edge: a node next to an
+            obstacle loses all its edges in the live refresh, and attached there the robot is
+            cut off from the graph (04-11 11:21, cell (0,4): node 0.15 m away with no edge,
+            two connected ones at 0.32 and 0.39 m);
           - has no infinite penalty;
           - is reachable in a straight line without passing over occupied cells of the global
             map (the first ignore_near_m around (x, y) do not count: the robot is there).
-        If none passes the checks, the nearest overall: the frontier decides anyway.
+        If none has an edge, the same checks without it; if none passes, the nearest overall:
+        the frontier decides anyway. A goal is attached without connected_first: a goal node
+        without edges is a goal to change, not one to move.
         """
         if not self.nodes:
             return None
@@ -188,10 +194,21 @@ class PRM(EdgeEvaluation, EdgeStats):
         xy = np.array([self.nodes[int(i)] for i in ids], dtype=np.float64)
         d = np.hypot(xy[:, 0] - x, xy[:, 1] - y)
         order = np.argsort(d, kind='stable')
+        for need_edge in ((True, False) if connected_first else (False,)):
+            nid = self._anchor_pass(x, y, ids, xy, d, order, global_map, edge_safety_margin,
+                                    ignore_near_m, need_edge)
+            if nid is not None:
+                return nid
+        return int(ids[order[0]])
+
+    def _anchor_pass(self, x, y, ids, xy, d, order, global_map, edge_safety_margin, ignore_near_m,
+                     need_edge):
         for k in order:
             if d[k] > ANCHOR_SEARCH_M:
                 break
             nid = int(ids[k])
+            if need_edge and not self.edges.get(nid):
+                continue
             if not np.isfinite(self.node_penalty(nid)):
                 continue
             if global_map is not None and edge_safety_margin > 0.0 and d[k] > 1e-6:
@@ -209,7 +226,7 @@ class PRM(EdgeEvaluation, EdgeStats):
                 if blocked:
                     continue
             return nid
-        return int(ids[order[0]])
+        return None
 
     def add_stop_node(self, x: float, y: float, global_map=None, edge_safety_margin: float = 0.0,
                       label: str = "stop", is_robot: bool = True) -> int:
@@ -218,7 +235,8 @@ class PRM(EdgeEvaluation, EdgeStats):
         not grow during the mission. If is_robot, it also becomes the robot node.
         """
         nid = self.anchor_node(x, y, global_map, edge_safety_margin,
-                               ignore_near_m=(ANCHOR_IGNORE_NEAR_M if is_robot else 0.0))
+                               ignore_near_m=(ANCHOR_IGNORE_NEAR_M if is_robot else 0.0),
+                               connected_first=is_robot)
         if nid is None:
             raise RuntimeError("add_stop_node: the graph has no nodes")
         if is_robot:

@@ -230,9 +230,13 @@ class ScanSteps:
             return FAILED
 
         # GraphNav breadcrumb at the attempt's starting point: it is the one the robot needs to
-        # be able to go back to if the cell turns out to be a dead end.
+        # be able to go back to if the cell turns out to be a dead end. Robot still walking
+        # after a hand-off (CHAIN_CELLS): the waypoint of the cell just visited is 10 cm
+        # behind and the cruise left its breadcrumbs, so only with the usual spacing (each
+        # waypoint costs ~0.4 s, 04-11 14:08).
+        moving = getattr(self.env, '_moving_pc', None) is not None
         map_recording.graphnav_drop_breadcrumb(self.env, self.recordingInterface, self.robot_state_client, self.robot_node_id,
-                                 self.target_row, self.target_col, force=True)
+                                 self.target_row, self.target_col, force=not moving)
         # The goal is the centre or a lattice node (find_best_point_in_cell chooses it among
         # the sampler points).
         self.goal_id = self.prm_graph.add_stop_node(

@@ -562,9 +562,15 @@ PLANE_MIN_VALID_FRACTION = 0.5
 # the measured body pitch: mean error 0.91 deg against 2.15 (bias -0.1 against +2.0); on the
 # slopes of 22-10/26-10/28-10/29-10 1.2 against 3.0. The lateral cannot be checked on the body
 # (Spot keeps it level): from 04-11 trajectory.csv also has the ground plane of the legs (gpe).
-# CAREFUL: SLOPE_THRESHOLD and the gait levels were tuned on the old estimate, which on the
-# slopes reads about 2 deg more.
-PLANE_SLOPES = False
+# The gait levels have thresholds of their own for the plane (gait.slope_thresholds). The
+# veto stays SLOPE_THRESHOLD (Spot's limit, ~30 deg): with the plane it is closer to the real
+# slope, while the old estimate reads more and vetoes earlier. The slope cost weights are
+# still those of the old estimate (tools/plane_thresholds.py).
+# On 04-11 14:08 (outdoors, ground up to 22 deg) against the ground plane of the legs (gpe,
+# max of long/lat) on 323 cruise stretches of 1 m: plane |error| 1.1 deg median (bias -0.5),
+# old 2.2 (bias +2.2); gait level right 89% with 0.13/0.20 against 76% with 0.15/0.25. The
+# frontier uses the same estimate (safe_frontier._plane_field). On from 04-11.
+PLANE_SLOPES = True
 PLANE_EDGE_HALF_WINDOW_M = ROBOT_HALF_LENGTH_M
 
 
@@ -573,7 +579,8 @@ def _box_sum(a, k):
     p = np.pad(a, k + 1, mode='constant')
     c = p.cumsum(0).cumsum(1)
     n = 2 * k + 1
-    return c[n:, n:] - c[:-n, n:] - c[n:, :-n] + c[:-n, :-n]
+    out = c[n:, n:] - c[:-n, n:] - c[n:, :-n] + c[:-n, :-n]
+    return out[:a.shape[0], :a.shape[1]]
 
 
 def plane_gradient_field(terrain_2d, valid_2d, cell_size, half_window_m=PLANE_HALF_WINDOW_M,

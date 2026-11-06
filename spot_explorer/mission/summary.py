@@ -4,8 +4,12 @@ import json
 
 from spot_explorer.robot import motion
 from spot_explorer.mission import attempt_cruise
+from spot_explorer.mission import mission_prm
+from spot_explorer.mission import cell_attempt
+from spot_explorer.planning import goal as goal_choice
 from spot_explorer.perception import geometry
 from spot_explorer.perception import slopes
+from spot_explorer.perception import low_obstacles
 from spot_explorer.perception import spot_grid
 
 from spot_explorer.planning import edge_evaluation
@@ -35,10 +39,14 @@ def mission_switches():
         'edge_evaluation.REFRESH_BATCH_SLOPES': edge_evaluation.REFRESH_BATCH_SLOPES,
         'edge_evaluation.INCREMENTAL_REFRESH': edge_evaluation.INCREMENTAL_REFRESH,
         'slopes.PLANE_SLOPES': slopes.PLANE_SLOPES,
+        'low_obstacles.LOW_OBSTACLE_FILTER': low_obstacles.LOW_OBSTACLE_FILTER,
         'motion.PATH_COMMAND_FOR_LEGS': motion.PATH_COMMAND_FOR_LEGS,
         'attempt_cruise.CONTINUOUS_MOTION': attempt_cruise.CONTINUOUS_MOTION,
         'attempt_cruise.CHAIN_CELLS': attempt_cruise.CHAIN_CELLS,
         'config.PLAN_ONLY_EXPLORED_CELLS': P.PLAN_ONLY_EXPLORED_CELLS,
+        'mission_prm.PLAN_ALSO_SHARED_NEIGHBOUR_CELLS': mission_prm.PLAN_ALSO_SHARED_NEIGHBOUR_CELLS,
+        'cell_attempt.CELL_SEEN_EXPLORED': cell_attempt.CELL_SEEN_EXPLORED,
+        'goal.GOAL_CENTRE_FIRST': goal_choice.GOAL_CENTRE_FIRST,
         'config.GRAPHNAV_SHORTCUTS': P.GRAPHNAV_SHORTCUTS,
         'config.GRAPHNAV_PRECHECK': P.GRAPHNAV_PRECHECK,
         'config.REPICK_ON_REPLAN_FAIL': P.REPICK_ON_REPLAN_FAIL,

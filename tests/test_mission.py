@@ -56,6 +56,21 @@ from bosdyn.client.math_helpers import Quat, SE3Pose
 
 from spot_explorer.planning import safe_frontier
 from spot_explorer.robot import battery
+from spot_explorer.perception import low_obstacles   # noqa: E402
+from spot_explorer.perception import slopes   # noqa: E402
+from spot_explorer.mission import mission_prm   # noqa: E402
+# The failures of these worlds are scripted by attempt number ([FAKE] attempt N failed on
+# purpose): a different sequence of attempts moves them onto other cells and the features to
+# check (fall during the GraphNav trip, return after the block) no longer happen. The plane
+# slopes and the shared neighbour cells (04-11) change the sequence: off here, the paths and
+# the slopes are checked by test_e2e_loop and test_cruise.
+slopes.PLANE_SLOPES = False
+mission_prm.PLAN_ALSO_SHARED_NEIGHBOUR_CELLS = False
+# Same for the goal nearest to the centre and the cells seen from outside (04-11 16:10).
+from spot_explorer.planning import goal as goal_choice   # noqa: E402
+from spot_explorer.mission import cell_attempt as _cell_attempt   # noqa: E402
+goal_choice.GOAL_CENTRE_FIRST = False
+_cell_attempt.CELL_SEEN_EXPLORED = False
 from spot_explorer.mission import attempt_legs, cell_attempt, exploration
 from spot_explorer.mission import run as mission_run
 from spot_explorer.planning import goal
@@ -397,6 +412,7 @@ def run(walls=None, name='MISSION', fiducial=None, stuck_wp0_m=None, wp0_offset_
     T.WORLD, T.ROBOT = T.World(WALLS if walls is None else walls, ghosts=True), T.Robot(*START)
     safe_frontier.OBSTACLE_HISTORY.reset()
     gn = FakeGraphNav()
+    low_obstacles.HISTORY.reset()
     gn.stuck_wp0_m = stuck_wp0_m
     gn.wp0_offset_m = wp0_offset_m
     robot = FakeRobot(gn)

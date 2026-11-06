@@ -35,8 +35,13 @@ from spot_explorer import records
 from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
 from spot_explorer.perception import spot_grid
+from spot_explorer.perception import slopes
 from spot_explorer.planning import decisions
 from spot_explorer.planning import safe_frontier
+from spot_explorer.perception import low_obstacles   # noqa: E402
+# The fake sensor sees through the obstacles: from the next cell a cell is "all seen" at once,
+# and these scenarios are about entering it (see cell_attempt.CELL_SEEN_EXPLORED).
+cell_attempt.CELL_SEEN_EXPLORED = False
 from spot_explorer.planning import roadmap
 from spot_explorer.planning import edge_evaluation
 from spot_explorer.robot import motion
@@ -360,6 +365,7 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
     # without resetting it the median mixed the previous scenario's scans with the
     # new ones: S11 passed or failed depending on what ran before.
     safe_frontier.OBSTACLE_HISTORY.reset()
+    low_obstacles.HISTORY.reset()
     DYNAMIC_TRIGGER.update(armed=dynamic is not None, rect=dynamic)
     FALL.update(armed=fall is not None, fallen=False, recoverable=(fall == 'recuperabile'), where=None)
     records.MISSION_STATS['falls'] = records.MISSION_STATS['self_rights'] = 0
@@ -639,8 +645,15 @@ if __name__ == '__main__':
                                         ("new goal at the first stop", 9, 8.75, 'wait')):
         GRAPH_KW.clear()
         GRAPH_KW.update(sampling='random', distribution='poisson', density_per_m2=4.0, seed=seed)
-        r = run(f"S15. obstacle right beyond the goal: {label}",
-                [(x0, x0 + 0.4, 2.0, 5.0)], (2.0, 3.0, 0.0), (0, 1))
+        # The path these seeds give (and so the final step below the minimum) is that of the
+        # height-difference slopes: with the plane the weights change a little and the robot
+        # arrives with a partial step and the tolerance instead.
+        plane_saved, slopes.PLANE_SLOPES = slopes.PLANE_SLOPES, False
+        try:
+            r = run(f"S15. obstacle right beyond the goal: {label}",
+                    [(x0, x0 + 0.4, 2.0, 5.0)], (2.0, 3.0, 0.0), (0, 1))
+        finally:
+            slopes.PLANE_SLOPES = plane_saved
         check(r['err'] is None and r['ok'] is True, f"{label}: cell reached without exceptions")
         check(r['tags']['[EARLY]'] == 0 and r['tags']['[BLOCK] Confirmed'] == 0,
               f"{label}: no [EARLY] nor block ({r['tags']['[EARLY]']}, "

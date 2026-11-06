@@ -109,8 +109,9 @@ def _print_configuration():
     print(f"[CONFIG] EDGE PROFILE: base={slopes.SLOPE_BASELINE_M}m  "
           f"lateral_slice=+/-{slopes.LATERAL_SLICE_HALF_WIDTH_M}m  "
           f"min_coverage={slopes.MIN_ARC_SAMPLE_FRACTION:.0%}")
-    print(f"[CONFIG] GAIT: plain<{gait.GAIT_PLAIN_SLOPE_MAX}/{gait.GAIT_PLAIN_ROUGH_MAX}  "
-          f"moderate<{gait.GAIT_MODERATE_SLOPE_MAX}/{gait.GAIT_MODERATE_ROUGH_MAX}  "
+    plain_max, moderate_max = gait.slope_thresholds()
+    print(f"[CONFIG] GAIT: plain<{plain_max}/{gait.GAIT_PLAIN_ROUGH_MAX}  "
+          f"moderate<{moderate_max}/{gait.GAIT_MODERATE_ROUGH_MAX}  "
           f"mu={gait.GAIT_MU_PLAIN}/{gait.GAIT_MU_MODERATE}/{gait.GAIT_MU_HARD}")
     print(f"[CONFIG] TERRAIN: terrain_valid >= {spot_grid.TERRAIN_VALID_MIN} "
           f"(was > 0.0, depended on the sign of a numerical residue)  "
@@ -272,7 +273,12 @@ def easy_walk(options):
     """The whole mission: robot and GraphNav start-up, graph, cell-by-cell exploration
     (Mission), final scan, summary, return to the start and power-off."""
     robot, lease_client, robot_state_client, client_metadata = connection.setLogInfo(options)
-    estop = connection.SimpleEstop(robot, options.name + "_estop")
+    if getattr(options, 'no_estop', False):
+        estop = None
+        print("[ESTOP] --no-estop: no software E-Stop of ours; the robot answers to the E-Stop "
+              "already registered (tablet).")
+    else:
+        estop = connection.SimpleEstop(robot, options.name + "_estop")
 
     local_grid = spot_grid.LocalGrid(robot)
     MISSION_CTX['local_grid'] = local_grid
@@ -390,7 +396,8 @@ def easy_walk(options):
             summary._emit_mission_summary_once()
 
             _close_mission(robot, robot_state_client, command_client, recordingInterface)
-            estop.stop()
+            if estop is not None:
+                estop.stop()
         except BaseException as exc:
             _emergency_shutdown(robot, command_client, recordingInterface, exc)
             raise
@@ -434,6 +441,12 @@ def _parse_args(argv=None):
                    help=f"minimum edge length in m (default {P.PRM_MIN_EDGE_M:g})")
     p.add_argument('--max-edge', type=float, default=None,
                    help=f"maximum edge length in m (default {P.PRM_MAX_EDGE_M:g})")
+    p.add_argument('--hostname', default=os.environ.get('SPOT_HOSTNAME', '192.168.80.3'),
+                   help="robot address (default: SPOT_HOSTNAME, else 192.168.80.3, the robot's WiFi; "
+                        "from the CORE I/O on board: 192.168.50.3)")
+    p.add_argument('--no-estop', action='store_true',
+                   help="do not register our software E-Stop: the one of the tablet stays. On the CORE "
+                        "I/O our keepalive runs on board and would never expire when the WiFi drops")
     a = p.parse_args(argv)
     if a.rows is not None and a.rows < 1 or a.cols is not None and a.cols < 1:
         p.error("--rows and --cols must be at least 1")
@@ -473,7 +486,8 @@ def main():
     options.grid_cols = args.cols
     options.grid_cell = args.cell
     options.name = "easyWalk"
-    options.hostname = "192.168.80.3"
+    options.hostname = args.hostname
+    options.no_estop = args.no_estop
     options.verbose = False
     options.recording_user_name = ""
     options.recording_session_name = ""

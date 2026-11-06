@@ -32,6 +32,7 @@ from spot_explorer import config, records                                      #
 from spot_explorer.mission import attempt_cruise, cell_attempt, planning_cycle  # noqa: E402
 from spot_explorer.perception import geometry                                  # noqa: E402
 from spot_explorer.planning import edge_evaluation, mission_graph, roadmap, safe_frontier   # noqa: E402
+from spot_explorer.perception import low_obstacles   # noqa: E402
 
 # test_e2e_loop pins the switches off for the stop-and-go: here the cruise is on, as in the field.
 attempt_cruise.CONTINUOUS_MOTION = True
@@ -123,6 +124,7 @@ def run(name, rects, start, cells_seq, on_step=None):
     e2e.WORLD, e2e.ROBOT = e2e.World(rects, True), e2e.Robot(*start)
     TRACK.clear()
     safe_frontier.OBSTACLE_HISTORY.reset()
+    low_obstacles.HISTORY.reset()
     for k in list(records.MISSION_STATS):
         if k.startswith('cruise'):
             del records.MISSION_STATS[k]

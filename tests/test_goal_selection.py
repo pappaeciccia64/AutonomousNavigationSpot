@@ -234,9 +234,10 @@ def synthetic_checks():
     _, g = pick([], reachable=lambda x, y: False)
     check(g == (0.0, 0.0), "no reachable point: the best one anyway (the centre)")
     _, g = pick([(0.30, 0.0)])
-    check(g != (0.0, 0.0) and math.dist(g, (0.30, 0.0)) >= P.TARGET_CLEARANCE_M,
-          f"centre 0.30 m from an obstacle (below {P.TARGET_CLEARANCE_M:.2f}): a point with more "
-          f"space {tuple(round(v, 2) for v in g)}")
+    check(g == (0.0, 0.0),
+          f"centre 0.30 m from an obstacle (below {P.TARGET_CLEARANCE_M:.2f}, above "
+          f"{geometry.PLAN_CLEARANCE_M:.2f}): still the centre, nearest first (04-11) "
+          f"{tuple(round(v, 2) for v in g)}")
     _, g = pick([(0.0, 0.0)])
     b = tr.cells.cell_border_distance(e, 0, 0, *g)
     check(b >= P.TARGET_CELL_BORDER_M,
