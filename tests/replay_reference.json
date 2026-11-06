@@ -11,7 +11,7 @@
     "discarded_arcs": 4387,
     "path_found": true,
     "path_arcs": 4,
-    "path_len_m": 4.09
+    "path_len_m": 4.0
    },
    {
     "attempt": 1,
@@ -43,11 +43,11 @@
      1,
      3
     ],
-    "valid_arcs": 101202,
-    "discarded_arcs": 4048,
+    "valid_arcs": 101206,
+    "discarded_arcs": 4044,
     "path_found": true,
     "path_arcs": 4,
-    "path_len_m": 4.06
+    "path_len_m": 4.0
    },
    {
     "attempt": 4,
@@ -55,11 +55,11 @@
      1,
      2
     ],
-    "valid_arcs": 101205,
-    "discarded_arcs": 4045,
+    "valid_arcs": 101206,
+    "discarded_arcs": 4044,
     "path_found": true,
     "path_arcs": 6,
-    "path_len_m": 4.85
+    "path_len_m": 4.84
    },
    {
     "attempt": 5,
@@ -83,7 +83,7 @@
     "discarded_arcs": 5068,
     "path_found": true,
     "path_arcs": 6,
-    "path_len_m": 5.91
+    "path_len_m": 5.87
    },
    {
     "attempt": 7,
@@ -106,8 +106,8 @@
     "valid_arcs": 93907,
     "discarded_arcs": 11343,
     "path_found": true,
-    "path_arcs": 4,
-    "path_len_m": 4.24
+    "path_arcs": 5,
+    "path_len_m": 4.12
    },
    {
     "attempt": 9,
@@ -139,11 +139,11 @@
      2,
      3
     ],
-    "valid_arcs": 92730,
-    "discarded_arcs": 12520,
+    "valid_arcs": 92808,
+    "discarded_arcs": 12442,
     "path_found": true,
     "path_arcs": 5,
-    "path_len_m": 4.77
+    "path_len_m": 4.58
    },
    {
     "attempt": 12,
@@ -166,9 +166,9 @@
    "straight_line_m": 14.3
   },
   "gait_tiers": {
-   "HARD": 7,
-   "MODERATE": 12,
-   "PLAIN": 27
+   "HARD": 10,
+   "MODERATE": 19,
+   "PLAIN": 17
   },
   "gait_by_segment": [
    "12:14:46 PLAIN",
@@ -182,10 +182,10 @@
    "12:16:01 PLAIN",
    "12:16:10 PLAIN",
    "12:16:19 MODERATE",
-   "12:16:42 PLAIN",
-   "12:16:48 PLAIN",
-   "12:16:55 PLAIN",
-   "12:17:02 PLAIN",
+   "12:16:42 MODERATE",
+   "12:16:48 MODERATE",
+   "12:16:55 MODERATE",
+   "12:17:02 MODERATE",
    "12:17:25 PLAIN",
    "12:17:32 PLAIN",
    "12:17:39 PLAIN",
@@ -194,29 +194,29 @@
    "12:18:03 PLAIN",
    "12:18:10 PLAIN",
    "12:18:33 MODERATE",
-   "12:18:44 MODERATE",
+   "12:18:44 HARD",
    "12:19:06 MODERATE",
    "12:19:16 MODERATE",
    "12:19:27 MODERATE",
-   "12:19:36 PLAIN",
-   "12:19:43 PLAIN",
-   "12:20:06 PLAIN",
-   "12:20:13 PLAIN",
+   "12:19:36 MODERATE",
+   "12:19:43 MODERATE",
+   "12:20:06 MODERATE",
+   "12:20:13 MODERATE",
    "12:20:33 HARD",
    "12:20:42 MODERATE",
    "12:20:50 MODERATE",
    "12:21:00 MODERATE",
-   "12:21:23 MODERATE",
-   "12:21:32 MODERATE",
+   "12:21:23 HARD",
+   "12:21:32 HARD",
    "12:22:05 HARD",
    "12:22:16 HARD",
    "12:22:33 HARD",
    "12:22:43 HARD",
    "12:22:55 HARD",
    "12:23:05 HARD",
-   "12:23:14 PLAIN",
+   "12:23:14 MODERATE",
    "12:23:48 MODERATE",
-   "12:23:55 PLAIN"
+   "12:23:55 MODERATE"
   ]
  },
  "13-10-2026_12-40-38": {
@@ -227,11 +227,11 @@
      0,
      1
     ],
-    "valid_arcs": 101192,
-    "discarded_arcs": 4058,
+    "valid_arcs": 101329,
+    "discarded_arcs": 3921,
     "path_found": true,
     "path_arcs": 4,
-    "path_len_m": 4.09
+    "path_len_m": 4.0
    },
    {
     "attempt": 1,
@@ -239,11 +239,11 @@
      0,
      2
     ],
-    "valid_arcs": 100981,
-    "discarded_arcs": 4269,
+    "valid_arcs": 100982,
+    "discarded_arcs": 4268,
     "path_found": true,
     "path_arcs": 2,
-    "path_len_m": 2.06
+    "path_len_m": 2.0
    },
    {
     "attempt": 2,
@@ -267,7 +267,7 @@
     "discarded_arcs": 5519,
     "path_found": true,
     "path_arcs": 4,
-    "path_len_m": 4.06
+    "path_len_m": 4.0
    },
    {
     "attempt": 4,
@@ -279,7 +279,7 @@
     "discarded_arcs": 8297,
     "path_found": true,
     "path_arcs": 5,
-    "path_len_m": 4.37
+    "path_len_m": 4.28
    },
    {
     "attempt": 5,
@@ -291,7 +291,7 @@
     "discarded_arcs": 12082,
     "path_found": true,
     "path_arcs": 4,
-    "path_len_m": 3.95
+    "path_len_m": 3.93
    },
    {
     "attempt": 6,
@@ -302,8 +302,8 @@
     "valid_arcs": 93220,
     "discarded_arcs": 12030,
     "path_found": true,
-    "path_arcs": 3,
-    "path_len_m": 3.0
+    "path_arcs": 4,
+    "path_len_m": 3.07
    },
    {
     "attempt": 7,
@@ -311,11 +311,11 @@
      2,
      0
     ],
-    "valid_arcs": 91849,
-    "discarded_arcs": 13401,
+    "valid_arcs": 92140,
+    "discarded_arcs": 13110,
     "path_found": true,
     "path_arcs": 6,
-    "path_len_m": 6.3
+    "path_len_m": 6.32
    },
    {
     "attempt": 8,
@@ -335,11 +335,11 @@
      2,
      2
     ],
-    "valid_arcs": 78852,
-    "discarded_arcs": 26398,
+    "valid_arcs": 79327,
+    "discarded_arcs": 25923,
     "path_found": true,
     "path_arcs": 6,
-    "path_len_m": 5.84
+    "path_len_m": 5.62
    },
    {
     "attempt": 10,
@@ -351,7 +351,7 @@
     "discarded_arcs": 31571,
     "path_found": true,
     "path_arcs": 4,
-    "path_len_m": 4.09
+    "path_len_m": 4.0
    }
   ],
   "wp0_return": {
@@ -362,9 +362,9 @@
    "straight_line_m": 13.1
   },
   "gait_tiers": {
-   "HARD": 21,
-   "MODERATE": 15,
-   "PLAIN": 15
+   "HARD": 27,
+   "MODERATE": 13,
+   "PLAIN": 11
   },
   "gait_by_segment": [
    "12:40:56 HARD",
@@ -379,21 +379,21 @@
    "12:42:39 HARD",
    "12:42:52 HARD",
    "12:43:06 HARD",
-   "12:43:26 PLAIN",
+   "12:43:26 MODERATE",
    "12:43:37 MODERATE",
    "12:43:47 MODERATE",
    "12:44:01 MODERATE",
-   "12:44:23 MODERATE",
-   "12:44:30 MODERATE",
+   "12:44:23 HARD",
+   "12:44:30 HARD",
    "12:44:58 HARD",
-   "12:45:06 MODERATE",
-   "12:45:26 MODERATE",
+   "12:45:06 HARD",
+   "12:45:26 HARD",
    "12:45:37 MODERATE",
-   "12:45:48 MODERATE",
+   "12:45:48 HARD",
    "12:46:09 HARD",
    "12:46:18 HARD",
    "12:46:30 HARD",
-   "12:46:37 MODERATE",
+   "12:46:37 HARD",
    "12:46:58 HARD",
    "12:47:05 MODERATE",
    "12:47:20 HARD",
@@ -401,7 +401,7 @@
    "12:47:38 PLAIN",
    "12:47:59 PLAIN",
    "12:48:07 PLAIN",
-   "12:48:12 PLAIN",
+   "12:48:12 MODERATE",
    "12:48:21 PLAIN",
    "12:48:23 PLAIN",
    "12:48:30 PLAIN",
@@ -411,11 +411,11 @@
    "12:49:16 HARD",
    "12:49:29 HARD",
    "12:49:39 MODERATE",
-   "12:49:47 PLAIN",
+   "12:49:47 MODERATE",
    "12:50:06 HARD",
    "12:50:15 PLAIN",
    "12:50:33 PLAIN",
-   "12:50:40 PLAIN",
+   "12:50:40 MODERATE",
    "12:50:53 HARD",
    "12:51:04 HARD"
   ]
