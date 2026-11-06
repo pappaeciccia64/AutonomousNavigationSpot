@@ -27,6 +27,25 @@ MISSION_GRID_ROWS = 8
 MISSION_GRID_COLS = 7
 MISSION_CELL_SIZE_M = 2.0
 
+# Where the robot stands, at the start, inside the grid: in which cell it starts. Looking at
+# the grid from above with the robot's forward direction up (see cells.py):
+#     'top-left'      'top-centre'      'top-right'
+#     'centre-left'   'centre'          'centre-right'
+#     'bottom-left'   'bottom-centre'   'bottom-right'
+# 'bottom-right' = cell (0, 0): the grid opens ahead and to the left of the robot (as
+# before). 'bottom-left': ahead and to the right; 'top-...': the grid is BEHIND the robot;
+# 'centre': the robot in the middle of the area. The cell can also be given, "row,column".
+# With an even number of rows or columns the centre falls between two cells: n//2 is taken.
+# From the command line: --start (e.g. --start centre, --start 3,2).
+MISSION_START_POSITION = 'bottom-right'
+
+# Order in which the cells are proposed (the rank of the frontier):
+#   'serpentine' rows walked back and forth, starting from the robot's corner;
+#   'rings'      wider and wider rings around the starting cell;
+#   'auto'       serpentine if the robot starts in a corner, rings otherwise.
+# From the command line: --order.
+MISSION_VISIT_ORDER = 'auto'
+
 # How the graph nodes are generated (see mission_graph.py, RANDOM NODES):
 #   'lattice' rectangular lattice, deterministic; the centre of every cell is a node;
 #   'random'  scattered nodes with MISSION_RANDOM_DISTRIBUTION ('uniform', 'poisson',

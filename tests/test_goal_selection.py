@@ -75,7 +75,7 @@ def replay_goals(name):
         return None
     with tr._quiet():
         env = tr.cells.EnvironmentMap(rows=m['rows'], cols=m['cols'], cell_size=m['cell'])
-        env.set_origin(m['origin'][0], m['origin'][1], math.radians(m['yaw_deg']))
+        env.set_origin(m['origin'][0], m['origin'][1], math.radians(m['yaw_deg']), *m.get('start_cell', (0, 0)))
         P.MISSION_LATTICE_SPACING_M = m['spacing']
         g = m['graph']
         P.MISSION_GRAPH_SAMPLING = g['sampling']

@@ -30,6 +30,7 @@ the robot arrives just outside the cell.
      point, a fall during a GraphNav move, the return to wp_0 stuck (STUCK) 0.60 m from the
      start. Exercises the new attempt right after recovery ([RECOVERY]), successful and
      failed, and the mission branches that real worlds rarely reach.
+  H  open area, the robot starts in the centre of the grid (--start centre): rings order.
   D  world A with the fake battery dropping one point per reading, from 36%: below 30% the
      mission stops exploring and closes as at the end of a mission (return to wp_0).
 In world A there is also a fiducial (ID 7) behind the starting point.
@@ -55,7 +56,6 @@ from bosdyn.api.graph_nav import graph_nav_pb2, map_pb2, map_processing_pb2, rec
 from bosdyn.client.math_helpers import Quat, SE3Pose
 
 from spot_explorer.planning import safe_frontier
-from spot_explorer.robot import battery
 from spot_explorer.perception import low_obstacles   # noqa: E402
 from spot_explorer.perception import slopes   # noqa: E402
 from spot_explorer.mission import mission_prm   # noqa: E402
@@ -71,6 +71,7 @@ from spot_explorer.planning import goal as goal_choice   # noqa: E402
 from spot_explorer.mission import cell_attempt as _cell_attempt   # noqa: E402
 goal_choice.GOAL_CENTRE_FIRST = False
 _cell_attempt.CELL_SEEN_EXPLORED = False
+from spot_explorer.robot import battery
 from spot_explorer.mission import attempt_legs, cell_attempt, exploration
 from spot_explorer.mission import run as mission_run
 from spot_explorer.planning import goal
@@ -406,13 +407,13 @@ def _with_battery(from_pct=36.0, points_per_read=1.0):
         config.BATTERY_SAMPLE_S = real_s
 
 
-def run(walls=None, name='MISSION', fiducial=None, stuck_wp0_m=None, wp0_offset_m=None):
+def run(walls=None, name='MISSION', fiducial=None, stuck_wp0_m=None, wp0_offset_m=None, extra_args=()):
     global FIDUCIAL_TAG
     FIDUCIAL_TAG = fiducial
     T.WORLD, T.ROBOT = T.World(WALLS if walls is None else walls, ghosts=True), T.Robot(*START)
     safe_frontier.OBSTACLE_HISTORY.reset()
-    gn = FakeGraphNav()
     low_obstacles.HISTORY.reset()
+    gn = FakeGraphNav()
     gn.stuck_wp0_m = stuck_wp0_m
     gn.wp0_offset_m = wp0_offset_m
     robot = FakeRobot(gn)
@@ -429,7 +430,7 @@ def run(walls=None, name='MISSION', fiducial=None, stuck_wp0_m=None, wp0_offset_
     mission_run.DATA_ROOT = root                                    # data folders here
     argv = sys.argv
     sys.argv = ["run_mission.py", "--rows", str(ROWS), "--cols", str(COLS), "--cell", str(CELL),
-                "--graph", "lattice", "--spacing", "0.5"]
+                "--graph", "lattice", "--spacing", "0.5"] + list(extra_args)
     t0 = time.time()
     out = io.StringIO()
     try:
@@ -544,6 +545,49 @@ def _check_emergency():
         check("[EMERGENCY] GraphNav map downloaded." in log, f"{how}: GraphNav map downloaded")
 
 
+def _check_start():
+    """Starting cell chosen by name (corners, centre, mid-sides, 'row,column') and visiting
+    order: complete, without repetitions, from the starting cell, and the usual serpentine
+    with the start in (0, 0)."""
+    print("\nStarting cell and visiting order")
+    from spot_explorer.mission import cells as E
+    expected = {'bottom-right': (0, 0), 'bottom-left': (7, 0), 'top-right': (0, 6),
+                'top-left': (7, 6), 'centre': (4, 3), 'bottom-centre': (4, 0),
+                'top-centre': (4, 6), 'centre-right': (0, 3), 'centre-left': (7, 3),
+                'Top Left': (7, 6), 'center': (4, 3), '2,5': (2, 5)}
+    found = {k: E.start_cell_for(k, 8, 7) for k in expected}
+    check(found == expected, f"named positions on an 8 x 7 grid: {found}")
+    for bad in ('7,7', 'in-the-middle', '1;2'):
+        try:
+            E.start_cell_for(bad, 8, 7)
+            check(False, f"start {bad!r} refused")
+        except ValueError:
+            pass
+    env = E.EnvironmentMap(rows=8, cols=7, cell_size=2.0)
+    old = [(r, c) for r in range(8) for c in (range(7) if r % 2 == 0 else range(6, -1, -1))]
+    check(env.generate_visit_path('auto', start_cell=(0, 0)) == old,
+          "start in (0, 0): the usual serpentine")
+    ok, corner_jumps = True, 0
+    for rows, cols in ((8, 7), (3, 3), (4, 5), (1, 5), (6, 6)):
+        env = E.EnvironmentMap(rows=rows, cols=cols, cell_size=2.0)
+        for pos in E.START_POSITIONS:
+            st = E.start_cell_for(pos, rows, cols)
+            for order in E.VISIT_ORDERS:
+                p = env.generate_visit_path(order, start_cell=st)
+                ok &= p[0] == st and len(p) == len(set(p)) == rows * cols
+                if E.is_corner_cell(st, rows, cols) and order != 'rings':
+                    corner_jumps += sum(abs(a[0] - b[0]) + abs(a[1] - b[1]) > 1 for a, b in zip(p, p[1:]))
+    check(ok, "every order, from every start: all the cells once, the start first")
+    check(corner_jumps == 0, f"serpentine from a corner: always between bordering cells (jumps {corner_jumps})")
+    env = E.EnvironmentMap(rows=3, cols=3, cell_size=3.0)
+    with contextlib.redirect_stdout(io.StringIO()):
+        env.set_origin(1.5, 1.5, 0.0, *E.start_cell_for('centre', 3, 3))
+    check(env.get_world_position_from_cell(1, 1) == (1.5, 1.5)
+          and env.get_cell_from_world(-0.5, -0.5) == (0, 0)
+          and env.update_position(4.4, 4.4) == (2, 2),
+          "start in the centre: the robot is in the centre of (1,1), (0,0) behind to the right")
+
+
 def _check_cell_choice():
     """
     The case of 28-10 13:50, 8 x 7 grid of 2 m: (7,2) was visited with the robot just
@@ -615,8 +659,18 @@ if __name__ == '__main__':
     _check_common(r, return_ok=False)
     _check_failures(r)
     shutil.rmtree(r['root'], ignore_errors=True)
+    _check_start()
     _check_cell_choice()
     _check_emergency()
+    print("\nWhole mission in world H: open area, the robot starts in the CENTRE of the grid.")
+    r = run([], "MISSION_H", extra_args=["--start", "centre"])
+    _check_common(r)
+    log = r['log']
+    check("[CONFIG] Start: cell (1,1) centre" in log, "start in cell (1,1), the centre")
+    check("[CONFIG] Visiting order: rings" in log, "from the centre the visiting order is rings")
+    check("[PROGRESS] End of exploration: 9/9 cells closed (100%): 9 visited" in log,
+          "all 9 cells visited, also those behind the robot")
+    shutil.rmtree(r['root'], ignore_errors=True)
     print("\nWhole mission in world G: world A with the return to wp_0 'arrived' but 0.8 m to the side "
           "(29-10 10:57: 1.2 m).")
     r = run(WORLDS['A'], "MISSION_G", fiducial=(7, START[0] - 1.0, START[1]), wp0_offset_m=0.8)

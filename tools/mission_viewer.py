@@ -992,14 +992,16 @@ class MissionContext:
 
     def mission_frame(self):
         """
-        (x, y, yaw) of the mission frame: origin at the centre of cell (0, 0), which is the
-        starting point, and orientation of the cell grid (env_origin_yaw, the robot's nose at
-        the start). From the PRM views; without them, from the first scan.
+        (x, y, yaw) of the mission frame: origin at the centre of the starting cell
+        (env_start_cell; (0, 0) before 06-11, when the start was always there), and
+        orientation of the cell grid (env_origin_yaw, the robot's nose at the start). From the
+        PRM views; without them, from the first scan.
         """
         for _t, _n, vd in self.vis:
             cells = _arr(vd, 'env_cells', (4,))
             yaw = _scalar(vd, 'env_origin_yaw', np.nan)
-            k = np.flatnonzero((cells[:, 0] == 0) & (cells[:, 1] == 0)) if len(cells) else []
+            r0, c0 = (int(v) for v in vd['env_start_cell']) if 'env_start_cell' in vd else (0, 0)
+            k = np.flatnonzero((cells[:, 0] == r0) & (cells[:, 1] == c0)) if len(cells) else []
             if len(k) and np.isfinite(yaw):
                 return float(cells[k[0], 2]), float(cells[k[0], 3]), float(yaw)
         d = self.scans[0]

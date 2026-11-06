@@ -30,7 +30,7 @@ from spot_explorer.mission import recovery
 class Mission:
     """The mission cell by cell, after start-up (see run.py).
 
-    The frontier is the list of candidate cells (row, column, rank on the serpentine path).
+    The frontier is the list of candidate cells (row, column, rank on the visiting path).
     At every turn: if a frontier cell borders the robot's cell, entry is attempted from here
     (_attempt_adjacent_cell); otherwise the lowest-rank candidate is chosen, the robot
     approaches it with GraphNav up to the waypoint of the nearest visited cell and attempts
@@ -57,7 +57,11 @@ class Mission:
         self.verification_tracker = verification_tracker
         self.mission_folder = mission_folder
         self.mobility_kwargs = mobility_kwargs
-        self.path = env.generate_serpentine_path(start_cell=env.start_cell)
+        self.path = env.generate_visit_path(P.MISSION_VISIT_ORDER, start_cell=env.start_cell)
+        print(f"[CONFIG] Visiting order: {env.visit_order_name(P.MISSION_VISIT_ORDER)} "
+              f"(from {P.MISSION_VISIT_ORDER}), first cells "
+              + " ".join(f"({r},{c})" for r, c in self.path[:8])
+              + (" ..." if len(self.path) > 8 else ""))
         self.frontier = []
         self.visualization_counter = 0   # running number of the saved images
         # Progress (see _log_progress): start instant, closed cells at the start and

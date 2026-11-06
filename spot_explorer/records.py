@@ -553,6 +553,7 @@ def save_visualization_bundle(save_path, pts, terrain_real, obstacle_mask, robot
             env_cell_status=np.array([c[4] for c in cells]),
             env_cell_size=np.nan if env is None else float(env.cell_size),
             env_origin_yaw=np.nan if env is None else float(env.origin_yaw),
+            env_start_cell=np.array((-1, -1) if env is None else tuple(env.start_cell), dtype=np.int64),
             traveled_arcs=np.array(getattr(env, '_traveled_arcs', []), dtype=np.float64).reshape(-1, 4),
         )
     except Exception as e:

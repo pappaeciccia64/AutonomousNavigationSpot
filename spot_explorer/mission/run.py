@@ -162,8 +162,8 @@ def _print_configuration():
           f"valid even with the robot outside the cell up to {P.ARRIVAL_OUTSIDE_CELL_M:.2f} m")
 
 
-def _mission_grid(options):
-    """The mission grid: EnvironmentMap with columns ahead and rows to the left.
+def _grid_size(options, verbose=True):
+    """Rows, columns and cell side of the mission grid, and where they come from.
 
     Default P.MISSION_GRID_ROWS x P.MISSION_GRID_COLS cells of P.MISSION_CELL_SIZE_M. They
     can be changed WITHOUT touching the code, in order of precedence:
@@ -179,8 +179,9 @@ def _mission_grid(options):
             grid_rows, grid_cols, grid_cell = int(_r), int(_c), float(_cs)
             _grid_source = f"SPOT_MISSION_GRID='{_env_grid}'"
         except Exception:
-            print(f"[CONFIG] SPOT_MISSION_GRID='{_env_grid}' not valid (expected 'rows,cols,side'): "
-                  f"using {grid_rows},{grid_cols},{grid_cell:g}.")
+            if verbose:
+                print(f"[CONFIG] SPOT_MISSION_GRID='{_env_grid}' not valid (expected 'rows,cols,side'): "
+                      f"using {grid_rows},{grid_cols},{grid_cell:g}.")
     _cli = (getattr(options, 'grid_rows', None), getattr(options, 'grid_cols', None),
             getattr(options, 'grid_cell', None))
     if any(v is not None for v in _cli):
@@ -188,9 +189,35 @@ def _mission_grid(options):
         grid_cols = int(_cli[1]) if _cli[1] is not None else grid_cols
         grid_cell = float(_cli[2]) if _cli[2] is not None else grid_cell
         _grid_source = "arguments --rows/--cols/--cell"
+    return grid_rows, grid_cols, grid_cell, _grid_source
+
+
+def _start_cell(options, rows, cols):
+    """The starting cell (see P.MISSION_START_POSITION, argument --start) and where it comes
+    from. ValueError if it is not valid for a rows x cols grid."""
+    pos = getattr(options, 'start_position', None)
+    source = "argument --start" if pos is not None else "config.MISSION_START_POSITION"
+    if pos is None:
+        pos = P.MISSION_START_POSITION
+    return cells.start_cell_for(pos, rows, cols), source
+
+
+def _mission_grid(options):
+    """The mission grid: EnvironmentMap with columns ahead and rows to the left, and the
+    robot's starting cell (see _grid_size and _start_cell)."""
+    grid_rows, grid_cols, grid_cell, _grid_source = _grid_size(options)
     print(f"[CONFIG] Mission grid: {grid_rows} x {grid_cols} cells of {grid_cell:.1f} m "
-          f"({grid_rows * grid_cell:.0f} m to the left x {grid_cols * grid_cell:.0f} m ahead; "
-          f"source: {_grid_source})")
+          f"({grid_rows * grid_cell:.0f} m x {grid_cols * grid_cell:.0f} m; source: {_grid_source})")
+    # Already checked in main() before connecting to the robot.
+    start_cell, _pos_source = _start_cell(options, grid_rows, grid_cols)
+    _name = cells.describe_start_cell(start_cell, grid_rows, grid_cols)
+    r0, c0 = start_cell
+    # Extent of the grid around the robot: ahead/behind, left/right.
+    _ahead, _behind = (grid_cols - 1 - c0 + 0.5) * grid_cell, (c0 + 0.5) * grid_cell
+    _left, _right = (grid_rows - 1 - r0 + 0.5) * grid_cell, (r0 + 0.5) * grid_cell
+    print(f"[CONFIG] Start: cell ({r0},{c0}){' ' + _name if _name else ''}; from the robot the grid "
+          f"goes {_ahead:.1f} m ahead, {_behind:.1f} m behind, {_left:.1f} m to the left, "
+          f"{_right:.1f} m to the right (source: {_pos_source})")
     print(f"[CONFIG] Lattice: requested spacing "
           f"{'suggested' if P.MISSION_LATTICE_SPACING_M is None else '%.3f m' % P.MISSION_LATTICE_SPACING_M}, "
           f"rings {P.MISSION_LATTICE_RINGS if P.MISSION_LATTICE_RINGS is not None else 'all'}")
@@ -201,7 +228,9 @@ def _mission_grid(options):
              f"{'random' if P.MISSION_RANDOM_SEED is None else P.MISSION_RANDOM_SEED})"
              if P.MISSION_GRAPH_SAMPLING == 'random' else "")
           + f"; edges from {P.PRM_MIN_EDGE_M:g} to {P.PRM_MAX_EDGE_M:g} m")
-    return cells.EnvironmentMap(rows=grid_rows, cols=grid_cols, cell_size=grid_cell)
+    env = cells.EnvironmentMap(rows=grid_rows, cols=grid_cols, cell_size=grid_cell)
+    env.start_cell = env.current_cell = start_cell   # set_origin confirms it with the pose
+    return env
 
 
 def _close_mission(robot, robot_state_client, command_client, recordingInterface):
@@ -338,12 +367,11 @@ def easy_walk(options):
                       f"seen in {P.START_FIDUCIAL_WAIT_S:.0f} s by any camera: starting without. "
                       f"Spot only recognizes AprilTag 36h11 (the Boston Dynamics fiducials).")
 
-            start_row, start_col = 0, 0
+            env = _mission_grid(options)
+            start_row, start_col = env.start_cell
             recordingInterface.create_default_waypoint(cell_row=start_row, cell_col=start_col)
             if fiducials:
                 recordingInterface.initialize_with_fiducial(robot_state_client, fiducials[0]['id'])
-
-            env = _mission_grid(options)
 
             # --- Gait for the whole mission ---
             # Empty: gait, step height and ground_mu_hint are chosen LEG BY LEG based on the
@@ -422,6 +450,11 @@ def _parse_args(argv=None):
                    help=f"columns of cells, ahead of the robot (default {P.MISSION_GRID_COLS})")
     p.add_argument('--cell', type=float, default=None,
                    help=f"cell side in m (default {P.MISSION_CELL_SIZE_M:g})")
+    p.add_argument('--start', default=None,
+                   help=f"starting cell of the robot in the grid: {', '.join(cells.START_POSITIONS)}, "
+                        f"or 'row,column' (default {P.MISSION_START_POSITION})")
+    p.add_argument('--order', choices=cells.VISIT_ORDERS, default=None,
+                   help=f"visiting order of the cells (default {P.MISSION_VISIT_ORDER})")
     p.add_argument('--spacing', type=float, default=None,
                    help=f"spacing between lattice nodes in m, rounded to cell/n; the edges "
                         f"stay >= {P.PRM_MIN_EDGE_M:g} m (default {P.MISSION_LATTICE_SPACING_M}; "
@@ -452,6 +485,12 @@ def _parse_args(argv=None):
         p.error("--rows and --cols must be at least 1")
     if a.cell is not None and a.cell <= 0:
         p.error("--cell must be positive")
+    if a.start is not None:
+        try:
+            # Only the form here; main() checks that the cell is inside the grid.
+            cells.start_cell_for(a.start, 10 ** 6, 10 ** 6)
+        except ValueError as e:
+            p.error(f"--start: {e}")
     if a.density is not None and a.density <= 0:
         p.error("--density must be positive")
     lo = P.PRM_MIN_EDGE_M if a.min_edge is None else a.min_edge
@@ -485,6 +524,19 @@ def main():
     options.grid_rows = args.rows
     options.grid_cols = args.cols
     options.grid_cell = args.cell
+    options.start_position = args.start
+    if args.order is not None:
+        P.MISSION_VISIT_ORDER = args.order
+    # Start and order are checked here, before connecting to the robot.
+    _rows, _cols, _cell, _src = _grid_size(options, verbose=False)
+    try:
+        _start_cell(options, _rows, _cols)
+        if P.MISSION_VISIT_ORDER not in cells.VISIT_ORDERS:
+            raise ValueError(f"MISSION_VISIT_ORDER {P.MISSION_VISIT_ORDER!r} unknown: one of "
+                             f"{cells.VISIT_ORDERS}")
+    except ValueError as e:
+        print(f"[CONFIG] {e} (grid {_rows} x {_cols}, source: {_src}). Mission not started.")
+        sys.exit(2)
     options.name = "easyWalk"
     options.hostname = args.hostname
     options.no_estop = args.no_estop

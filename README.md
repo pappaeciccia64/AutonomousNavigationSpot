@@ -31,6 +31,21 @@ SPOT_MISSION_GRID="2,3,4" python3 run_mission.py       # environment variable
 ```
 The `[CONFIG] Mission grid` line of the log says which value was used and where it came from.
 
+**Where the robot starts in the grid.** `config.MISSION_START_POSITION`, or for a single mission `--start`. Looking at the grid from above with the robot's forward direction up:
+
+| | left | centre | right |
+|---|---|---|---|
+| **top** (grid behind) | `top-left` | `top-centre` | `top-right` |
+| **centre** | `centre-left` | `centre` | `centre-right` |
+| **bottom** (grid ahead) | `bottom-left` | `bottom-centre` | `bottom-right` (default, cell (0,0)) |
+
+```bash
+python3 run_mission.py --start centre              # the robot in the middle of the area
+python3 run_mission.py --start bottom-left         # grid ahead and to the RIGHT of the robot
+python3 run_mission.py --start 3,2                 # any cell (row,column)
+```
+The visiting order (`--order`, `config.MISSION_VISIT_ORDER`) is `auto`: a serpentine from the robot's corner, or rings around the start if the robot is not in a corner; `serpentine` or `rings` can be forced. The `[CONFIG] Start` and `[CONFIG] Visiting order` lines of the log give the cell, how far the grid goes ahead, behind, left and right, and the first cells in order. An invalid start (cell outside the grid, unknown name): the mission does not start.
+
 **Mission graph.** The nodes are generated in two ways (`--graph`, default in `config.MISSION_GRAPH_SAMPLING`):
 ```bash
 python3 run_mission.py --graph random --distribution poisson --density 9 --seed 7     # random nodes (default: poisson, 9 nodes/m², random seed)
@@ -56,7 +71,7 @@ python3 tools/bench_graph.py --graph random --distribution halton --seed 7 --pre
 ## How a mission works
 
 ### Cells and exploration
-The area is a grid of cells (`mission/cells.py`) relative to the robot pose at start-up: the **columns** go forward, the **rows** to the left. The cells are visited in a serpentine; at every step the neighbouring frontier cell with the lowest rank is chosen. If none borders the current position, the robot goes with GraphNav to the waypoint nearest to the lowest-rank one and tries from there. A cell that failed from one side stays a candidate and is retried later from another side; it becomes blocked only when all sides have been tried, or at once if the goal turns out to be inside an obstacle (`mission/exploration.py`, `mission/recovery.py`).
+The area is a grid of cells (`mission/cells.py`) relative to the robot pose at start-up: the **columns** go forward, the **rows** to the left. The cells are visited in a serpentine from the starting corner, or in rings if the robot starts in the centre or mid-side; at every step the neighbouring frontier cell with the lowest rank is chosen. If none borders the current position, the robot goes with GraphNav to the waypoint nearest to the lowest-rank one and tries from there. A cell that failed from one side stays a candidate and is retried later from another side; it becomes blocked only when all sides have been tried, or at once if the goal turns out to be inside an obstacle (`mission/exploration.py`, `mission/recovery.py`).
 
 ### A cell attempt (`CellAttempt` in `mission/cell_attempt.py`)
 The attempt prepares scan, maps, graph and path (`_prepare`), then repeats a turn of phases (`_guards`, `_scan_and_graph`, `_frontier_and_decision`, `_rotation`, `_node_or_arrival`, `_wait`, `_block`, `_execute_legs`) until the robot arrives or the attempt fails. The loop and the decision are in `cell_attempt.py`; the scan phases in `attempt_scan.py`, rotation, wait and block in `attempt_obstacles.py`, the legs in `attempt_legs.py`.
@@ -175,7 +190,7 @@ Every change is checked with `test_replay.py --all`, `test_e2e_loop.py`, `test_m
 ## Conventions
 
 - **Coordinates**: Spot's VISION frame. x, y and heading are relative to the pose at mission start (`env.set_origin`); heights to the ground height at start-up (`mission_z0`), because Spot measures them from where it was powered on.
-- **Cells**: columns forward, rows to the left; the starting cell is (0,0).
+- **Cells**: columns forward, rows to the left; the starting cell is (0,0) unless `--start` says otherwise.
 - **Sides of a cell**: 4 bits, `0b1000` north, `0b0100` east, `0b0010` south, `0b0001` west.
 - **GraphNav waypoints**: `wp_0` at the start, then numbered in order (`wp_1`, `wp_2`, …).
 - **Log**: every line has a tag in square brackets (`[ATTEMPT]`, `[FRONTIER]`, `[BLOCK]`, `[GRAPHNAV]`, `[TIMING]`, …), which stays stable: messages may change, tags do not. Missions before 30-10-2026 have Italian logs (`[FRONTE]`, `[BLOCCO]`, `[TEMPO]`, …); the tools read both.

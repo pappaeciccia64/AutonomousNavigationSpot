@@ -320,7 +320,7 @@ def finalize_or_defer_blocked_cell(env, row, col, sampler=None, global_map=None)
     (env.all_sides_explored). Otherwise it stays at the not-visited value (0) and is NOT
     retried right away: it stays a normal frontier candidate.
     get_adjacent_frontier_cells and get_lowest_rank_from_frontier_list treat every cell at
-    0 the same way, ordered by its position in the serpentine, like a cell never tried.
+    0 the same way, ordered by its position in the visiting path, like a cell never tried.
     So a cell that failed once competes for priority with the SAME logic as all the
     others, and is retried when its turn comes, from the side not yet tried: neither right
     away out of turn, nor discarded after a single side.

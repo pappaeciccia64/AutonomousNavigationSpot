@@ -8,6 +8,10 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-06 (starting cell chosen)
+
+- **Starting cell chosen** (`config.MISSION_START_POSITION`, `MISSION_VISIT_ORDER`, arguments `--start` and `--order` of `run_mission.py`, `cells.start_cell_for`, `generate_visit_path`; ported from `AdL-version` 4fa37ae of 04-11, old code). Before, the robot always started in cell (0,0), the bottom-right corner: the grid opened only ahead and to the left, and the robot had to be put in a corner of the area. Now it can start in any of the four corners, in the centre, mid-side or in a cell given as `row,column`. Graph, cells, waypoints and viewers already used `env.start_cell`: only where it is fixed changes. The visiting order follows the start: serpentine from the robot's corner (from (0,0) the same as before), rings around the start if it is not a corner (the "rotated" serpentine of before, from the centre, explored half the area and then jumped to the other end). The figure data save `env_start_cell` (the viewer's mission frame is centred on it; older missions (0,0)); the replay reads the starting cell from the log (`Starting cell (r, c)`; old missions (0,0)). Tests: `test_mission`, checks on positions and orders and world H (open area, start in the centre: 9/9 cells visited, also those behind the robot). Never tried on the robot.
+
 ## 2026-11-04 (first mission run on the CORE I/O, 16:52, same room)
 
 The mission ran on board (Jetson Xavier NX of the CORE I/O, Python 3.8) from start to the return to wp_0 (4 cm of drift), 8 x 8 cells, 7 visited and 1 blocked, the rest beyond the walls. The robot stood still 52 s out of 136 (16:10 from the laptop: 25 out of 139): hand-offs 4.1-4.7 s against 0.9-1.6 s; cycle phases scan x2, maps x2, edges x6 the laptop (0.21 s median), from the attempt start to the graph update 1.2-2.2 s against 0.25 s. Two GraphNav trips (9 s and 4 s) went to cells where the robot already stood and that turned out 93% and 100% seen; GraphNav STUCK towards (0,2) in front of a chair with a jacket moved into the corridor (photos).

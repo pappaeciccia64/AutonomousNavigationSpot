@@ -8,9 +8,98 @@ West 0b0001).
 
 The grid frame is fixed at power-on (set_origin): the centre of the starting cell is at
 the origin, the grid x axis is the robot's forward direction at that moment (columns),
-the y axis its left (rows). The visiting order is a serpentine.
+the y axis its left (rows).
+
+The starting cell is chosen (start_cell_for, config.MISSION_START_POSITION): the robot can
+stand in one of the four corners, in the middle of a side or in the centre of the grid.
+Looking at the grid from above with the robot's forward direction up:
+
+    top-left       top-centre     top-right          ^ forward (growing columns)
+    centre-left    centre         centre-right       |
+    bottom-left    bottom-centre  bottom-right  <----+ left (growing rows)
+
+'bottom-right' is cell (0, 0): the grid opens ahead and to the left of the robot (as it
+always was). 'top-...' puts the grid BEHIND the robot, '...-right' to its left,
+'...-left' to its right.
+
+The visiting order (generate_visit_path) is a serpentine starting from the robot's corner,
+or, if the robot is not in a corner, rings around the starting cell.
 """
 import numpy as np
+
+
+# =========================================================================================
+# STARTING CELL AND VISITING ORDER
+# =========================================================================================
+# Named positions of the starting cell: (vertical, horizontal) looking at the grid from
+# above with the robot's forward direction up. Vertical -> column (bottom = column 0, the
+# grid is ahead of the robot), horizontal -> row (right = row 0, the grid is to the left).
+START_POSITIONS = (
+    'bottom-right', 'bottom-left', 'top-right', 'top-left', 'centre',
+    'bottom-centre', 'top-centre', 'centre-right', 'centre-left',
+)
+VISIT_ORDERS = ('auto', 'serpentine', 'rings')
+
+_START_ALIASES = {'centre-centre': 'centre', 'center': 'centre'}
+
+
+def _axis_index(where, n):
+    """Index along one axis: 'bottom'/'right' = 0, 'top'/'left' = n-1, 'centre' = n//2."""
+    if where in ('bottom', 'right'):
+        return 0
+    if where in ('top', 'left'):
+        return n - 1
+    return n // 2
+
+
+def start_cell_for(position, rows, cols):
+    """
+    The starting cell (row, column) for a rows x cols grid.
+
+    position: one of START_POSITIONS ('bottom-right', 'centre', ...; spaces and '_' count as
+    '-', 'center' as 'centre'), or the cell itself, as a tuple (row, column) or a string
+    "row,column". With an even number of rows or columns the centre is not a cell: 'centre'
+    takes cell n//2 (the more to the left / more ahead of the two central ones).
+
+    Raises ValueError if the position is not valid or the cell is outside the grid.
+    """
+    if isinstance(position, (tuple, list)):
+        cell = (int(position[0]), int(position[1]))
+    else:
+        text = str(position).strip().lower().replace(' ', '-').replace('_', '-').replace('center', 'centre')
+        text = _START_ALIASES.get(text, text)
+        if ',' in text:
+            try:
+                r, c = text.split(',')
+                cell = (int(r), int(c))
+            except ValueError:
+                raise ValueError(f"starting cell {position!r} not valid: expected 'row,column'")
+        elif text == 'centre':
+            cell = (rows // 2, cols // 2)
+        elif text in START_POSITIONS:
+            vert, horiz = text.split('-')
+            cell = (_axis_index(horiz, rows), _axis_index(vert, cols))
+        else:
+            raise ValueError(f"starting position {position!r} unknown: one of "
+                             f"{', '.join(START_POSITIONS)}, or 'row,column'")
+    if not (0 <= cell[0] < rows and 0 <= cell[1] < cols):
+        raise ValueError(f"starting cell {cell} outside the {rows} x {cols} grid")
+    return cell
+
+
+def describe_start_cell(cell, rows, cols):
+    """Name of the position of the cell in the grid ('bottom-right', 'centre', ...) or ''."""
+    for name in START_POSITIONS:
+        if start_cell_for(name, rows, cols) == tuple(cell):
+            return name
+    return ''
+
+
+def is_corner_cell(cell, rows, cols):
+    """True if the cell is in a corner of the grid (also for one-row grids)."""
+    r, c = cell
+    return r in (0, rows - 1) and c in (0, cols - 1)
+
 
 class EnvironmentMap(object):
     def __init__(self, rows=12, cols=12, cell_size=2.0):
@@ -342,33 +431,102 @@ class EnvironmentMap(object):
 
     def generate_serpentine_path(self, start_cell=None):
         """
-        The serpentine visiting order, list of (row, column):
+        The serpentine visiting order, list of (row, column). A row is walked along the
+        columns (forwards or backwards), then the next row, coming back:
             1  2  3  4  5
             10 9  8  7  6
             11 12 13 14 15
-        rotated so as to start from start_cell (default: self.start_cell).
+        If start_cell (default: self.start_cell) is a corner, the serpentine starts from that
+        corner: rows from the one of start_cell, columns from its side. With (0, 0) it is the
+        usual serpentine. If it is not a corner, the serpentine from (0, 0) rotated so as to
+        start from start_cell (better generate_visit_path('rings')).
         """
+        effective_start = tuple(start_cell if start_cell is not None else self.start_cell)
+        r0, c0 = effective_start
+        corner = is_corner_cell(effective_start, self.rows, self.cols)
+        row_order = range(self.rows - 1, -1, -1) if corner and r0 == self.rows - 1 and self.rows > 1 \
+            else range(self.rows)
+        forward = not (corner and c0 == self.cols - 1 and self.cols > 1)
         path = []
-        for row in range(self.rows):
-            if row % 2 == 0:
-                # even rows: left to right
-                for col in range(self.cols):
-                    path.append((row, col))
-            else:
-                # odd rows: right to left
-                for col in range(self.cols - 1, -1, -1):
-                    path.append((row, col))
+        for row in row_order:
+            cols = range(self.cols) if forward else range(self.cols - 1, -1, -1)
+            path.extend((row, col) for col in cols)
+            forward = not forward
 
         if not path:
             return path
 
-        effective_start = start_cell if start_cell is not None else self.start_cell
         if effective_start in path:
             start_idx = path.index(effective_start)
             if start_idx > 0:
                 path = path[start_idx:] + path[:start_idx]
 
         return path
+
+    def generate_ring_path(self, start_cell=None):
+        """
+        The visiting order in rings, list of (row, column): first the starting cell, then the
+        ring of cells at distance 1 (the 8 around it), then the one at distance 2, ...
+        (distance = max(|delta row|, |delta column|)). Each ring is walked from one cell to
+        the bordering one, counter-clockwise, starting from the cell nearest to the last one
+        of the ring before; if the grid border cuts the ring, it starts from one of its ends,
+        so no piece is left behind. Suited to a start in the centre or mid-side.
+        """
+        start = tuple(start_cell if start_cell is not None else self.start_cell)
+        r0, c0 = start
+        rings = {}
+        for r in range(self.rows):
+            for c in range(self.cols):
+                rings.setdefault(max(abs(r - r0), abs(c - c0)), []).append((r, c))
+
+        n4 = ((-1, 0), (1, 0), (0, 1), (0, -1))
+
+        def angle(cell):
+            return float(np.arctan2(cell[0] - r0, cell[1] - c0)) % (2 * np.pi)
+
+        def ccw(a, b):
+            # > 0 if going from a to b turns counter-clockwise around the start
+            return (a[1] - c0) * (b[0] - r0) - (a[0] - r0) * (b[1] - c0)
+
+        path, cur = [], start
+        for d in sorted(rings):
+            todo = set(rings[d])
+            while todo:
+                def degree(cell):
+                    return sum((cell[0] + dr, cell[1] + dc) in todo for dr, dc in n4)
+                # Entry into the ring (or one piece of it): if the border cuts the ring, the
+                # nearest end; if it is closed, the nearest cell.
+                nxt = min(todo, key=lambda x: (degree(x) > 1,
+                                               abs(x[0] - cur[0]) + abs(x[1] - cur[1]),
+                                               angle(x)))
+                while nxt is not None:
+                    path.append(nxt)
+                    todo.discard(nxt)
+                    cur = nxt
+                    near = [(cur[0] + dr, cur[1] + dc) for dr, dc in n4
+                            if (cur[0] + dr, cur[1] + dc) in todo]
+                    nxt = max(near, key=lambda x: (ccw(cur, x), -angle(x))) if near else None
+        return path
+
+    def visit_order_name(self, order='auto', start_cell=None):
+        """The order actually used: 'auto' = 'serpentine' from a corner, 'rings' otherwise."""
+        start = tuple(start_cell if start_cell is not None else self.start_cell)
+        if order not in VISIT_ORDERS:
+            raise ValueError(f"visiting order {order!r} unknown: one of {VISIT_ORDERS}")
+        if order == 'auto':
+            return 'serpentine' if is_corner_cell(start, self.rows, self.cols) else 'rings'
+        return order
+
+    def generate_visit_path(self, order='auto', start_cell=None):
+        """
+        The visiting order of the cells, list of (row, column), starting from the starting
+        cell. order: 'serpentine' (generate_serpentine_path), 'rings' (generate_ring_path) or
+        'auto' (see visit_order_name).
+        """
+        start = tuple(start_cell if start_cell is not None else self.start_cell)
+        if self.visit_order_name(order, start) == 'serpentine':
+            return self.generate_serpentine_path(start_cell=start)
+        return self.generate_ring_path(start_cell=start)
 
     def get_world_position_from_cell(self, row, col):
         """
