@@ -34,6 +34,8 @@ To go back at once to the morning's behaviour: `CONTINUOUS_MOTION = False` (and 
 
 **After:** `python3 tools/mission_report.py` (line `Cruise (continuous motion)` and the next one: hand-offs, new goals, path changes, distance from the line, reasons of the ends) and `python3 tools/mission_viewer.py` (the scans of the cruise every 0.5 m, decision `cruise`; light blue contour = area really seen by the cameras). Slopes: `python3 tools/slope_check.py <mission>` (estimates against the body tilt and the ground plane of the legs, `gpe`, recorded from 04-11).
 
+**Hand-off times (from 06-11, above all on the CORE I/O):** `grep "TIMING\] hand-off\|TIMING\] attempt start" mission_log.txt`: every wait between two moves split into its steps (scan download, global maps, graph update, goal choice, planning turn, ...); the sums per step are in `mission_summary.json`, `handoff_steps_s`. On 04-11 16:52 the hand-offs on the CORE were 4.1-4.7 s, with ~1 s explained by no line.
+
 **Slopes from the local plane** (`PLANE_SLOPES` in `spot_explorer/perception/slopes.py`, on from 04-11 after the outdoor mission 14:08, see CHANGELOG): gait thresholds 0.13 / 0.20, edge veto 0.6, the frontier with the same estimate. To check on the next missions: `[GAIT] Terrain level` lines much rarer than on 14:08 (239 in 20 min), HARD only on the real slopes, frontier stops for `slope` rare. Against the legs: `python3 tools/plane_thresholds.py --since 2026-11-04` and `python3 tools/slope_check.py <mission>`. Off again: `PLANE_SLOPES = False` (everything goes back as before, thresholds included).
 
 ---

@@ -53,7 +53,7 @@ from spot_explorer.perception import gait
 from spot_explorer.perception import geometry
 from spot_explorer.planning import decisions
 from spot_explorer.planning import safe_frontier
-from spot_explorer.records import MISSION_STATS, BodyTiltRecorder, append_trajectory, timing_add
+from spot_explorer.records import HANDOFF, MISSION_STATS, BodyTiltRecorder, append_trajectory, timing_add
 from spot_explorer.robot import connection
 from spot_explorer.robot import motion
 from spot_explorer.robot import photos
@@ -229,6 +229,7 @@ class CruiseSteps:
         kwargs = self._cruise_gait(planner._terrain(confirmed, ids[1:]))
         path_len = float(sum(np.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(self.polyline, self.polyline[1:])))
         to_goal = turn_stop is None and adv >= path_len - 0.01
+        HANDOFF.mark("cruise setup")
         print(f"[CRUISE] Start from node {self.robot_node_id} towards the goal "
               f"({self.target_x:.2f}, {self.target_y:.2f}): {len(ids) - 1} nodes, {path_len:.2f} m, "
               f"{adv:.2f} m confirmed" + (f" (rotation not clear at node {turn_stop})" if turn_stop else "") + ".")
@@ -261,6 +262,7 @@ class CruiseSteps:
         crumb = None
         try:
             pc.send(confirmed[1:], start_in_place_deg=start_in_place, **kwargs)
+            HANDOFF.report("first send")
             n_sends += 1
             tracker.start_planning(planner, planning_cycle.PLAN_PERIOD_S)
             while reason is None:
@@ -400,6 +402,7 @@ class CruiseSteps:
                         pc.send(plan['confirmed'][1:], hold_s=None, **self._cruise_gait(plan['terrain']))
                         n_sends += 1
                         self.env._handoff_t = time.time()
+                        HANDOFF.start("hand-off (end of the cruise -> first command of the next move)")
                         break
                 if ahead < CRUISE_MIN_AHEAD_M:
                     if plan['to_goal']:

@@ -12,7 +12,7 @@ from spot_explorer.planning import safe_frontier
 from spot_explorer.planning import roadmap
 
 from spot_explorer import config as P
-from spot_explorer.records import MISSION_STATS, timing_add
+from spot_explorer.records import HANDOFF, MISSION_STATS, timing_add
 from spot_explorer.planning import goal
 from spot_explorer.mission import recovery
 from spot_explorer.mission.attempt_common import CONTINUE, STOP, FAILED, battery_return_due
@@ -97,6 +97,8 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps):
         """True if the robot ends up inside the cell (or accepted just outside, see _finish)."""
         self._handoff = False
         self._seen_only = False
+        HANDOFF.mark("choice of the next cell")
+        HANDOFF.start("attempt start (robot standing) -> first command", restart=False)
         try:
             if self._prepare() is FAILED:
                 return False
@@ -137,13 +139,16 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps):
         scan = self._first_scan()
         if scan is None:
             return FAILED
-        if self._cell_already_seen():
+        seen = self._cell_already_seen()
+        HANDOFF.mark("seen check")
+        if seen:
             return STOP
         self._local_data_into_graph(scan)
         outcome = self._goal_and_path(scan)
         if outcome is not None:
             return outcome
         self._reset_counters()
+        HANDOFF.mark("attempt counters")
 
     def _cell_already_seen(self):
         """
@@ -476,6 +481,7 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps):
         timing_add('global maps', self.t_maps - self.t_proc)
         timing_add('PRM and replanning', self.t_prm - self.t_maps)
         timing_add('frontier and decision', t_front - self.t_prm)
+        HANDOFF.mark("planning turn")
         print(f"[TIMING] scan {self.t_scan - self.t_iter:.2f} s | processing {self.t_proc - self.t_scan:.2f} | "
               f"maps {self.t_maps - self.t_proc:.2f} | PRM {self.t_prm - self.t_maps:.2f} | frontier {t_front - self.t_prm:.2f} "
               f"| decision: {self.decision['kind']}")

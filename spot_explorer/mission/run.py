@@ -36,6 +36,7 @@ from spot_explorer import config as P
 from spot_explorer import REPO_ROOT
 from spot_explorer.records import (MISSION_STATS, MISSION_CTX, SegmentLog, install_stdout_tee, remove_stdout_tee, set_mission_z0)
 from spot_explorer.mission import attempt_common
+from spot_explorer.mission import attempt_scan
 from spot_explorer.mission import exploration
 from spot_explorer.mission import summary
 
@@ -76,6 +77,11 @@ def _emergency_shutdown(robot, command_client, recordingInterface, exc):
         recordingInterface.stop_recording()
     except BaseException:
         pass
+    try:
+        attempt_scan.save_global_maps(MISSION_CTX.get('global_grid'), MISSION_CTX.get('mission_folder'),
+                                      force=True)
+    except BaseException as e:
+        print(f"[EMERGENCY] Global maps not saved ({e!r}).")
     try:
         recordingInterface.download_full_graph()
         print("[EMERGENCY] GraphNav map downloaded.")
@@ -322,6 +328,7 @@ def easy_walk(options):
         # Folders and log created at once, so the copy of the output to file (mission_log.txt)
         # also captures the whole start-up and graph construction.
         graph_folder, mission_folder, mission_log_folder = _mission_folders()
+        MISSION_CTX['mission_folder'] = mission_folder
         install_stdout_tee(os.path.join(mission_log_folder, "mission_log.txt"))
         try:
             MISSION_CTX['log_folder'] = mission_log_folder

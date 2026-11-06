@@ -16,11 +16,39 @@ from spot_explorer.planning import roadmap
 from spot_explorer.planning import edge_evaluation
 from spot_explorer.mission import mission_prm
 from spot_explorer import config as P
-from spot_explorer.records import (MISSION_STATS, MISSION_CTX, save_npz_async, timing_add, visualize_grid_with_candidates)
+from spot_explorer.records import (HANDOFF, MISSION_STATS, MISSION_CTX, save_npz_async, timing_add, visualize_grid_with_candidates)
 from spot_explorer.planning import goal
 from spot_explorer.mission import recovery
 from spot_explorer.mission import planning_cycle
 from spot_explorer.mission.attempt_common import STOP, FAILED
+
+# The global maps on disk (global_occupancy_map.pkl, global_terrain_map.pkl in the mission
+# folder) are read only after the mission (tools/mission_viewer.py): they are saved at most
+# every MAPS_SAVE_EVERY_S at the attempt starts, and always after the final scan and on an
+# interrupted mission. Before, at every attempt start: ~50 ms on the laptop on the maps of
+# 04-11 16:52, several times that on the CORE I/O, growing with the mission; and the data
+# after the last attempt start (last cruise, final scan) were never saved.
+MAPS_SAVE_EVERY_S = 60.0
+_maps_saved_at = [None]
+
+
+def save_global_maps(global_grid, folder, force=False):
+    """Both global maps in folder (see MAPS_SAVE_EVERY_S); force = now in any case."""
+    occ = getattr(global_grid, 'global_occupancy_map', None)
+    ter = getattr(global_grid, 'global_terrain_map', None)
+    if folder is None or occ is None or ter is None:
+        return
+    now = time.time()
+    if not force and _maps_saved_at[0] is not None and now - _maps_saved_at[0] < MAPS_SAVE_EVERY_S:
+        return
+    t0 = time.perf_counter()
+    occ.save_map(os.path.join(folder, "global_occupancy_map.pkl"))
+    ter.mission_z0 = MISSION_CTX.get('mission_z0')
+    ter.save_map(os.path.join(folder, "global_terrain_map.pkl"))
+    _maps_saved_at[0] = now
+    timing_add('maps on disk', time.perf_counter() - t0)
+    if force:
+        print(f"[MAP] Global maps saved in {time.perf_counter() - t0:.2f} s.")
 
 
 class ScanSteps:
@@ -40,6 +68,7 @@ class ScanSteps:
 
         # 1. The scan: the layers in one request, then (below) their processing
         scan = self.local_grid.fetch_scan(self.robot_state_client)
+        HANDOFF.mark("scan download")
         if scan is None:
             print("[ERROR] Local grid acquisition failed.")
             return None
@@ -74,6 +103,7 @@ class ScanSteps:
         # slope and roughness, obstacle mask
         self.local_grid.process_scan(scan, self.robot_x, self.robot_y, self.robot_yaw,
                                 ground_label="scan-initial")
+        HANDOFF.mark("scan processing")
         terrain_real, is_valid = scan.terrain, scan.is_valid
         obstacle_mask = scan.obstacle_mask
 
@@ -84,14 +114,11 @@ class ScanSteps:
 
         # The terrain map serves the PRM as a fallback for the slope
         self.prm_graph.set_global_terrain_map(self.global_terrain_map)
+        HANDOFF.mark("global maps")
 
-        # Global maps on disk (.pkl), at every attempt
-        if self.mission_folder is not None:
-            pkl_map_path = os.path.join(self.mission_folder, "global_occupancy_map.pkl")
-            self.global_map.save_map(pkl_map_path)
-            pkl_terrain_path = os.path.join(self.mission_folder, "global_terrain_map.pkl")
-            self.global_terrain_map.mission_z0 = MISSION_CTX.get('mission_z0')
-            self.global_terrain_map.save_map(pkl_terrain_path)
+        # Global maps on disk (.pkl): at most every MAPS_SAVE_EVERY_S
+        save_global_maps(self.global_grid, self.mission_folder)
+        HANDOFF.mark("maps on disk")
         return scan
 
     def _local_data_into_graph(self, scan):
@@ -152,6 +179,7 @@ class ScanSteps:
                 if node_id not in self.prm_graph.node_roughness:
                     self.prm_graph.node_roughness[node_id] = 0.0
 
+        HANDOFF.mark("scan into the PRM")
         # The scan just made also goes into the preliminary edge discard
         # (edge_evaluation.LIVE_PREFILTER_OD_M): at build time the global map has not yet
         # confirmed anything about this place, and the edges crossing the obstacles just
@@ -170,6 +198,7 @@ class ScanSteps:
         # The candidate pairs are those of the mission graph (see mission_prm.build_mission_prm);
         # vetoes and weights are computed by PRM._evaluate_and_add_edge.
         mission_prm.rebuild_prm_edges(self.prm_graph, self.global_map)
+        HANDOFF.mark("graph update")
         timing_add('graph construction', time.perf_counter() - t_build)
         _upd = getattr(getattr(self.prm_graph, 'mission_graph', None), 'last_update', None)
         print(f"[TIMING] {'local update' if _upd and _upd[2] else 'full build'} "
@@ -196,6 +225,7 @@ class ScanSteps:
         # Only visited cells + robot cell + goal cell (see PLAN_ONLY_EXPLORED_CELLS).
         mission_prm.restrict_planning_to_explored_cells(self.prm_graph, self.env, self.target_row, self.target_col,
                                              (self.robot_x, self.robot_y))
+        HANDOFF.mark("allowed cells")
 
         # --- Start and arrival nodes: EXISTING graph nodes ------------------------------------
         # add_stop_node attaches the position to the suitable node instead of creating one. The
@@ -205,12 +235,14 @@ class ScanSteps:
             self.robot_x, self.robot_y, self.global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M,
             label="attempt start")
         self.prm_graph.set_robot_node(self.robot_node_id, 0.0)
+        HANDOFF.mark("robot node")
 
 
         # Search for the target point and planning
         self.target_x, self.target_y, valid_samples, rejected_samples = goal.find_best_point_in_cell(
             self.robot_x, self.robot_y, self.env, self.target_row, self.target_col, pts, cells_obstacle_dist, self.sampler,
             global_map=self.global_map, reachable=self._reachable_from_robot)
+        HANDOFF.mark("goal choice")
 
         # The goal of this attempt, for the recovery right after a failure
         # (see RECOVERY_SAME_GOAL_M in the main loop).
@@ -237,6 +269,7 @@ class ScanSteps:
         moving = getattr(self.env, '_moving_pc', None) is not None
         map_recording.graphnav_drop_breadcrumb(self.env, self.recordingInterface, self.robot_state_client, self.robot_node_id,
                                  self.target_row, self.target_col, force=not moving)
+        HANDOFF.mark("breadcrumb")
         # The goal is the centre or a lattice node (find_best_point_in_cell chooses it among
         # the sampler points).
         self.goal_id = self.prm_graph.add_stop_node(
@@ -244,6 +277,7 @@ class ScanSteps:
             label=f"goal of cell ({self.target_row},{self.target_col})", is_robot=False)
         self.prm_graph.set_robot_node(self.robot_node_id, 0.0)
         path_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
+        HANDOFF.mark("goal node and path")
 
         if path_ids is None:
             print(
@@ -273,6 +307,7 @@ class ScanSteps:
             cells_obstacle_dist=cells_obstacle_dist, valid_values=valid_values,
             grad_values=grad_values, rough_values=rough_values
         )
+        HANDOFF.mark("figure data")
         return None
 
     def _scan_and_graph(self):

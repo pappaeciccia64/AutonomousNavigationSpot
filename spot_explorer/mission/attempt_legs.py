@@ -16,7 +16,7 @@ from spot_explorer.planning import decisions
 from spot_explorer.planning import safe_frontier
 from spot_explorer.mission import mission_prm
 from spot_explorer import config as P
-from spot_explorer.records import (MISSION_STATS, BodyTiltRecorder, append_csv, append_trajectory, log_segment, timing_add, visualize_grid_with_candidates)
+from spot_explorer.records import (HANDOFF, MISSION_STATS, BodyTiltRecorder, append_csv, append_trajectory, log_segment, timing_add, visualize_grid_with_candidates)
 from spot_explorer.mission.attempt_common import CONTINUE, FAILED
 
 
@@ -31,6 +31,7 @@ class LegSteps:
             return outcome
         if self._can_cruise():
             return self._cruise()          # continuous motion: see attempt_cruise.py
+        HANDOFF.report("stop-and-go leg")
 
         # --- Execution: one or more LEGS on the polyline already confirmed by the frontier,
         # without scan, refresh or replan in between (see MULTI-NODE

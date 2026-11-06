@@ -16,8 +16,8 @@ from spot_explorer.robot import connection
 from spot_explorer.mission import mission_prm
 
 from spot_explorer import config as P
-from spot_explorer.records import MISSION_STATS, visualize_grid_with_candidates
-from spot_explorer.mission import attempt_common, cell_attempt
+from spot_explorer.records import HANDOFF, MISSION_STATS, visualize_grid_with_candidates
+from spot_explorer.mission import attempt_common, attempt_scan, cell_attempt
 from spot_explorer.planning import goal
 from spot_explorer.mission import recovery
 
@@ -92,6 +92,7 @@ class Mission:
             self.env, row, col, self.sampler, self.prm, self.mission_folder,
             self.visualization_counter, self.recordingInterface, self.verification_tracker,
             mobility_kwargs=self.mobility_kwargs)
+        HANDOFF.mark("end of the attempt")
         self.visualization_counter += 1
         self._attempt_count += 1
         return check
@@ -101,6 +102,7 @@ class Mission:
         new candidates around it."""
         self.env.update_position(x, y)
         self.recordingInterface.create_default_waypoint(cell_row=row, cell_col=col)
+        HANDOFF.mark("waypoint of the visited cell")
         self.env.mark_cell_visited(row, col)
         self._last_visited = (int(row), int(col))
         # The neighbours of the cell JUST VISITED, not of the one the robot is in: with
@@ -190,6 +192,7 @@ class Mission:
                 break
             if self._close_seen_cells() and len(self.frontier) == 0:
                 break
+            HANDOFF.mark("progress and seen cells")
             robot_row, robot_col = self._robot_cell()
 
             borders = self.env.get_adjacent_frontier_cells(robot_row, robot_col, self.path)
@@ -551,6 +554,7 @@ class Mission:
         map_shortcuts.graphnav_add_shortcuts(recordingInterface, "before the move between cells",
                                              map_edges=True, target_wp_id=nearest_wp['id'],
                                              robot_xy=(x_current, y_current))
+        HANDOFF.report("GraphNav trip")
         recordingInterface.stop_recording()
         navigation_success = navigation.graphnav_navigate_to(
             recordingInterface, nearest_wp['id'], self.robot_state_client, self.command_client,
@@ -605,6 +609,7 @@ class Mission:
             self.global_grid.global_occupancy_map, self.global_grid.global_terrain_map, scan.pts,
             scan.terrain, scan.obstacle_mask, scan.is_valid, scan.od,
             (scan.num_y, scan.num_x), (x_final, y_final, final_yaw))
+        attempt_scan.save_global_maps(self.global_grid, self.mission_folder, force=True)
 
         final_save_path = os.path.join(
             self.mission_folder, f"iteration_{self.visualization_counter}_FINAL_SCAN.png"

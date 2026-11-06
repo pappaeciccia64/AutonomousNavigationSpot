@@ -140,6 +140,54 @@ def timing_add(phase, seconds):
     MISSION_STATS['time_s'][phase] = MISSION_STATS['time_s'].get(phase, 0.0) + float(seconds)
 
 
+class StepTimer:
+    """
+    Stopwatch of the steps between two moves, for the slow hand-offs of the CORE I/O (04-11
+    16:52: 4.1-4.7 s from the end of a cruise to the start of the next, 0.9-1.6 s from the
+    laptop, and 1 s of it explained by no log line). start() at the end of a cruise (or at
+    the attempt start, robot standing), mark(step) after every step, report() at the first
+    command of the next move: one line [TIMING] <label> with the total and every step, and
+    the sums per step in MISSION_STATS['handoff_steps_s'] ({step: [seconds, count]}).
+    mark() and report() do nothing when not started: the code that marks needs no checks.
+    """
+
+    def __init__(self):
+        self.t0 = None
+        self.label = ''
+        self.steps = []
+
+    def start(self, label, restart=True):
+        """Start (restart=False: only if not already running)."""
+        if self.t0 is not None and not restart:
+            return
+        self.t0 = self._last = time.perf_counter()
+        self.label, self.steps = label, []
+
+    def mark(self, step):
+        if self.t0 is None:
+            return
+        now = time.perf_counter()
+        self.steps.append((step, now - self._last))
+        self._last = now
+
+    def report(self, last_step):
+        if self.t0 is None:
+            return
+        self.mark(last_step)
+        total = self._last - self.t0
+        acc = MISSION_STATS.setdefault('handoff_steps_s', {})
+        for step, s in self.steps:
+            a = acc.setdefault(step, [0.0, 0])
+            a[0] += s
+            a[1] += 1
+        print(f"[TIMING] {self.label}: {total:.2f} s | "
+              + " | ".join(f"{step} {s:.2f}" for step, s in self.steps))
+        self.t0 = None
+
+
+HANDOFF = StepTimer()
+
+
 def save_npz_async(path, **arrays):
     """Compressed save on the service thread: the main loop does not wait for the disk."""
     def _job():
