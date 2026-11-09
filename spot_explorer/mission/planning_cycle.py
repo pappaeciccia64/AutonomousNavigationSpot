@@ -268,6 +268,11 @@ class CruisePlanner:
         # the next one before the main thread read it (robot still 17 s, command expired).
         self.switch_info = None
         self._switch_seq = 0
+        # No path to the goal (attempt_cruise._on_no_path): job(planner, scan, robot, prev, next)
+        # -> dict; the thread itself chooses another goal or the next cell, the plan carries it
+        # as 'switch' (as switch_job). None = the main thread handles the 'no_path' as before.
+        self.no_path_job = None
+        self.target_cell, self.tried_goals, self.repicks = None, [], 0
         # Times of the cycle, for the log: seconds per phase (PHASES) of every cycle, and the
         # interval between the acquisition times of two consecutive Spot grids (0 = the same
         # grid read again: the cycle was faster than Spot's update).
@@ -328,7 +333,16 @@ class CruisePlanner:
         if next_id != self.goal_id:
             new_ids = self.prm.find_path_dijkstra(next_id, self.goal_id, current_path_ids=remainder,
                                                   margin=PLAN_REPLAN_MARGIN)
-            if new_ids is None:
+            if new_ids is None and self.no_path_job is not None and status == 'ok':
+                self._switch_seq += 1
+                self.switch_info = dict(self.no_path_job(self, scan, robot, prev_id, next_id), id=self._switch_seq)
+                switch = self.switch_info
+                if self.switch_info.get('ids'):
+                    remainder = list(self.switch_info['ids'])
+                    replanned = True
+                else:
+                    status = 'no_path'
+            elif new_ids is None:
                 status = 'no_path' if status == 'ok' else status
             elif new_ids != remainder:
                 self.path_ids = self.path_ids[:k + 1] + list(new_ids)

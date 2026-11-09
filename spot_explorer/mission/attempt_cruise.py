@@ -263,6 +263,7 @@ class CruiseSteps:
                                                self.robot_state_client, self.goal_id, ids)
         planner.bundle = self._cruise_bundle_info()
         planner.seen_cell = self._seen_cell()
+        self._thread_goals(planner)
         # First stretch: the one confirmed by the frontier of this turn, with the same corner
         # check the planner will make.
         adv, turn_stop = planner._turns_within(self.polyline, ids[1:],
@@ -382,6 +383,22 @@ class CruiseSteps:
                         HANDOFF.start("hand-off (end of the cruise -> first command of the next move)")
                         break
                     continue          # plans still towards the cell done: the robot walks the stretch sent
+                if sw is not None and sw.get('kind') == 'end':
+                    last_switch_id = sw.get('id')
+                    planner.switch_info = None
+                    reason, no_path_end = sw['reason'], True
+                    if sw.get('left') is not None:
+                        self.env._attempt_left_unreachable = True
+                    break
+                if sw is not None and sw.get('kind') in ('goal', 'cell') and sw.get('done') is None \
+                        and sw.get('next', sw.get('cell')) is not None:
+                    # Prepared by the thread on a path lost (_on_no_path): applied at once.
+                    last_switch_id = sw.get('id')
+                    planner.switch_info = None
+                    rx0, ry0 = (r['x'], r['y']) if r['x'] is not None else plan['robot'][:2]
+                    self._apply_switch(sw, rx0, ry0)
+                    to_goal, report_switch = False, True
+                    sw = None
                 if sw is not None:
                     last_switch_id = sw.get('id')
                     planner.switch_info = None
@@ -397,6 +414,8 @@ class CruiseSteps:
                 if plan['status'] == 'edge_blocked':
                     reason = "the edge being walked is out of the graph"
                     break
+                if plan['status'] == 'no_path' and planner.no_path_job is not None:
+                    continue          # the thread is choosing another goal or cell: the robot walks the stretch
                 if plan['status'] == 'no_path':
                     # The stretch confirmed by this plan (still towards the old goal) is sent
                     # again, before and after the choice: while the main thread computes, the
@@ -557,26 +576,85 @@ class CruiseSteps:
             return STOP
         return outcome
 
+    def _thread_goals(self, planner):
+        """The planner chooses itself the new goal (or cell) when the path is lost
+        (CRUISE_SWITCH: _on_no_path), with the state of the attempt."""
+        planner.target_cell = (self.target_row, self.target_col)
+        planner.tried_goals = list(self.tried_goals)
+        planner.repicks = self.goal_repicks
+        planner.no_path_job = self._on_no_path if CRUISE_SWITCH else None
+
     def _can_switch(self):
         """CRUISE_SWITCH with the cell rules of the mission at hand."""
         from spot_explorer.mission import cell_rules
         return (CRUISE_SWITCH and cell_rules.CELL_RULES
                 and getattr(self.env, '_cell_rules', None) is not None)
 
-    def _prepare_next_cell(self, planner, scan, robot, done, why, where=""):
+    def _robot_edge(self, planner, robot):
+        """(prev, next): the edge of the planner's path the robot is walking."""
+        coords = [self.prm_graph.get_node_position(n) for n in planner.path_ids]
+        _, seg = motion.path_ahead(coords, robot[0], robot[1], from_seg=planner._seg)
+        k = min(seg, len(planner.path_ids) - 2) if len(planner.path_ids) > 1 else 0
+        prev_id = planner.path_ids[k]
+        next_id = planner.path_ids[k + 1] if len(planner.path_ids) > 1 else planner.path_ids[0]
+        return prev_id, next_id
+
+    def _goal_with_path(self, row, col, scan, robot, next_id, exclude):
+        """IN THE PLANNING THREAD: the goal of cell (row, col) (goal.find_best_point_in_cell,
+        reachable from next_id) and the path to it, up to GOAL_REPICK_CANDIDATES points.
+        (ids, goal_id, x, y), ids None if no goal has a path; the points tried go into exclude."""
+        env, prm, gm = self.env, self.prm_graph, self.global_map
+        mission_prm.restrict_planning_to_explored_cells(prm, env, row, col, (robot[0], robot[1]))
+
+        def reachable(px, py):
+            nid = prm.anchor_node(px, py, gm, geometry.PRM_EDGE_SAFETY_MARGIN_M)
+            return nid is not None and prm.find_path_dijkstra(next_id, nid) is not None
+        for _k in range(P.GOAL_REPICK_CANDIDATES):
+            tx, ty, _vs, _rs = goal_choice.find_best_point_in_cell(
+                robot[0], robot[1], env, row, col, scan.pts, scan.od, self.sampler,
+                global_map=gm, exclude=exclude, reachable=reachable)
+            if tx is None or ty is None:
+                break
+            gid = prm.add_stop_node(tx, ty, gm, geometry.PRM_EDGE_SAFETY_MARGIN_M,
+                                    label=f"goal of cell ({row},{col}), chosen while walking", is_robot=False)
+            ids = prm.find_path_dijkstra(next_id, gid)
+            if ids is not None:
+                return ids, gid, float(tx), float(ty)
+            exclude.append((float(tx), float(ty)))
+        return None, None, None, None
+
+    @staticmethod
+    def _planner_to(planner, prm, prev_id, next_id, ids, gid, cell):
+        """The planner goes on along ids towards goal gid of cell, keeping the edge being walked."""
+        planner.path_ids = ([prev_id] if prev_id != next_id else []) + list(ids)
+        planner._seg = 0
+        planner._not_edges = {(a, b) for a, b in zip(planner.path_ids, planner.path_ids[1:])
+                              if not planning_cycle._edge_in_graph(prm, a, b)}
+        planner.goal_id = gid
+        if planner.seen_cell is not None:
+            planner.seen_cell = (planner.seen_cell[0], cell[0], cell[1])
+        if planner.bundle is not None:
+            planner.bundle = dict(planner.bundle, cell=tuple(cell))
+        if tuple(cell) != tuple(getattr(planner, 'target_cell', cell)):
+            planner.target_cell, planner.tried_goals, planner.repicks = tuple(cell), [], 0
+
+    def _prepare_next_cell(self, planner, scan, robot, done, why, where="", exclude=()):
         """
-        IN THE PLANNING THREAD (CruisePlanner.switch_job), on the fresh scan of the cycle: the
-        cell done is marked, the next one chosen (cell_rules, only within NEAR_PATH_M), its goal
-        (goal.find_best_point_in_cell, reachable from the node the robot is walking to) and the
-        path; the planner goes on towards it, keeping the edge being walked. Returns the
-        'switch' of the plan: next = (row, col) and goal, or next None and the reason.
+        IN THE PLANNING THREAD (CruisePlanner.switch_job, or _on_no_path), on the fresh scan of
+        the cycle: the cell done is marked (done None: the cell is left because unreachable
+        now, not marked), the next one chosen (cell_rules, only within NEAR_PATH_M, not in
+        exclude), its goal and the path; the planner goes on towards it, keeping the edge being
+        walked. Returns the 'switch' of the plan: next = (row, col), goal and the path ids, or
+        next None and the reason.
         """
         t0 = time.perf_counter()
         env, prm, gm = self.env, self.prm_graph, self.global_map
-        env.mark_cell_visited(*done)
-        info = dict(done=done, why=why, where=where, next=None)
+        if done is not None:
+            env.mark_cell_visited(*done)
+        info = dict(kind='cell', done=done, why=why, where=where, next=None)
         rules = getattr(env, '_cell_rules', None)
-        choice = rules.choose((robot[0], robot[1]), gm, self.sampler) if rules is not None else None
+        choice = (rules.choose((robot[0], robot[1]), gm, self.sampler, exclude=exclude)
+                  if rules is not None else None)
         if choice is None:
             info['reason'] = "no other candidate cell"
             return info
@@ -584,66 +662,94 @@ class CruiseSteps:
         if not choice.near:
             info['reason'] = f"next cell ({choice.row},{choice.col}) {choice.length:.1f} m away: GraphNav"
             return info
-        coords = [prm.get_node_position(n) for n in planner.path_ids]
-        _, seg = motion.path_ahead(coords, robot[0], robot[1], from_seg=planner._seg)
-        k = min(seg, len(planner.path_ids) - 2) if len(planner.path_ids) > 1 else 0
-        prev_id = planner.path_ids[k]
-        next_id = planner.path_ids[k + 1] if len(planner.path_ids) > 1 else planner.path_ids[0]
-        mission_prm.restrict_planning_to_explored_cells(prm, env, choice.row, choice.col, (robot[0], robot[1]))
+        prev_id, next_id = self._robot_edge(planner, robot)
         prm.clear_penalties_for_attempt()
-
-        def reachable(px, py):
-            nid = prm.anchor_node(px, py, gm, geometry.PRM_EDGE_SAFETY_MARGIN_M)
-            return nid is not None and prm.find_path_dijkstra(next_id, nid) is not None
-        tried, ids, gid, tx, ty = [], None, None, None, None
-        for _k in range(P.GOAL_REPICK_CANDIDATES):
-            tx, ty, _vs, _rs = goal_choice.find_best_point_in_cell(
-                robot[0], robot[1], env, choice.row, choice.col, scan.pts, scan.od, self.sampler,
-                global_map=gm, exclude=tried, reachable=reachable)
-            if tx is None or ty is None:
-                break
-            gid = prm.add_stop_node(tx, ty, gm, geometry.PRM_EDGE_SAFETY_MARGIN_M,
-                                    label=f"goal of cell ({choice.row},{choice.col}), chosen while walking",
-                                    is_robot=False)
-            ids = prm.find_path_dijkstra(next_id, gid)
-            if ids is not None:
-                break
-            tried.append((float(tx), float(ty)))
+        ids, gid, tx, ty = self._goal_with_path(choice.row, choice.col, scan, robot, next_id, [])
         if ids is None:
             info['reason'] = f"no goal with a path in the next cell ({choice.row},{choice.col})"
             return info
-        planner.path_ids = ([prev_id] if prev_id != next_id else []) + list(ids)
-        planner._seg = 0
-        planner._not_edges = {(a, b) for a, b in zip(planner.path_ids, planner.path_ids[1:])
-                              if not planning_cycle._edge_in_graph(prm, a, b)}
-        planner.goal_id = gid
-        if planner.seen_cell is not None:
-            planner.seen_cell = (env, choice.row, choice.col)
-        if planner.bundle is not None:
-            planner.bundle = dict(planner.bundle, cell=(choice.row, choice.col))
-        info.update(next=(choice.row, choice.col), goal=(float(tx), float(ty)), goal_id=gid,
+        self._planner_to(planner, prm, prev_id, next_id, ids, gid, (choice.row, choice.col))
+        info.update(next=(choice.row, choice.col), goal=(tx, ty), goal_id=gid, ids=list(ids),
                     n_nodes=len(ids), prep_s=time.perf_counter() - t0)
         return info
 
+    def _on_no_path(self, planner, scan, robot, prev_id, next_id):
+        """
+        IN THE PLANNING THREAD (CruisePlanner.no_path_job): no path from the node the robot
+        walks to towards the goal. If from there the graph goes on (the goal is the problem,
+        not the robot): the goal is excluded for the mission and another one chosen in the cell
+        (up to MAX_BLOCK_REPLANS per cell); with none, the cell is unreachable now and the
+        next one is chosen (_prepare_next_cell, the cell left NOT marked done nor failed).
+        Returns the 'switch' of the plan: kind 'goal' or 'cell' with the new path ids, or kind
+        'end' with the reason (the cruise ends).
+        """
+        t0 = time.perf_counter()
+        env, prm = self.env, self.prm_graph
+        row, col = planner.target_cell
+        prm.set_robot_node(next_id, 0.0)
+        n_free = prm.reachable_count(next_id, P.REPLAN_FAIL_ROBOT_FREE_NODES)
+        if not P.REPICK_ON_REPLAN_FAIL or n_free < P.REPLAN_FAIL_ROBOT_FREE_NODES:
+            planner.no_path_job = None
+            return dict(kind='end', reason=(f"no path from node {next_id}, and from there the graph reaches only "
+                                            f"{n_free} nodes: the robot is shut in, not the goal"))
+        gx, gy = prm.get_node_position(planner.goal_id)
+        goal_choice._refuse_goal(env, row, col, gx, gy, "no path in the updated graph")
+        planner.tried_goals.append((float(gx), float(gy)))
+        MISSION_STATS['replan_fail_repicks'] = MISSION_STATS.get('replan_fail_repicks', 0) + 1
+        if planner.repicks < P.MAX_BLOCK_REPLANS:
+            planner.repicks += 1
+            ids, gid, tx, ty = self._goal_with_path(row, col, scan, robot, next_id, planner.tried_goals)
+            if ids is not None:
+                self._planner_to(planner, prm, prev_id, next_id, ids, gid, (row, col))
+                return dict(kind='goal', cell=(row, col), goal=(tx, ty), goal_id=gid, ids=list(ids),
+                            n_nodes=len(ids), prep_s=time.perf_counter() - t0)
+        if self._can_switch():
+            info = self._prepare_next_cell(planner, scan, robot, done=None,
+                                           why=f"no goal with a path in cell ({row},{col})",
+                                           exclude={(row, col)})
+            info['left'] = (row, col)
+            if info.get('next') is not None:
+                return info
+            planner.no_path_job = None
+            return dict(kind='end', left=(row, col),
+                        reason=f"no goal with a path in cell ({row},{col}) and {info.get('reason')}")
+        planner.no_path_job = None
+        return dict(kind='end', left=(row, col), reason=f"no goal with a path in cell ({row},{col})")
+
     def _apply_switch(self, sw, x, y):
-        """MAIN THREAD, plan with a prepared next cell: the GraphNav waypoint of the cell done
-        (exploration, env._on_chained_visit), the attempt now on the next cell, the log."""
-        done, nxt = sw['done'], sw['next']
-        cb = getattr(self.env, '_on_chained_visit', None)
-        if cb is not None:
-            cb(done[0], done[1], x, y)
-        self.target_row, self.target_col = nxt
+        """MAIN THREAD, a plan with what the planning thread prepared (see _prepare_next_cell,
+        _on_no_path): kind 'goal' -- a new goal in the same cell; kind 'cell' -- the next cell
+        (with done: the GraphNav waypoint of the cell done, exploration env._on_chained_visit;
+        with left: the cell left because unreachable now, recorded for the mission in
+        env._cells_left_unreachable). The attempt now on the new goal / cell, the log."""
         self.target_x, self.target_y = sw['goal']
         self.goal_id = sw['goal_id']
-        self.tried_goals, self.goal_repicks = [], 0
         self.best_goal_dist = float('inf')
         self.env._last_attempt_goal = sw['goal']
+        if sw['kind'] == 'goal':
+            self.goal_repicks += 1
+            MISSION_STATS['cruise_goal_repicks'] = MISSION_STATS.get('cruise_goal_repicks', 0) + 1
+            print(f"[CRUISE] New goal ({sw['goal'][0]:.2f}, {sw['goal'][1]:.2f}) in cell ({sw['cell'][0]},"
+                  f"{sw['cell'][1]}) chosen while walking (the previous one has no path any more): "
+                  f"{sw['n_nodes']} nodes, prepared in the planning thread in {sw['prep_s']:.2f} s.")
+            return
+        done, nxt = sw.get('done'), sw['next']
+        if done is not None:
+            cb = getattr(self.env, '_on_chained_visit', None)
+            if cb is not None:
+                cb(done[0], done[1], x, y)
+            what = f"Cell ({done[0]},{done[1]}) done while walking ({sw['why']})"
+        else:
+            left = sw['left']
+            self.env._cells_left_unreachable = getattr(self.env, '_cells_left_unreachable', []) + [left]
+            what = f"Cell ({left[0]},{left[1]}) left while walking ({sw['why']}: not failed, unreachable now)"
+        self.target_row, self.target_col = nxt
+        self.tried_goals, self.goal_repicks = [], 0
         self.env._chain_choice = sw['choice']
         MISSION_STATS['cruise_switches'] = MISSION_STATS.get('cruise_switches', 0) + 1
         HANDOFF.mark("next cell prepared, waypoint of the cell done")
-        print(f"[CRUISE] Cell ({done[0]},{done[1]}) done while walking ({sw['why']}): next cell "
-              f"({nxt[0]},{nxt[1]}), goal ({sw['goal'][0]:.2f}, {sw['goal'][1]:.2f}), {sw['n_nodes']} nodes, "
-              f"prepared in the planning thread in {sw['prep_s']:.2f} s.")
+        print(f"[CRUISE] {what}: next cell ({nxt[0]},{nxt[1]}), goal ({sw['goal'][0]:.2f}, {sw['goal'][1]:.2f}), "
+              f"{sw['n_nodes']} nodes, prepared in the planning thread in {sw['prep_s']:.2f} s.")
 
     def _seen_cell(self):
         """(env, row, col) of the target cell for the planner's 'cell_seen', None if the seen
@@ -689,6 +795,7 @@ class CruiseSteps:
                                                    self.robot_state_client, self.goal_id, ids)
         new_planner.bundle = self._cruise_bundle_info()
         new_planner.seen_cell = self._seen_cell()
+        self._thread_goals(new_planner)
         # Its bundles go on numbering from those of the previous planner (same attempt turn):
         # from 1 again they overwrote them (04-11 14:08, cell (0,2)).
         new_planner.bundle_seq = planner.bundle_seq + planner.cycles

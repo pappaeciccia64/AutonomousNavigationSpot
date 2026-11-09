@@ -73,6 +73,9 @@ class CellRules:
         self.rank = {tuple(c): i for i, c in enumerate(path)}
         self.failures = {}          # (r, c) -> [entry, ...] of the real failures
         self.status = {}            # (r, c) -> why it is not a candidate now (for the log)
+        # Cells left because unreachable now (no goal with a path): not failed, skipped at the
+        # next choice only (rule 3: not a candidate NOW; it comes back when the graph changes).
+        self.skip_once = set()
 
     # --- the cells to look at ------------------------------------------------------------
     def open_cells(self, robot_cell=None):
@@ -156,7 +159,7 @@ class CellRules:
         return gx is not None
 
     # --- the choice ----------------------------------------------------------------------
-    def choose(self, robot_xy, global_map, sampler=None, waypoints=None):
+    def choose(self, robot_xy, global_map, sampler=None, waypoints=None, exclude=()):
         """The next cell (Choice), None if there is no candidate. Cells found with every
         candidate point inside an obstacle are marked blocked on the way. A candidate needs a
         goal the attempt would accept (has_goal): from the robot if near, from the GraphNav
@@ -181,7 +184,9 @@ class CellRules:
             return Choice(first[0], first[1], self.rank.get(first, 10 ** 6), 0.0, None, None, start,
                           prm.nodes[start])
         far = None
-        order = sorted(self.open_cells(robot_cell),
+        excluded = set(map(tuple, exclude)) | self.skip_once
+        self.skip_once = set()
+        order = sorted((rc for rc in self.open_cells(robot_cell) if rc not in excluded),
                        key=lambda rc: (len(self.failures.get(rc, [])) > 0, self.rank.get(rc, 10 ** 6)))
         far_failed = None
         for (r, c) in order:

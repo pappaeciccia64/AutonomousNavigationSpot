@@ -273,7 +273,7 @@ def main():
     check(done_cb[:2] == [(0, 1), (1, 1)], f"waypoint of the cells done, in order ({done_cb})")
     check(r['stats'].get('cruises') == 1, f"one cruise for the three cells ({r['stats'].get('cruises')})")
     # Still (no linear speed) only for the turns on the spot towards the next cell: 90 degrees
-    # at every switch here, ~2 s each; no wait for the next cell to be prepared.
+    # at every switch here, ~2 s each (2.6 with the computer busy); no wait for the next cell.
     tr = np.array(TRACK)
     v = np.hypot(np.diff(tr[:, 0]), np.diff(tr[:, 1])) / np.maximum(np.diff(tr[:, 2]), 1e-3)
     pauses, k = [], 0
@@ -287,8 +287,33 @@ def main():
         else:
             k += 1
     mid = [p_ for p_ in pauses[1:-1] if p_ >= 0.3] if len(pauses) > 2 else [p_ for p_ in pauses if p_ >= 0.3]
-    check(all(p_ < 2.5 for p_ in mid), f"between the cells only the turns on the spot "
+    check(all(p_ < 3.0 for p_ in mid), f"between the cells only the turns on the spot "
                                         f"({[round(p_, 1) for p_ in mid]} s)")
+
+    # A cell with no goal reachable (a big box fills (0,1) but for 0.3 m strips): the planning
+    # thread excludes the goals, finds none with a path, leaves the cell -- not done, not failed
+    # -- and goes on to the next one, in the same cruise (09-11: before, the robot stopped and
+    # the cell counted as failed).
+    env2 = cells_mod.EnvironmentMap(rows=2, cols=2, cell_size=5.0)
+    with contextlib.redirect_stdout(io.StringIO()):
+        env2.set_origin(3.5, 3.5, 0.0)
+    env2._cell_rules = cell_rules.CellRules(env2, None, env2.generate_visit_path('auto', start_cell=(0, 0)))
+    env2._on_chained_visit = lambda r, c, x, y: None
+    # The way to the next cell goes around the box (~10 m): "near" up to 15 m here.
+    near0, cell_rules.NEAR_PATH_M = cell_rules.NEAR_PATH_M, 15.0
+    try:
+        r = run("cell without a reachable goal: left while walking", [(6.3, 10.7, 1.3, 5.7)],
+                (2.0, 2.0, 0.785), [(0, 1)], env=env2)
+    finally:
+        cell_rules.NEAR_PATH_M = near0
+    left = [l for l in r['log'].splitlines() if 'left while walking' in l]
+    check(len(left) == 1 and 'Cell (0,1) left' in left[0], f"(0,1) left while walking ({left[:1]})")
+    lines = r['log'].splitlines()
+    k_left = next((k for k, l in enumerate(lines) if 'left while walking' in l), None)
+    check(k_left is not None and not any('[CRUISE] Start' in l for l in lines[k_left:])
+          or any('Cell (1,1) done while walking' in l for l in lines[k_left or 0:]),
+          "after leaving (0,1) the same cruise goes on into (1,1)")
+    check(r['clear'] >= clear_min, f"centre at least {clear_min:.2f} m from the box ({r['clear']:.2f})")
 
     # The robot falls halfway (recoverable): the cruise ends at once, the stop-and-go gets it up.
     fall = {'done': False, 'xy': None}

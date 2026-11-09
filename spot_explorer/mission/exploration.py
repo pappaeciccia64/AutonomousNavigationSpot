@@ -226,6 +226,8 @@ class Mission:
             MISSION_STATS['cell_choices_near' if choice.near else 'cell_choices_far'] = \
                 MISSION_STATS.get('cell_choices_near' if choice.near else 'cell_choices_far', 0) + 1
             self.env._chain_choice = None
+            self.env._attempt_left_unreachable = False
+            self.env._cells_left_unreachable = []
             if choice.near:
                 ok = self._attempt(choice.row, choice.col)
             else:
@@ -244,9 +246,15 @@ class Mission:
                 self._on_visited(choice.row, choice.col, x, y)
             elif attempt_common.battery_low():
                 continue
+            elif getattr(self.env, '_attempt_left_unreachable', False):
+                # No goal of the cell has a path any more (rule 3): not failed, skipped once.
+                rules.skip_once.add((choice.row, choice.col))
+                print(f"[CELL RULES] Cell ({choice.row},{choice.col}) unreachable now (no goal with a "
+                      f"path): not a failure, skipped at the next choice.")
             else:
                 rules.record_failure(choice, "attempt failed" if (choice.near or ok is not None)
                                      else "GraphNav did not get there")
+            rules.skip_once |= set(map(tuple, getattr(self.env, '_cells_left_unreachable', [])))
         attempt_cruise.stop_if_moving(self.env, self.command_client, "end of the exploration")
         rules.explain_end(self._attempt_count)
         self._log_progress(final=True)
