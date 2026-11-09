@@ -261,11 +261,11 @@ RECOVERY_SAME_GOAL_M = 0.30
 
 # --- CHOICE OF THE CELL GOAL (see find_best_point_in_cell) -----------------------------
 # TARGET_CLEARANCE_M: PREFERRED free space around the goal, on the global map and
-# on the live scan. The frontier requires FRONTIER_CLEARANCE_M (0.25) and the frontier's
-# hysteresis is 0.04 m: a goal chosen at 0.28 (PLAN_CLEARANCE_M, which stays the absolute
-# minimum) oscillates around the threshold. Outdoors (22-10 16:04) the goals chosen at
-# 0.28 were refused live at 0.24, at the edge of the grass.
-TARGET_CLEARANCE_M = 0.33
+# on the live scan. The frontier requires FRONTIER_CLEARANCE_M and the frontier's
+# hysteresis is 0.04 m: a goal chosen at the minimum (PLAN_CLEARANCE_M) oscillates around the
+# threshold. Outdoors (22-10 16:04) the goals chosen at 0.28 were refused live at 0.24, at the
+# edge of the grass. 0.08 above the frontier's threshold (0.33 with 0.25, 0.38 with 0.30).
+TARGET_CLEARANCE_M = geometry.FRONTIER_CLEARANCE_M + 0.08
 # TARGET_CELL_BORDER_M: the goal is preferably chosen at least this distance from the
 # cell border. A goal on the border leaves the robot, stopped within the arrival
 # tolerance, outside the cell ("0.06 m to go ... still outside cell", 44 times on
