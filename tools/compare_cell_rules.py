@@ -49,13 +49,17 @@ def cell_events(name):
     log = open(os.path.join(ROOT, 'MissionLogs', f'Mission_{name}', 'mission_log.txt'), errors='replace').read()
     ev = [(_t(m.group(1)), (int(m.group(3)), int(m.group(4))), 1 if m.group(2) == 'VISITED' else -1)
           for m in re.finditer(r'^(\d\d:\d\d:\d\d\.\d+) \[(VISITED|BLOCKED)\] Cell \((\d+),(\d+)\) marked', log, re.M)]
+    fails = [(_t(m.group(1)), (int(m.group(2)), int(m.group(3))),
+              None if m.group(4) is None else (int(m.group(4)), int(m.group(5))))
+             for m in re.finditer(r'^(\d\d:\d\d:\d\d\.\d+) \[CELL RULES\] Cell \((\d+),(\d+)\) failed .*?'
+                                  r'(?:entering from cell \((\d+), (\d+)\)|the robot in the cell)', log, re.M)]
     first = re.search(r'^(\d\d:\d\d:\d\d\.\d+) \[ATTEMPT\] Trying', log, re.M)
-    return ev, (_t(first.group(1)) if first else None)
+    return ev, fails, (_t(first.group(1)) if first else None)
 
 
 def compare(name):
     m = R.mission_setup(name)
-    ev, first_attempt = cell_events(name)
+    ev, fails, first_attempt = cell_events(name)
     t0 = float(np.load(m['scans'][0])['time']) % 86400
     # The log is in the local time of the machine that ran the mission (laptop CET, CORE UTC):
     # whole hours between the first attempt in the log and the first scan.
@@ -100,6 +104,11 @@ def compare(name):
             for t, rc, v in ev:
                 if t < tod:
                     env.map[rc[0]][rc[1]] = v
+            # The failures of the general cell rules logged before this attempt (09-11 on).
+            rules.failures = {}
+            for t, rc, entry in fails:
+                if t < tod:
+                    rules.failures.setdefault(rc, []).append(entry)
             if env.map[tr][tc] == 0:
                 with contextlib.redirect_stdout(io.StringIO()):
                     ch = rules.choose((rx, ry), gm, sampler)

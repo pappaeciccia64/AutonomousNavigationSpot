@@ -218,7 +218,8 @@ class Mission:
             self._close_seen_cells()
             HANDOFF.mark("progress and seen cells")
             x, y, _, _ = connection.getPosition(self.robot_state_client)
-            choice = rules.choose((x, y), self.global_grid.global_occupancy_map, self.sampler)
+            choice = rules.choose((x, y), self.global_grid.global_occupancy_map, self.sampler,
+                                  waypoints=self.recordingInterface.get_all_manual_waypoints_with_cells())
             if choice is None:
                 break
             print(f"[CELL RULES] Next: {choice.describe()}.")
@@ -264,11 +265,14 @@ class Mission:
     def _travel_to_choice(self, choice):
         """GraphNav to the waypoint nearest to the node the way enters the cell at, then the
         attempt. True/False as the attempt, None if GraphNav did not get there, 'fall'."""
-        wps = self.recordingInterface.get_all_manual_waypoints_with_cells()
-        if not wps:
-            return None
-        nx, ny = choice.node_xy
-        cell, wp = min(wps.items(), key=lambda kv: np.hypot(kv[1]['x'] - nx, kv[1]['y'] - ny))
+        if choice.waypoint is not None:
+            cell, wp = choice.waypoint          # the one the choice checked the goal from
+        else:
+            wps = self.recordingInterface.get_all_manual_waypoints_with_cells()
+            if not wps:
+                return None
+            nx, ny = choice.node_xy
+            cell, wp = min(wps.items(), key=lambda kv: np.hypot(kv[1]['x'] - nx, kv[1]['y'] - ny))
         res = self._graphnav_to(wp, f"to the waypoint of cell {cell} for cell ({choice.row},{choice.col})",
                                 self.env.get_world_position_from_cell(choice.row, choice.col))
         if res != 'ok':

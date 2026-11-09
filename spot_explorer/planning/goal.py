@@ -44,7 +44,7 @@ def _refuse_goal(env, row, col, x, y, why):
 
 def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cells_obstacle_dist,
                             sampler, global_map=None, safety_margin=None, exclude=None,
-                            reachable=None):
+                            reachable=None, quiet=False, require_reachable=False):
     """
     Choose the goal point inside the cell among the geometric centre and the graph nodes
     in the cell.
@@ -59,7 +59,8 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
          of the following criteria until one answers yes). Falling back on the next ones
          nearest to the centre when the graph does not get there is not enough: they lie in
          the same isolated area (on 22-10 16:04 that fallback failed 9 times out of 10). If
-         no point is reachable the best one is chosen anyway, and the attempt fails;
+         no point is reachable the best one is chosen anyway, and the attempt fails
+         (require_reachable=True: None instead, used by cell_rules to check a cell);
       3. nearest to the centre, in rings of 0.25 m (the centre itself, free or unknown, is
          the first): from there the robot sees the whole cell. Within a ring:
       4. with at least TARGET_CLEARANCE_M (0.33) of free space;
@@ -160,6 +161,8 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
 
     valid = [r['p'] for r in rows]
     if not rows:
+        if quiet:
+            return None, None, [], blocked
         print(f"[TARGET] Cell ({cell_row},{cell_col}): centre {center_reason or 'discarded'} and "
               f"no point of the cell at least {min_clear:.2f} m from obstacles. "
               f"No valid goal.")
@@ -185,6 +188,8 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
                 chosen = r
                 break
         if chosen is None:
+            if require_reachable:
+                return None, None, valid, blocked
             chosen = pool[0]
             reach_note = "; NO point of the cell is reachable from the robot in the graph"
             MISSION_STATS['goals_unreachable'] = MISSION_STATS.get('goals_unreachable', 0) + 1
@@ -198,6 +203,8 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
     if chosen['edge']:
         flags.append(f"less than {P.TARGET_CELL_BORDER_M:.2f} m from the cell border")
     flag_txt = f" -- {', '.join(flags)}" if flags else ""
+    if quiet:
+        return bx, by, valid, blocked
     if chosen['center']:
         state = "free" if chosen['seen'] else "unknown"
         print(f"[TARGET] Cell ({cell_row},{cell_col}): using the geometric centre "

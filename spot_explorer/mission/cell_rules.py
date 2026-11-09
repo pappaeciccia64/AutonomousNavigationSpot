@@ -35,6 +35,7 @@ from spot_explorer import config as P
 from spot_explorer.mission import mission_prm
 from spot_explorer.mission import recovery
 from spot_explorer.perception import geometry
+from spot_explorer.planning import goal as goal_choice
 from spot_explorer.planning import roadmap
 from spot_explorer.records import MISSION_STATS
 
@@ -45,13 +46,14 @@ MAX_FAILURES = 2           # real failures (the robot went and stopped) before s
 
 class Choice:
     """The next cell: where, how far, the entry edge, the node it is reached at."""
-    __slots__ = ('row', 'col', 'rank', 'length', 'entry', 'edge', 'node', 'node_xy', 'near')
+    __slots__ = ('row', 'col', 'rank', 'length', 'entry', 'edge', 'node', 'node_xy', 'near', 'waypoint')
 
     def __init__(self, row, col, rank, length, entry, edge, node, node_xy):
         self.row, self.col, self.rank = int(row), int(col), int(rank)
         self.length, self.entry, self.edge = float(length), entry, edge
         self.node, self.node_xy = node, node_xy
         self.near = self.length <= NEAR_PATH_M
+        self.waypoint = None        # far: (cell, data) of the GraphNav waypoint to start from
 
     def describe_entry(self):
         if self.entry is None:
@@ -123,10 +125,43 @@ class CellRules:
                     heapq.heappush(heap, (nd, v))
         return None
 
+    def has_goal(self, start, from_xy, row, col, cells_of, global_map, sampler):
+        """Is there a goal of the cell that the attempt starting at from_xy (node start)
+        would accept? The SAME choice as the attempt (goal.find_best_point_in_cell, on the
+        global map: no live scan here), with "reachable" = in the graph from start through
+        the cells the attempt may use. On 09-11 14:38 the rules saw a way into (1,5) (a node
+        of the cell) and the robot went there with GraphNav (22 s) to find no goal reachable."""
+        if global_map is None or sampler is None:
+            return True
+        prm, env = self.prm, self.env
+        allowed = (mission_prm.planning_cells(env, row, col, from_xy)
+                   if P.PLAN_ONLY_EXPLORED_CELLS else None)
+        seen, stack = {start}, [start]
+        while stack:
+            u = stack.pop()
+            for v, _w in prm.edges.get(u, ()):
+                if v in seen or (allowed is not None and cells_of.get(v) not in allowed):
+                    continue
+                if not np.isfinite(prm.node_penalty(v)):
+                    continue
+                seen.add(v)
+                stack.append(v)
+
+        def reachable(px, py):
+            nid = prm.anchor_node(px, py, global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M)
+            return nid is not None and nid in seen
+        gx, _gy, _v, _b = goal_choice.find_best_point_in_cell(
+            from_xy[0], from_xy[1], env, row, col, None, None, sampler, global_map=global_map,
+            reachable=reachable, quiet=True, require_reachable=True)
+        return gx is not None
+
     # --- the choice ----------------------------------------------------------------------
-    def choose(self, robot_xy, global_map, sampler=None):
+    def choose(self, robot_xy, global_map, sampler=None, waypoints=None):
         """The next cell (Choice), None if there is no candidate. Cells found with every
-        candidate point inside an obstacle are marked blocked on the way."""
+        candidate point inside an obstacle are marked blocked on the way. A candidate needs a
+        goal the attempt would accept (has_goal): from the robot if near, from the GraphNav
+        waypoint nearest to where the way enters the cell if far (waypoints: {cell: data
+        with x, y}, see map_recording.get_all_manual_waypoints_with_cells; None = not checked)."""
         env, prm = self.env, self.prm
         self.status = {}
         robot_cell = tuple(int(v) for v in env.get_cell_from_world(*robot_xy))
@@ -168,6 +203,21 @@ class CellRules:
                                        f"where it already failed")
                 continue
             ch = Choice(r, c, self.rank.get((r, c), 10 ** 6), length, entry, edge, node, prm.nodes[node])
+            if ch.near:
+                ok = self.has_goal(start, robot_xy, r, c, cells_of, global_map, sampler)
+            elif waypoints:
+                nx, ny = ch.node_xy
+                ch.waypoint = min(waypoints.items(), key=lambda kv: np.hypot(kv[1]['x'] - nx, kv[1]['y'] - ny))
+                wxy = (float(ch.waypoint[1]['x']), float(ch.waypoint[1]['y']))
+                wstart = prm.anchor_node(wxy[0], wxy[1], global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M,
+                                         ignore_near_m=roadmap.ANCHOR_IGNORE_NEAR_M, connected_first=True)
+                ok = wstart is not None and self.has_goal(wstart, wxy, r, c, cells_of, global_map, sampler)
+            else:
+                ok = True
+            if not ok:
+                self.status[(r, c)] = ("unreachable: a way into the cell, but no goal the attempt "
+                                       "would accept is reachable" + ("" if ch.near else " from the waypoint"))
+                continue
             if failed:
                 # Behind every cell that never failed, near or far.
                 if far_failed is None or (ch.near and not far_failed.near):
