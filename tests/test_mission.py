@@ -286,6 +286,15 @@ def _initialize_with_fiducial(self, robot_state_client, fiducial_id=None):
 map_recording.RecordingInterface.initialize_with_fiducial = _initialize_with_fiducial
 
 
+COMMANDS = []          # 'sit' / 'stop' / 'cmd' sent to the robot command client, in order
+
+
+def _command(cmd, *a, **k):
+    text = str(cmd)
+    COMMANDS.append('sit' if 'sit_request' in text else 'stop' if 'stop_request' in text else 'cmd')
+    return 1
+
+
 class FakeRobot:
     def __init__(self, gn):
         self.gn = gn
@@ -294,7 +303,7 @@ class FakeRobot:
         self._current_user = "prova"
         self.powered = False
         self.state = NS(get_robot_state=lambda: (_ for _ in ()).throw(RuntimeError("fake state")))
-        self.commands = NS(robot_command=lambda *a, **k: 1)
+        self.commands = NS(robot_command=_command)
 
     def ensure_client(self, name):
         if name in ('recording-service', 'graph-nav-service', 'map-processing-service'):
@@ -391,7 +400,7 @@ def _with_battery(from_pct=36.0, points_per_read=1.0):
         config.BATTERY_SAMPLE_S = real_s
 
 
-def run(walls=None, name='MISSION', fiducial=None, stuck_wp0_m=None, wp0_offset_m=None):
+def run(walls=None, name='MISSION', fiducial=None, stuck_wp0_m=None, wp0_offset_m=None, extra_argv=()):
     global FIDUCIAL_TAG
     FIDUCIAL_TAG = fiducial
     T.WORLD, T.ROBOT = T.World(WALLS if walls is None else walls, ghosts=True), T.Robot(*START)
@@ -413,14 +422,16 @@ def run(walls=None, name='MISSION', fiducial=None, stuck_wp0_m=None, wp0_offset_
     mission_run.DATA_ROOT = root                                    # data folders here
     argv = sys.argv
     sys.argv = ["run_mission.py", "--rows", str(ROWS), "--cols", str(COLS), "--cell", str(CELL),
-                "--graph", "lattice", "--spacing", "0.5"]
+                "--graph", "lattice", "--spacing", "0.5"] + list(extra_argv)
     t0 = time.time()
     out = io.StringIO()
+    real_navigate = config.NAVIGATE_AFTER_EXPLORATION
     try:
         with contextlib.redirect_stdout(out):
             ok = mission_run.main()
     finally:
         sys.argv = argv
+        config.NAVIGATE_AFTER_EXPLORATION = real_navigate
     logs = [os.path.join(dp, f) for dp, _, fs in os.walk(os.path.join(root, "MissionLogs")) for f in fs
             if f == "mission_log.txt"]
     log = open(logs[0]).read() if logs else out.getvalue()
@@ -564,6 +575,89 @@ def _check_cell_choice():
     check(cell == (6, 2), f"robot far from the visited cell: the one it is in counts ({cell})")
 
 
+def _check_navigation_phase():
+    """run_mission.py --then-navigate: after the exploration the robot takes commands on the map
+    just built (scripted here), sits down while it waits too long, and with 'end' the mission
+    closes as usual."""
+    from bosdyn.client import robot_command
+    from spot_explorer.navigation import in_mission
+    print("\nWhole mission in world H: world A with --then-navigate (navigation phase before closing).")
+    stands = []
+
+    def script(commands):
+        it = iter(commands)
+
+        def ask(prompt):
+            c = next(it)
+            if c is EOFError:
+                raise EOFError
+            if callable(c):
+                return c()
+            return c
+        return ask
+
+    def wait_and(cmd):
+        def f():
+            time.sleep(0.4)          # longer than IDLE_SIT_S below: the robot sits down
+            return cmd
+        return f
+
+    def turn(dx, dy, dyaw, frame, cc, rsc, **kw):        # turning in place (arrival heading)
+        T.ROBOT.yaw = float((T.ROBOT.yaw + dyaw + np.pi) % (2 * np.pi) - np.pi)
+        return True, 0.0
+
+    real = (in_mission.ASK, in_mission.IDLE_SIT_S, robot_command.blocking_stand, motion.relative_move)
+    in_mission.IDLE_SIT_S = 0.1
+    robot_command.blocking_stand = lambda *a, **k: stands.append(1)
+    motion.relative_move = turn
+    # Mission frame: x ahead, y to the left of the start (1.5, 1.5) of the world, facing +x.
+    in_mission.ASK = script(['6,3', 'save p1', 'home', 'p1 @ 90', wait_and('places'), 'nowhere 1',
+                             'route p1,home x2', 'end'])
+    COMMANDS.clear()
+    try:
+        r = run(WORLDS['A'], "MISSION_H", extra_argv=['--then-navigate'])
+    finally:
+        in_mission.ASK, in_mission.IDLE_SIT_S, robot_command.blocking_stand, motion.relative_move = real
+    _check_common(r)
+    log = r['log']
+    check("NAVIGATION PHASE: the robot waits for commands" in log, "after the exploration: navigation phase")
+    check("Navigation phase over (end): 4 of 4 goals reached" in log,
+          "4 goals (a point, home, a place with a heading, a route of 2 loops), all reached, then 'end'")
+    i_phase, i_close = log.find("NAVIGATION PHASE"), log.find("return to wp_0: arrived")
+    check(0 < i_phase < i_close and "[FINAL SCAN] Done" in log[:i_phase],
+          "order: exploration, final scan, phase, then the usual closure (return to wp_0)")
+    check("No command for 0 s: the robot sits down" in log and "Standing up again." in log and stands,
+          "waiting too long: sits down, stands up at the next command")
+    check("Not valid" in log, "a command that is not valid is said and skipped")
+    mfolder = glob.glob(os.path.join(r['root'], 'MissionMap', 'Mission_*'))[0]
+    lfolder = glob.glob(os.path.join(r['root'], 'MissionLogs', 'Mission_*'))[0]
+    import json
+    places = json.load(open(os.path.join(mfolder, 'places.json')))['places']
+    check('p1' in places and abs(places['p1']['x'] - 6.0) < 0.8 and abs(places['p1']['y'] - 3.0) < 0.8,
+          f"'save p1' after reaching (6, 3): place at ({places.get('p1', {}).get('x', 0):.2f}, "
+          f"{places.get('p1', {}).get('y', 0):.2f}) in the mission folder")
+    rows = open(os.path.join(lfolder, 'route.csv')).read().splitlines()
+    check(len(rows) == 5 and all(r_.split(',')[4] == '1' for r_ in rows[1:]),
+          f"route p1,home x2: {len(rows) - 1} stops in route.csv, all reached")
+    check(os.path.exists(os.path.join(lfolder, 'navigation.csv'))
+          and os.path.exists(os.path.join(lfolder, 'navigation_state.json')),
+          "navigation.csv and the viewer state in the mission log folder")
+    check("'config.NAVIGATE_AFTER_EXPLORATION': True" in log or 'NAVIGATE_AFTER_EXPLORATION' in log,
+          "the switch is in the [CONFIG] SWITCHES line")
+    shutil.rmtree(r['root'], ignore_errors=True)
+
+    print("\nWhole mission in world H2: --then-navigate, input closed at once (EOF).")
+    in_mission.ASK = script([EOFError])
+    try:
+        r = run(WORLDS['A'], "MISSION_H2", extra_argv=['--then-navigate'])
+    finally:
+        in_mission.ASK = real[0]
+    _check_common(r)
+    check("Navigation phase over (eof): 0 of 0 goals reached" in r['log'],
+          "no input: the phase ends at once and the mission closes as usual")
+    shutil.rmtree(r['root'], ignore_errors=True)
+
+
 def _check_battery(r):
     log = r['log']
     grid = log.split("--- Cell map ---")[-1].splitlines()[1:ROWS + 1]
@@ -601,6 +695,7 @@ if __name__ == '__main__':
     shutil.rmtree(r['root'], ignore_errors=True)
     _check_cell_choice()
     _check_emergency()
+    _check_navigation_phase()
     print("\nWhole mission in world G: world A with the return to wp_0 'arrived' but 0.8 m to the side "
           "(29-10 10:57: 1.2 m).")
     r = run(WORLDS['A'], "MISSION_G", fiducial=(7, START[0] - 1.0, START[1]), wp0_offset_m=0.8)

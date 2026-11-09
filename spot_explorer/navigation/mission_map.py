@@ -355,6 +355,33 @@ class MissionMap:
             print(f"{LOG_TAG} {mm.places.describe().splitlines()[0]}.")
         return mm
 
+    @classmethod
+    def from_live(cls, env, global_map, terrain_map, waypoint_poses, mission_graph, mission_folder):
+        """
+        The mission still running (navigation phase of run_mission.py --then-navigate): its
+        own live maps (not copies: what the phase sees goes into the maps the mission saves),
+        its cell grid and origin, the graph rebuilt with the same node parameters and seed as
+        the mission's (same nodes; fresh edges and no leftover penalties of the last cell
+        attempt), and the waypoints it recorded (VISION poses, the same frame as the maps).
+        """
+        name = os.path.basename(os.path.normpath(mission_folder))
+        name = name[len('Mission_'):] if name.startswith('Mission_') else name
+        mg = mission_graph
+        cfg = dict(name=name, origin=(env.origin_x, env.origin_y), yaw=env.origin_yaw,
+                   rows=env.rows, cols=env.cols, cell=env.cell_size,
+                   start_cell=tuple(getattr(env, 'start_cell', (0, 0))),
+                   spacing=P.MISSION_LATTICE_SPACING_M, sampling=P.MISSION_GRAPH_SAMPLING,
+                   min_edge=P.PRM_MIN_EDGE_M, max_edge=P.PRM_MAX_EDGE_M,
+                   distribution=getattr(mg, 'distribution', None) or P.MISSION_RANDOM_DISTRIBUTION,
+                   density=getattr(mg, 'density_per_m2', None) or P.MISSION_RANDOM_DENSITY,
+                   seed=getattr(mg, 'seed', None) if getattr(mg, 'seed', None) is not None else P.MISSION_RANDOM_SEED)
+        wps = {p['waypoint_id']: dict(name=n, x=float(p['x']), y=float(p['y']), yaw=float(p['yaw']))
+               for n, p in waypoint_poses.items() if p.get('waypoint_id')}
+        ng = dict(dir=None, graph=None, wp=wps, by_name={v['name']: k for k, v in wps.items()})
+        mm = cls(name, cfg, global_map, terrain_map, ng)
+        mm.places = Places(os.path.join(mission_folder, 'places.json'))
+        return mm
+
     def _build_prm(self):
         t0 = time.perf_counter()
         cfg = self.cfg

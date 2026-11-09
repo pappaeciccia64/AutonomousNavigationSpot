@@ -346,6 +346,14 @@ MAX_FALLS_PER_MISSION = 3      # at the third fall the robot gets up and the mis
 BATTERY_RETURN_PCT = 30.0
 BATTERY_RETURN_CONFIRM = 2     # readings in a row below threshold (against an isolated value)
 BATTERY_SAMPLE_S = 5.0         # at most one reading every this many seconds in the loop
+
+# --- NAVIGATION PHASE AFTER THE EXPLORATION ------------------------------------------------
+#   NAVIGATE_AFTER_EXPLORATION -- True (or run_mission.py --then-navigate): when the exploration
+#     is over, before going back to wp_0, the robot waits for commands on the map it has just
+#     built (goals, places, routes, click; see spot_explorer/navigation/in_mission.py). With
+#     'end' the mission closes as usual. False = the mission closes at once, as before.
+NAVIGATE_AFTER_EXPLORATION = False
+
 GRAPHNAV_TIMEOUT_S = 240.0
 # Return to wp_0 stopped within this distance (STUCK, timeout): it stays a return that did NOT
 # succeed, but fiducial and drift are measured anyway (see graphnav_return_to_start).

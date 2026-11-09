@@ -132,8 +132,32 @@ class MapNavigator:
         self.T = None                       # Transform2D old -> today's VISION
         self.tracker = safe_frontier.ArcVerificationTracker(robot)
         self.local_grid = spot_grid.LocalGrid(robot)
+        self.same_session = False
         self.init_maps()
         self.init_session(log_folder)
+
+    @classmethod
+    def in_mission(cls, mission_map, robot, robot_state_client, command_client, recordingInterface,
+                   tracker, local_grid, log_folder, maps_folder, battery=None):
+        """
+        The navigator inside the mission that has just explored the map (run_mission.py
+        --then-navigate). Same session, same VISION frame as the maps: no graph upload, no
+        localization, the transform is the identity; the mission's own GraphNav recording,
+        frontier thread and local grid. The logs go into the mission log folder and the
+        updated maps into the mission map folder, so the mission saves them as usual.
+        """
+        nav = object.__new__(cls)
+        nav.map, nav.robot, nav.rsc, nav.cc = mission_map, robot, robot_state_client, command_client
+        nav.ri = recordingInterface
+        nav.gn = recordingInterface._graph_nav_client
+        nav.T = Transform2D()
+        nav.tracker = tracker
+        nav.local_grid = local_grid
+        nav.same_session = True
+        nav.init_maps(update=True)
+        nav.init_session(log_folder, battery=battery)
+        nav.maps_folder = maps_folder
+        return nav
 
     def init_maps(self, update=None):
         """State of the map updates (also for the tests, which do not go through __init__)."""
@@ -149,6 +173,7 @@ class MapNavigator:
         and counters for the log.
         """
         self.log_folder = log_folder
+        self.maps_folder = log_folder       # where the periodic full saves go
         self.battery = battery
         self.end_reason = None
         self.returning = False
@@ -397,6 +422,8 @@ class MapNavigator:
         the old one, and with today's drift the robot would go to the wrong point of the map,
         believing it is right.
         """
+        if getattr(self, 'same_session', False):
+            return True          # same frame as the maps: nothing to localize
         if self.update_transform(where) is not None:
             self.rounds_without_loc = 0
             return True
@@ -719,7 +746,7 @@ class MapNavigator:
                 os.replace(path + '.tmp.npz', path)
             if self.n_scans_in_map and now - self._t_pkl >= PKL_EVERY_S:
                 self._t_pkl = now
-                self.save_maps(self.log_folder, quiet_=True)
+                self.save_maps(self.maps_folder, quiet_=True)
         except Exception as e:
             print(f"{LOG_TAG} State for the viewer not written: {e}")
 

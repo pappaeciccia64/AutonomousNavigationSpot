@@ -48,6 +48,7 @@ def mission_switches():
         'geometry.ROBOT_CLEARANCE_AIR_M': geometry.ROBOT_CLEARANCE_AIR_M,
         'geometry.PLAN_CLEARANCE_EXTRA_M': geometry.PLAN_CLEARANCE_EXTRA_M,
         'config.BATTERY_RETURN_PCT': P.BATTERY_RETURN_PCT,
+        'config.NAVIGATE_AFTER_EXPLORATION': P.NAVIGATE_AFTER_EXPLORATION,
     }
 
 

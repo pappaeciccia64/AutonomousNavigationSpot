@@ -386,6 +386,15 @@ def easy_walk(options):
             # MISSION SUMMARY -- diagnostics only, to be read after the run.
             summary._emit_mission_summary_once()
 
+            # NAVIGATION PHASE (--then-navigate): commands on the map just built, then the usual
+            # closure. Not with a low battery: then the robot goes straight home.
+            if P.NAVIGATE_AFTER_EXPLORATION and not attempt_common.battery_low():
+                from spot_explorer.navigation import in_mission
+                in_mission.navigation_phase(robot, robot_state_client, command_client, recordingInterface,
+                                            local_grid, global_grid, env, prm, verification_tracker,
+                                            mission_folder, mission_log_folder,
+                                            battery=MISSION_CTX.get('battery'))
+
             _close_mission(robot, robot_state_client, command_client, recordingInterface)
             estop.stop()
         except BaseException as exc:
@@ -431,6 +440,9 @@ def _parse_args(argv=None):
                    help=f"minimum edge length in m (default {P.PRM_MIN_EDGE_M:g})")
     p.add_argument('--max-edge', type=float, default=None,
                    help=f"maximum edge length in m (default {P.PRM_MAX_EDGE_M:g})")
+    p.add_argument('--then-navigate', action='store_true',
+                   help="when the exploration is over, wait for navigation commands on the map before "
+                        "going back to wp_0 ('end' closes the mission as usual)")
     a = p.parse_args(argv)
     if a.rows is not None and a.rows < 1 or a.cols is not None and a.cols < 1:
         p.error("--rows and --cols must be at least 1")
@@ -459,6 +471,8 @@ def main():
         P.PRM_MIN_EDGE_M = float(args.min_edge)
     if args.max_edge is not None:
         P.PRM_MAX_EDGE_M = float(args.max_edge)
+    if args.then_navigate:
+        P.NAVIGATE_AFTER_EXPLORATION = True
     if args.spacing is not None:
         P.MISSION_LATTICE_SPACING_M = None if args.spacing <= 0 else float(args.spacing)
     if args.rings is not None:
