@@ -418,7 +418,7 @@ def run(walls=None, name='MISSION', fiducial=None, stuck_wp0_m=None, wp0_offset_
     gn.wp0_offset_m = wp0_offset_m
     robot = FakeRobot(gn)
     connection.setLogInfo = lambda o: (robot, NS(), robot.state, None)
-    connection.SimpleEstop = lambda r, n: NS(stop=lambda: None, allow=lambda: None)
+    connection.SimpleEstop = lambda r, n: NS(stop=lambda: None, allow=lambda: None, release=lambda: None)
     bosdyn.client.lease.LeaseKeepAlive = lambda *a, **k: contextlib.nullcontext()
     mission_run.blocking_stand = lambda *a, **k: None
     spot_grid.LocalGrid = lambda r: T.FakeLocalGrid()
