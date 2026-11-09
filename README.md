@@ -87,6 +87,7 @@ It gets here when the frontier is empty, or earlier if the battery drops below t
 | Path | What it does |
 |---|---|
 | `run_mission.py` | Starts a mission (`spot_explorer.mission.run.main`) |
+| `run_navigation.py` | Map navigation on an area already explored (`spot_explorer.navigation.run.main`), see *Map navigation* |
 | `spot_explorer/config.py` | All the mission parameters and switches, read as `P.NAME` |
 | `spot_explorer/records.py` | Statistics, logs and saved data (CSV, scan bundles, views); nothing here decides the movement |
 | `spot_explorer/legacy.py` | Old Italian names of tags, values and keys, so the tools still read missions recorded before 30-10-2026 |
@@ -94,9 +95,10 @@ It gets here when the frontier is empty, or earlier if the battery drops below t
 | `spot_explorer/planning/` | `mission_graph.py` the mission graph and its edge update; `graph_nodes.py` lattice and random nodes; `roadmap.py` the PRM (graph, penalties, Dijkstra); `edge_evaluation.py` edge vetoes and weights; `edge_stats.py` veto statistics; `goal.py` goal choice in a cell; `safe_frontier.py` the safe frontier and its thread; `decisions.py` what to do given the frontier (step, rotation, cone, back-off, traps) |
 | `spot_explorer/perception/` | `spot_grid.py` the local grid and its processing; `global_maps.py` global maps; `slopes.py` edge slope; `geometry.py` robot footprint and clearances; `gait.py` gait thresholds |
 | `spot_explorer/graphnav/` | `map_recording.py` recording, waypoints, breadcrumbs, loop closure, download; `navigation.py` GraphNav moves and return to `wp_0`; `localization.py` localization, re-anchoring, drift; `map_shortcuts.py` shortcuts; `apriltags.py` starting fiducial and correction of the return |
+| `spot_explorer/navigation/` | Map navigation: `mission_map.py` a finished mission read back (log, global maps, GraphNav graph with the old waypoint poses) and planning on its PRM; `navigator.py` the robot side (graph upload, localization, transform between the frames, following the path with the safe frontier, map updates, battery, return home, logs); `frames.py` mission frame and transform; `goal_picker.py` goal with a click; `run.py` command line |
 | `spot_explorer/robot/` | `connection.py` robot connection and E-Stop; `motion.py` motion commands, gait, falls; `battery.py` charge and early return |
-| `tools/` | `mission_report.py`, `mission_viewer.py`, `live_viewer.py` (no SDK needed); `preflight.py`, `compare_logs.py`; `bench_graph.py` (also the graph command line), `bench_loop_closure.py`, `bench_fiducial.py` bench tests |
-| `tests/` | `test_e2e_loop.py`, `test_mission.py`, `test_replay.py` (+ `replay_reference.json`), `test_goal_selection.py` |
+| `tools/` | `mission_report.py`, `mission_viewer.py`, `live_viewer.py`, `navigation_viewer.py` (no SDK needed); `preflight.py`, `compare_logs.py`; `bench_graph.py` (also the graph command line), `bench_loop_closure.py`, `bench_fiducial.py` bench tests |
+| `tests/` | `test_e2e_loop.py`, `test_mission.py`, `test_replay.py` (+ `replay_reference.json`), `test_goal_selection.py`, `test_map_navigation.py` |
 
 ---
 
@@ -134,6 +136,21 @@ Every mission has a name `Mission_<day-month-year>_<time>` and three folders:
 | `graph/<mission>/` | downloaded GraphNav graph (`Graph_<date>`, `Grafo_<date>` in missions before 30-10-2026), with the waypoint snapshots | 150 MB |
 
 ---
+
+## Map navigation
+
+`run_navigation.py` takes the robot to a point of an area explored by a finished mission, without exploring again (never tried on the robot yet: see `TODO.md`).
+```bash
+python3 run_navigation.py 26-10-2026_15-11-21 --to 6,2 --preview plan.png   # without the robot: only the plan, as a figure
+python3 run_navigation.py 26-10-2026_15-11-21 --to 6,2                      # on the robot
+python3 run_navigation.py 26-10-2026_15-11-21 --click                       # one goal after another, with a click on the map
+python3 run_navigation.py 26-10-2026_15-11-21 --interactive                 # one goal after another, from the terminal
+python3 run_navigation.py 26-10-2026_15-11-21 --home                        # back to the mission start (wp_0)
+python3 tools/navigation_viewer.py                                          # in a second terminal: the latest navigation, live
+```
+Goals: `--to X,Y` (metres, X ahead and Y to the left of the mission start), `--cell R,C` (cell centre), `--waypoint wp_N`, `--home`, or `--click`: left click sets the goal and draws the path at once, Enter confirms, `h` goes home, Esc quits (needs a screen). The robot starts at the mission start with the start tag in view (or, without a tag, exactly on the start pose: `--localization wp_0`).
+
+How it works: the mission's global maps and PRM are in that day's VISION frame, which no longer exists after a reboot. The downloaded GraphNav graph is uploaded to Spot and the robot localizes on it; the pose of each waypoint in the old frame (from its snapshot) gives the transform between the mission frame and today's, recomputed at every round. The path is planned on the mission PRM (same nodes, read from the log; only seen ground) and followed with the safe frontier as in the mission. Every scan of today goes into the maps (resampled onto the map grid, heights brought to the mission's) and the PRM is re-evaluated where they change: an obstacle that appeared removes edges, one that went away gives them back, and the path changes along the way. Fallback with GraphNav when the PRM cannot make it. Below the battery threshold of the mission the robot goes home (GraphNav, then PRM); if GraphNav gets lost it stops and tries to relocalize, and stays still if it cannot. Logs and updated maps in `MissionLogs/Navigation_<date>/` (`navigation.csv`, `trajectory.csv`, `segments.csv`, `battery.csv`, the files of the viewer); `--maps MissionLogs/Navigation_<date>` starts again from those maps, `--no-map-update` keeps the mission maps fixed.
 
 ## During the mission
 
