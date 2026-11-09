@@ -199,6 +199,9 @@ class Mission:
         A real failure counts against the cell with its entry; no candidate = the end.
         """
         rules = self.rules = cell_rules.CellRules(self.env, self.prm, self.path)
+        # For the next cell prepared in the cruise (attempt_cruise.CRUISE_SWITCH).
+        self.env._cell_rules = rules
+        self.env._on_chained_visit = self._chained_visit
         self._t0 = time.time()
         self._closed_at_start = self._cell_counts()[0]
         while True:
@@ -221,11 +224,15 @@ class Mission:
             print(f"[CELL RULES] Next: {choice.describe()}.")
             MISSION_STATS['cell_choices_near' if choice.near else 'cell_choices_far'] = \
                 MISSION_STATS.get('cell_choices_near' if choice.near else 'cell_choices_far', 0) + 1
+            self.env._chain_choice = None
             if choice.near:
                 ok = self._attempt(choice.row, choice.col)
             else:
                 attempt_cruise.stop_if_moving(self.env, self.command_client, "next cell far: GraphNav")
                 ok = self._travel_to_choice(choice)
+            # The cruise may have gone on into other cells (attempt_cruise.CRUISE_SWITCH): the
+            # outcome is that of the last one.
+            choice = getattr(self.env, '_chain_choice', None) or choice
             if ok == 'fall':
                 rules.record_failure(choice, "fall during the GraphNav move")
                 continue
@@ -242,6 +249,17 @@ class Mission:
         attempt_cruise.stop_if_moving(self.env, self.command_client, "end of the exploration")
         rules.explain_end(self._attempt_count)
         self._log_progress(final=True)
+
+    def _chained_visit(self, row, col, x, y):
+        """A cell done in cruise, the next one already prepared by the planning thread (which
+        marked it visited): its GraphNav waypoint, as _on_visited, from the main thread."""
+        border = cells.cell_border_distance(self.env, row, col, x, y)
+        if border is not None and -border <= P.ARRIVAL_OUTSIDE_CELL_M:
+            self.recordingInterface.create_default_waypoint(cell_row=row, cell_col=col)
+        else:
+            print(f"[VISITED] Cell ({row},{col}) seen from {-border:.1f} m outside: no GraphNav "
+                  f"waypoint of its own.")
+        self._last_visited = (int(row), int(col))
 
     def _travel_to_choice(self, choice):
         """GraphNav to the waypoint nearest to the node the way enters the cell at, then the

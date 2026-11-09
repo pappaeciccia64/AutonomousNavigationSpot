@@ -119,7 +119,7 @@ class RTSpot(FakeSpot):
         return super().get_robot_state()
 
 
-def run(name, rects, start, cells_seq, on_step=None):
+def run(name, rects, start, cells_seq, on_step=None, env=None):
     print(f"\n== {name} ==")
     e2e.WORLD, e2e.ROBOT = e2e.World(rects, True), e2e.Robot(*start)
     TRACK.clear()
@@ -136,9 +136,11 @@ def run(name, rects, start, cells_seq, on_step=None):
                       connection_radius=config.PRM_CONNECTION_RADIUS_M)
     prm.mission_graph = mg
     mg.into_prm(prm)
+    if getattr(env, '_cell_rules', None) is not None:
+        env._cell_rules.prm = prm               # the cell rules of the run work on its graph
     spot, tracker = RTSpot(on_step), PlanTracker()
     gg = NS(global_occupancy_map=None, global_terrain_map=None)
-    env = e2e.FakeEnv()
+    env = e2e.FakeEnv() if env is None else env
     folder = tempfile.mkdtemp(prefix="cruise_")
     os.makedirs(os.path.join(folder, 'scans'))
     out, oks, err, t0 = io.StringIO(), [], None, time.time()
@@ -247,6 +249,46 @@ def main():
     check(r['oks'] == [True, True], f"two cells done ({r['oks']})")
     check(len(seen_ends) >= 1, f"hand-off because the cell is seen ({r['ends']})")
     check("cell seen" in r['log'] and "[CRUISE] Plan" in r['log'], "the [CRUISE] Plan lines give the share seen")
+
+    # Step C (09-11): the next cell prepared in the planning thread, the cruise goes on through
+    # the cells. A real cell grid and the cell rules, as the mission sets them; ONE attempt on
+    # (0,1). Cells of 5 m here: "near" up to 8 m (4 m in the mission, cells of 2 m).
+    from spot_explorer.mission import cell_rules, cells as cells_mod
+    real_env = cells_mod.EnvironmentMap(rows=2, cols=2, cell_size=5.0)
+    with contextlib.redirect_stdout(io.StringIO()):
+        real_env.set_origin(3.5, 3.5, 0.0)
+    rules = cell_rules.CellRules(real_env, None, real_env.generate_visit_path('auto', start_cell=(0, 0)))
+    done_cb = []
+    real_env._cell_rules = rules
+    real_env._on_chained_visit = lambda r, c, x, y: done_cb.append((r, c))
+    near0, cell_rules.NEAR_PATH_M = cell_rules.NEAR_PATH_M, 8.0
+    try:
+        r = run("step C: one cruise through three cells", [], (2.0, 2.0, 0.785), [(0, 1)], env=real_env)
+    finally:
+        cell_rules.NEAR_PATH_M = near0
+    switches = [l for l in r['log'].splitlines() if 'done while walking' in l]
+    check(r['oks'] == [True], f"the attempt ends well ({r['oks']})")
+    check(len(switches) >= 2, f"two cells done while walking, the next prepared in the planning thread "
+                              f"({len(switches)}: {[l.split('[CRUISE] ')[1][:40] for l in switches]})")
+    check(done_cb[:2] == [(0, 1), (1, 1)], f"waypoint of the cells done, in order ({done_cb})")
+    check(r['stats'].get('cruises') == 1, f"one cruise for the three cells ({r['stats'].get('cruises')})")
+    # Still (no linear speed) only for the turns on the spot towards the next cell: 90 degrees
+    # at every switch here, ~2 s each; no wait for the next cell to be prepared.
+    tr = np.array(TRACK)
+    v = np.hypot(np.diff(tr[:, 0]), np.diff(tr[:, 1])) / np.maximum(np.diff(tr[:, 2]), 1e-3)
+    pauses, k = [], 0
+    while k < len(v):
+        if v[k] < 0.05:
+            j = k
+            while j < len(v) and v[j] < 0.05:
+                j += 1
+            pauses.append(float(tr[j, 2] - tr[k, 2]))
+            k = j
+        else:
+            k += 1
+    mid = [p_ for p_ in pauses[1:-1] if p_ >= 0.3] if len(pauses) > 2 else [p_ for p_ in pauses if p_ >= 0.3]
+    check(all(p_ < 2.5 for p_ in mid), f"between the cells only the turns on the spot "
+                                        f"({[round(p_, 1) for p_ in mid]} s)")
 
     # The robot falls halfway (recoverable): the cruise ends at once, the stop-and-go gets it up.
     fall = {'done': False, 'xy': None}

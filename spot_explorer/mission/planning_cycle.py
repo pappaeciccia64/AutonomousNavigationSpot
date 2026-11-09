@@ -257,6 +257,11 @@ class CruisePlanner:
         # (env, row, col) of the target cell: every plan says how much of it the global map
         # has seen ('cell_seen', see cells.cell_seen_fraction). None = not computed.
         self.seen_cell = None
+        # The next cell prepared HERE, in the planning thread (attempt_cruise.CRUISE_SWITCH):
+        # the main thread sets switch_job (a callable job(planner, scan, robot) -> dict), the
+        # next cycle runs it once on its fresh scan, before planning, and the plan carries its
+        # result as 'switch'. The job may change goal_id, path_ids and seen_cell.
+        self.switch_job = None
         # Times of the cycle, for the log: seconds per phase (PHASES) of every cycle, and the
         # interval between the acquisition times of two consecutive Spot grids (0 = the same
         # grid read again: the cycle was faster than Spot's update).
@@ -290,6 +295,11 @@ class CruisePlanner:
         self.last_scan, self.last_snap = scan, snap
         t1 = time.perf_counter(); ph['maps'] = t1 - t; t = t1
         self.cycles += 1
+        switch = None
+        if self.switch_job is not None:
+            job, self.switch_job = self.switch_job, None
+            switch = job(self, scan, robot)
+            t1 = time.perf_counter(); ph['switch'] = t1 - t; t = t1
 
         # Where the robot is along the path: the edge it is walking stays (committed), the
         # plan changes from the next node on.
@@ -336,12 +346,12 @@ class CruisePlanner:
                      if self.seen_cell is not None and self.global_map is not None else None)
         ph['other'] = time.perf_counter() - t
         for k, v in ph.items():
-            self.phase_s[k].append(v)
+            self.phase_s.setdefault(k, []).append(v)
         return dict(status=status, robot=robot, ids=list(remainder), polyline=polyline,
                     frontier=frontier, advance=advance, confirmed=confirmed, replanned=replanned,
                     turn_stop=turn_stop, terrain=terrain,
                     to_goal=(turn_stop is None and advance >= path_len - 0.01),
-                    edges=getattr(self.prm, 'cycle_counts', None), cell_seen=cell_seen,
+                    edges=getattr(self.prm, 'cycle_counts', None), cell_seen=cell_seen, switch=switch,
                     phases=ph, grid_dt=grid_dt, cycle_s=time.perf_counter() - t0)
 
     def timing_summary(self):
