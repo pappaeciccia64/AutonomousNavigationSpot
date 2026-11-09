@@ -10,3 +10,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SSH=(ssh -p "$CORE_PORT" -o ControlMaster=auto -o ControlPath=/tmp/core-ssh-%r@%h:%p -o ControlPersist=60)
 DEST="$CORE_USER@$CORE_HOST"
 RSYNC_SSH="ssh -p $CORE_PORT -o ControlMaster=auto -o ControlPath=/tmp/core-ssh-%r@%h:%p -o ControlPersist=60"
+# The shared SSH connection is opened here, detached from this script's output: if the first
+# command of a script opened it, it would keep that output open for the 60 s of ControlPersist
+# and whoever reads it (a pipe, $(...)) would wait that long, as if the script hung.
+"${SSH[@]}" -O check "$DEST" >/dev/null 2>&1 || "${SSH[@]}" -o ControlMaster=yes -fN "$DEST" </dev/null >/dev/null 2>&1

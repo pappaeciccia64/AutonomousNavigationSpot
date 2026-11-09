@@ -4,6 +4,9 @@ Connection check with the robot, READ ONLY: no lease, no E-Stop registered, no c
 the CORE I/O (robot at 192.168.50.3) before the first mission from there, and anywhere else.
 
     python3 tools/core_check.py [--hostname 192.168.50.3] [--scans 5]
+    python3 tools/core_check.py --clear-estop    the one write: empties the robot's E-Stop
+                                                 configuration (after a mission that died),
+                                                 only with the motors off
 
 It prints: login and time sync, battery and motor power, the E-Stop endpoints registered and
 their state (with --no-estop the mission needs one already there: the tablet's), who holds
@@ -25,12 +28,14 @@ from bosdyn.client.lease import LeaseClient                  # noqa: E402
 from bosdyn.client.robot_state import RobotStateClient       # noqa: E402
 
 from spot_explorer.perception import spot_grid                # noqa: E402
+from spot_explorer.robot import connection                    # noqa: E402
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('--hostname', default=os.environ.get('SPOT_HOSTNAME', '192.168.50.3'))
     ap.add_argument('--scans', type=int, default=5)
+    ap.add_argument('--clear-estop', action='store_true')
     a = ap.parse_args()
 
     t = time.time()
@@ -49,6 +54,13 @@ def main():
     eps = list(cfg.endpoints)
     print(f"[E-STOP] {len(eps)} endpoints registered: "
           + ", ".join(f"{e.role} '{e.name}' (timeout {e.timeout.seconds} s)" for e in eps))
+    if a.clear_estop and eps:
+        if state.power_state.motor_power_state != state.power_state.MOTOR_POWER_STATE_OFF:
+            print("[E-STOP] motors on: configuration NOT touched (power them off first)")
+        else:
+            connection.clear_estop_config(estop)
+            cfg, st = estop.get_config(), estop.get_status()
+            print(f"[E-STOP] configuration emptied: {len(cfg.endpoints)} endpoints now")
     for s in st.endpoints:
         print(f"         {s.endpoint.name}: {s.stop_level} ({s.time_since_valid_response.seconds} s since its last answer)")
     print(f"         robot stop level: {st.stop_level} (4 = NONE: free to move; 1-2 = stopped)")

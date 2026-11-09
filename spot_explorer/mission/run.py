@@ -432,7 +432,7 @@ def easy_walk(options):
 
             _close_mission(robot, robot_state_client, command_client, recordingInterface)
             if estop is not None:
-                estop.stop()
+                estop.release()
         except BaseException as exc:
             _emergency_shutdown(robot, command_client, recordingInterface, exc)
             raise

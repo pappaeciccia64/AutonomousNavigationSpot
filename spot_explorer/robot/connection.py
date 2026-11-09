@@ -47,6 +47,7 @@ import bosdyn.client.util
 import bosdyn.geometry
 from bosdyn.client.robot_state import RobotStateClient
 from bosdyn.client.recording import GraphNavRecordingServiceClient
+from bosdyn.api import estop_pb2
 from bosdyn.client.estop import EstopClient, EstopEndpoint, EstopKeepAlive
 
 def setLogInfo(options):
@@ -96,3 +97,16 @@ class SimpleEstop:
         """Release the E-Stop: the robot may move."""
         self.keepalive.allow()
         print("[ESTOP] Robot free to move")
+
+    def release(self):
+        """End of the mission, robot already sitting with the motors off: our endpoint leaves
+        the robot's E-Stop configuration, so the robot is again as we found it. Otherwise it
+        stays E-Stopped by an endpoint nobody answers for, and the tablet cannot power it on."""
+        self.keepalive.shutdown()
+        clear_estop_config(self.estop_client)
+        print("[ESTOP] Our E-Stop removed from the robot (configuration back to empty)")
+
+
+def clear_estop_config(estop_client):
+    """Empty E-Stop configuration on the robot (no endpoint): as found before the mission."""
+    estop_client.set_config(estop_pb2.EstopConfig(), estop_client.get_config().unique_id)
