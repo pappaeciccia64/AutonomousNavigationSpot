@@ -262,6 +262,12 @@ class CruisePlanner:
         # next cycle runs it once on its fresh scan, before planning, and the plan carries its
         # result as 'switch'. The job may change goal_id, path_ids and seen_cell.
         self.switch_job = None
+        # Its result stays in EVERY plan until the main thread has applied it (switch_info,
+        # cleared by the main thread; 'id' to apply it once): the tracker publishes only the
+        # last plan, and on 09-11 14:30 and 14:36 the plan with the switch was overwritten by
+        # the next one before the main thread read it (robot still 17 s, command expired).
+        self.switch_info = None
+        self._switch_seq = 0
         # Times of the cycle, for the log: seconds per phase (PHASES) of every cycle, and the
         # interval between the acquisition times of two consecutive Spot grids (0 = the same
         # grid read again: the cycle was faster than Spot's update).
@@ -295,11 +301,12 @@ class CruisePlanner:
         self.last_scan, self.last_snap = scan, snap
         t1 = time.perf_counter(); ph['maps'] = t1 - t; t = t1
         self.cycles += 1
-        switch = None
         if self.switch_job is not None:
             job, self.switch_job = self.switch_job, None
-            switch = job(self, scan, robot)
+            self._switch_seq += 1
+            self.switch_info = dict(job(self, scan, robot), id=self._switch_seq)
             t1 = time.perf_counter(); ph['switch'] = t1 - t; t = t1
+        switch = self.switch_info
 
         # Where the robot is along the path: the edge it is walking stays (committed), the
         # plan changes from the next node on.

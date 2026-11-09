@@ -98,6 +98,9 @@ CHAIN_ON_SEEN = True
 # none, no goal with a path) the cruise ends with the hand-off as before. Needs the cell rules
 # of the mission (env._cell_rules, set by exploration.Mission._explore_rules).
 CRUISE_SWITCH = True
+# The main thread waits at most this for the next cell prepared by the thread; then the cruise
+# ends with the hand-off as before (the robot walks the stretch sent, ~3 s).
+CRUISE_SWITCH_WAIT_S = 3.0
 CHAIN_SCAN_MAX_AGE_S = 2.0
 # Gait in cruise: back to a lighter level only after the plans have asked for it this long
 # (04-11 14:08: 239 changes in 20 min, one every 5 s, without it).
@@ -289,6 +292,7 @@ class CruiseSteps:
         track = [(self.robot_x, self.robot_y)]
         reason, arrived, no_path_end = None, False, False
         switch_pending = report_switch = False
+        switch_t0, switch_why, last_switch_id = 0.0, "", None
         n_plans = n_sends = bad = 0
         last_version, last_plan_t = 0, t0
         last_crumb_t, last_battery_t, last_fall_t = t0, t0, t0
@@ -360,9 +364,20 @@ class CruiseSteps:
                     continue
                 bad, last_plan_t = 0, now
                 sw = plan.get('switch')
+                if sw is not None and sw.get('id') == last_switch_id:
+                    sw = None         # already applied (it stays in the plans until cleared)
                 if switch_pending and sw is None:
+                    if now - switch_t0 > CRUISE_SWITCH_WAIT_S:
+                        reason, handoff = (f"cell done ({switch_why}), the next one not prepared within "
+                                           f"{CRUISE_SWITCH_WAIT_S:.0f} s: next cell while walking"), True
+                        planner.switch_job = None
+                        MISSION_STATS['cruise_switch_timeouts'] = MISSION_STATS.get('cruise_switch_timeouts', 0) + 1
+                        HANDOFF.start("hand-off (end of the cruise -> first command of the next move)")
+                        break
                     continue          # plans still towards the cell done: the robot walks the stretch sent
                 if sw is not None:
+                    last_switch_id = sw.get('id')
+                    planner.switch_info = None
                     switch_pending = False
                     if sw.get('next') is None:
                         reason, handoff = (f"{sw['where']}{sw['why']}: next cell while walking "
@@ -461,7 +476,7 @@ class CruiseSteps:
                         planner.switch_job = functools.partial(
                             self._prepare_next_cell, done=(self.target_row, self.target_col), why=why,
                             where=where)
-                        switch_pending = True
+                        switch_pending, switch_t0, switch_why = True, time.time(), why
                         HANDOFF.start("next cell prepared in the planning thread -> first command towards it")
                         continue
                     reason, handoff = f"{where}{why}: next cell while walking", True
