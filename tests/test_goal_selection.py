@@ -233,9 +233,12 @@ def synthetic_checks():
           f"centre not reachable: a reachable point {tuple(round(v, 2) for v in g)}")
     _, g = pick([], reachable=lambda x, y: False)
     check(g == (0.0, 0.0), "no reachable point: the best one anyway (the centre)")
-    _, g = pick([(0.30, 0.0)])
+    # An obstacle between the minimum (PLAN_CLEARANCE_M) and the preferred free space
+    # (TARGET_CLEARANCE_M): the centre is kept. 0.30 m until 09-11, when the minimum was 0.28.
+    d_obs = 0.5 * (geometry.PLAN_CLEARANCE_M + P.TARGET_CLEARANCE_M)
+    _, g = pick([(d_obs, 0.0)])
     check(g == (0.0, 0.0),
-          f"centre 0.30 m from an obstacle (below {P.TARGET_CLEARANCE_M:.2f}, above "
+          f"centre {d_obs:.2f} m from an obstacle (below {P.TARGET_CLEARANCE_M:.2f}, above "
           f"{geometry.PLAN_CLEARANCE_M:.2f}): still the centre, nearest first (04-11) "
           f"{tuple(round(v, 2) for v in g)}")
     _, g = pick([(0.0, 0.0)])

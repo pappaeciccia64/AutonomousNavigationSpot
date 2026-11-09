@@ -328,16 +328,6 @@ class CruisePlanner:
         advance = safe_frontier.allowed_advance(frontier)
         advance, turn_stop = self._turns_within(polyline, remainder, advance, snap)
         confirmed = _cut_polyline(polyline, advance)
-        # The graph chooses the way, the frontier says whether to walk (edge_evaluation.
-        # FRONTIER_EDGES): the edge being walked out of the graph (the planning keeps
-        # 3 cm more than the frontier) does not end the cruise while the frontier still
-        # confirms the robot up to its end, the next node; from there the path is the new
-        # one. Before, the cruise stopped (04-11 16:52, 1.8 s still after 0.30 m).
-        if (status == 'edge_blocked' and edge_evaluation.FRONTIER_EDGES and len(polyline) > 1
-                and advance >= float(np.hypot(polyline[1][0] - polyline[0][0],
-                                              polyline[1][1] - polyline[0][1])) - 1e-6):
-            status = 'ok'
-            MISSION_STATS['cruise_edge_out_walked'] = MISSION_STATS.get('cruise_edge_out_walked', 0) + 1
         t1 = time.perf_counter(); ph['frontier'] = t1 - t; t = t1
         path_len = float(sum(np.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(polyline, polyline[1:])))
         self._save_bundle(scan, snap, robot, polyline, remainder, next_id, frontier, advance, confirmed)

@@ -8,6 +8,13 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-09 (one threshold: 0.30 m)
+
+- **One threshold for frontier, edges, filter, nodes and goals: 0.30 m from the centre line** (`geometry.ROBOT_CLEARANCE_AIR_M` 0 -> 0.05, `PLAN_CLEARANCE_EXTRA_M` 0.03 -> 0; `FRONTIER_EDGES_CLEARANCE_M` = `FRONTIER_CLEARANCE_M`; margin on the global map 0.13 -> 0.15; `TARGET_CLEARANCE_M` = threshold + 0.08 = 0.38). User's choice, after trying 0.28 for the graph and 0.25 for the frontier (two thresholds = a band where they disagree). 5 cm of air cover what was measured: robot off the line in cruise up to 4.4 cm, cells of 3 cm. The emergency stop during a leg of the stop-and-go stays at half the body (0.25, `FRONTIER_ABORT_AIR_M`), the rotation check has its own margin (unchanged). The rule "edge being walked out of the graph, the cruise goes on while the frontier confirms it" (same day) removed: with one threshold it is not needed.
+- On the 463 real frontiers of 03-04-11 the confirmed stretch is shorter than with 0.25 in 19% of the cycles, by 7 cm median; 8 cycles would become a stop. `bench_edges --b-frontier-edges` on the 349 cruise cycles of 04-11: the frontier stops on an edge the graph holds valid 2 -> 0; edges free for the frontier but out of the graph 16 -> 3 (2 because the graph checks an edge from both ends, the frontier only in the direction of travel).
+- **Cost: narrow passages.** Corridors on 12 random graphs of 5 nodes/m2 (e2e world): 1.0 m 12/12 with 0.25 and 0.30; 0.9 m 11/12 and 11/12; **0.8 m 9/12 with 0.25, 5/12 with 0.30**: the centre of the robot has a band of 0.20 m in a 0.8 m door and often no node falls in it. Next: densify the graph in the narrow passages (user's decision: keep 0.30 and fix it in the graph).
+- Tests: `test_e2e_loop` S16 (0.9 m corridor) with 5 nodes/m2 as in the mission (4 with seed 1 had no way); `test_goal_selection` synthetic check with the obstacle between the minimum and the preferred space (on the replayed attempt starts of 22-10: one without goal, 0 before); `test_replay` reference updated (invariants all OK).
+
 ## 2026-11-09 (one rule for the graph and the safe frontier)
 
 User's point: the area the scan sees at every cycle is where the edges are re-evaluated and also where the safe frontier lets the robot walk: one thing, not two.

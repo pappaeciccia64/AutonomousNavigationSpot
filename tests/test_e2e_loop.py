@@ -726,7 +726,12 @@ if __name__ == '__main__':
                          f"({sum(d['usable'] for d in fan_pocket)}/{len(fan_pocket)} directions)")
 
     GRAPH_KW.clear()
-    GRAPH_KW.update(sampling='random', distribution='poisson', density_per_m2=4.0, seed=1)
+    # 5 nodes/m2 as in the mission: with the threshold of 0.30 m (09-11) the centre of the robot
+    # has a band of 0.30 m in this corridor, and the graph of 4 nodes/m2 with seed 1 had no
+    # way through it (on 12 seeds at 5 nodes/m2 the 0.9 m corridor is passed by 11 with both
+    # 0.25 and 0.30; the 0.8 m one by 9 with 0.25, 5 with 0.30: graph to densify in the narrow
+    # passages).
+    GRAPH_KW.update(sampling='random', distribution='poisson', density_per_m2=5.0, seed=1)
     r = run("S16. 0.9 m wide corridor: no empty [ARRIVAL] refusal",
             [(5.0, 8.0, 0.0, 3.0), (5.0, 8.0, 3.9, 12.0)], (2.0, 3.5, 0.0), (0, 1))
     GRAPH_KW.clear()

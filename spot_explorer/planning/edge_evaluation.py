@@ -70,11 +70,11 @@ INCREMENTAL_REFRESH = True
 # 'end_of_data', and the robot looks again). Needs the snapshot (set_live_snapshot); with the
 # raw arrays only (attempt start) the old check. False = the old check everywhere.
 FRONTIER_EDGES = True
-# The threshold of the rule for the edges: the planning distance (geometry.PLAN_CLEARANCE_M =
-# 0.28), 3 cm more than the frontier's (0.25), which stops the robot only below it: the 3 cm
-# are the tolerance of the tracking (the robot walks a few cm off the line). With 0.25 for
-# both, test_cruise "box appears": the centre of the robot 0.24 m from the box.
-FRONTIER_EDGES_CLEARANCE_M = geometry.PLAN_CLEARANCE_M
+# The threshold of the rule for the edges: the same as the frontier (geometry.FRONTIER_CLEARANCE_M,
+# 0.30). Tried first: 0.28 for the graph and 0.25 for the frontier (3 cm for the tracking;
+# with 0.25 for both, test_cruise "box appears" had the robot centre 0.24 m from the box);
+# the user chose one threshold, with the margin in the threshold itself.
+FRONTIER_EDGES_CLEARANCE_M = geometry.FRONTIER_CLEARANCE_M
 _EXEMPT_R_M = max(geometry.FRONTIER_ROBOT_RADIUS_M,
                   float(np.hypot(geometry.ROBOT_HALF_LENGTH_M, geometry.ROBOT_HALF_WIDTH_M))) + 0.01
 

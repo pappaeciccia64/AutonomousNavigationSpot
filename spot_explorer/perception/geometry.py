@@ -36,8 +36,13 @@ OBSTACLE_THRESHOLD = 0.15   # obstacle_distance (m): distance <= this -> blocked
 # =========================================================================
 ROBOT_HALF_LENGTH_M = 0.55          # Spot: 1.10 x 0.50 m
 ROBOT_HALF_WIDTH_M = 0.25
-ROBOT_CLEARANCE_AIR_M = 0.0         # air between body and obstacle (0.05 = with margin)
-FRONTIER_CLEARANCE_M = ROBOT_HALF_WIDTH_M + ROBOT_CLEARANCE_AIR_M      # = 0.25
+# Air between body and obstacle: ONE threshold for frontier, edges, filter, nodes and goals
+# (09-11, user's choice): 0.30 m from the centre line, passages of at least 0.60 m. 5 cm
+# cover what was measured: the robot off the line in cruise up to 4.4 cm (04-11 16:52), cells
+# of 3 cm. On the 463 real frontiers of 03-04-11 the confirmed stretch is shorter than with
+# 0.25 in 19% of the cycles, by 7 cm (median). Until 09-11 0.0 (0.25 m), 0.05 before 15-10.
+ROBOT_CLEARANCE_AIR_M = 0.05
+FRONTIER_CLEARANCE_M = ROBOT_HALF_WIDTH_M + ROBOT_CLEARANCE_AIR_M      # = 0.30
 FRONTIER_MIN_CLEARANCE_M = 0.05
 FRONTIER_ESCAPE_DIST_M = 1.0
 FRONTIER_BODY_HALF_LENGTH_M = ROBOT_HALF_LENGTH_M                       # = 0.55
@@ -165,10 +170,13 @@ def rotation_is_clear(obstacle_dist, origin_x, origin_y, cell_size, robot_x, rob
 # of 22-10 15:24, 18 frontier turns out of 25 stopped by an obstacle at 0.23-0.24 m with a
 # minimum of 0.25, with advances of 0.2-0.5 m. The narrowest passage is always decided by
 # the frontier; the planner leaves a few more centimetres. 0 = same distance as the frontier.
-PLAN_CLEARANCE_EXTRA_M = 0.03
-PLAN_CLEARANCE_M = FRONTIER_CLEARANCE_M + PLAN_CLEARANCE_EXTRA_M          # = 0.28
+# Since 09-11 0: the edges of the scan window and the frontier use the same rule on the same
+# filtered scan, with its hysteresis (edge_evaluation.FRONTIER_EDGES), so the noise no
+# longer makes them disagree; one threshold, ROBOT_CLEARANCE_AIR_M.
+PLAN_CLEARANCE_EXTRA_M = 0.0
+PLAN_CLEARANCE_M = FRONTIER_CLEARANCE_M + PLAN_CLEARANCE_EXTRA_M          # = 0.30
 
 # Margin with which the PRM discards edges near occupied cells of the global map. The
 # occupied cells have obstacle_distance <= OBSTACLE_THRESHOLD, so an accepted edge passes
 # at least OBSTACLE_THRESHOLD + margin = PLAN_CLEARANCE_M from the obstacle.
-PRM_EDGE_SAFETY_MARGIN_M = PLAN_CLEARANCE_M - OBSTACLE_THRESHOLD   # = 0.13
+PRM_EDGE_SAFETY_MARGIN_M = PLAN_CLEARANCE_M - OBSTACLE_THRESHOLD   # = 0.15
