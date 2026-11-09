@@ -35,6 +35,7 @@ from spot_explorer.legacy import modern
 from spot_explorer.mission import cells
 from spot_explorer.mission import mission_prm
 from spot_explorer.navigation.frames import MissionFrame, yaw_of_quat
+from spot_explorer.navigation.places import Places
 from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
 from spot_explorer.planning import roadmap
@@ -317,6 +318,7 @@ class MissionMap:
         """From ready pieces (the tests build them in memory); from files: load()."""
         self.name, self.cfg, self.gm, self.tm, self.ng = name, cfg, gm, tm, ng
         self.frame = MissionFrame(cfg['origin'][0], cfg['origin'][1], cfg['yaw'])
+        self.places = Places(None)          # load() reads the mission's places.json
         prepare_hysteresis(gm)
         self._build_prm()
 
@@ -346,7 +348,12 @@ class MissionMap:
               + f"; map: {len(gm.grid)} cells seen, {n_occ} occupied"
               + (f", plus {n_scan} saved scans" if with_scans else "") + ".")
         ng = None if without_graphnav else load_graphnav_graph(name)
-        return cls(name, cfg, gm, tm, ng)
+        mm = cls(name, cfg, gm, tm, ng)
+        # Places stay with the mission (its frame), even when the maps come from --maps.
+        mm.places = Places(os.path.join(REPO_ROOT, 'MissionMap', f'Mission_{name}', 'places.json'))
+        if mm.places.places or mm.places.routes:
+            print(f"{LOG_TAG} {mm.places.describe().splitlines()[0]}.")
+        return mm
 
     def _build_prm(self):
         t0 = time.perf_counter()
@@ -368,23 +375,31 @@ class MissionMap:
               f"valid edges ({removed} removed as on unseen ground) in {time.perf_counter() - t0:.1f} s.")
 
     # --- goals -----------------------------------------------------------------------------
-    def goal_vision(self, to=None, cell=None, waypoint=None):
-        """The goal in the mission's VISION frame, from the three ways of giving it, and a
-        description."""
+    def goal_vision(self, to=None, cell=None, waypoint=None, place=None, heading_deg=None):
+        """The goal in the mission's VISION frame, from the ways of giving it: (x, y),
+        description, arrival heading in the mission frame (degrees, None = any). heading_deg
+        overrides the heading of a place."""
         if to is not None:
             x, y = self.frame.to_vision(*to)
-            return (x, y), f"({to[0]:.2f}, {to[1]:.2f}) in the mission frame"
+            return (x, y), f"({to[0]:.2f}, {to[1]:.2f}) in the mission frame", heading_deg
         if cell is not None:
             r, c = cell
             if not (0 <= r < self.env.rows and 0 <= c < self.env.cols):
                 raise ValueError(f"cell ({r},{c}) is outside the {self.env.rows} x {self.env.cols} grid")
-            return tuple(self.env.get_world_position_from_cell(r, c)), f"centre of cell ({r},{c})"
+            return tuple(self.env.get_world_position_from_cell(r, c)), f"centre of cell ({r},{c})", heading_deg
         if waypoint is not None:
             if self.ng is None or waypoint not in self.ng['by_name']:
                 raise ValueError(f"waypoint {waypoint} not found in the GraphNav graph")
             w = self.ng['wp'][self.ng['by_name'][waypoint]]
-            return (w['x'], w['y']), f"waypoint {waypoint}"
-        raise ValueError("a goal is needed: --to, --cell or --waypoint")
+            return (w['x'], w['y']), f"waypoint {waypoint}", heading_deg
+        if place is not None:
+            if place not in self.places.places:
+                raise ValueError(f"no place called '{place}' (places: "
+                                 f"{', '.join(sorted(self.places.places)) or 'none'})")
+            p = self.places.places[place]
+            h = heading_deg if heading_deg is not None else p.get('heading_deg')
+            return self.frame.to_vision(p['x'], p['y']), f"place {place}", h
+        raise ValueError("a goal is needed: --to, --cell, --waypoint or --place")
 
     def _component(self, start):
         seen, stack = {start}, [start]
@@ -450,6 +465,7 @@ class MissionMap:
         if self.ng and self.ng['wp']:
             w = np.array([fr.from_vision(v['x'], v['y']) for v in self.ng['wp'].values()])
             ax.scatter(w[:, 1], w[:, 0], s=8, c='#2b6cb0', zorder=4, label='GraphNav waypoints')
+        draw_places(ax, self.places.places)
         ax.set_aspect('equal')
         ax.set_xlim(ext[1] + 0.5, ext[0] - 0.5)       # inverted: the robot's left on the left
         ax.set_ylim(ext[2] - 0.5, ext[3] + 0.5)
@@ -457,9 +473,10 @@ class MissionMap:
         ax.set_ylabel("x: ahead of the start [m]")
         ax.grid(alpha=0.3)
 
-    def draw_plan(self, ax, plan=None, from_xy=None, to_xy=None, from_label='start'):
-        """Path, start and goal (mission VISION points). Returns the drawn artists, to remove
-        when the plan changes."""
+    def draw_plan(self, ax, plan=None, from_xy=None, to_xy=None, from_label='start', heading_deg=None):
+        """Path, start and goal (mission VISION points; heading_deg: arrival heading in the
+        mission frame, drawn as an arrow). Returns the drawn artists, to remove when the plan
+        changes."""
         fr = self.frame
         out = []
         if plan is not None:
@@ -472,6 +489,8 @@ class MissionMap:
         if to_xy is not None:
             m = fr.from_vision(*to_xy)
             out += ax.plot(m[1], m[0], '*', c='#ffd400', mec='k', ms=18, zorder=6, label='goal')
+            if heading_deg is not None:
+                out.append(heading_arrow(ax, m[0], m[1], heading_deg, '#b7791f'))
         return out
 
     def preview(self, png, plan=None, from_xy=None, to_xy=None, title=""):
@@ -515,6 +534,25 @@ def mission_raster(gm, fr):
     img = np.zeros(XM.shape, dtype=np.uint8)
     img[ok] = ras[ix[ok], iy[ok]]
     return img, (float(ys[0] - r / 2), float(ys[-1] + r / 2), float(xs[0] - r / 2), float(xs[-1] + r / 2))
+
+
+def heading_arrow(ax, xm, ym, heading_deg, color, length=0.8):
+    """An arrow for a heading in the mission frame (figure axes: y horizontal, x vertical)."""
+    h = np.radians(heading_deg)
+    return ax.annotate('', xy=(ym + length * np.sin(h), xm + length * np.cos(h)), xytext=(ym, xm),
+                       arrowprops=dict(arrowstyle='-|>', color=color, lw=2), zorder=7)
+
+
+def draw_places(ax, places):
+    """Named places: a purple diamond, the name and, if any, the arrival heading."""
+    for name, p in sorted(places.items()):
+        ax.plot(p['y'], p['x'], 'D', c='#805ad5', mec='k', ms=7, zorder=6)
+        ax.annotate(name, (p['y'], p['x']), textcoords='offset points', xytext=(6, 6), fontsize=8,
+                    color='#44337a', zorder=7)
+        if p.get('heading_deg') is not None:
+            heading_arrow(ax, p['x'], p['y'], p['heading_deg'], '#805ad5', length=0.6)
+    if places:
+        ax.plot([], [], 'D', c='#805ad5', mec='k', ms=7, label='places')
 
 
 def draw_raster(ax, img, ext):

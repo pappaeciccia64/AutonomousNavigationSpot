@@ -31,6 +31,12 @@ Scenarios:
  11  frame jump: a single wrong GraphNav reading 1 m away is not trusted, a lasting correction
      is accepted after the confirmation readings;
  12  check before starting: where the robot is, and no move without a yes;
+ 14  places and routes: places.json, names, --add-place / --add-route / --remove-place,
+     goals typed with a place and '@ heading', p in the click window with a drag for the heading;
+ 15  arrival heading: the robot turns where there is room, not in a narrow corridor;
+ 16  a route of two places and home, two loops: every stop reached, route.csv;
+ 17  start from anywhere: a guess within ~0.5 m is refined by (fake) GraphNav, one 3 m off is
+     refused; in the whole session too (--start-at);
  13  whole session (run_navigation.main) against a fake robot, lease, E-Stop and GraphNav:
      graph uploaded with the motors off, then standing, localization, goal, sitting down,
      motors off, maps saved after; a second session with the graph already on Spot sends no
@@ -140,9 +146,17 @@ class FakeGraphNav:
         self.jump_from = None      # from reading n on: position off by jump_xy (old frame)
         self.jump_for = None       # for how many readings (None = for good)
         self.jump_xy = (0.0, 0.0)
+        self.localized = True      # False: nothing until a set_localization is accepted
+
+    def set_localization(self, **kw):
+        if not guess_ok(kw, self.wps):
+            raise RuntimeError("STATUS_COULD_NOT_LOCALIZE (fake: the guess is too far from the truth)")
+        self.localized = True
 
     def get_localization_state(self):
         self.n += 1
+        if not self.localized:
+            return NS(localization=NS(waypoint_id='', waypoint_tform_body=None))
         if (self.lost_from is not None and self.n >= self.lost_from
                 and (self.lost_for is None or self.n < self.lost_from + self.lost_for)):
             return NS(localization=NS(waypoint_id='', waypoint_tform_body=None),
@@ -159,6 +173,25 @@ class FakeGraphNav:
         pos = NS(x=c * dx + s * dy, y=-s * dx + c * dy, z=0.0)
         return NS(localization=NS(waypoint_id=wid, waypoint_tform_body=NS(position=pos,
                                                                          rotation=T.quat(oyaw - w['yaw']))))
+
+
+def guess_ok(kw, wps):
+    """Fake ICP: a localization with an initial guess (waypoint + body relative to it) is
+    accepted when the guessed body pose is within max_distance / max_yaw of the truth.
+    Without a guess (fiducial): always accepted."""
+    loc = kw.get('initial_guess_localization')
+    if loc is None or not loc.waypoint_id or kw.get('max_distance') is None:
+        return True
+    w = wps[loc.waypoint_id]
+    b = loc.waypoint_tform_body
+    c, s = np.cos(w['yaw']), np.sin(w['yaw'])
+    gx, gy = w['x'] + c * b.position.x - s * b.position.y, w['y'] + s * b.position.x + c * b.position.y
+    q = b.rotation
+    gyaw = w['yaw'] + np.arctan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y ** 2 + q.z ** 2))
+    tx, ty = old_from_new(T.ROBOT.x, T.ROBOT.y)
+    tyaw = T.ROBOT.yaw - T_TRUE.th
+    dyaw = abs((gyaw - tyaw + np.pi) % (2 * np.pi) - np.pi)
+    return np.hypot(gx - tx, gy - ty) <= kw['max_distance'] and dyaw <= kw.get('max_yaw', np.pi)
 
 
 def navigator(mission_map, update=True):
@@ -230,6 +263,157 @@ def test_mission_config():
             check('Mission grid' in str(e), f"log without the grid line: error ({e})")
     finally:
         mm.REPO_ROOT = old_root
+
+
+def test_places(wall):
+    print("\n=== 14 places and routes ===")
+    from spot_explorer.navigation.places import Places
+    root = tempfile.mkdtemp(prefix="mapnav_places_")
+    path = os.path.join(root, 'places.json')
+    pl = Places(path)
+    pl.add('gate', 6.0, 2.0, heading_deg=90)
+    pl.add('shed', 3.0, -1.0, dwell_s=5)
+    pl.add_route('patrol', ['gate', 'shed', 'home'])
+    again = Places(path)
+    check(again.places['gate']['heading_deg'] == 90.0 and again.places['shed']['dwell_s'] == 5.0
+          and again.route_stops('patrol') == ['gate', 'shed', 'home']
+          and again.route_stops('shed,gate') == ['shed', 'gate'],
+          "places.json: places with heading and dwell, saved route, list of places as a route")
+    errors = 0
+    for bad in (lambda: pl.add('home', 0, 0), lambda: pl.add('a b', 0, 0), lambda: pl.add_route('r', ['nowhere']),
+                lambda: again.route_stops('gate,nowhere'), lambda: pl.remove('nothing')):
+        try:
+            bad()
+        except (ValueError, KeyError):
+            errors += 1
+    check(errors == 5, "bad names, unknown places and unknown routes refused")
+    pl.remove('patrol')
+    check('patrol' not in Places(path).routes, "route removed")
+
+    # Command line: places.json of a mission folder, without loading the maps.
+    old_root = nrun.REPO_ROOT
+    nrun.REPO_ROOT = root
+    os.makedirs(os.path.join(root, 'MissionMap', 'Mission_x'))
+    try:
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            a = nrun.main(['x', '--add-place', 'gate', '6,2,90'])
+            b = nrun.main(['x', '--add-place', 'shed', '3,-1'])
+            c = nrun.main(['x', '--add-route', 'patrol', 'gate,shed,home'])
+            d = nrun.main(['x', '--add-route', 'bad', 'gate,nowhere'])
+            e = nrun.main(['x', '--remove-place', 'shed'])
+            f = nrun.main(['x', '--list-places'])
+    finally:
+        nrun.REPO_ROOT = old_root
+    pl = Places(os.path.join(root, 'MissionMap', 'Mission_x', 'places.json'))
+    check(a and b and c and not d and e and f and set(pl.places) == {'gate'} and 'patrol' in pl.routes
+          and 'route patrol: gate -> shed -> home' in out.getvalue(),
+          "--add-place, --add-route (an unknown place refused), --remove-place, --list-places")
+
+    mission_map = map_from_world(T.World(wall, ghosts=False), (1.5, 1.5), 0.0)
+    mission_map.places.add('gate', 7.5, 0.5, heading_deg=90)
+    g = nrun.goal_from_text(mission_map, 'gate')
+    g2 = nrun.goal_from_text(mission_map, 'gate @ 180')
+    g3 = nrun.goal_from_text(mission_map, '2,1 @ -45')
+    check(g[1] == "place gate" and g[2] == 90.0 and g2[2] == 180.0 and g3[2] == -45.0
+          and np.allclose(new_from_old(*g[0]), (9.0, 2.0)),
+          "typed goals: a place (its heading), '@ heading' overriding it, coordinates with a heading")
+    with contextlib.redirect_stdout(io.StringIO()):
+        pk = ClickGoalPicker(mission_map, old_from_new(1.5, 1.5), ask=lambda q: 'corner')
+        pk._press(NS(inaxes=pk.ax, button=1, xdata=1.0, ydata=4.0))          # (4, 1) of the mission frame
+        pk._release(NS(inaxes=pk.ax, button=1, xdata=1.0, ydata=5.0))        # dragged 1 m ahead: heading 0
+        pk._key(NS(key='p'))
+    p = mission_map.places.places.get('corner')
+    check(p is not None and abs(p['x'] - 4.0) < 1e-6 and abs(p['y'] - 1.0) < 1e-6 and abs(p['heading_deg']) < 1e-6,
+          "click window: press, drag for the heading, p saves the place")
+    with contextlib.redirect_stdout(io.StringIO()):
+        pk._press(NS(inaxes=pk.ax, button=1, xdata=0.5, ydata=7.5))
+        pk._release(NS(inaxes=pk.ax, button=1, xdata=1.5, ydata=7.5))       # dragged 1 m to the left: +90
+    pk._key(NS(key='enter'))
+    r = pk.choose()
+    check(r is not None and abs(r[2] - 90.0) < 1e-6, f"click window: the goal carries the dragged heading ({r[2]:+.0f})")
+    png = os.path.join(root, 'route.png')
+    mission_map.places.add('back', 2.0, 0.0)
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        ok = nrun._preview_route(mission_map, old_from_new(1.5, 1.5), NS(route='gate,back', loops=2, preview=png))
+    check(ok and os.path.getsize(png) > 10000 and 'Route gate,back x 2' in out.getvalue(),
+          "route preview: every leg planned, figure saved")
+
+
+def test_heading():
+    print("\n=== 15 arrival heading ===")
+    real = nv.motion.relative_move
+
+    def turn(dx, dy, dyaw, frame, cc, rsc, **kw):
+        T.ROBOT.yaw = float((T.ROBOT.yaw + dyaw + np.pi) % (2 * np.pi) - np.pi)
+        return True, 0.0
+    nv.motion.relative_move = turn
+    try:
+        for name, rects, heading, expect in (
+                ("open ground", [], 90.0, True),
+                ("0.7 m corridor", [(3.0, 8.0, 0.9, 1.15), (3.0, 8.0, 1.85, 2.1)], 90.0, False)):
+            sf.OBSTACLE_HISTORY.reset()
+            mission_map = map_from_world(T.World(rects, ghosts=False), (1.5, 1.5), 0.0)
+            T.WORLD, T.ROBOT = T.World(rects, ghosts=False), T.Robot(1.5, 1.5, 0.0)
+            nav = navigator(mission_map)
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                nav.update_transform("test")
+                ok = nav.go(old_from_new(6.0, 1.5), "ahead", graphnav_fallback=False, heading_deg=heading)
+            # Mission frame heading 90 = today's 90 (the fake mission starts facing today's +x).
+            facing = np.degrees(T.ROBOT.yaw)
+            if expect:
+                check(ok and abs(facing - 90.0) < 1.0, f"{name}: arrived and turned, facing {facing:.0f} degrees")
+            else:
+                check(ok and abs(facing) < 15.0 and 'is not possible here' in out.getvalue(),
+                      f"{name}: arrived, the turn is not possible, it stays facing {facing:.0f} degrees")
+    finally:
+        nv.motion.relative_move = real
+
+
+def test_route(wall):
+    print("\n=== 16 route ===")
+    sf.OBSTACLE_HISTORY.reset()
+    mission_map = map_from_world(T.World(wall, ghosts=False), (1.5, 1.5), 0.0)
+    mission_map.places.add('a', 3.0, 3.0)
+    mission_map.places.add('b', 7.5, 0.5)
+    T.WORLD, T.ROBOT = T.World(wall, ghosts=False), T.Robot(1.5, 1.5, 0.0)
+    nav = navigator(mission_map)
+    tmp = tempfile.mkdtemp(prefix="mapnav_route_")
+    records.MISSION_CTX['log_folder'] = tmp
+    args = NS(click=False, interactive=False, no_fallback=True, return_at_end=False, loops=2, dwell=0.0)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            nav.update_transform("test")
+            ok = nrun.run_goals(nav, mission_map, args, [('route', 'a,b,home')])
+    finally:
+        records.MISSION_CTX['log_folder'] = None
+    import csv as _csv
+    rows = list(_csv.DictReader(open(os.path.join(tmp, 'route.csv'))))
+    d_home = float(np.hypot(T.ROBOT.x - 1.5, T.ROBOT.y - 1.5))
+    check(ok and len(rows) == 6 and all(r['reached'] == '1' for r in rows) and d_home < 0.8
+          and [r['place'] for r in rows] == ['a', 'b', 'home'] * 2 and 'Route a,b,home: 6 of 6' in out.getvalue(),
+          f"a, b, home twice: 6 of 6 stops reached, route.csv, back home ({d_home:.2f} m)")
+
+
+def test_start_anywhere():
+    print("\n=== 17 start from anywhere ===")
+    for off_m, off_deg, expect in ((0.5, 20.0, True), (3.0, 0.0, False)):
+        mission_map = map_from_world(T.World([], ghosts=False), (1.5, 1.5), 0.0)
+        T.WORLD, T.ROBOT = T.World([], ghosts=False), T.Robot(7.0, 4.0, np.radians(-100))
+        nav = navigator(mission_map)
+        nav.gn.localized = False
+        nav.rsc = NS(get_robot_state=_robot_state)
+        fr = mission_map.frame
+        xm, ym = fr.from_vision(*old_from_new(7.0, 4.0))
+        hm = np.degrees(np.radians(-100) - T_TRUE.th - fr.yaw)
+        with contextlib.redirect_stdout(io.StringIO()):
+            ok = nav.localize(start_pose=(xm + off_m, ym, hm + off_deg))
+        if expect:
+            w = nav.where_am_i()
+            check(ok and np.hypot(w['x'] - xm, w['y'] - ym) < 0.01 and abs(w['heading_deg'] - hm) < 0.5,
+                  f"guess {off_m} m and {off_deg:.0f} degrees off: localized at the true pose "
+                  f"({w['x']:.2f}, {w['y']:.2f}), heading {w['heading_deg']:.0f}")
+        else:
+            check(not ok and nav.T is None, f"guess {off_m} m off: refused, no transform")
 
 
 def test_frame_jump(wall):
@@ -328,6 +512,8 @@ class FakeSpot:
         from bosdyn.api.graph_nav import graph_nav_pb2
         if self.graph is None:
             raise RuntimeError("no graph (fake)")
+        if not guess_ok(kw, SESSION['wps']):
+            raise RuntimeError("STATUS_COULD_NOT_LOCALIZE (fake: the guess is too far from the truth)")
         self.localized = True
         return graph_nav_pb2.SetLocalizationResponse(status=graph_nav_pb2.SetLocalizationResponse.STATUS_OK)
 
@@ -406,6 +592,13 @@ def _robot_state():
     return st
 
 
+def mission_map_frame():
+    """The mission frame of the fake maps (start at (1.5, 1.5) of today, heading 0)."""
+    from spot_explorer.navigation.frames import MissionFrame
+    ox, oy = old_from_new(1.5, 1.5)
+    return MissionFrame(ox, oy, -T_TRUE.th)
+
+
 def session_map(wall, folder):
     """A mission map with a GraphNav graph proto and its snapshot files, as downloaded."""
     from bosdyn.api.graph_nav import map_pb2
@@ -466,7 +659,7 @@ def test_session(wall):
         return _real(self, path)
     global_maps.GlobalGrid.save_map = save
 
-    def session(argv, wall_today=wall, fresh_spot=False):
+    def session(argv, wall_today=wall, fresh_spot=False, robot_at=(1.5, 1.5, 0.0)):
         nonlocal spot
         if fresh_spot:
             spot = FakeSpot()
@@ -475,7 +668,7 @@ def test_session(wall):
         snaps = tempfile.mkdtemp(prefix="graph_", dir=root)
         mission_map = session_map(wall, snaps)
         nrun.MissionMap.load = lambda *a, **k: mission_map
-        T.WORLD, T.ROBOT = T.World(wall_today, ghosts=False), T.Robot(1.5, 1.5, 0.0)
+        T.WORLD, T.ROBOT = T.World(wall_today, ghosts=False), T.Robot(*robot_at)
         SESSION['events'] = []
         sent0, cleared0 = spot.sent, spot.cleared
         out = io.StringIO()
@@ -517,6 +710,25 @@ def test_session(wall):
         check(r['ok'] is False and 'No terminal to confirm on' in r['out'] and 'cmd' not in r['events']
               and T.ROBOT.commands == 0 and ev(r)[-2:] == ['sit', 'power_off'],
               f"no terminal and no --yes: no move, sitting down ({ev(r)})")
+
+        # Robot NOT at the start: at (6, 3) of today facing 60 degrees; --start-at with the
+        # position in the mission frame 0.4 m off and the heading 15 degrees off.
+        tx, ty = old_from_new(6.0, 3.0)
+        true_m = mission_map_frame().from_vision(tx, ty)
+        true_h = np.degrees(np.radians(60) - T_TRUE.th - mission_map_frame().yaw)
+        guess = f"{true_m[0] + 0.4:.3f},{true_m[1]:.3f},{true_h + 15:.1f}"
+        time.sleep(1.0)
+        r = session(['fake', '--to', to.format(*goal_m), '--yes', '--start-at', guess],
+                    robot_at=(6.0, 3.0, np.radians(60)))
+        check(r['ok'] and r['d'] < 0.8 and f"Localized: the robot is at ({true_m[0]:.2f}, {true_m[1]:.2f})" in r['out'],
+              f"--start-at 0.4 m and 15 degrees off: localized at the true position, arrived "
+              f"{r['d']:.2f} m from the goal")
+        guess = f"{true_m[0] + 3.0:.3f},{true_m[1]:.3f},{true_h:.1f}"
+        time.sleep(1.0)
+        r = session(['fake', '--to', to.format(*goal_m), '--yes', '--start-at', guess],
+                    robot_at=(6.0, 3.0, np.radians(60)))
+        check(r['ok'] is False and 'did not accept the start guess' in r['out'] and 'cmd' not in r['events'],
+              "--start-at 3 m off: refused, no move")
 
         real_nav = motion.navigate_to
         for how, err in (("exception", RuntimeError("fake failure")), ("Ctrl+C", KeyboardInterrupt())):
@@ -625,15 +837,16 @@ def main():
         pk = ClickGoalPicker(mission_map, start)
         # Goal (9, 2) of today = (7.5, 0.5) in the mission frame (start at (1.5, 1.5), nose
         # along +x); in the figure the point (xm, ym) is at (ym, xm).
-        pk._click(NS(inaxes=pk.ax, button=1, xdata=0.5, ydata=7.5))
+        pk._press(NS(inaxes=pk.ax, button=1, xdata=0.5, ydata=7.5))
+        pk._release(NS(inaxes=pk.ax, button=1, xdata=0.5, ydata=7.5))
     gx, gy = new_from_old(*pk.goal)
     check(np.hypot(gx - 9.0, gy - 2.0) < 1e-6, f"click at (7.5, 0.5) of the mission frame -> "
                                                f"({gx:.2f}, {gy:.2f}) of today")
     check(pk.plan is not None and pk.plan['length'] > 9.0,
           f"path planned at once, around the wall ({pk.plan['length']:.1f} m)")
     with contextlib.redirect_stdout(io.StringIO()):
-        pk._click(NS(inaxes=None, button=1, xdata=None, ydata=None))           # outside the axes
-        pk._click(NS(inaxes=pk.ax, button=3, xdata=3.0, ydata=3.0))            # right button
+        pk._press(NS(inaxes=None, button=1, xdata=None, ydata=None))           # outside the axes
+        pk._press(NS(inaxes=pk.ax, button=3, xdata=3.0, ydata=3.0))            # right button
     check(np.hypot(*np.subtract(new_from_old(*pk.goal), (9.0, 2.0))) < 1e-6,
           "clicks outside the map and with the right button ignored")
     check(len(pk._artists) == 3, "a single path drawn (the old one removed)")
@@ -642,7 +855,7 @@ def main():
     check(r is not None and r[0] == pk.goal, "Enter: goal confirmed")
     with contextlib.redirect_stdout(io.StringIO()):
         pk2 = ClickGoalPicker(mission_map, start)
-        pk2._click(NS(inaxes=pk2.ax, button=1, xdata=2.0, ydata=2.0))
+        pk2._press(NS(inaxes=pk2.ax, button=1, xdata=2.0, ydata=2.0))
     pk2._key(NS(key='escape'))
     check(pk2.choose() is None, "Esc: no goal")
     with contextlib.redirect_stdout(io.StringIO()):
@@ -753,6 +966,10 @@ def main():
     test_mission_config()
     test_frame_jump(wall)
     test_confirm_start(wall)
+    test_places(wall)
+    test_heading()
+    test_route(wall)
+    test_start_anywhere()
     test_session(wall)
 
     # Transforms: there and back.

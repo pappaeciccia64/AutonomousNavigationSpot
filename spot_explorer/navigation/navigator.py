@@ -88,6 +88,12 @@ FRAME_JUMP_CONFIRM_WAIT_S = 0.3
 FRAME_JUMP_AGREE_M = 0.10
 # Graph upload: a progress line at most this often (s).
 UPLOAD_PROGRESS_EVERY_S = 5.0
+# Arrival heading: turn in place only if the robot is off by more than this (degrees).
+HEADING_TOLERANCE_DEG = 8.0
+# Start from anywhere (--start-at): how far the operator's guess may be from the truth for
+# GraphNav's ICP to accept it (search radius and yaw), around the nearest waypoint.
+START_GUESS_MAX_DIST_M = 1.5
+START_GUESS_MAX_YAW_DEG = 30.0
 
 # Special goal: back to the mission start (wp_0).
 HOME = 'home'
@@ -217,14 +223,56 @@ class MapNavigator:
               f"sent ({sent_mb:.0f} MB in {dt:.0f} s).")
         return n_wp, sent_mb
 
-    def localize(self, mode='auto'):
+    def localize_from_guess(self, xm, ym, heading_deg):
         """
-        'fiducial': on the most visible tag that is in the map (the start one);
-        'wp_0': the robot stands on the start pose of the mission, guess = wp_0 + ICP;
-        'auto': first the fiducial, then wp_0. True if GraphNav is localized.
+        Start from anywhere: the operator says where the robot is on the mission map ((xm, ym)
+        and heading in the mission frame, --start-at). The guess is given to GraphNav relative
+        to the nearest waypoint, and GraphNav's ICP refines it against that waypoint's snapshot
+        within START_GUESS_MAX_DIST_M and START_GUESS_MAX_YAW_DEG: a guess within about a metre
+        and a few tens of degrees is enough. True if GraphNav accepts it.
         """
         from bosdyn.api.graph_nav import graph_nav_pb2, nav_pb2
         from bosdyn.client.frame_helpers import get_odom_tform_body
+        from bosdyn.client.math_helpers import Quat, SE3Pose
+        fr = self.map.frame
+        bx, by = fr.to_vision(xm, ym)
+        byaw = np.radians(heading_deg) + fr.yaw
+        wid = self.map.nearest_waypoint((bx, by))
+        w = self.map.ng['wp'][wid]
+        wp_T_body = (SE3Pose(w['x'], w['y'], 0.0, Quat.from_yaw(w['yaw'])).inverse()
+                     * SE3Pose(bx, by, 0.0, Quat.from_yaw(byaw)))
+        print(f"{LOG_TAG} Start guess: ({xm:.2f}, {ym:.2f}) heading {heading_deg:+.0f} degrees in the mission "
+              f"frame, {np.hypot(wp_T_body.x, wp_T_body.y):.2f} m from {w['name']}: GraphNav refines it "
+              f"(within {START_GUESS_MAX_DIST_M:.1f} m and {START_GUESS_MAX_YAW_DEG:.0f} degrees).")
+        try:
+            state = self.rsc.get_robot_state()
+            odom_T_body = get_odom_tform_body(state.kinematic_state.transforms_snapshot)
+            loc = nav_pb2.Localization()
+            loc.waypoint_id = wid
+            loc.waypoint_tform_body.CopyFrom(wp_T_body.to_proto())
+            self.gn.set_localization(
+                initial_guess_localization=loc, ko_tform_body=odom_T_body.to_proto(),
+                max_distance=START_GUESS_MAX_DIST_M, max_yaw=np.radians(START_GUESS_MAX_YAW_DEG),
+                fiducial_init=graph_nav_pb2.SetLocalizationRequest.FIDUCIAL_INIT_NO_FIDUCIAL)
+        except Exception as e:
+            print(f"{LOG_TAG} GraphNav did not accept the start guess ({e}): is the robot really there, "
+                  f"facing that way?")
+            return False
+        return self.update_transform("after the start guess") is not None
+
+    def localize(self, mode='auto', start_pose=None):
+        """
+        'fiducial': on the most visible tag that is in the map (the start one, or any other
+        tag seen during the mission);
+        'wp_0': the robot stands on the start pose of the mission, guess = wp_0 + ICP;
+        'auto': first the fiducial, then wp_0;
+        start_pose (xm, ym, heading_deg): the robot is there (--start-at), see
+        localize_from_guess; the mode is not used. True if GraphNav is localized.
+        """
+        from bosdyn.api.graph_nav import graph_nav_pb2, nav_pb2
+        from bosdyn.client.frame_helpers import get_odom_tform_body
+        if start_pose is not None:
+            return self.localize_from_guess(*start_pose)
         ok = False
         if mode in ('auto', 'fiducial'):
             ok = self.ri.initialize_with_fiducial(self.rsc, P.START_FIDUCIAL_ID)
@@ -702,11 +750,13 @@ class MapNavigator:
             print(f"{LOG_TAG} Final row of navigation.csv not written: {e}")
 
     # --- navigation ------------------------------------------------------------------------
-    def go(self, goal_xy, descr, graphnav_fallback=True):
+    def go(self, goal_xy, descr, graphnav_fallback=True, heading_deg=None):
         """
         Takes the robot towards goal_xy (mission VISION). First the PRM, replanning after every
         block (at most MAX_PLANS plans); then, if needed, GraphNav to the waypoint nearest to the
-        goal and a last attempt with the PRM from there. True if it arrives.
+        goal and a last attempt with the PRM from there. heading_deg: arrival heading in the
+        mission frame (None = as it arrives), see turn_to_heading. True if it arrives (even
+        when the final turn is not possible: the log says so).
         """
         print(f"\n{LOG_TAG} ===== Goal: {descr} =====")
         self.end_reason = None
@@ -737,6 +787,8 @@ class MapNavigator:
                 print(f"{LOG_TAG} ARRIVED: {np.hypot(old[0] - goal_xy[0], old[1] - goal_xy[1]):.2f} m "
                       f"from the goal (mission frame).")
                 self.path = []
+                if heading_deg is not None:
+                    self.turn_to_heading(heading_deg)
                 self.phase = 'arrived'
                 self._row_here()
                 self._write_state()
@@ -745,7 +797,43 @@ class MapNavigator:
                 return self._end(outcome)
         if not graphnav_fallback:
             return self._end(None)
-        return self._graphnav_fallback(goal_xy, descr)
+        return self._graphnav_fallback(goal_xy, descr, heading_deg)
+
+    def turn_to_heading(self, heading_deg):
+        """
+        Arrival heading: turn in place to face heading_deg (mission frame), only if the fresh
+        scan says the body has room to turn (decisions.rotation_plan, the same check as the
+        mission: the sector swept by the body, not the whole circle). True if the robot faces
+        that way at the end; if the turn is not possible it stays as it is and the log says so.
+        """
+        snap = self.scan()
+        if snap is None:
+            print(f"{LOG_TAG} Arrival heading: no scan, the robot stays as it is.")
+            return False
+        want = np.radians(heading_deg) + self.map.frame.yaw + self.T.th      # today's VISION
+        rx, ry, ryaw = snap.robot_x, snap.robot_y, snap.robot_yaw
+        dyaw = wrap(want - ryaw)
+        if abs(np.degrees(dyaw)) <= HEADING_TOLERANCE_DEG:
+            return True
+        target = (rx + np.cos(want), ry + np.sin(want))
+        frontier = safe_frontier.compute_safe_frontier([(rx, ry), target], snap)
+        rot = decisions.rotation_plan(ryaw, (rx, ry), target, frontier['od_robot'], snap=snap)
+        if not rot['turn']:
+            print(f"{LOG_TAG} Arrival heading {heading_deg:+.0f} degrees: a {np.degrees(dyaw):+.0f} degree turn "
+                  f"is not possible here ({rot['why']}): the robot stays as it is.")
+            return False
+        print(f"{LOG_TAG} Arrival heading {heading_deg:+.0f} degrees in the mission frame: turning "
+              f"{np.degrees(dyaw):+.0f} degrees.")
+        ok, _d = motion.relative_move(0.0, 0.0, dyaw, "vision", self.cc, self.rsc)
+        return bool(ok)
+
+    def save_place_here(self, name):
+        """The robot's current position and heading as a named place of the mission."""
+        w = self.where_am_i()
+        self.map.places.add(name, w['x'], w['y'], heading_deg=round(w['heading_deg'], 1))
+        print(f"{LOG_TAG} Place '{name}' saved: ({w['x']:.2f}, {w['y']:.2f}), heading "
+              f"{w['heading_deg']:+.0f} degrees" + (f", in {self.map.places.path}" if self.map.places.path else "") + ".")
+        return w
 
     def _end(self, reason):
         """Goal not reached: why (end_reason), state for the viewer."""
@@ -756,7 +844,7 @@ class MapNavigator:
         self._write_state()
         return False
 
-    def _graphnav_fallback(self, goal_xy, descr):
+    def _graphnav_fallback(self, goal_xy, descr, heading_deg=None):
         from spot_explorer.graphnav import navigation
         wid = self.map.nearest_waypoint(goal_xy)
         if wid is None:
@@ -770,7 +858,8 @@ class MapNavigator:
         if not navigation.graphnav_navigate_to(self.ri, wid, self.rsc, self.cc,
                                                f"fallback towards {descr}", face_xy=face):
             return self._end(None)
-        return self.go(goal_xy, descr + " (after the fallback)", graphnav_fallback=False)
+        return self.go(goal_xy, descr + " (after the fallback)", graphnav_fallback=False,
+                       heading_deg=heading_deg)
 
     def _follow(self, plan):
         """

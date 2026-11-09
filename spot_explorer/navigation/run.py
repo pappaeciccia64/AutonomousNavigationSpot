@@ -3,20 +3,28 @@ Command line of map navigation (run_navigation.py): "go there" on an area alread
 finished mission, using its global maps, its PRM and its downloaded GraphNav graph.
 
 Without the robot (plan preview; coordinates in the mission frame: x ahead, y to the left of
-the start, in metres):
+the start, in metres; headings in degrees from x towards y):
     python3 run_navigation.py 26-10-2026_15-11-21 --to 6,2 --preview plan.png
     python3 run_navigation.py 26-10-2026_15-11-21 --cell 1,3 --from 4,0 --preview plan.png
     python3 run_navigation.py 26-10-2026_15-11-21 --click --preview plan.png
-On the robot (robot at the start of the mission, with the start tag in view):
-    python3 run_navigation.py 26-10-2026_15-11-21 --to 6,2
+    python3 run_navigation.py 26-10-2026_15-11-21 --route gate,shed,home --preview route.png
+Places and routes (saved in MissionMap/Mission_<name>/places.json):
+    python3 run_navigation.py 26-10-2026_15-11-21 --add-place gate 6,2,90     # X,Y[,HEADING]
+    python3 run_navigation.py 26-10-2026_15-11-21 --add-route patrol gate,shed,home
+    python3 run_navigation.py 26-10-2026_15-11-21 --list-places
+    python3 run_navigation.py 26-10-2026_15-11-21 --remove-place gate
+On the robot (robot at the start of the mission with the start tag in view, or anywhere with
+--start-at):
+    python3 run_navigation.py 26-10-2026_15-11-21 --to 6,2 [--heading 90]
+    python3 run_navigation.py 26-10-2026_15-11-21 --place gate
+    python3 run_navigation.py 26-10-2026_15-11-21 --route patrol --loops 3 --dwell 10
     python3 run_navigation.py 26-10-2026_15-11-21 --interactive    # asks for one goal after another
     python3 run_navigation.py 26-10-2026_15-11-21 --click          # goals with a click
     python3 run_navigation.py 26-10-2026_15-11-21 --home           # back to wp_0
+    python3 run_navigation.py 26-10-2026_15-11-21 --to 6,2 --start-at 4,1,180   # robot not at the start
+    python3 run_navigation.py 26-10-2026_15-11-21 --click --start-at click      # say where it is on the map
 Live, in a second terminal: python3 tools/navigation_viewer.py
-Goals: --to X,Y (mission frame), --cell R,C (cell centre), --waypoint wp_N (a waypoint of the
-GraphNav graph), --home, or --click: left click on the map, the path appears at once, Enter
-confirms, h goes home, Esc quits. Without a mission name: the latest one with global maps, log
-and GraphNav graph.
+Without a mission name: the latest one with global maps, log and GraphNav graph.
 """
 import argparse
 import os
@@ -29,14 +37,26 @@ from types import SimpleNamespace
 import numpy as np
 
 from spot_explorer import REPO_ROOT
-from spot_explorer.navigation.mission_map import LOG_TAG, MissionMap
+from spot_explorer import records
+from spot_explorer.navigation.mission_map import LOG_TAG, MissionMap, latest_complete_mission
 from spot_explorer.navigation.navigator import HOME, MapNavigator
 from spot_explorer.navigation.goal_picker import ClickGoalPicker, window_available
+from spot_explorer.navigation.places import HOME_NAME, Places
+
+ROUTE_COLUMNS = ['time', 'loop', 'stop', 'place', 'reached', 'seconds', 'missing_m', 'end_reason']
 
 
 def _pair(s, kind=float):
     a, b = (t.strip() for t in s.split(','))
     return kind(a), kind(b)
+
+
+def _pose(s):
+    """X,Y[,HEADING] -> (x, y, heading or None)."""
+    v = [float(t) for t in s.split(',')]
+    if len(v) not in (2, 3):
+        raise argparse.ArgumentTypeError("X,Y or X,Y,HEADING")
+    return v[0], v[1], (v[2] if len(v) == 3 else None)
 
 
 def _parse_args(argv=None):
@@ -49,13 +69,32 @@ def _parse_args(argv=None):
                    help="goal in the mission frame: X ahead, Y to the left of the start (m)")
     g.add_argument('--cell', type=lambda s: _pair(s, int), metavar='R,C', help="cell centre")
     g.add_argument('--waypoint', metavar='wp_N', help="a waypoint of the GraphNav graph")
+    g.add_argument('--place', metavar='NAME', help="a named place (see --add-place)")
+    g.add_argument('--route', metavar='ROUTE',
+                   help="a saved route, or places separated by commas ('home' = wp_0)")
     g.add_argument('--home', action='store_true',
                    help="on the robot: back to the mission start (wp_0)")
     g.add_argument('--interactive', action='store_true',
-                   help="on the robot: asks for one goal after another (X,Y | c R,C | wp_N | home | q)")
+                   help="on the robot: asks for one goal after another (X,Y | c R,C | wp_N | NAME | "
+                        "route R | save NAME | home | q)")
     g.add_argument('--click', action='store_true',
-                   help="goal chosen with a click on the map (Enter confirms, h home, Esc quits); on "
-                        "the robot one after another, with --preview only the plan")
+                   help="goal chosen with a click on the map (drag: heading; Enter confirms, p saves a "
+                        "place, h home, Esc quits); on the robot one after another, with --preview only the plan")
+    g.add_argument('--add-place', nargs=2, metavar=('NAME', 'X,Y[,H]'),
+                   help="WITHOUT THE ROBOT: save a named place (mission frame, optional heading)")
+    g.add_argument('--add-route', nargs=2, metavar=('NAME', 'A,B,C'),
+                   help="WITHOUT THE ROBOT: save a named route of places ('home' allowed)")
+    g.add_argument('--remove-place', metavar='NAME', help="WITHOUT THE ROBOT: remove a place or a route")
+    g.add_argument('--list-places', action='store_true', help="WITHOUT THE ROBOT: list places and routes")
+    p.add_argument('--heading', type=float, metavar='DEG',
+                   help="arrival heading in the mission frame (degrees from x towards y); for a place it "
+                        "overrides the place's own")
+    p.add_argument('--loops', type=int, default=1, help="with --route: how many times (default 1)")
+    p.add_argument('--dwell', type=float, default=0.0,
+                   help="with --route: seconds to stand at each stop (a place's own dwell wins)")
+    p.add_argument('--start-at', metavar='X,Y,H|click',
+                   help="on the robot: where it is now (mission frame, heading needed), when it is not at "
+                        "the mission start; 'click' to show it on the map")
     p.add_argument('--preview', metavar='PNG',
                    help="WITHOUT THE ROBOT: plan and save the figure of the plan, then exit")
     p.add_argument('--from', dest='from_', type=_pair, metavar='X,Y',
@@ -76,43 +115,138 @@ def _parse_args(argv=None):
     p.add_argument('--yes', action='store_true',
                    help="on the robot: start without asking to confirm where the robot is on the map")
     p.add_argument('--hostname', default='192.168.80.3')
-    return p.parse_args(argv)
+    a = p.parse_args(argv)
+    if a.loops < 1:
+        p.error("--loops must be at least 1")
+    if a.start_at and a.start_at != 'click':
+        try:
+            a.start_at = _pose(a.start_at)
+        except (ValueError, argparse.ArgumentTypeError):
+            p.error("--start-at wants X,Y,HEADING (mission frame) or 'click'")
+        if a.start_at[2] is None:
+            p.error("--start-at needs the heading too (X,Y,HEADING): GraphNav cannot guess it")
+    return a
 
 
 def goal_from_text(mission_map, s):
-    """A goal typed in --interactive: X,Y | c R,C | wp_N | home."""
+    """A goal typed in --interactive: X,Y | c R,C | wp_N | NAME (a place) | home. An optional
+    heading after '@' (for example '6,2 @ 90' or 'gate @ 180')."""
     s = s.strip()
+    heading = None
+    if '@' in s:
+        s, h = (t.strip() for t in s.split('@', 1))
+        heading = float(h)
     if s.lower() in ('home', 'h', 'wp0'):
         return HOME
     if re.fullmatch(r'wp_\d+', s):
-        return mission_map.goal_vision(waypoint=s)
-    if s.lower().startswith('c'):
-        return mission_map.goal_vision(cell=_pair(s[1:], int))
-    return mission_map.goal_vision(to=_pair(s))
+        return mission_map.goal_vision(waypoint=s, heading_deg=heading)
+    if s in mission_map.places.places:
+        return mission_map.goal_vision(place=s, heading_deg=heading)
+    if s.lower().startswith('c') and ',' in s:
+        return mission_map.goal_vision(cell=_pair(s[1:], int), heading_deg=heading)
+    return mission_map.goal_vision(to=_pair(s), heading_deg=heading)
+
+
+def route_goals(mission_map, spec, heading=None):
+    """The stops of a route as goals: (name, goal) with goal = HOME or (xy, descr, heading)."""
+    out = []
+    for name in mission_map.places.route_stops(spec):
+        out.append((name, HOME if name.lower() == HOME_NAME else mission_map.goal_vision(place=name)))
+    return out
 
 
 def preview(args):
-    """Without the robot: plan from the start (or from --from) to the goal, and figure."""
+    """Without the robot: plan from the start (or from --from) to the goal, or along the whole
+    route, and figure."""
     mission_map = MissionMap.load(args.mission, with_scans=args.with_scans, maps_folder=args.maps)
     start = mission_map.frame.to_vision(*(args.from_ or (0.0, 0.0)))
+    if args.route:
+        return _preview_route(mission_map, start, args)
     if args.click:
         picker = ClickGoalPicker(mission_map, start, title=f"Mission {mission_map.name} (without the robot)")
-        if picker.choose() in (None, HOME):
+        r = picker.choose()
+        if r in (None, HOME):
             print(f"{LOG_TAG} No goal confirmed.")
             return False
-        goal = picker.goal
-        descr = "the point chosen with a click"
+        goal, descr, heading = r
     else:
-        goal, descr = mission_map.goal_vision(args.to, args.cell, args.waypoint)
+        goal, descr, heading = mission_map.goal_vision(args.to, args.cell, args.waypoint, args.place, args.heading)
     plan = mission_map.plan(start, goal)
     if plan is None:
         print(f"{LOG_TAG} No path towards {descr}.")
     else:
         print(f"{LOG_TAG} Plan towards {descr}: {len(plan['path']) - 1} edges, {plan['length']:.1f} m "
               f"(straight line {np.hypot(goal[0] - start[0], goal[1] - start[1]):.1f} m), arriving "
-              f"{plan['missing_m']:.2f} m from the goal.")
+              f"{plan['missing_m']:.2f} m from the goal"
+              + (f", then facing {heading:+.0f} degrees" if heading is not None else "") + ".")
     mission_map.preview(args.preview, plan, start, goal, title=f"Mission {mission_map.name}: towards {descr}")
     return plan is not None
+
+
+def _preview_route(mission_map, start, args):
+    """The route leg by leg, from the start, each leg planned from where the previous ended."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    stops = route_goals(mission_map, args.route)
+    wp0 = mission_map.ng['wp'][mission_map.ng['by_name']['wp_0']] if mission_map.ng and 'wp_0' in mission_map.ng['by_name'] else None
+    fig, ax = plt.subplots(figsize=(10, 10))
+    mission_map.draw_map(ax)
+    here, total, ok = start, 0.0, True
+    for loop in range(args.loops):
+        for name, g in stops:
+            xy = (wp0['x'], wp0['y']) if g == HOME else g[0]
+            if xy is None:
+                continue
+            plan = mission_map.plan(here, xy)
+            if plan is None:
+                print(f"{LOG_TAG} Route: no path to {name}.")
+                ok = False
+                continue
+            total += plan['length']
+            if loop == 0:
+                mission_map.draw_plan(ax, plan, None, xy, heading_deg=None if g == HOME else g[2])
+            print(f"{LOG_TAG} Route leg to {name}: {plan['length']:.1f} m.")
+            here = mission_map.prm.nodes[plan['goal']]
+    print(f"{LOG_TAG} Route {args.route} x {args.loops}: {total:.1f} m in all.")
+    ax.set_title(f"Mission {mission_map.name}: route {args.route} ({total:.1f} m"
+                 + (f", {args.loops} loops" if args.loops > 1 else "") + ")")
+    fig.tight_layout()
+    fig.savefig(args.preview, dpi=130)
+    plt.close(fig)
+    print(f"{LOG_TAG} Preview saved to {args.preview}")
+    return ok
+
+
+def edit_places(args):
+    """--add-place, --add-route, --remove-place, --list-places: only the places.json of the
+    mission, no maps loaded."""
+    name = args.mission or latest_complete_mission()
+    if name is None:
+        print(f"{LOG_TAG} No mission found.")
+        return False
+    name = name[len('Mission_'):] if name.startswith('Mission_') else name
+    folder = os.path.join(REPO_ROOT, 'MissionMap', f'Mission_{name}')
+    if not os.path.isdir(folder):
+        print(f"{LOG_TAG} No folder {folder}.")
+        return False
+    places = Places(os.path.join(folder, 'places.json'))
+    try:
+        if args.add_place:
+            x, y, h = _pose(args.add_place[1])
+            places.add(args.add_place[0], x, y, heading_deg=h)
+            print(f"{LOG_TAG} Place '{args.add_place[0]}' saved.")
+        elif args.add_route:
+            places.add_route(args.add_route[0], [t.strip() for t in args.add_route[1].split(',') if t.strip()])
+            print(f"{LOG_TAG} Route '{args.add_route[0]}' saved.")
+        elif args.remove_place:
+            places.remove(args.remove_place)
+            print(f"{LOG_TAG} '{args.remove_place}' removed.")
+    except (ValueError, KeyError, argparse.ArgumentTypeError) as e:
+        print(f"{LOG_TAG} {e}")
+        return False
+    print(f"{LOG_TAG} Mission {name}: {places.describe()}")
+    return True
 
 
 def confirm_start(nav, args, ask=input):
@@ -217,8 +351,18 @@ def on_robot(args):
     goals = []
     if args.home:
         goals.append(HOME)
+    elif args.route:
+        goals.append(('route', args.route))
+        route_goals(mission_map, args.route)            # unknown places: error now, not on the robot
     elif not (args.interactive or args.click):
-        goals.append(mission_map.goal_vision(args.to, args.cell, args.waypoint))
+        goals.append(mission_map.goal_vision(args.to, args.cell, args.waypoint, args.place, args.heading))
+    start_pose = args.start_at
+    if start_pose == 'click':
+        start_pose = ClickGoalPicker(mission_map, None, start=True,
+                                     title=f"Mission {mission_map.name}: where is the robot now?").choose()
+        if start_pose is None:
+            print(f"{LOG_TAG} Start position not given: not starting.")
+            return False
 
     log_folder = os.path.join(REPO_ROOT, 'MissionLogs',
                               f"Navigation_{datetime.now().strftime('%d-%m-%Y_%H-%M-%S')}")
@@ -247,7 +391,7 @@ def on_robot(args):
                 robot.power_on()
                 assert robot.is_powered_on(), "Robot power-on failed."
                 robot_command.blocking_stand(cc)
-                if not nav.localize(args.localization):
+                if not nav.localize(args.localization, start_pose=start_pose):
                     print(f"{LOG_TAG} Not localized on the map: not moving.")
                     ok = False
                 elif not confirm_start(nav, args):
@@ -268,11 +412,58 @@ def on_robot(args):
         remove_stdout_tee()
 
 
+def run_route(nav, mission_map, spec, args):
+    """
+    A route: its stops in order, --loops times, standing --dwell seconds (or the place's own
+    dwell) at each stop reached. A stop not reached is skipped and the route goes on; battery
+    low, robot lost or fallen end it. One row per stop in route.csv. True if every stop was
+    reached.
+    """
+    stops = route_goals(mission_map, spec)
+    reached = total = 0
+    print(f"{LOG_TAG} Route {spec}: {' -> '.join(n for n, _ in stops)}"
+          + (f", {args.loops} loops" if args.loops > 1 else "") + ".")
+    for loop in range(1, args.loops + 1):
+        for i, (name, g) in enumerate(stops, 1):
+            if nav.battery_low("before a route stop"):
+                nav.end_reason = 'battery'
+                return False
+            t0 = time.time()
+            total += 1
+            if g == HOME:
+                ok = nav.go_home(f"route {spec}")
+                xy = nav.wp0_xy()
+            else:
+                ok = nav.go(g[0], f"{g[1]} (route {spec}, loop {loop}, stop {i})",
+                            graphnav_fallback=not args.no_fallback, heading_deg=g[2])
+                xy = g[0]
+            _here, old = nav.robot_pose() if nav.T is not None else (None, None)
+            missing = float(np.hypot(old[0] - xy[0], old[1] - xy[1])) if old is not None and xy else ''
+            records.append_csv('route.csv', ROUTE_COLUMNS, [[
+                round(time.time(), 2), loop, i, name, int(bool(ok)), round(time.time() - t0, 1),
+                round(missing, 2) if missing != '' else '', nav.end_reason or '']])
+            if nav.end_reason in ('lost', 'fallen', 'battery'):
+                return False
+            if not ok:
+                print(f"{LOG_TAG} Route {spec}: stop {name} NOT reached, going on with the next one.")
+                continue
+            reached += 1
+            dwell = (mission_map.places.places.get(name, {}).get('dwell_s') or args.dwell or 0.0)
+            if dwell > 0:
+                print(f"{LOG_TAG} At {name}: standing {dwell:g} s.")
+                nav.phase = f'at {name}'
+                nav._write_state()
+                time.sleep(dwell)
+    print(f"{LOG_TAG} Route {spec}: {reached} of {total} stops reached.")
+    return reached == total
+
+
 def run_goals(nav, mission_map, args, goals):
     """
     The round of goals, robot already standing and localized: from the command line, from the
-    terminal (--interactive) or with a click (--click). Battery low: back home and end. Robot
-    lost or fallen: end, it stays where it is. True if the last goal was reached.
+    terminal (--interactive) or with a click (--click). A goal is HOME, (xy, descr, heading)
+    or ('route', spec). Battery low: back home and end. Robot lost or fallen: end, it stays
+    where it is. True if the last goal (or route) was done.
     """
     ok = True
     while True:
@@ -287,15 +478,24 @@ def run_goals(nav, mission_map, args, goals):
             goals = [r]
         elif args.interactive:
             try:
-                s = input("\nGoal (X,Y ahead/left | c R,C | wp_N | home | q to finish): ")
+                s = input("\nGoal (X,Y | c R,C | wp_N | PLACE, optional '@ HEADING' | route R | save NAME | "
+                          "home | q to finish): ")
             except EOFError:
                 break
-            if s.strip().lower() in ('q', 'quit', 'exit', ''):
+            s = s.strip()
+            if s.lower() in ('q', 'quit', 'exit', ''):
                 break
             try:
-                goals = [goal_from_text(mission_map, s)]
-            except Exception as e:
-                print(f"{LOG_TAG} Goal not valid: {e}")
+                if s.lower().startswith('save '):
+                    nav.save_place_here(s[5:].strip())
+                    continue
+                if s.lower().startswith('route '):
+                    route_goals(mission_map, s[6:].strip())
+                    goals = [('route', s[6:].strip())]
+                else:
+                    goals = [goal_from_text(mission_map, s)]
+            except (ValueError, KeyError) as e:
+                print(f"{LOG_TAG} Not valid: {e}")
                 continue
         if nav.end_reason != 'battery':
             if not goals:
@@ -303,8 +503,11 @@ def run_goals(nav, mission_map, args, goals):
             g = goals.pop(0)
             if g == HOME:
                 ok = nav.go_home("asked")
+            elif g[0] == 'route':
+                ok = run_route(nav, mission_map, g[1], args)
             else:
-                ok = nav.go(g[0], g[1], graphnav_fallback=not args.no_fallback)
+                ok = nav.go(g[0], g[1], graphnav_fallback=not args.no_fallback,
+                            heading_deg=g[2] if len(g) > 2 else None)
                 if not ok:
                     print(f"{LOG_TAG} Goal {g[1]} NOT reached.")
         if nav.end_reason == 'battery':
@@ -323,15 +526,19 @@ def run_goals(nav, mission_map, args, goals):
 
 def main(argv=None):
     args = _parse_args(argv)
-    if args.click and not window_available():
+    if args.add_place or args.add_route or args.remove_place or args.list_places:
+        return edit_places(args)
+    if (args.click or args.start_at == 'click') and not window_available():
         return False
     if args.preview:
-        if not (args.to or args.cell or args.waypoint or args.click):
-            print("With --preview a goal is needed: --to, --cell, --waypoint or --click.")
+        if not (args.to or args.cell or args.waypoint or args.place or args.route or args.click):
+            print("With --preview a goal is needed: --to, --cell, --waypoint, --place, --route or --click.")
             return False
         return preview(args)
-    if not (args.to or args.cell or args.waypoint or args.home or args.interactive or args.click):
-        print("A goal is needed (--to, --cell, --waypoint, --home) or --interactive or --click.")
+    if not (args.to or args.cell or args.waypoint or args.place or args.route or args.home
+            or args.interactive or args.click):
+        print("A goal is needed (--to, --cell, --waypoint, --place, --route, --home) or --interactive "
+              "or --click.")
         return False
     from spot_explorer.robot import motion
     try:
