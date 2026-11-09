@@ -40,7 +40,13 @@ LIVE_PREFILTER_OD_M = geometry.FRONTIER_CLEARANCE_M     # = 0.25
 # weights of the last evaluation (safety stays with the frontier, on the live data). 1.25 m is
 # the maximum edge length: the edge the robot is about to travel always falls
 # entirely in the re-evaluated area. None = no limit.
-REFRESH_RADIUS_M = 1.25
+# Since 09-11 None (user's rule: the edges updated are all those the robot sees, the whole
+# scan window): the incremental refresh keeps the profile of the edges already evaluated, so
+# the work is the new edges entering the window. Measured with tools/bench_edges.py on the
+# 392 cruise cycles of 04-11 and 09-11 14:36, laptop: 36.4 -> 53.8 ms median per cycle (p90
+# 47 -> 72), mostly the slopes of the edges entering at the border; on the CORE I/O ~6 times.
+# 1.25 m before (the maximum edge length).
+REFRESH_RADIUS_M = None
 
 # Slopes of the refresh pairs computed in batch with matrices (see
 # precompute_arc_slopes), as at cell start (mission_graph.BATCH_SLOPES).

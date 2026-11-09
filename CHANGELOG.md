@@ -8,6 +8,10 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-09 (the edges of the whole scan window updated at every cycle)
+
+- **`edge_evaluation.REFRESH_RADIUS_M` 1.25 -> None** (user's rule: the edges updated are all those the robot sees): weights, slopes and occupancy of every edge with an end in the scan window at every planning cycle, with the incremental reuse of the profiles already computed. Before, only within 1.25 m of the robot node; beyond, up to the border of the window, the edges were only discarded when blocked. `tools/bench_edges.py --b-frontier-edges --b-radius window` on the 392 cruise cycles of 04-11 and 09-11 14:36 (laptop): 36.4 -> 53.8 ms median per cycle, p90 47 -> 72 (on the CORE I/O ~6 times: ~+100 ms per cycle); the frontier never stops on an edge the graph holds valid; edges free for the frontier but out of the graph 3 -> 2 of 305. `test_cruise`, `test_mission`, `test_e2e_loop`, `test_replay`: all OK.
+
 ## 2026-11-09 (the lost path handled by the planning thread, without stopping)
 
 - **A new goal in the same cell, chosen by the planning thread** (`attempt_cruise._on_no_path`, `CruisePlanner.no_path_job`, with `CRUISE_SWITCH`): when the path from the node the robot walks to has gone and from there the graph goes on (`REPLAN_FAIL_ROBOT_FREE_NODES`), the thread excludes the goal for the mission and chooses another one in the cell (up to `MAX_BLOCK_REPLANS` per cell, `GOAL_REPICK_CANDIDATES` points each), in the same cycle; the main thread only applies it (`_apply_switch`, kind 'goal'). Before: the main thread paused the planning, chose and started a new planner (`_cruise_repick`, still there with `CRUISE_SWITCH` off). `test_cruise` "goal inside a box": two new goals, 0.07-0.08 s each in the thread.
