@@ -197,6 +197,7 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps):
         self.rotation_discards = 0   # discards for rotation refusal in THIS attempt
         self.best_goal_dist = float('inf')   # to reset the refusals only on PROGRESS
         self.idle_loops = 0          # consecutive turns without moving (see MAX_IDLE_LOOPS)
+        self.cruise_stalls = 0       # consecutive cruises that did not walk (MAX_CRUISE_STALLS)
         self.last_xy = None          # position at the previous turn, to count the idle turns
         self.rotation_fail_xy = {}   # leg -> robot position at the last refusal
         self.retreats_in_a_row = 0   # consecutive back-offs: reset by a real advance

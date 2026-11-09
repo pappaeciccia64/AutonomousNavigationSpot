@@ -67,6 +67,13 @@ CRUISE_PLAN_STALE_S = 1.2       # no new plan for this long: stop
 CRUISE_MIN_AHEAD_M = 0.10       # confirmed stretch ahead of the robot below this: stop
 CRUISE_BAD_PLANS = 3            # consecutive plans without scan or with an error: stop
 CRUISE_MAX_S = 180.0
+# Cruises in a row that walk less than CRUISE_STALL_M (not arrived, no hand-off) before the
+# attempt is given up. On 09-11 14:53 the goal of (0,5) was 9 cm from a wall: the attempt
+# planned a way back through a node behind the robot (the frontier confirmed 1.26 m of it),
+# the cruise put the robot on the last edge, already blocked (0.00 m ahead), and so on for 61
+# cruises of 2-5 cm in 90 s. The other nets did not trigger: every cruise moves a little.
+CRUISE_STALL_M = 0.10
+MAX_CRUISE_STALLS = 3
 CRUISE_TRACK_STEP_M = 0.30      # spacing of the walked track kept for the retreat
 CRUISE_BREADCRUMB_S = 1.0       # how often the GraphNav breadcrumb is tried
 CRUISE_BATTERY_S = 5.0          # how often the battery is read
@@ -529,6 +536,17 @@ class CruiseSteps:
         planner.replans += replans_done
         MISSION_STATS['cruise_goal_repicks'] = MISSION_STATS.get('cruise_goal_repicks', 0) + n_repicks
         outcome = self._after_cruise(planner, track, t0, reason, n_plans, n_sends, pc, handoff)
+        if arrived or handoff or pc.travelled >= CRUISE_STALL_M:
+            self.cruise_stalls = 0
+        else:
+            self.cruise_stalls += 1
+            if self.cruise_stalls >= MAX_CRUISE_STALLS:
+                MISSION_STATS['cruise_stalls'] = MISSION_STATS.get('cruise_stalls', 0) + 1
+                print(f"[STALL] {self.cruise_stalls} cruises in a row of less than "
+                      f"{CRUISE_STALL_M:.2f} m towards ({self.target_x:.2f}, {self.target_y:.2f}): "
+                      f"the way confirmed at the start is not one the cruise can walk. I give up "
+                      f"entering ({self.target_row},{self.target_col}) from here.")
+                return FAILED
         if no_path_end:
             print(f"[CRUISE] Attempt on cell ({self.target_row},{self.target_col}) ended: no path in "
                   f"the graph to any goal of the cell from here.")
