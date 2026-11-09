@@ -18,6 +18,7 @@ from spot_explorer.mission import mission_prm
 from spot_explorer import config as P
 from spot_explorer.records import HANDOFF, MISSION_STATS, visualize_grid_with_candidates
 from spot_explorer.mission import attempt_common, attempt_scan, cell_attempt
+from spot_explorer.mission import cell_rules
 from spot_explorer.planning import goal
 from spot_explorer.mission import recovery
 
@@ -183,7 +184,107 @@ class Mission:
     # --- The loop --------------------------------------------------------------------------
 
     def explore(self):
-        """Visit the cells until the frontier is empty."""
+        """Visit the cells: with the general rules (cell_rules.CELL_RULES, 09-11) or with the
+        sides tried as before."""
+        if cell_rules.CELL_RULES:
+            return self._explore_rules()
+        return self._explore_sides()
+
+    def _explore_rules(self):
+        """
+        The cells with the general rules (see cell_rules): at every turn the cells already
+        seen are closed, then the next cell is the first in the visiting order with a way of
+        at most NEAR_PATH_M in the graph of now (attempt from here, in cruise), otherwise
+        the first with any way (GraphNav to the waypoint nearest to it, then the attempt).
+        A real failure counts against the cell with its entry; no candidate = the end.
+        """
+        rules = self.rules = cell_rules.CellRules(self.env, self.prm, self.path)
+        self._t0 = time.time()
+        self._closed_at_start = self._cell_counts()[0]
+        while True:
+            self._log_progress()
+            if attempt_common.battery_return_due():
+                left = [(r, c) for r in range(self.env.rows) for c in range(self.env.cols)
+                        if self.env.map[r][c] == 0]
+                MISSION_STATS['battery_return_cells_left'] = len(left)
+                print(f"[BATTERY] End of exploration for low battery: {len(left)} cells not done.")
+                break
+            x, y, _, _ = connection.getPosition(self.robot_state_client)
+            robot_cell = tuple(int(v) for v in self.env.get_cell_from_world(x, y))
+            self.frontier = [(r, c, rules.rank.get((r, c), 10 ** 6)) for r, c in rules.open_cells(robot_cell)]
+            self._close_seen_cells()
+            HANDOFF.mark("progress and seen cells")
+            x, y, _, _ = connection.getPosition(self.robot_state_client)
+            choice = rules.choose((x, y), self.global_grid.global_occupancy_map, self.sampler)
+            if choice is None:
+                break
+            print(f"[CELL RULES] Next: {choice.describe()}.")
+            MISSION_STATS['cell_choices_near' if choice.near else 'cell_choices_far'] = \
+                MISSION_STATS.get('cell_choices_near' if choice.near else 'cell_choices_far', 0) + 1
+            if choice.near:
+                ok = self._attempt(choice.row, choice.col)
+            else:
+                attempt_cruise.stop_if_moving(self.env, self.command_client, "next cell far: GraphNav")
+                ok = self._travel_to_choice(choice)
+            if ok == 'fall':
+                rules.record_failure(choice, "fall during the GraphNav move")
+                continue
+            x, y, _, _ = connection.getPosition(self.robot_state_client)
+            inside = tuple(int(v) for v in self.env.get_cell_from_world(x, y)) == (choice.row, choice.col)
+            if ok or inside:
+                # Failed but the robot is inside the cell anyway: it counts as visited.
+                self._on_visited(choice.row, choice.col, x, y)
+            elif attempt_common.battery_low():
+                continue
+            else:
+                rules.record_failure(choice, "attempt failed" if (choice.near or ok is not None)
+                                     else "GraphNav did not get there")
+        attempt_cruise.stop_if_moving(self.env, self.command_client, "end of the exploration")
+        rules.explain_end(self._attempt_count)
+        self._log_progress(final=True)
+
+    def _travel_to_choice(self, choice):
+        """GraphNav to the waypoint nearest to the node the way enters the cell at, then the
+        attempt. True/False as the attempt, None if GraphNav did not get there, 'fall'."""
+        wps = self.recordingInterface.get_all_manual_waypoints_with_cells()
+        if not wps:
+            return None
+        nx, ny = choice.node_xy
+        cell, wp = min(wps.items(), key=lambda kv: np.hypot(kv[1]['x'] - nx, kv[1]['y'] - ny))
+        res = self._graphnav_to(wp, f"to the waypoint of cell {cell} for cell ({choice.row},{choice.col})",
+                                self.env.get_world_position_from_cell(choice.row, choice.col))
+        if res != 'ok':
+            return 'fall' if res == 'fall' else None
+        if attempt_common.battery_return_due("after the GraphNav move"):
+            return None
+        return self._attempt(choice.row, choice.col)
+
+    def _graphnav_to(self, wp, label, face_xy):
+        """GraphNav trip to the waypoint wp (data of map_recording), with our shortcuts first:
+        'ok', 'fail' (it did not get there) or 'fall' (it fell and got up)."""
+        recordingInterface = self.recordingInterface
+        x_current, y_current, _, _ = connection.getPosition(self.robot_state_client)
+        map_shortcuts.graphnav_add_shortcuts(recordingInterface, "before the move between cells",
+                                             map_edges=True, target_wp_id=wp['id'],
+                                             robot_xy=(x_current, y_current))
+        HANDOFF.report("GraphNav trip")
+        recordingInterface.stop_recording()
+        ok = navigation.graphnav_navigate_to(recordingInterface, wp['id'], self.robot_state_client,
+                                             self.command_client, label, face_xy=face_xy)
+        # GraphNav does not record the legs travelled: the old ones no longer describe the way
+        # the robot came, the retreat must not use them.
+        self.env._traveled_arcs = []
+        fell = motion.check_and_recover_fall(self.robot_state_client, self.command_client,
+                                             self.global_grid.global_occupancy_map,
+                                             "during the move with GraphNav") is not None
+        recordingInterface.start_recording()
+        if fell:
+            print("[FALL] Got up after the move with GraphNav.")
+            return 'fall'
+        return 'ok' if ok else 'fail'
+
+    def _explore_sides(self):
+        """Visit the cells until the frontier is empty (the rules before 09-11: sides tried)."""
         x, y, z, _ = connection.getPosition(self.robot_state_client)
         robot_row, robot_col = self.env.get_cell_from_world(x, y)
         self.frontier.extend(cells.find_new_borders(

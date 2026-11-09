@@ -7,6 +7,7 @@ from spot_explorer.mission import attempt_cruise
 from spot_explorer.mission import mission_prm
 from spot_explorer.mission import cell_attempt
 from spot_explorer.mission import exploration
+from spot_explorer.mission import cell_rules
 from spot_explorer.planning import goal as goal_choice
 from spot_explorer.perception import geometry
 from spot_explorer.perception import slopes
@@ -50,6 +51,8 @@ def mission_switches():
         'mission_prm.PLAN_ALSO_SHARED_NEIGHBOUR_CELLS': mission_prm.PLAN_ALSO_SHARED_NEIGHBOUR_CELLS,
         'cell_attempt.CELL_SEEN_EXPLORED': cell_attempt.CELL_SEEN_EXPLORED,
         'exploration.SEEN_BEFORE_MOVING': exploration.SEEN_BEFORE_MOVING,
+        'cell_rules.CELL_RULES': cell_rules.CELL_RULES,
+        'cell_rules.NEAR_PATH_M': cell_rules.NEAR_PATH_M,
         'goal.GOAL_CENTRE_FIRST': goal_choice.GOAL_CENTRE_FIRST,
         'config.GRAPHNAV_SHORTCUTS': P.GRAPHNAV_SHORTCUTS,
         'config.GRAPHNAV_PRECHECK': P.GRAPHNAV_PRECHECK,

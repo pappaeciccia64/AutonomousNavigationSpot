@@ -459,18 +459,30 @@ def _check_common(r, return_ok=True):
     check("[ANCHORING]" in log, "final anchoring called")
 
 
-def _check_world(name, r):
+def _check_world(name, r, rules=True):
+    """rules: the general cell rules (cell_rules.CELL_RULES, 09-11), where the closed cell
+    (2,2) is unreachable (no way in the graph) or set aside; False: the sides tried, where it
+    ends blocked after every side failed."""
     log = r['log']
     grid = log.split("--- Cell map ---")[-1].splitlines()[1:ROWS + 1]
     cells = [line.split()[1:] for line in grid]
     visited = sum(v == '1' for row in cells for v in row)
     check(visited == 8, f"all 8 reachable cells visited (visited {visited})")
-    check(cells and cells[2][2] == '-1', "the closed cell (2,2) is blocked")
+    if rules:
+        end = [l for l in log.splitlines() if '[END] Exploration finished' in l]
+        check(cells and cells[2][2] == '0' and end and '(2,2)' in end[0]
+              and ('unreachable' in end[0] or 'set aside' in end[0]),
+              f"the closed cell (2,2) is unreachable or set aside, said in [END] ({end[:1]})")
+        check("[PROGRESS] End of exploration: 8/9 cells closed (89%): 8 visited, 0 blocked" in log,
+              "final progress: 8/9 cells closed, 8 visited")
+    else:
+        check(cells and cells[2][2] == '-1', "the closed cell (2,2) is blocked")
     check("[GOAL] The robot is outside cell (1,1)" in log,
           "in (1,1) the arrival counts with the robot just outside the cell")
     check(len(r['gn'].trips) >= 2, f"GraphNav moves: {len(r['gn'].trips)}")
-    check("[PROGRESS] End of exploration: 9/9 cells closed (100%): 8 visited, 1 blocked" in log,
-          "final progress: 9/9 cells closed, 8 visited and 1 blocked")
+    if not rules:
+        check("[PROGRESS] End of exploration: 9/9 cells closed (100%): 8 visited, 1 blocked" in log,
+              "final progress: 9/9 cells closed, 8 visited and 1 blocked")
     lines = [l for l in log.splitlines() if '[PROGRESS]' in l and 'End' not in l]
     closed = [int(l.split('[PROGRESS] ')[1].split('/')[0]) for l in lines]
     check(closed == sorted(set(closed)), f"one [PROGRESS] line for every additional closed cell: {closed}")
@@ -480,8 +492,9 @@ def _check_world(name, r):
           f"GraphNav trips arriving turned towards the cell ({len(r['gn'].headings)})")
     check(len(r['gn'].headings) < len(r['gn'].trips),
           "the return to wp_0 keeps the waypoint heading")
-    if name == 'A':
+    if name == 'A' and not rules:
         check("[PRECHECK]" in log, "the check before the GraphNav move triggers")
+    if name == 'A':
         check("[FIDUCIAL] Starting fiducial: tag 7 at 1.00 m, behind" in log,
               "starting fiducial seen behind the robot, any ID")
         check("[FIDUCIAL INIT] Fiducial searched: ID 7" in log and "[FIDUCIAL INIT] ✓" in log,
@@ -495,6 +508,21 @@ def _check_world(name, r):
               "without a fiducial it starts without, and without trying the localization")
     if name == 'B':
         check("[BLOCK] Confirmed" in log and "[RETURN]" in log, "block confirmed and return with GraphNav")
+
+
+def _check_rules_failures(r):
+    """World C with the general cell rules: the forced failures count against the cells with
+    their entry, a cell is set aside after MAX_FAILURES, the fall during the GraphNav trip is a
+    failure, the mission still ends with the summary of the cells left."""
+    from spot_explorer.mission import cell_rules
+    log = r['log']
+    check("[CELL RULES] Cell (0,1) failed (attempt failed), the robot in the cell: 1 failure" in log,
+          "a forced failure counts against the cell (robot in it)")
+    check(f"{cell_rules.MAX_FAILURES} failures, set aside" in log, "a cell set aside after the failures")
+    check("failed (fall during the GraphNav move)" in log, "the fall during the GraphNav trip is a failure")
+    check("[END] Exploration finished" in log and "[PROGRESS] End of exploration" in log,
+          "the end says which cells are left and why")
+    check(len(log.split('[CELL RULES] Next:')) < 40, "no endless loop of choices")
 
 
 def _check_failures(r):
@@ -696,19 +724,24 @@ def _check_battery(r):
 
 
 if __name__ == '__main__':
-    for name, walls in WORLDS.items():
-        print(f"\nWhole mission in world {name}, fake robot and GraphNav: 3 x 3 cells of 3 m.")
-        r = run(walls, f"MISSION_{name}",
-                fiducial=(7, START[0] - 1.0, START[1]) if name == 'A' else None)
-        _check_common(r)
-        _check_world(name, r)
+    from spot_explorer.mission import cell_rules
+    for rules in (True, False):
+        cell_rules.CELL_RULES = rules
+        tag = "general cell rules" if rules else "OLD rules (sides tried)"
+        for name, walls in WORLDS.items():
+            print(f"\nWhole mission in world {name}, {tag}, fake robot and GraphNav: 3 x 3 cells of 3 m.")
+            r = run(walls, f"MISSION_{name}" + ("" if rules else "_old"),
+                    fiducial=(7, START[0] - 1.0, START[1]) if name == 'A' else None)
+            _check_common(r)
+            _check_world(name, r, rules)
+            shutil.rmtree(r['root'], ignore_errors=True)
+        print(f"\nWhole mission in world C, {tag}: B with forced failures.")
+        with _with_failures():
+            r = run(WORLDS['B'], "MISSION_C" + ("" if rules else "_old"), stuck_wp0_m=0.6)
+        _check_common(r, return_ok=False)
+        _check_rules_failures(r) if rules else _check_failures(r)
         shutil.rmtree(r['root'], ignore_errors=True)
-    print("\nWhole mission in world C: B with forced failures.")
-    with _with_failures():
-        r = run(WORLDS['B'], "MISSION_C", stuck_wp0_m=0.6)
-    _check_common(r, return_ok=False)
-    _check_failures(r)
-    shutil.rmtree(r['root'], ignore_errors=True)
+    cell_rules.CELL_RULES = True
     _check_start()
     _check_seen_before_moving()
     _check_cell_choice()
