@@ -8,6 +8,17 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-09 (one rule for the graph and the safe frontier)
+
+User's point: the area the scan sees at every cycle is where the edges are re-evaluated and also where the safe frontier lets the robot walk: one thing, not two.
+
+- **`safe_frontier.sample_flags`**: THE rule "can the robot pass here now", point by point on the scan of the cycle (outside the window or never seen; obstacle_distance below the threshold or a hysteresis cell of the filter, except under the body; roughness veto, except next to the robot). `compute_safe_frontier` uses it: identical to before on 430 real frontiers of 04-11 (429 also equal to the one computed in the mission; the other is from 14:08, still with the old slope estimate).
+- **The edges of the scan window use the same rule** (`edge_evaluation.FRONTIER_EDGES`, `set_live_snapshot`, `_frontier_blocked_xy`): same samples as the frontier (one per cell, from both ends), obstacle with the hysteresis and roughness; before, only obstacle_distance every 10 cm. Threshold for the graph `FRONTIER_EDGES_CLEARANCE_M` = `PLAN_CLEARANCE_M` (0.28), 3 cm more than the frontier (0.25) for the tracking: with 0.25 for both, `test_cruise` "box appears" had the robot centre 0.24 m from the box (now 0.31). The exemptions of the rule exist only within ~0.61 m of the robot, so only there the full rule per sample: identical to it on 37 600 random edges of real snapshots.
+- **Where the scan sees, the scan decides; the global map only where it does not see** (`_global_occupancy_blocked_many`). The spots of a fall stay blocking everywhere (`_hazard_hits`: the terrain there looks normal to the sensors). Measured with `tools/bench_edges.py --b-frontier-edges` on the 349 cruise cycles of 04-11: edges that the frontier confirms free but the graph held out 14 of 279 (13 from the global map) -> 3 (the band 0.25-0.28 m); the frontier stopping on an edge the graph holds valid: 0 before and after.
+- **The edge being walked out of the graph no longer ends the cruise while the frontier confirms the robot up to its end** (`planning_cycle.CruisePlanner`, stat `cruise_edge_out_walked`): the graph chooses the way, the frontier says whether to walk. Before: 04-11 16:52, cruise ended after 0.30 m, 1.8 s still.
+- Cost: refresh of the cruise ~+11 ms per cycle on the laptop compared with `FAST_REFRESH` alone (the samples every 3 cm instead of 10).
+- `test_e2e_loop` S15: the goal 0.25 m from the obstacle is now replaced as soon as the scan sees the obstacle (goal isolated in the graph), before the frontier stops beyond it: the two checks accept both ways (same purpose: new goal at once, never back to the excluded one).
+
 ## 2026-11-06 (a cell is done when it is seen)
 
 - **The cruise hands off as soon as the target cell is seen for 90%** (`attempt_cruise.CHAIN_ON_SEEN`, with `cell_attempt.CELL_SEEN_EXPLORED` and `CELL_SEEN_FRACTION`): the planning thread computes at every cycle how much of the cell the global map has seen (`CruisePlanner.seen_cell`, plan `cell_seen`, in the `[CRUISE] Plan` lines as `cell seen N%`), and at the threshold the cell is done wherever the robot is; the arrival at the goal keeps counting as before. User's rule: the cell exists to be seen, the goal is only where to see it from. Stat `cruise_seen_handoffs`.

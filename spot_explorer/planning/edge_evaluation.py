@@ -57,6 +57,27 @@ REFRESH_BATCH_SLOPES = True
 # 03-11, end-to-end test: the slopes were 34% of the 190 ms of a refresh.
 INCREMENTAL_REFRESH = True
 
+# ONE RULE FOR GRAPH AND FRONTIER (09-11): in the scan window an edge is discarded by the
+# live scan with THE rule of the safe frontier (safe_frontier.sample_flags: obstacle with the
+# hysteresis of the filter, roughness veto, the exemptions under the body and next to the
+# robot), on the same samples (one per cell, FRONTIER_SAMPLE_STEP_M, from both ends), so the
+# planner cannot propose in the seen area a stretch the frontier then refuses. Before: only
+# obstacle_distance below LIVE_PREFILTER_OD_M every 10 cm, without hysteresis and roughness.
+# Where the scan sees, the global map (memory of the past scans, margin PLAN_CLEARANCE_M)
+# no longer decides: on 04-11 it held out 14 of the 279 edges the frontier confirmed free
+# (the cruise then ended with "the edge being walked is out of the graph", 16:52).
+# What the scan has not seen does not discard the edge (the frontier stops there,
+# 'end_of_data', and the robot looks again). Needs the snapshot (set_live_snapshot); with the
+# raw arrays only (attempt start) the old check. False = the old check everywhere.
+FRONTIER_EDGES = True
+# The threshold of the rule for the edges: the planning distance (geometry.PLAN_CLEARANCE_M =
+# 0.28), 3 cm more than the frontier's (0.25), which stops the robot only below it: the 3 cm
+# are the tolerance of the tracking (the robot walks a few cm off the line). With 0.25 for
+# both, test_cruise "box appears": the centre of the robot 0.24 m from the box.
+FRONTIER_EDGES_CLEARANCE_M = geometry.PLAN_CLEARANCE_M
+_EXEMPT_R_M = max(geometry.FRONTIER_ROBOT_RADIUS_M,
+                  float(np.hypot(geometry.ROBOT_HALF_LENGTH_M, geometry.ROBOT_HALF_WIDTH_M))) + 0.01
+
 # FAST REFRESH (06-11): the same refresh with the fixed costs cut (see tools/bench_edges.py,
 # which checks the result identical to the bit on the real scans). False = the code before.
 FAST_REFRESH = True
@@ -136,6 +157,7 @@ class EdgeEvaluation:
         # Live scan for the preliminary discard (see LIVE_PREFILTER_OD_M and
         # set_live_obstacles). None = no scan: no discard.
         self.live_obstacles = None
+        self.live_snap = None         # filtered snapshot of the cycle (set_live_snapshot)
         self.live_veto_last = 0       # edges discarded by the scan at the last call
         self.live_prune_last = 0      # valid edges outside the radius removed at the last refresh
 
@@ -208,6 +230,7 @@ class EdgeEvaluation:
         navigation loop the FILTERED one from the frontier snapshot (median + hysteresis); at
         the start of the attempt the raw one. seen_2d: cells seen by the sensor.
         """
+        self.live_snap = None             # set_live_snapshot sets it after this call
         if obstacle_dist_2d is None:
             self.live_obstacles = None
             return
@@ -221,6 +244,54 @@ class EdgeEvaluation:
         nr, nc = od.shape[:2]
         self.dirty_rects.append((float(origin_x), float(origin_x + nc * cell_size),
                                  float(origin_y), float(origin_y + nr * cell_size)))
+
+    def set_live_snapshot(self, snap):
+        """The filtered snapshot of this cycle (safe_frontier.GridSnapshot): live discard of the
+        edges with the frontier's rule (FRONTIER_EDGES)."""
+        self.set_live_obstacles(snap.obstacle_dist, snap.seen, snap.origin_x, snap.origin_y,
+                                snap.cell_size, snap.robot_x, snap.robot_y, snap.robot_yaw)
+        self.live_snap = snap
+
+    def _frontier_blocked_xy(self, xy1, xy2, d):
+        """FRONTIER_EDGES: for each edge (ends xy1, xy2, length d) True if THE rule of the
+        frontier (safe_frontier.sample_flags) finds an obstacle or a roughness veto on its
+        samples, taken as the frontier takes them on a segment, from either end."""
+        from spot_explorer.planning import safe_frontier
+        snap = self.live_snap
+        thr = FRONTIER_EDGES_CLEARANCE_M
+        step = geometry.FRONTIER_SAMPLE_STEP_M
+        out = np.zeros(len(d), dtype=bool)
+        ns = np.maximum(1, np.ceil(d / step).astype(np.int64))
+        for m in np.unique(ns):
+            sel = np.nonzero(ns == m)[0]
+            t = np.append(np.arange(int(m)) / int(m), 1.0)
+            hit = np.zeros(len(sel), dtype=bool)
+            for a, b in ((xy1, xy2), (xy2, xy1)):
+                todo = np.nonzero(~hit)[0]            # an edge blocked one way is blocked
+                if todo.size == 0:
+                    break
+                e = sel[todo]
+                sx = a[e, 0, None] + t[None, :] * (b[e, 0] - a[e, 0])[:, None]
+                sy = a[e, 1, None] + t[None, :] * (b[e, 1] - a[e, 1])[:, None]
+                # Same outcome as sample_flags on every sample, cheaper: the cells first
+                # (obstacle, hysteresis, roughness); the exemptions under the body and next to
+                # the robot exist only within _EXEMPT_R_M of it, so only there sample_flags.
+                rows, cols, inside = safe_frontier._cells(snap, sx, sy)
+                cell_bad = snap.obstacle_dist[rows, cols] < thr
+                if snap.blocked_latch is not None:
+                    cell_bad |= snap.blocked_latch[rows, cols]
+                cell_bad = inside & (cell_bad | snap.rough_veto[rows, cols])
+                if not cell_bad.any():
+                    continue
+                near = cell_bad & (np.hypot(sx - snap.robot_x, sy - snap.robot_y) <= _EXEMPT_R_M)
+                bad = cell_bad & ~near
+                if near.any():
+                    i, j = np.nonzero(near)
+                    f = safe_frontier.sample_flags(snap, sx[i, j], sy[i, j], thr)
+                    bad[i, j] = f[6] | f[7]
+                hit[todo] |= bad.any(axis=1)
+            out[sel] = hit
+        return out
 
     def _live_blocked_samples(self, sx, sy):
         """
@@ -265,6 +336,8 @@ class EdgeEvaluation:
         out = np.zeros(len(d), dtype=bool)
         if len(d) == 0 or self.live_obstacles is None or LIVE_PREFILTER_OD_M is None:
             return out
+        if FRONTIER_EDGES and getattr(self, 'live_snap', None) is not None:
+            return self._frontier_blocked_xy(xy1, xy2, d)
         ns = np.maximum(OCCUPANCY_SAMPLES_MIN,
                         np.ceil(d * OCCUPANCY_SAMPLES_PER_M).astype(np.int64) + 1)
         for m in np.unique(ns):
@@ -979,7 +1052,30 @@ class EdgeEvaluation:
             occ = global_map.occupied_many(sx, sy, safety_margin=edge_safety_margin)
             if keep is not None:
                 occ &= keep
+            if FRONTIER_EDGES and getattr(self, 'live_snap', None) is not None:
+                # Where the scan of this cycle sees, it decides (with the frontier's rule, see
+                # _frontier_blocked_xy); the global map only where it does not see.
+                from spot_explorer.planning import safe_frontier
+                rows, cols, inside = safe_frontier._cells(self.live_snap, sx, sy)
+                occ &= ~(inside & self.live_snap.seen[rows, cols])
             out[sel] = occ.any(axis=1)
+        if FRONTIER_EDGES and getattr(self, 'live_snap', None) is not None:
+            # The spots of a fall stay blocking also where the scan sees: there the terrain
+            # looks normal to the sensors (see GlobalGrid.mark_hazard).
+            out |= self._hazard_hits(xy1, xy2, global_map, edge_safety_margin)
+        return out
+
+    @staticmethod
+    def _hazard_hits(xy1, xy2, global_map, margin):
+        """For each segment: True if it passes within (radius + margin) of a hazard disk
+        (GlobalGrid.segment_hits_hazard, on arrays)."""
+        out = np.zeros(len(xy1), dtype=bool)
+        for hx, hy, hr in getattr(global_map, 'hazards', None) or ():
+            d = xy2 - xy1
+            L2 = np.einsum('ij,ij->i', d, d)
+            t = np.clip(np.where(L2 < 1e-12, 0.0, ((hx - xy1[:, 0]) * d[:, 0] + (hy - xy1[:, 1]) * d[:, 1])
+                                 / np.maximum(L2, 1e-12)), 0.0, 1.0)
+            out |= np.hypot(xy1[:, 0] + t * d[:, 0] - hx, xy1[:, 1] + t * d[:, 1] - hy) <= hr + margin
         return out
 
     def _prefill_global_slope_nodata(self, pairs):

@@ -253,6 +253,33 @@ def _cells(snap, xs, ys):
     return np.clip(rows, 0, ny - 1), np.clip(cols, 0, nx - 1), inside
 
 
+def sample_flags(snap, xs, ys, thr, use_latch=True, nominal_mask=None):
+    """
+    THE rule of "can the robot pass here now", point by point, on the scan of this cycle: the
+    safe frontier applies it along the path, the PRM to the edges of the scan window
+    (edge_evaluation.FRONTIER_EDGES), so the graph and the frontier cannot disagree on what
+    the scan sees. For samples (xs, ys) and the threshold thr (scalar or per sample) on the
+    distance from the centre line to the nearest obstacle:
+        no_data   outside the window, or never seen (except within FRONTIER_ROBOT_RADIUS_M of
+                  the robot: under and around the body the sensors do not see the ground)
+        obstacle  obstacle_distance below thr (and, with use_latch, the hysteresis cells where
+                  nominal_mask is True: see _ObstacleHistory), except under the body
+        rough     roughness veto, except within FRONTIER_ROBOT_RADIUS_M of the robot
+    Returns (rows, cols, inside, od, under_body, no_data, obstacle, rough).
+    """
+    rows, cols, inside = _cells(snap, xs, ys)
+    od = snap.obstacle_dist[rows, cols]
+    near_robot = np.hypot(xs - snap.robot_x, ys - snap.robot_y) <= geometry.FRONTIER_ROBOT_RADIUS_M
+    under_body = _under_body(snap, xs, ys)
+    no_data = ~inside | (~snap.seen[rows, cols] & ~near_robot)
+    obstacle = inside & (od < thr) & ~under_body
+    if snap.blocked_latch is not None and use_latch:
+        nominal = np.ones(np.shape(xs), dtype=bool) if nominal_mask is None else nominal_mask
+        obstacle |= inside & nominal & snap.blocked_latch[rows, cols] & ~under_body
+    rough = inside & snap.rough_veto[rows, cols] & ~near_robot
+    return rows, cols, inside, od, under_body, no_data, obstacle, rough
+
+
 def _polyline_samples(polyline, step):
     """Equally spaced samples along the polyline: (xs, ys, s, segment index)."""
     xs, ys, ss, seg = [], [], [], []
@@ -333,7 +360,6 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
             pl.append((xb + extend_end_m * (xb - xa) / L, yb + extend_end_m * (yb - ya) / L))
 
     xs, ys, ss, seg, _ = _polyline_samples(pl, geometry.FRONTIER_SAMPLE_STEP_M)
-    rows, cols, inside = _cells(snap, xs, ys)
 
     # obstacle_distance under the robot: decides whether we are already in a tight space
     r0, c0, in0 = _cells(snap, np.array([snap.robot_x]), np.array([snap.robot_y]))
@@ -342,19 +368,12 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
                         if allow_escape else clearance_nominal)
     thr = np.where(ss < geometry.FRONTIER_ESCAPE_DIST_M, clearance_escape, clearance_nominal)
 
-    od = snap.obstacle_dist[rows, cols]
-    near_robot = np.hypot(xs - snap.robot_x, ys - snap.robot_y) <= geometry.FRONTIER_ROBOT_RADIUS_M
-    under_body = _under_body(snap, xs, ys)
-
-    no_data = ~inside | (~snap.seen[rows, cols] & ~near_robot)
-    obstacle = inside & (od < thr) & ~under_body
-    # Hysteresis: a cell already blocking stays so until it rises above
-    # FRONTIER_CLEARANCE_M + OBSTACLE_HYSTERESIS_M (see _ObstacleHistory). Only where the
-    # nominal threshold applies: where the exit rule lowered it the robot is getting out of a
-    # tight space, and the hysteresis would pin it there.
-    if snap.blocked_latch is not None and use_latch:
-        nominal = thr >= clearance_nominal - 1e-9
-        obstacle |= inside & nominal & snap.blocked_latch[rows, cols] & ~under_body
+    # The rule point by point (sample_flags). Hysteresis: a cell already blocking stays so
+    # until it rises above FRONTIER_CLEARANCE_M + OBSTACLE_HYSTERESIS_M (see _ObstacleHistory).
+    # Only where the nominal threshold applies: where the exit rule lowered it the robot is
+    # getting out of a tight space, and the hysteresis would pin it there.
+    rows, cols, inside, od, under_body, no_data, obstacle, rough = sample_flags(
+        snap, xs, ys, thr, use_latch=use_latch, nominal_mask=thr >= clearance_nominal - 1e-9)
     # Exit rule from a tight space: in the first metre (FRONTIER_ESCAPE_DIST_M) the
     # threshold drops to od_robot - 2 cm, but the promise "do not get closer than you
     # already are" holds: a sample below the nominal threshold is allowed only if it does not
@@ -372,7 +391,6 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
         # riavvicinamento.
         tol = max(0.02, 1.5 * snap.cell_size)
         obstacle = obstacle | (in_escape & (od < best_so_far - tol))
-    rough = inside & snap.rough_veto[rows, cols] & ~near_robot
 
     bad = no_data | obstacle | rough
     result = dict(path_len=path_len, od_robot=od_robot, clearance=clearance_escape,

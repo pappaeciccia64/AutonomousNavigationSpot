@@ -661,8 +661,13 @@ if __name__ == '__main__':
         if wait == 'step':
             check('[FINAL STEP]' in r['log'], "the step below 0.40 m that is enough to arrive is taken")
         else:
-            check("[TARGET] The frontier stops" in r['log'] and "beyond the end of the path" in r['log'],
-                  "the frontier stopped beyond the goal makes it choose another goal at once")
+            # Since 09-11 (edge_evaluation.FRONTIER_EDGES) the edges towards a goal 0.25 m from
+            # the obstacle leave the graph as soon as the scan sees it: the goal is isolated and
+            # replaced at once; before, the frontier stopped beyond the goal first.
+            check(("[TARGET] The frontier stops" in r['log'] and "beyond the end of the path" in r['log'])
+                  or ("it is the goal that is isolated" in r['log'] and "excluded for the rest" in r['log']),
+                  "the goal against the obstacle is replaced at once (frontier beyond the goal, or "
+                  "goal isolated in the graph)")
         check(r['scans'] <= 9, f"{label}: {r['scans']} scans")
 
     # The same case with the wait rule removed: the confirmed block right next to
@@ -684,9 +689,10 @@ if __name__ == '__main__':
         cell_attempt.CellAttempt._frontier_stops_at_goal = real_check
         config.MAX_EARLY_REPLANS = early_saved
     check(r['err'] is None and r['ok'] is True, "block near the goal: cell reached")
-    check("[TARGET] Block " in r['log'] and "[REPLAN] After the block" not in r['log'],
-          "after the block right next to the goal another one is chosen, without replanning "
-          "towards the excluded one")
+    check(("[TARGET] Block " in r['log'] or "excluded for the rest" in r['log'])
+          and "[REPLAN] After the block" not in r['log'],
+          "the goal right next to the obstacle is replaced (after the block, or before it because "
+          "isolated in the graph, FRONTIER_EDGES), without replanning towards the excluded one")
     GRAPH_KW.clear()
 
     # S16: the check on the arrival pose (arrival_has_exit). A turnable direction that stops

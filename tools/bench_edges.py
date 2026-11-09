@@ -21,6 +21,7 @@ whose state differed (must be 0).
 No robot needed; it also runs on the CORE I/O (tools/core_run.sh, venv).
 """
 import argparse
+import collections
 import copy
 import math
 import os
@@ -86,6 +87,84 @@ def state(prm):
         traversed=frozenset(prm.traversed_edges))
 
 
+DISAGREE = {'A': [0, 0], 'B': [0, 0]}    # [cycles where the frontier stops on a valid edge, cycles]
+STRICT = {'A': [0, 0, collections.Counter()], 'B': [0, 0, collections.Counter()]}  # graph out where the frontier is free
+
+
+def snapshot_of(d):
+    """The filtered snapshot of a saved scan, as the frontier had it in the mission."""
+    from spot_explorer.perception import spot_grid
+    z = d['terrain_corrected']; sh = z.shape
+    seen = np.asarray(d['terrain_valid_raw']).reshape(sh) >= spot_grid.TERRAIN_VALID_MIN
+    if 'unwritten' in d.files and np.size(d['unwritten']) == z.size:
+        seen &= ~np.asarray(d['unwritten'], bool).reshape(sh)
+    valid = np.asarray(d['is_valid'], bool).reshape(sh)
+    rough = np.asarray(d['roughness'], float).reshape(sh)
+    latch = (np.asarray(d['blocked_latch'], bool).reshape(sh)
+             if 'blocked_latch' in d.files and np.size(d['blocked_latch']) == z.size else None)
+    return safe_frontier.GridSnapshot(
+        np.asarray(d['obstacle_distance_filtered'], float).reshape(sh), (rough > spot_grid.ROUGH_THRESHOLD) & valid,
+        seen, np.asarray(z, float), float(d['grid_origin'][0]), float(d['grid_origin'][1]), float(d['cell_size']),
+        float(d['robot_xyz'][0]), float(d['robot_xyz'][1]), valid=valid, blocked_latch=latch,
+        robot_yaw=float(d['robot_yaw']))
+
+
+def frontier_on_valid_edge(prm, d, snap):
+    """1 if the frontier, on the path of the saved scan (robot + its nodes in this graph),
+    stops for an obstacle or roughness on an edge the graph holds valid now: the planner
+    and the frontier disagree. 0 otherwise."""
+    ids = [int(n) for n in np.ravel(d['path_node_ids'])] if 'path_node_ids' in d.files else []
+    ids = [n for n in ids if n in prm.nodes]
+    if len(ids) < 2:
+        return 0
+    pl = [(snap.robot_x, snap.robot_y)] + [prm.nodes[n] for n in ids]
+    f = safe_frontier.compute_safe_frontier(pl, snap, allow_escape=False)
+    if f['reason'] not in ('obstacle', 'roughness'):
+        return 0
+    if f['dist'] >= f['path_len'] - 1e-9:
+        return 0                      # on the extension beyond the goal (the nose): not an edge
+    _xy, k = safe_frontier.point_along(pl, f['dist'])
+    if k == 0 or k > len(ids) - 1:
+        return 0                      # robot -> first node, or the nose beyond the goal: not an edge
+    a, b = ids[k - 1], ids[k]
+    return int(bool(prm.edge_validity.get((min(a, b), max(a, b)))))
+
+
+def graph_out_on_free_stretch(prm, d, snap):
+    """Edges of the saved path inside the stretch the frontier confirms free now, and how
+    many of them the graph holds OUT: the graph stricter than the frontier (the cruise ends
+    with 'the edge being walked is out of the graph', 04-11 16:52). Returns (out, edges
+    checked, Counter of the reasons: live / global / slope / other)."""
+    ids = [int(n) for n in np.ravel(d['path_node_ids'])] if 'path_node_ids' in d.files else []
+    ids = [n for n in ids if n in prm.nodes]
+    if len(ids) < 2:
+        return 0, 0, {}
+    pl = [(snap.robot_x, snap.robot_y)] + [prm.nodes[n] for n in ids]
+    f = safe_frontier.compute_safe_frontier(pl, snap, allow_escape=False)
+    s_acc, out, n, why = float(np.hypot(pl[1][0] - pl[0][0], pl[1][1] - pl[0][1])), 0, 0, collections.Counter()
+    for a, b in zip(ids, ids[1:]):
+        L = float(np.hypot(prm.nodes[b][0] - prm.nodes[a][0], prm.nodes[b][1] - prm.nodes[a][1]))
+        if s_acc + L > f['dist']:
+            break
+        s_acc += L
+        key = (min(a, b), max(a, b))
+        n += 1
+        if prm.edge_validity.get(key):
+            continue
+        out += 1
+        if key in prm.tracker_blocked_edges:
+            why['blocked up close'] += 1
+        elif key in prm.vetoed_arcs_occupancy:
+            xy1, xy2 = np.array([prm.nodes[a]]), np.array([prm.nodes[b]])
+            live = prm._live_blocked_xy(xy1, xy2, np.array([L]))[0]
+            why['occupancy, live scan' if live else 'occupancy, global map'] += 1
+        elif key in prm.vetoed_arcs_longitudinal or key in prm.vetoed_arcs_lateral:
+            why['slope'] += 1
+        else:
+            why['other (never evaluated / node pruned)'] += 1
+    return out, n, why
+
+
 def first_difference(sa, sb):
     for k in sa:
         if sa[k] == sb[k]:
@@ -103,7 +182,7 @@ def first_difference(sa, sb):
     return None
 
 
-def replay(name, max_scans=None, b_radius='same'):
+def replay(name, max_scans=None, b_radius='same', b_frontier_edges=False):
     m = R.mission_setup(name)
     if m is None:
         print(f"{name}: no scans or log on this PC")
@@ -137,15 +216,17 @@ def replay(name, max_scans=None, b_radius='same'):
         it = int(re.search(r'scan_it(\d+)_', os.path.basename(f)).group(1))
         a = R.scan_arrays(d)
         rx, ry, ryaw = a['robot']
-        snap = NS(obstacle_dist=a['od_filt'], seen=a['seen'], origin_x=a['ox'], origin_y=a['oy'],
-                  cell_size=a['cs'])
+        snap = snapshot_of(d)
         for k in 'AB':
             p, gm_, tm_ = side[k]
             label[0] = k
             edge_evaluation.FAST_REFRESH = (k == 'B')
+            edge_evaluation.FRONTIER_EDGES = (k == 'B' and b_frontier_edges)
             edge_evaluation.REFRESH_RADIUS_M = (b_radius if k == 'B' and b_radius != 'same' else RADIUS0)
             with R._quiet():
                 R.feed_scan(a, p, gm_, tm_)
+                if it == prev_it:
+                    p.set_live_snapshot(snap)       # as refresh_graph does in the cruise
                 node = int(d['robot_node_id']) if int(d['robot_node_id']) in p.nodes else \
                     min(p.nodes, key=lambda n: math.hypot(p.nodes[n][0] - rx, p.nodes[n][1] - ry))
                 p.set_robot_node(node, 0.0)
@@ -162,6 +243,13 @@ def replay(name, max_scans=None, b_radius='same'):
                     safe_frontier.prune_prm_nodes_in_obstacles(p, snap)
         new_node = node
         if it == prev_it:
+            for k in 'AB':
+                DISAGREE[k][1] += 1
+                DISAGREE[k][0] += frontier_on_valid_edge(side[k][0], d, snap)
+                n_out, n_conf, why = graph_out_on_free_stretch(side[k][0], d, snap)
+                STRICT[k][0] += n_out
+                STRICT[k][1] += n_conf
+                STRICT[k][2].update(why)
             n_cmp += 1
             diff = first_difference(state(side['A'][0]), state(side['B'][0]))
             if diff:
@@ -170,6 +258,7 @@ def replay(name, max_scans=None, b_radius='same'):
                     first_diff = f"{os.path.basename(f)}: {diff}"
         prev_it, prev_node = it, new_node
     edge_evaluation.FAST_REFRESH = True
+    edge_evaluation.FRONTIER_EDGES = True
     edge_evaluation.REFRESH_RADIUS_M = RADIUS0
     return n_cmp, n_diff, first_diff, len(prm.nodes)
 
@@ -193,6 +282,9 @@ def main():
     p = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     p.add_argument('--missions', nargs='+', default=['04-11-2026_16-52-30'])
     p.add_argument('--max-scans', type=int, default=None)
+    p.add_argument('--b-frontier-edges', action='store_true',
+                   help="the NEW side with edge_evaluation.FRONTIER_EDGES (the frontier's rule on the "
+                        "edges): the states differ on purpose; see the disagreements line")
     p.add_argument('--b-radius', default='same',
                    help="refresh radius of the NEW side only, in m, or 'window' (all the scan window): "
                         "the states then differ on purpose, the times are what counts")
@@ -201,7 +293,7 @@ def main():
     for name in a.missions:
         t0 = time.perf_counter()
         br = a.b_radius if a.b_radius == 'same' else (None if a.b_radius == 'window' else float(a.b_radius))
-        r = replay(name, a.max_scans, br)
+        r = replay(name, a.max_scans, br, a.b_frontier_edges)
         if r is None:
             continue
         n_cmp, n_diff, first, n_nodes = r
@@ -209,6 +301,13 @@ def main():
         print(f"{name}: {n_nodes} nodes, {n_cmp} cruise cycles compared, {n_diff} with a different state"
               + (f" -- first: {first}" if first else "") + f" ({time.perf_counter() - t0:.0f} s)")
     report()
+    for k, label in (('A', 'old'), ('B', 'new')):
+        n_bad, n = DISAGREE[k]
+        print(f"{label}: the frontier stops for obstacle/roughness on an edge the graph holds valid "
+              f"in {n_bad} cruise cycles out of {n}")
+        o, c, w = STRICT[k]
+        print(f"{label}: edges the frontier confirms free but the graph holds out: {o} out of {c} "
+              f"({dict(w)})")
     print("\nSAME RESULT" if bad == 0 else f"\n{bad} CYCLES DIFFER")
     sys.exit(1 if bad else 0)
 
