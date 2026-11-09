@@ -23,8 +23,10 @@ BOSDYN_CLIENT_PASSWORD=\$(sed -n 2p ~/$CORE_DIR/robot_credentials) || true; }"
 case "$cmd" in
   bench)   "${SSH[@]}" "$DEST" "$ENVS && $PY tools/bench_cruise.py $*" ;;
   check)   "${SSH[@]}" "$DEST" "$ENVS && $PY tools/core_check.py $*" ;;
-  mission) "${SSH[@]}" "$DEST" "$ENVS && nohup $PY run_mission.py --hostname $ROBOT_FROM_CORE $* \
-               > mission_nohup.log 2>&1 < /dev/null & echo \"mission started, pid \$!\"" ;;
+  # Only the mission goes in the background ({ ... & }): a bare & would take the whole && chain
+  # with it, and that chain keeps the SSH connection open until the mission ends.
+  mission) "${SSH[@]}" "$DEST" "$ENVS && { nohup $PY run_mission.py --hostname $ROBOT_FROM_CORE $* \
+               > mission_nohup.log 2>&1 < /dev/null & } && echo \"mission started, pid \$!\"" ;;
   log)     "${SSH[@]}" -t "$DEST" "tail -f ~/$CORE_DIR/code/mission_nohup.log" ;;
   stop)    "${SSH[@]}" "$DEST" "pkill -INT -f 'run_mission.py' && echo 'SIGINT sent' || echo 'no mission running'" ;;
   credentials)
