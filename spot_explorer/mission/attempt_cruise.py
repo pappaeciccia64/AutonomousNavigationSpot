@@ -435,6 +435,11 @@ class CruiseSteps:
                 # The new stretch must start where the robot is: after a path change while
                 # walking the line can pass beside it (see PathCommand.send).
                 off = motion.distance_from_polyline(rx, ry, plan['confirmed'])
+                if off > CRUISE_REJOIN_MAX_M and report_switch:
+                    # The plan with the next cell was computed on a scan a moment old and the
+                    # robot, walking the stretch sent, has moved on: the next plan starts from
+                    # where it is (test_cruise step C, 1 run in 6: 31 cm, cruise ended).
+                    continue
                 if off > CRUISE_REJOIN_MAX_M:
                     reason = (f"the new path passes {100 * off:.0f} cm from the robot "
                               f"(limit {100 * CRUISE_REJOIN_MAX_M:.0f} cm)")
