@@ -76,6 +76,18 @@ MAX_ROUNDS_WITHOUT_LOC = 2
 # ~35 MB) are saved in the log folder.
 MAP_IMAGE_EVERY_S = 10.0
 PKL_EVERY_S = 300.0
+# FRAME JUMP: between two rounds the estimate of where the robot is in the mission map moves
+# by more than this (m or degrees). GraphNav corrects the drift a little at a time, so a jump
+# is checked with FRAME_JUMP_CONFIRM_READINGS more readings, FRAME_JUMP_CONFIRM_WAIT_S apart:
+# if they agree with the new estimate (within FRAME_JUMP_AGREE_M) it is a real correction,
+# otherwise the reading is not trusted (it counts as a round without localization).
+FRAME_JUMP_M = 0.5
+FRAME_JUMP_DEG = 10.0
+FRAME_JUMP_CONFIRM_READINGS = 2
+FRAME_JUMP_CONFIRM_WAIT_S = 0.3
+FRAME_JUMP_AGREE_M = 0.10
+# Graph upload: a progress line at most this often (s).
+UPLOAD_PROGRESS_EVERY_S = 5.0
 
 # Special goal: back to the mission start (wp_0).
 HOME = 'home'
@@ -141,35 +153,69 @@ class MapNavigator:
         self.n_plan = 0
         self.round = 0
         self.last = {}                      # last decision and frontier, for navigation.csv
-        self._t_image = self._t_pkl = 0.0
+        self._t_image = 0.0                 # the first map image at once, for the viewer
+        self._t_pkl = time.time()           # the first full save after PKL_EVERY_S
         if log_folder:
             self._write_info()
 
     # --- graph and localization ----------------------------------------------------------
     def upload_graph(self):
-        """The graph downloaded at the end of the mission onto Spot, with the snapshots Spot
-        does not have."""
+        """
+        The graph downloaded at the end of the mission onto Spot. If Spot already has that
+        graph (same waypoints: a navigation earlier today, or the mission itself without a
+        reboot) it is not cleared: upload_graph answers with the snapshots Spot does NOT have,
+        and only those are sent, so a second start takes seconds instead of minutes (the
+        snapshots of a mission are ~150 MB). Any other graph is cleared first. A progress line
+        with MB sent, speed and time left. Returns (waypoint snapshots sent, MB sent).
+        """
         from bosdyn.api.graph_nav import map_pb2
         ng = self.map.ng
         self.ri.stop_recording()
-        self.gn.clear_graph()
+        ours = {w.id for w in ng['graph'].waypoints}
+        try:
+            on_robot = {w.id for w in self.gn.download_graph().waypoints}
+        except Exception:
+            on_robot = set()
+        if on_robot and on_robot == ours:
+            print(f"{LOG_TAG} Spot already has this graph ({len(ours)} waypoints): not cleared, only the "
+                  f"missing snapshots are sent.")
+        else:
+            if on_robot:
+                print(f"{LOG_TAG} Spot has another graph ({len(on_robot)} waypoints, {len(on_robot & ours)} "
+                      f"in common with this one): cleared.")
+            self.gn.clear_graph()
         resp = self.gn.upload_graph(graph=ng['graph'], generate_new_anchoring=not ng['graph'].anchoring.anchors)
-        for sid in resp.unknown_waypoint_snapshot_ids:
-            s = map_pb2.WaypointSnapshot()
-            with open(os.path.join(ng['dir'], 'waypoint_snapshots', sid), 'rb') as f:
-                s.ParseFromString(f.read())
-            self.gn.upload_waypoint_snapshot(s)
-        for sid in resp.unknown_edge_snapshot_ids:
-            path = os.path.join(ng['dir'], 'edge_snapshots', sid)
-            if not os.path.exists(path):
-                continue
-            s = map_pb2.EdgeSnapshot()
+        todo = [('waypoint', sid, os.path.join(ng['dir'], 'waypoint_snapshots', sid), map_pb2.WaypointSnapshot)
+                for sid in resp.unknown_waypoint_snapshot_ids]
+        todo += [('edge', sid, os.path.join(ng['dir'], 'edge_snapshots', sid), map_pb2.EdgeSnapshot)
+                 for sid in resp.unknown_edge_snapshot_ids]
+        todo = [t for t in todo if os.path.exists(t[2])]
+        total_mb = sum(os.path.getsize(t[2]) for t in todo) / 1e6
+        if todo:
+            print(f"{LOG_TAG} Uploading {len(todo)} snapshots to Spot, {total_mb:.0f} MB...")
+        t0 = t_last = time.time()
+        sent_mb, n_wp = 0.0, 0
+        for i, (kind, sid, path, cls) in enumerate(todo, 1):
+            snap = cls()
             with open(path, 'rb') as f:
-                s.ParseFromString(f.read())
-            self.gn.upload_edge_snapshot(s)
+                snap.ParseFromString(f.read())
+            if kind == 'waypoint':
+                self.gn.upload_waypoint_snapshot(snap)
+                n_wp += 1
+            else:
+                self.gn.upload_edge_snapshot(snap)
+            sent_mb += os.path.getsize(path) / 1e6
+            now = time.time()
+            if now - t_last >= UPLOAD_PROGRESS_EVERY_S and i < len(todo):
+                t_last = now
+                speed = sent_mb / max(now - t0, 1e-6)
+                print(f"{LOG_TAG} Upload: {i}/{len(todo)} snapshots, {sent_mb:.0f}/{total_mb:.0f} MB, "
+                      f"{speed:.1f} MB/s, about {(total_mb - sent_mb) / max(speed, 1e-6):.0f} s left.")
         self.ri.invalidate_graph_cache()
-        print(f"{LOG_TAG} Graph uploaded to Spot ({len(resp.unknown_waypoint_snapshot_ids)} waypoint "
-              f"snapshots and {len(resp.unknown_edge_snapshot_ids)} edge snapshots sent).")
+        dt = time.time() - t0
+        print(f"{LOG_TAG} Graph on Spot: {n_wp} waypoint snapshots and {len(todo) - n_wp} edge snapshots "
+              f"sent ({sent_mb:.0f} MB in {dt:.0f} s).")
+        return n_wp, sent_mb
 
     def localize(self, mode='auto'):
         """
@@ -205,40 +251,73 @@ class MapNavigator:
             ok = self.update_transform("after localization") is not None
         return ok
 
-    def update_transform(self, where=""):
-        """
-        Old VISION -> today's VISION, from: old pose of the waypoint GraphNav is localized on
-        * where the body is relative to it (now) = old body pose; new body pose from today's
-        odometry. None (and T unchanged) if GraphNav is not localized on a waypoint whose pose
-        is known.
-        """
+    def _transform_now(self, where):
+        """(transform from GraphNav's localization now, waypoint name), or (None, why)."""
         try:
             st = self.gn.get_localization_state()
             loc = st.localization
         except Exception as e:
-            print(f"{LOG_TAG} GraphNav state not readable ({where}): {e}")
-            return None
+            return None, f"GraphNav state not readable ({where}): {e}"
         if graphnav_says_lost(st):
-            print(f"{LOG_TAG} GraphNav's lost detector says LOST ({where}): keeping the previous estimate.")
-            return None
+            return None, f"GraphNav's lost detector says LOST ({where}): keeping the previous estimate."
         w = self.map.ng['wp'].get(loc.waypoint_id)
         if not loc.waypoint_id or w is None:
-            print(f"{LOG_TAG} GraphNav not localized on a known waypoint ({where}): keeping the previous estimate.")
-            return None
+            return None, f"GraphNav not localized on a known waypoint ({where}): keeping the previous estimate."
         b = loc.waypoint_tform_body
         c, s = np.cos(w['yaw']), np.sin(w['yaw'])
         old = (w['x'] + c * b.position.x - s * b.position.y,
                w['y'] + s * b.position.x + c * b.position.y,
                wrap(w['yaw'] + yaw_of_quat(b.rotation)))
         x, y, _z, q = connection.getPosition(self.rsc)
-        new = Transform2D.from_poses((x, y, yaw_of_quat(q)), old)
+        return Transform2D.from_poses((x, y, yaw_of_quat(q)), old), w['name']
+
+    def _shift(self, a, b):
+        """How far apart two transforms put the robot NOW in the mission map (m, degrees)."""
+        x, y, _z, _q = connection.getPosition(self.rsc)
+        pa, pb = a.inverse(x, y), b.inverse(x, y)
+        return float(np.hypot(pa[0] - pb[0], pa[1] - pb[1])), float(np.degrees(abs(wrap(a.th - b.th))))
+
+    def _jump_confirmed(self, new, where):
+        """
+        The estimate jumped (FRAME_JUMP_M / FRAME_JUMP_DEG) in one round. A real GraphNav
+        correction stays; a wrong localization (a similar-looking place, a moving object in
+        the ICP) usually does not. FRAME_JUMP_CONFIRM_READINGS more readings must agree with
+        the new estimate. The robot is standing: this is called only between moves.
+        """
+        dm, dg = self._shift(new, self.T)
+        print(f"{LOG_TAG} FRAME JUMP {where}: the robot would be {dm:.2f} m / {dg:.1f} degrees away "
+              f"from where it was a round ago. Checking with {FRAME_JUMP_CONFIRM_READINGS} more readings.")
+        for _ in range(FRAME_JUMP_CONFIRM_READINGS):
+            time.sleep(FRAME_JUMP_CONFIRM_WAIT_S)
+            again, _name = self._transform_now(where)
+            if again is None or self._shift(again, new)[0] > FRAME_JUMP_AGREE_M:
+                print(f"{LOG_TAG} Jump NOT confirmed: the localization is not trusted this round.")
+                return False
+        print(f"{LOG_TAG} Jump confirmed by the next readings: GraphNav corrected the position, "
+              f"using the new estimate.")
+        return True
+
+    def update_transform(self, where=""):
+        """
+        Old VISION -> today's VISION, from: old pose of the waypoint GraphNav is localized on
+        * where the body is relative to it (now) = old body pose; new body pose from today's
+        odometry. None (and T unchanged) if GraphNav is not localized on a waypoint whose pose
+        is known, or if the estimate jumped and the next readings do not confirm it.
+        """
+        new, name = self._transform_now(where)
+        if new is None:
+            print(f"{LOG_TAG} {name}")
+            return None
         if self.T is None:
-            print(f"{LOG_TAG} Mission frame -> today's frame: {new} (on {w['name']}).")
+            print(f"{LOG_TAG} Mission frame -> today's frame: {new} (on {name}).")
         else:
-            dm, dg = new.difference(self.T)
-            if dm > 0.10 or dg > 3.0:
+            dm, dg = self._shift(new, self.T)
+            if dm > FRAME_JUMP_M or dg > FRAME_JUMP_DEG:
+                if not self._jump_confirmed(new, where):
+                    return None
+            elif dm > 0.10 or dg > 3.0:
                 print(f"{LOG_TAG} Frame estimate changed by {dm:.2f} m and {dg:.1f} degrees {where} "
-                      f"(on {w['name']}): GraphNav corrected today's drift.")
+                      f"(on {name}): GraphNav corrected today's drift.")
         self.T = new
         # Waypoint poses in TODAY's frame: the relocalization and the arrival heading of
         # spot_explorer.graphnav use them, comparing with the current VISION position.
@@ -247,6 +326,20 @@ class MapNavigator:
                             yaw=new.apply_yaw(v['yaw']), waypoint_id=wid, t=None)
             for wid, v in self.map.ng['wp'].items()}
         return new
+
+    def where_am_i(self):
+        """Where the robot is in the mission map now: (x, y, heading in degrees) in the
+        mission frame, the nearest GraphNav waypoint and its distance. For the check before
+        starting (run.confirm_start)."""
+        (x, y, yaw), old = self.robot_pose()
+        fr = self.map.frame
+        xm, ym = fr.from_vision(*old)
+        wid = self.map.nearest_waypoint(old)
+        w = self.map.ng['wp'][wid]
+        return dict(x=xm, y=ym, heading_deg=float(np.degrees(wrap(yaw - self.T.th - fr.yaw))),
+                    waypoint=w['name'], waypoint_m=float(np.hypot(w['x'] - old[0], w['y'] - old[1])),
+                    seen=bool(self.map.gm.is_known(*old)),
+                    occupied=bool(self.map.gm.is_occupied(*old)))
 
     def localization_ok(self, where):
         """

@@ -73,6 +73,8 @@ def _parse_args(argv=None):
                    help="on the robot: when the goals are done, back to wp_0 before sitting")
     p.add_argument('--no-fallback', action='store_true',
                    help="no GraphNav fallback when the PRM cannot make it")
+    p.add_argument('--yes', action='store_true',
+                   help="on the robot: start without asking to confirm where the robot is on the map")
     p.add_argument('--hostname', default='192.168.80.3')
     return p.parse_args(argv)
 
@@ -113,10 +115,100 @@ def preview(args):
     return plan is not None
 
 
+def confirm_start(nav, args, ask=input):
+    """
+    Before the first move: where the robot believes it is on the mission map, from GraphNav's
+    localization, and a yes from the operator. A wrong localization (the wrong tag, a
+    similar-looking place) would send the robot to the wrong point of the map believing it is
+    right: this is the moment to see it, with the robot still standing at the start. The
+    same position is in the viewer (navigation_state.json). --yes skips the question; without
+    a terminal to ask on, and without --yes, the robot does not move.
+    """
+    w = nav.where_am_i()
+    print(f"{LOG_TAG} Localized: the robot is at ({w['x']:.2f}, {w['y']:.2f}) of the mission frame "
+          f"(x ahead, y to the left of the mission start), heading {w['heading_deg']:+.0f} degrees, "
+          f"{w['waypoint_m']:.2f} m from {w['waypoint']}"
+          + ("" if w['seen'] else "; NOT on ground seen by the mission")
+          + ("; ON AN OCCUPIED CELL of the map" if w['occupied'] else "") + ".")
+    nav._write_state()
+    if getattr(args, 'yes', False):
+        return True
+    if not sys.stdin.isatty() and ask is input:
+        print(f"{LOG_TAG} No terminal to confirm on: not moving (use --yes to start without asking).")
+        return False
+    try:
+        answer = ask(f"{LOG_TAG} Is that where the robot really is? Start? [y/N] ")
+    except EOFError:
+        answer = ''
+    if answer.strip().lower() in ('y', 'yes', 's', 'si'):
+        return True
+    print(f"{LOG_TAG} Not confirmed: not moving.")
+    return False
+
+
+def emergency_shutdown(robot, command_client, nav, log_folder, exc):
+    """
+    Session interrupted (exception or Ctrl+C) with the robot powered and the lease still held:
+    as the mission does (mission.run._emergency_shutdown), first stop it, then sit it down and
+    power off the motors -- unless it has fallen (it is already on the ground) -- and only then
+    save the updated maps, which take seconds. Each step is tried on its own: never raises.
+    """
+    from spot_explorer.robot import motion
+    from bosdyn.client.robot_command import RobotCommandBuilder
+    fallen = isinstance(exc, motion.RobotFallenError)
+    print(f"\n[EMERGENCY] Map navigation interrupted ({type(exc).__name__}): "
+          + ("the robot is on the ground, " if fallen else "I stop the robot, sit it down, ")
+          + "I save the maps.")
+    if nav is not None:
+        try:
+            nav.tracker.clear_path()
+            nav.tracker.stop()
+        except BaseException:
+            pass
+    if not fallen and command_client is not None:
+        try:
+            motion.stop_robot(command_client, reason="map navigation interrupted")
+            command_client.robot_command(RobotCommandBuilder.synchro_sit_command(),
+                                         end_time_secs=time.time() + 20)
+            time.sleep(3)
+            robot.power_off(cut_immediately=False)
+            print("[EMERGENCY] Robot sitting and motors off.")
+        except BaseException as e:
+            print(f"[EMERGENCY] I could not sit the robot down ({e!r}): use the tablet.")
+    if nav is not None and log_folder:
+        try:
+            nav.phase = 'interrupted'
+            nav._write_state()
+            nav.save_maps(log_folder)
+        except BaseException as e:
+            print(f"[EMERGENCY] Maps not saved ({e!r}).")
+
+
+def close_session(robot, command_client, nav, log_folder, monitor):
+    """Normal end: sit down and power off first, then the saves (they take seconds)."""
+    from bosdyn.client.robot_command import RobotCommandBuilder
+    if nav is not None:
+        nav.tracker.stop()
+    try:
+        command_client.robot_command(RobotCommandBuilder.synchro_sit_command(), end_time_secs=time.time() + 20)
+        time.sleep(3)
+        robot.power_off(cut_immediately=False)
+    except Exception as e:
+        print(f"{LOG_TAG} Sitting down / power off failed: {e}")
+    if monitor is not None:
+        monitor.check("end")
+    if nav is not None:
+        nav.save_maps(log_folder)
+
+
 def on_robot(args):
-    """Connection, graph on Spot, localization, one or more goals, sitting down."""
+    """
+    Connection, graph on Spot (before powering the motors: it can take minutes), power on,
+    localization, check of where the robot is, one or more goals, sitting down. On an
+    exception or Ctrl+C: emergency_shutdown, then the error goes up.
+    """
     import bosdyn.client.lease
-    from bosdyn.client.robot_command import RobotCommandBuilder, RobotCommandClient, blocking_stand
+    from bosdyn.client import robot_command
     from spot_explorer.robot import battery
     from spot_explorer.robot import connection
     from spot_explorer.records import MISSION_CTX, SegmentLog, install_stdout_tee, remove_stdout_tee
@@ -141,34 +233,33 @@ def on_robot(args):
                               recording_user_name="", recording_session_name="")
     robot, lease_client, rsc, client_metadata = connection.setLogInfo(options)
     estop = connection.SimpleEstop(robot, options.name + "_estop")
+    nav = cc = None
     try:
         with bosdyn.client.lease.LeaseKeepAlive(lease_client, must_acquire=True, return_at_exit=True):
-            cc = robot.ensure_client(RobotCommandClient.default_service_name)
-            robot.power_on()
-            assert robot.is_powered_on(), "Robot power-on failed."
-            blocking_stand(cc)
+            cc = robot.ensure_client(robot_command.RobotCommandClient.default_service_name)
             nav = MapNavigator(mission_map, robot, rsc, cc, client_metadata, log_folder)
             nav.init_maps(update=not args.no_map_update)
             monitor = battery.BatteryMonitor(rsc)
             nav.init_session(log_folder, battery=monitor)
             monitor.check("start")
-            nav.upload_graph()
-            if not nav.localize(args.localization):
-                print(f"{LOG_TAG} Not localized on the map: not moving.")
-                return False
-            nav.tracker.start()
             try:
-                return run_goals(nav, mission_map, args, goals)
-            finally:
-                nav.tracker.stop()
-                nav.save_maps(log_folder)
-                monitor.check("end")
-                try:
-                    cc.robot_command(RobotCommandBuilder.synchro_sit_command(), end_time_secs=time.time() + 20)
-                    time.sleep(3)
-                    robot.power_off(cut_immediately=False)
-                except Exception as e:
-                    print(f"{LOG_TAG} Sitting down / power off failed: {e}")
+                nav.upload_graph()
+                robot.power_on()
+                assert robot.is_powered_on(), "Robot power-on failed."
+                robot_command.blocking_stand(cc)
+                if not nav.localize(args.localization):
+                    print(f"{LOG_TAG} Not localized on the map: not moving.")
+                    ok = False
+                elif not confirm_start(nav, args):
+                    ok = False
+                else:
+                    nav.tracker.start()
+                    ok = run_goals(nav, mission_map, args, goals)
+            except BaseException as exc:
+                emergency_shutdown(robot, cc, nav, log_folder, exc)
+                raise
+            close_session(robot, cc, nav, log_folder, monitor)
+            return ok
     finally:
         try:
             estop.stop()
@@ -242,7 +333,16 @@ def main(argv=None):
     if not (args.to or args.cell or args.waypoint or args.home or args.interactive or args.click):
         print("A goal is needed (--to, --cell, --waypoint, --home) or --interactive or --click.")
         return False
-    return on_robot(args)
+    from spot_explorer.robot import motion
+    try:
+        return on_robot(args)
+    except motion.RobotFallenError as exc:
+        print("\n" + "=" * 70)
+        print(f"[FALL] MAP NAVIGATION INTERRUPTED: {exc}")
+        print("[FALL] The robot is on the ground and has NOT tried to go back home.")
+        print("[FALL] Take control from the tablet, check the robot, then stand it up by hand.")
+        print("=" * 70)
+        return False
 
 
 if __name__ == '__main__':
