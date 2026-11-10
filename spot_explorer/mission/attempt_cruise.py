@@ -55,6 +55,7 @@ from spot_explorer.mission.attempt_common import CONTINUE, STOP, FAILED, battery
 from spot_explorer.perception import gait
 from spot_explorer.perception import geometry
 from spot_explorer.planning import decisions
+from spot_explorer.planning import roadmap
 from spot_explorer.planning import safe_frontier
 from spot_explorer.records import HANDOFF, MISSION_STATS, BodyTiltRecorder, append_trajectory, timing_add
 from spot_explorer.robot import connection
@@ -268,6 +269,7 @@ class CruiseSteps:
         # check the planner will make.
         adv, turn_stop = planner._turns_within(self.polyline, ids[1:],
                                                safe_frontier.allowed_advance(self.frontier), self.snap)
+        adv = planning_cycle.snap_to_node(self.polyline, adv)
         confirmed = planning_cycle._cut_polyline(self.polyline, adv)
         kwargs = self._cruise_gait(planner._terrain(confirmed, ids[1:]))
         path_len = float(sum(np.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(self.polyline, self.polyline[1:])))
@@ -875,6 +877,28 @@ class CruiseSteps:
             air=geometry.ROTATION_CLEARANCE_AIR_M + extra)
         return bool(clear)
 
+    def _stop_on_edge(self, planner, x, y):
+        """The robot node after a cruise: an END of the edge it is on, not the nearest node
+        (10-11): the node ahead if the edge is still in the graph (or the robot is on it),
+        otherwise the node it came from -- the part just walked is free. Before: the nearest
+        node with edges, 0.20 m away (median) on 09-11 14:36, also behind or beside the robot,
+        with a first stretch robot -> node that is not an edge."""
+        k = min(planner._seg, max(len(planner.path_ids) - 2, 0))
+        prev_id = planner.path_ids[k]
+        next_id = planner.path_ids[min(k + 1, len(planner.path_ids) - 1)]
+        prm = self.prm_graph
+        nx, ny = prm.get_node_position(next_id)
+        on_next = float(np.hypot(nx - x, ny - y)) <= roadmap.ANCHOR_ON_NODE_M
+        if prev_id == next_id or on_next or planning_cycle._edge_in_graph(prm, prev_id, next_id):
+            nid, why = next_id, "the node ahead"
+        else:
+            nid, why = prev_id, "the node it came from (the edge ahead is out of the graph)"
+        self.robot_node_id = nid
+        prm.set_robot_node(nid, 0.0)
+        px, py = prm.get_node_position(nid)
+        print(f"[NODE] stop (cruise): on edge {prev_id}->{next_id}, robot node {nid} ({why}) at "
+              f"({px:.2f}, {py:.2f}), {float(np.hypot(px - x, py - y)):.2f} m from ({x:.2f}, {y:.2f})")
+
     def _after_cruise(self, planner, track, t0, reason, n_plans, n_sends, pc, handoff=False):
         """The graph and maps are the main thread's again: track for the retreat, robot node
         where the robot is, path from there, breadcrumb."""
@@ -889,7 +913,7 @@ class CruiseSteps:
         if planner.last_scan is not None:
             self.scan, self.snap = planner.last_scan, planner.last_snap
         remainder = planner.path_ids[min(planner._seg + 1, len(planner.path_ids) - 1):]
-        self._stop_node_here(x, y, "stop (cruise)")
+        self._stop_on_edge(planner, x, y)
         ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
         if ids is None:
             ids = [self.robot_node_id] + [n for n in remainder if n != self.robot_node_id]

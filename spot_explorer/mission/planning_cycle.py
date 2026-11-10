@@ -358,6 +358,7 @@ class CruisePlanner:
         frontier = safe_frontier.compute_safe_frontier(polyline, snap, allow_escape=False)
         advance = safe_frontier.allowed_advance(frontier)
         advance, turn_stop = self._turns_within(polyline, remainder, advance, snap)
+        advance = snap_to_node(polyline, advance)
         confirmed = _cut_polyline(polyline, advance)
         t1 = time.perf_counter(); ph['frontier'] = t1 - t; t = t1
         path_len = float(sum(np.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(polyline, polyline[1:])))
@@ -480,6 +481,33 @@ def _pose_of_scan(scan):
     q = tf.rotation
     yaw = float(np.arctan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y ** 2 + q.z ** 2)))
     return float(tf.position.x), float(tf.position.y), yaw
+
+
+# WHOLE EDGES (10-11, user's rule, already asked by Marco on 08-10): an edge is walked only
+# if it is confirmed free for its whole length. The confirmed stretch ends at the last node
+# reached by edges all confirmed (the frontier already keeps the nose on confirmed terrain
+# beyond its end), not halfway along an edge seen only in part: the robot stops on a node, never
+# in the middle of an edge it was not sure of. Only the edge the robot is already on may be
+# confirmed in part (an obstacle appearing ahead: there the robot stops where it can).
+# False = the stretch as far as the frontier confirms, as before. OFF: to stop on the node
+# the robot needs the nose (0.65 m) confirmed beyond it, so a whole edge of up to 1.25 m needs
+# data up to 1.9 m beyond the node ahead, at the limit of Spot's grid (1.92 m around the
+# robot): test_cruise "step C" went from 1 cruise to 6 (6 s still), "three cells" to 7 (10 s).
+WHOLE_EDGES = False
+
+
+def snap_to_node(polyline, advance):
+    """WHOLE_EDGES: advance cut back to the last vertex of polyline (robot, nodes...) within it;
+    unchanged if not even the first node is within it (the robot is on that edge already)."""
+    if not WHOLE_EDGES or len(polyline) < 2:
+        return advance
+    s, best = 0.0, None
+    for a, b in zip(polyline, polyline[1:]):
+        s += float(np.hypot(b[0] - a[0], b[1] - a[1]))
+        if s > advance + 1e-6:
+            break
+        best = s
+    return advance if best is None else best
 
 
 def _cut_polyline(polyline, s):
