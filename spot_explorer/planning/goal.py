@@ -61,11 +61,12 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
          the same isolated area (on 22-10 16:04 that fallback failed 9 times out of 10). If
          no point is reachable the best one is chosen anyway, and the attempt fails
          (require_reachable=True: None instead, used by cell_rules to check a cell);
-      3. nearest to the centre, in rings of 0.25 m (the centre itself, free or unknown, is
+      3. at least TARGET_CELL_BORDER_M from the cell border: border points only after all
+         the others (since 09-11; before, only on a tie in the ring);
+      4. nearest to the centre, in rings of 0.25 m (the centre itself, free or unknown, is
          the first): from there the robot sees the whole cell. Within a ring:
-      4. with at least TARGET_CLEARANCE_M (0.33) of free space;
-      5. seen free before never seen;
-      6. at least TARGET_CELL_BORDER_M from the cell border;
+      5. with at least TARGET_CLEARANCE_M (0.38) of free space;
+      6. seen free before never seen;
       7. nearest to the robot: on a tie, the one on its side of the obstacle.
 
     If no point is left the cell has no valid goal and the function returns
@@ -172,8 +173,13 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
     # Nearest to the centre first (in rings of `step`): from there the robot sees the whole cell
     # (04-11 16:10: with the free space first, the goal of (1,2) went 0.94 m from the centre,
     # against the furniture on the border). The rest only decides within a ring.
+    # A point on the cell border (closer than TARGET_CELL_BORDER_M) comes after all the others,
+    # whatever its ring: the robot stops in front of it, often outside the cell, and the arrival
+    # does not count (ARRIVAL_OUTSIDE_CELL_M assumes a goal at least that far inside). Oct-Nov:
+    # 28% of border goals ended in an arrival against ~40%, and 8 of the 11 goals refused by
+    # the frontier were on the border (09-11 14:53, (0,5): 9 cm from a wall).
     if GOAL_CENTRE_FIRST:
-        rows.sort(key=lambda r: (round(r['dc'] / step), r['tight'], not r['seen'], r['edge'], r['dr']))
+        rows.sort(key=lambda r: (r['edge'], round(r['dc'] / step), r['tight'], not r['seen'], r['dr']))
     else:                       # until 04-11: free space, centre, seen, border, then distance
         rows.sort(key=lambda r: (r['tight'], not r['center'], not r['seen'], r['edge'],
                                  round(r['dc'] / step), r['dr']))
