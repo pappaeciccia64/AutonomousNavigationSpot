@@ -105,6 +105,16 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps):
             if self._seen_only:
                 return True
 
+            # The first turn in the planning thread (attempt_cruise.THREAD_FIRST_TURN): straight
+            # into the cruise; the stop-and-go loop below only if its first plan does not allow it.
+            if self._can_start_from_thread():
+                self.loop_iter = 1
+                outcome = self._cruise(from_thread=True)
+                if outcome is FAILED:
+                    return False
+                if outcome is STOP:
+                    return self._finish()
+
             while self.path_waypoints and len(self.path_waypoints) > 0:
                 outcome = self._loop_once()
                 if outcome is FAILED:

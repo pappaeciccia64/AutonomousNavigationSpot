@@ -109,6 +109,17 @@ CRUISE_SWITCH = True
 # The main thread waits at most this for the next cell prepared by the thread; then the cruise
 # ends with the hand-off as before (the robot walks the stretch sent, ~3 s).
 CRUISE_SWITCH_WAIT_S = 3.0
+# THE FIRST TURN IN THE PLANNING THREAD (11-11, user's request): after the attempt start (goal
+# and path) the cruise starts at once, and its first command comes from the first plan of the
+# thread -- scan, maps, edges, Dijkstra, frontier, the same cycle as every other -- instead of
+# a turn of the stop-and-go made by the main thread first (the same work with its own code).
+# The checks of that turn stay, on the plan: a confirmed stretch of at least CRUISE_MIN_AHEAD_M,
+# the rotation towards the first node clear with the body (decisions.rotation_plan standing;
+# with CHAIN_TURN_EXTRA_AIR_M more air while walking). If the first plan does not allow to
+# start, the thread stops and the stop-and-go takes the turn (wait, block, rotation refused,
+# tight space: the exceptions). False = the stop-and-go turn first, as before.
+THREAD_FIRST_TURN = True
+FIRST_PLAN_WAIT_S = 3.0
 CHAIN_SCAN_MAX_AGE_S = 2.0
 # Gait in cruise: back to a lighter level only after the plans have asked for it this long
 # (04-11 14:08: 239 changes in 20 min, one every 5 s, without it).
@@ -255,9 +266,77 @@ class CruiseSteps:
             g._gait_hint_since = None
         return kwargs
 
-    def _cruise(self):
+    def _can_start_from_thread(self):
+        """THREAD_FIRST_TURN: the attempt may start straight into the cruise."""
+        return (THREAD_FIRST_TURN and CONTINUOUS_MOTION and self.verification_tracker is not None
+                and hasattr(self.verification_tracker, 'start_planning') and not self.mobility_kwargs
+                and bool(self.path_waypoints))
+
+    def _first_plan(self, planner):
+        """THREAD_FIRST_TURN: the planner starts and its first plan (with data) is the first turn
+        of the attempt. The plan if the robot can start on it (confirmed stretch, rotation towards
+        the first node clear), None otherwise: then the planning is stopped and the stop-and-go
+        takes the turn. Leaves the robot pose, scan, snapshot, frontier and polyline of the plan."""
+        tracker = self.verification_tracker
+        tracker.start_planning(planner, planning_cycle.PLAN_PERIOD_S)
+        t0, plan = time.time(), None
+        while time.time() - t0 < FIRST_PLAN_WAIT_S:
+            time.sleep(CRUISE_POLL_S)
+            p = tracker.get_plan()
+            if p is not None and p.get('status') not in ('no_scan', 'error'):
+                plan = p
+                break
+        moving = getattr(self.env, '_moving_pc', None) is not None
+        why = None
+        if plan is None:
+            why = f"no plan from the planning thread within {FIRST_PLAN_WAIT_S:.0f} s"
+        else:
+            self.robot_x, self.robot_y, self.robot_yaw = plan['robot']
+            if planner.last_scan is not None:
+                self.scan, self.snap = planner.last_scan, planner.last_snap
+            self.frontier, self.polyline = plan['frontier'], plan['polyline']
+            sw = plan.get('switch')
+            if sw is not None and sw.get('kind') == 'end':
+                why = sw.get('reason')
+            elif sw is not None and sw.get('kind') in ('goal', 'cell'):
+                planner.switch_info = None
+                self._apply_switch(sw, self.robot_x, self.robot_y)
+            if why is None and plan['status'] != 'ok':
+                why = f"first plan '{plan['status']}'"
+            if why is None and plan['advance'] < CRUISE_MIN_AHEAD_M:
+                f = plan['frontier']
+                why = (f"first plan: {plan['advance']:.2f} m confirmed ("
+                       + (f"rotation not clear at node {plan['turn_stop']}" if plan['turn_stop'] else f['reason']) + ")")
+            if why is None and len(plan['polyline']) > 1:
+                rot = decisions.rotation_plan(self.robot_yaw, (self.robot_x, self.robot_y), plan['polyline'][1],
+                                              self.frontier['od_robot'], snap=self.snap)
+                limit = motion.PATH_START_IN_PLACE_DEG if moving else motion.LEG_START_IN_PLACE_DEG
+                if not rot['turn']:
+                    why = f"first plan: rotation of {rot['dyaw_deg']:+.0f} deg towards the first node not clear"
+                elif moving and abs(rot['dyaw_deg']) > limit:
+                    if self._turn_clear_while_moving(rot['dyaw_deg']):
+                        print(f"[CRUISE] {rot['dyaw_deg']:+.0f} deg to turn towards the next cell: on the spot "
+                              f"inside the new command, without stopping first (swept area clear with "
+                              f"{100 * CHAIN_TURN_EXTRA_AIR_M:.0f} cm more air).")
+                    else:
+                        why = (f"first plan: {rot['dyaw_deg']:+.0f} deg to turn while walking, swept area not "
+                               f"clear with {100 * CHAIN_TURN_EXTRA_AIR_M:.0f} cm more air")
+        if why is None:
+            MISSION_STATS['thread_first_turns'] = MISSION_STATS.get('thread_first_turns', 0) + 1
+            return plan
+        tracker.stop_planning()
+        MISSION_STATS['thread_first_turn_fallbacks'] = MISSION_STATS.get('thread_first_turn_fallbacks', 0) + 1
+        print(f"[CRUISE] The attempt does not start in cruise ({why}): the stop-and-go takes the turn.")
+        if moving:
+            stop_if_moving(self.env, self.command_client, "first plan not usable while walking")
+        self.need_refresh = True
+        return None
+
+    def _cruise(self, from_thread=False):
         """The cruise (see the module docstring). Returns CONTINUE: the loop looks again
-        with a fresh scan, as after a move."""
+        with a fresh scan, as after a move. from_thread (THREAD_FIRST_TURN): the first command
+        comes from the first plan of the planning thread; None if it does not allow to start
+        (the stop-and-go takes the turn)."""
         tracker = self.verification_tracker
         ids = [self.robot_node_id] + [w[0] for w in self.path_waypoints]
         planner = planning_cycle.CruisePlanner(self.local_grid, self.global_grid, self.prm_graph,
@@ -265,12 +344,21 @@ class CruiseSteps:
         planner.bundle = self._cruise_bundle_info()
         planner.seen_cell = self._seen_cell()
         self._thread_goals(planner)
-        # First stretch: the one confirmed by the frontier of this turn, with the same corner
-        # check the planner will make.
-        adv, turn_stop = planner._turns_within(self.polyline, ids[1:],
-                                               planning_cycle.walk_advance(self.polyline, self.frontier), self.snap)
-        confirmed = planning_cycle._cut_polyline(self.polyline, adv)
-        kwargs = self._cruise_gait(planner._terrain(confirmed, ids[1:]))
+        if from_thread:
+            plan0 = self._first_plan(planner)
+            if plan0 is None:
+                return None
+            ids = [planner.path_ids[0]] + list(plan0['ids'])
+            adv, turn_stop = plan0['advance'], plan0['turn_stop']
+            confirmed = plan0['confirmed']
+            kwargs = self._cruise_gait(plan0['terrain'])
+        else:
+            # First stretch: the one confirmed by the frontier of this turn, with the same corner
+            # check the planner will make.
+            adv, turn_stop = planner._turns_within(self.polyline, ids[1:],
+                                                   planning_cycle.walk_advance(self.polyline, self.frontier), self.snap)
+            confirmed = planning_cycle._cut_polyline(self.polyline, adv)
+            kwargs = self._cruise_gait(planner._terrain(confirmed, ids[1:]))
         path_len = float(sum(np.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(self.polyline, self.polyline[1:])))
         to_goal = turn_stop is None and adv >= path_len - 0.01
         HANDOFF.mark("cruise setup")
@@ -310,7 +398,10 @@ class CruiseSteps:
             pc.send(confirmed[1:], start_in_place_deg=start_in_place, **kwargs)
             HANDOFF.report("first send")
             n_sends += 1
-            tracker.start_planning(planner, planning_cycle.PLAN_PERIOD_S)
+            if from_thread:
+                last_version = plan0['version']       # the planner is running already
+            else:
+                tracker.start_planning(planner, planning_cycle.PLAN_PERIOD_S)
             while reason is None:
                 time.sleep(CRUISE_POLL_S)
                 now = time.time()
