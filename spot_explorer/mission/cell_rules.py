@@ -186,6 +186,8 @@ class CellRules:
         far = None
         excluded = set(map(tuple, exclude)) | self.skip_once
         self.skip_once = set()
+        for rc in excluded:
+            self.status[rc] = "unreachable: no goal with a path when last tried"
         order = sorted((rc for rc in self.open_cells(robot_cell) if rc not in excluded),
                        key=lambda rc: (len(self.failures.get(rc, [])) > 0, self.rank.get(rc, 10 ** 6)))
         far_failed = None

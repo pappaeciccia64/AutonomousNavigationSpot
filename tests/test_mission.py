@@ -72,7 +72,7 @@ from spot_explorer.mission import cell_attempt as _cell_attempt   # noqa: E402
 goal_choice.GOAL_CENTRE_FIRST = False
 _cell_attempt.CELL_SEEN_EXPLORED = False
 from spot_explorer.robot import battery
-from spot_explorer.mission import attempt_legs, cell_attempt, exploration
+from spot_explorer.mission import attempt_cruise, attempt_legs, cell_attempt, exploration
 from spot_explorer.mission import run as mission_run
 from spot_explorer.planning import goal
 from spot_explorer.robot import motion
@@ -81,6 +81,9 @@ from spot_explorer import config
 from spot_explorer import records
 from spot_explorer.perception import spot_grid
 from spot_explorer.robot import connection
+
+# The real frontier tracker, before run() patches it (test_cruise reads it at import).
+_REAL_AVT = safe_frontier.ArcVerificationTracker
 
 CELL = 3.0
 ROWS, COLS = 3, 3
@@ -407,7 +410,8 @@ def _with_battery(from_pct=36.0, points_per_read=1.0):
         config.BATTERY_SAMPLE_S = real_s
 
 
-def run(walls=None, name='MISSION', fiducial=None, stuck_wp0_m=None, wp0_offset_m=None, extra_args=()):
+def run(walls=None, name='MISSION', fiducial=None, stuck_wp0_m=None, wp0_offset_m=None, extra_args=(),
+        cruise=False):
     global FIDUCIAL_TAG
     FIDUCIAL_TAG = fiducial
     T.WORLD, T.ROBOT = T.World(WALLS if walls is None else walls, ghosts=True), T.Robot(*START)
@@ -417,12 +421,29 @@ def run(walls=None, name='MISSION', fiducial=None, stuck_wp0_m=None, wp0_offset_
     gn.stuck_wp0_m = stuck_wp0_m
     gn.wp0_offset_m = wp0_offset_m
     robot = FakeRobot(gn)
+    tracker_factory = lambda r: _Tracker()
+    if cruise:
+        # The continuous motion as in the field: the real-time fake Spot of test_cruise (it walks
+        # the trajectories of the cruise) as command and state client, and the frontier thread
+        # with the planning mode. Imported here: test_cruise switches the cruise on at import.
+        safe_frontier.ArcVerificationTracker = _REAL_AVT
+        import test_cruise as C
+        attempt_cruise.CONTINUOUS_MOTION = True
+        rt = C.RTSpot()
+        robot.state = robot.commands = rt
+        class _CruiseTracker(C.PlanTracker):
+            def start(self):
+                pass
+
+            def stop(self):
+                self._running = False
+        tracker_factory = lambda r: _CruiseTracker()
     connection.setLogInfo = lambda o: (robot, NS(), robot.state, None)
     connection.SimpleEstop = lambda r, n: NS(stop=lambda: None, allow=lambda: None, release=lambda: None)
     bosdyn.client.lease.LeaseKeepAlive = lambda *a, **k: contextlib.nullcontext()
     mission_run.blocking_stand = lambda *a, **k: None
     spot_grid.LocalGrid = lambda r: T.FakeLocalGrid()
-    safe_frontier.ArcVerificationTracker = lambda r: _Tracker()
+    safe_frontier.ArcVerificationTracker = tracker_factory
     attempt_legs.BodyTiltRecorder = records.BodyTiltRecorder = _NoTilt
     config.MISSION_GRAPH_SAMPLING = 'lattice'
 
@@ -438,6 +459,8 @@ def run(walls=None, name='MISSION', fiducial=None, stuck_wp0_m=None, wp0_offset_
             ok = mission_run.main()
     finally:
         sys.argv = argv
+        if cruise:
+            attempt_cruise.CONTINUOUS_MOTION = False
     logs = [os.path.join(dp, f) for dp, _, fs in os.walk(os.path.join(root, "MissionLogs")) for f in fs
             if f == "mission_log.txt"]
     log = open(logs[0]).read() if logs else out.getvalue()
@@ -457,6 +480,21 @@ def _check_common(r, return_ok=True):
         check("return to wp_0: arrived" in log, "return to wp_0 successful")
     check("[FINAL SCAN] Done" in log, "final scan done")
     check("[ANCHORING]" in log, "final anchoring called")
+
+
+def _check_cruise_mission(r):
+    """World A in cruise (the mission as in the field since 11-11): cell rules, the next cell
+    prepared in the planning thread, the first turn of an attempt from the thread."""
+    log = r['log']
+    grid = log.split("--- Cell map ---")[-1].splitlines()[1:ROWS + 1]
+    visited = sum(v == '1' for line in grid for v in line.split()[1:])
+    check(visited == 8, f"all 8 reachable cells visited in cruise (visited {visited})")
+    check("[CRUISE] Start" in log, "the robot moves in cruise")
+    check("done while walking" in log, "at least one cell done while walking, the next prepared in the thread")
+    check("does not start in cruise" not in log or log.count("[CRUISE] Start") > log.count("does not start in cruise"),
+          "the attempts start from the planning thread (stop-and-go only as an exception)")
+    check("Traceback" not in log and "Error in the planning cycle" not in r['out'],
+          "no exception, also in the planning thread")
 
 
 def _check_world(name, r, rules=True):
@@ -742,6 +780,12 @@ if __name__ == '__main__':
         _check_rules_failures(r) if rules else _check_failures(r)
         shutil.rmtree(r['root'], ignore_errors=True)
     cell_rules.CELL_RULES = True
+    print("\nWhole mission in world A IN CRUISE: cell rules, next cell in the planning thread, "
+          "first turn from the thread.")
+    r = run(WORLDS['A'], "MISSION_A_cruise", cruise=True)
+    _check_common(r)
+    _check_cruise_mission(r)
+    shutil.rmtree(r['root'], ignore_errors=True)
     _check_start()
     _check_seen_before_moving()
     _check_cell_choice()
