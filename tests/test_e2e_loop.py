@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.dirname(HERE))   # the spot_explorer package
 
 import matplotlib  # noqa: E402
 matplotlib.use("Agg")
-from spot_explorer.mission import attempt_cruise, attempt_legs, attempt_obstacles, attempt_scan, cell_attempt     # noqa: E402
+from spot_explorer.mission import attempt_cruise, attempt_legs, attempt_obstacles, attempt_scan, cell_attempt, legacy_stop_and_go_start     # noqa: E402
 from spot_explorer import config
 from spot_explorer import records
 from spot_explorer.perception import geometry
@@ -330,7 +330,7 @@ class FakeSampler:
 
 
 # ---- patches: only the boundaries with the robot ----------------------------------------
-attempt_scan.get_a_tform_b = attempt_obstacles.get_a_tform_b = attempt_legs.get_a_tform_b = spot_grid.get_a_tform_b = fake_get_a_tform_b
+attempt_scan.get_a_tform_b = legacy_stop_and_go_start.get_a_tform_b = attempt_obstacles.get_a_tform_b = attempt_legs.get_a_tform_b = spot_grid.get_a_tform_b = fake_get_a_tform_b
 connection.getPosition = lambda rsc: (ROBOT.x, ROBOT.y, -2.7, quat(ROBOT.yaw))
 motion.navigate_to = fake_navigate_to
 motion.move_to_world_point_without_turning = fake_move_no_turn

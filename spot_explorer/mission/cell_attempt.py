@@ -21,6 +21,7 @@ from spot_explorer.mission.attempt_obstacles import ObstacleSteps
 from spot_explorer.mission.attempt_legs import LegSteps
 from spot_explorer.mission import attempt_cruise
 from spot_explorer.mission.attempt_cruise import CruiseSteps
+from spot_explorer.mission.legacy_stop_and_go_start import StopAndGoStart
 
 
 # =========================================================================
@@ -32,7 +33,7 @@ from spot_explorer.mission.attempt_cruise import CruiseSteps
 CELL_SEEN_EXPLORED = True
 CELL_SEEN_FRACTION = 0.90
 
-class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps):
+class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStart):
     """Try to enter cell (target_row, target_col) from the robot's current position.
 
     Scan, update of maps and graph, choice of the goal point, path, then the navigation
@@ -42,8 +43,10 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps):
         swing_height) for all legs, passed down to motion.relative_move through
         navigate_to. Empty = gait chosen leg by leg (select_mobility_params).
 
-    HOW IT IS MADE. _prepare once (_first_scan, _local_data_into_graph, _goal_and_path,
-    _reset_counters), then _loop_once until a phase decides the outcome:
+    HOW IT IS MADE. The start: the first cycle of the planning thread (attempt_cruise:
+    _start_in_thread -- seen check, _local_data_into_graph, _goal_and_path, _reset_counters),
+    then the cruise; in the stop-and-go mode (cruise off) _prepare (legacy_stop_and_go_start).
+    The stop-and-go loop: _loop_once until a phase decides the outcome:
 
       _guards                 too many turns, low battery, fall, robot still for too long
       _scan_and_graph         _fresh_scan, _update_graph, _replan
@@ -100,20 +103,43 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps):
         HANDOFF.mark("choice of the next cell")
         HANDOFF.start("attempt start (robot standing) -> first command", restart=False)
         try:
-            if self._prepare() is FAILED:
-                return False
-            if self._seen_only:
-                return True
-
-            # The first turn in the planning thread (attempt_cruise.THREAD_FIRST_TURN): straight
-            # into the cruise; the stop-and-go loop below only if its first plan does not allow it.
-            if self._can_start_from_thread():
-                self.loop_iter = 1
-                outcome = self._cruise(from_thread=True)
-                if outcome is FAILED:
+            if self._can_start_in_thread():
+                # The attempt start is the first cycle of the planning thread: the main thread
+                # only gets up if fallen and starts the planner (attempt_cruise._start_in_thread).
+                self._prepare_for_thread()
+                started = None
+                for k in range(attempt_cruise.START_TRIES):
+                    self.loop_iter = 1
+                    started = self._cruise_from_start()
+                    if started is not None or self.path_waypoints:
+                        break
+                    print(f"[ATTEMPT] No path from the planning thread within {attempt_cruise.START_PLAN_WAIT_S:.0f} s "
+                          f"(try {k + 1} of {attempt_cruise.START_TRIES}).")
+                if started is FAILED:
                     return False
-                if outcome is STOP:
-                    return self._finish()
+                if started is STOP:
+                    return True if self._seen_only else self._finish()
+                if not self.path_waypoints:
+                    self.loop_iter = 0
+                    self.env._attempt_left_unreachable = True
+                    print(f"[ATTEMPT] Cell ({self.target_row},{self.target_col}): the planning thread gave no path, "
+                          f"left as unreachable now.")
+                    return False
+                self.loop_iter = 0          # the first plan did not allow to start: stop-and-go
+            else:
+                # Stop-and-go mode (cruise off): its own start, legacy_stop_and_go_start.
+                if self._prepare() is FAILED:
+                    return False
+                if self._seen_only:
+                    return True
+                # The first turn in the planning thread (attempt_cruise.THREAD_FIRST_TURN).
+                if self._can_start_from_thread():
+                    self.loop_iter = 1
+                    outcome = self._cruise(from_thread=True)
+                    if outcome is FAILED:
+                        return False
+                    if outcome is STOP:
+                        return self._finish()
 
             while self.path_waypoints and len(self.path_waypoints) > 0:
                 outcome = self._loop_once()
@@ -139,26 +165,18 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps):
                 return outcome
         return CONTINUE
 
-    def _prepare(self):
-        """Before the loop: get up if fallen, first scan, maps and graph, goal point and path,
-        attempt counters. FAILED if it cannot even start."""
+    def _prepare_for_thread(self):
+        """Attempt start in the planning thread: what stays in the main thread before the planner starts -- get up if
+        fallen (and leave the spot of the fall), global maps created if this is the first attempt."""
         self.mobility_kwargs = self.mobility_kwargs or {}
-
-        print(f"\n[ATTEMPT] Trying to enter cell ({self.target_row},{self.target_col}) from the current position...")
-
-        scan = self._first_scan()
-        if scan is None:
-            return FAILED
-        seen = self._cell_already_seen()
-        HANDOFF.mark("seen check")
-        if seen:
-            return STOP
-        self._local_data_into_graph(scan)
-        outcome = self._goal_and_path(scan)
-        if outcome is not None:
-            return outcome
-        self._reset_counters()
-        HANDOFF.mark("attempt counters")
+        print(f"\n[ATTEMPT] Trying to enter cell ({self.target_row},{self.target_col}) from the current position "
+              f"(start in the planning thread)...")
+        if motion.check_and_recover_fall(self.robot_state_client, self.command_client,
+                                         self.global_grid.global_occupancy_map, "at the start of the attempt") is not None:
+            recovery.retreat_along_traveled_path(self.env, self.robot_state_client, self.command_client,
+                                                 mobility_kwargs=self.mobility_kwargs)
+        self._ensure_global_maps()
+        self.path_waypoints = []
 
     def _cell_already_seen(self):
         """

@@ -762,14 +762,14 @@ class EdgeEvaluation:
         from the best to the coarsest:
           1. the current scan (self.current_terrain_2d);
           2. the global height map, for a stretch already seen but now outside the window;
-          3. the mean slope of the two nodes, all on the longitudinal component.
+          3. none (11-11): an edge never seen costs its length only.
         precomputed_slope: profile already computed by the caller (3 or 6 values), so it is not redone.
 
         Roughness: 90th percentile of the per-cell field along the stretch (OCCUPANCY_SAMPLES_PER_M
-        samples per metre); outside the scan, the mean of the nodes. need_roughness=False
+        samples per metre); outside the scan, 0. need_roughness=False
         skips it (with gamma = 0 it does not enter the cost).
 
-        node_idx1/node_idx2: node ids, for the global map cache and for the fallback.
+        node_idx1/node_idx2: node ids, for the global map cache.
         """
         dist = float(np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2))
         num_samples = max(OCCUPANCY_SAMPLES_MIN, int(dist * OCCUPANCY_SAMPLES_PER_M))
@@ -793,12 +793,7 @@ class EdgeEvaluation:
                 if 0 <= row_idx < num_rows and 0 <= col_idx < num_cols:
                     sampled_roughness.append(self.current_rough_2d[row_idx, col_idx])
 
-        if sampled_roughness:
-            actual_roughness = slopes.p90(sampled_roughness)
-        else:
-            r1 = self.node_roughness.get(node_idx1, 0.0)
-            r2 = self.node_roughness.get(node_idx2, 0.0)
-            actual_roughness = float((r1 + r2) / 2.0)
+        actual_roughness = slopes.p90(sampled_roughness) if sampled_roughness else 0.0
 
         # --- Slope: directional and with the body (body_slope), from the live scan ---
         if precomputed_slope is None:
@@ -814,11 +809,10 @@ class EdgeEvaluation:
                 source = 'global_map'
 
         if not has_slope_data:
-            # No data from any source: mean of the nodes, all on the longitudinal.
-            grad1 = self.node_gradients.get(node_idx1, 0.0)
-            grad2 = self.node_gradients.get(node_idx2, 0.0)
-            longitudinal_slope = float((grad1 + grad2) / 2.0)
-            lateral_slope = 0.0
+            # No data from any source: the edge costs its length only. (Until 11-11 the mean
+            # slope of the two nodes: values read only at the attempt start, at the node point,
+            # meaningless for the stretch in between that nobody has seen.)
+            longitudinal_slope, lateral_slope = 0.0, 0.0
             source = 'fallback_nodes'
 
         # Statistics: only for the summary, they decide nothing.
@@ -1182,22 +1176,13 @@ class EdgeEvaluation:
     def _add_edge_without_data(self, idx1: int, idx2: int, dist: float) -> bool:
         """
         AREA WITHOUT DATA: edge on which no source has information (outside the scan, global
-        terrain map certainly without data, occupancy free, not blocked, gamma = 0).
-        _evaluate_and_add_edge would end up at the fallback cost (length + mean slope of the
-        nodes): here it is computed directly, with the same formula and the same counters,
-        result identical to the bit. Only for adjacencies just cleared (fresh).
+        terrain map certainly without data, occupancy free, not blocked, gamma = 0). Cost: its
+        length only, as _evaluate_and_add_edge would give, same counters. Only for adjacencies
+        just cleared (fresh).
         """
-        grad1 = self.node_gradients.get(idx1, 0.0)
-        grad2 = self.node_gradients.get(idx2, 0.0)
-        longitudinal_slope = float((grad1 + grad2) / 2.0)
-        lateral_slope = 0.0
-        r1 = self.node_roughness.get(idx1, 0.0)
-        r2 = self.node_roughness.get(idx2, 0.0)
-        actual_roughness = float((r1 + r2) / 2.0)
         self.slope_source_counts['fallback_nodes'] += 1
         self.last_slope_source = 'fallback_nodes'
-        weight = float((self.alpha * dist) + (self.beta * float(longitudinal_slope)) +
-                       (self.beta_lateral * float(lateral_slope)) + (self.gamma * actual_roughness))
+        weight = float(self.alpha * dist)
         self.edges.setdefault(idx1, []).append((idx2, weight))
         self.edges.setdefault(idx2, []).append((idx1, weight))
         self.edge_validity[(min(idx1, idx2), max(idx1, idx2))] = True

@@ -85,14 +85,6 @@ CHAIN_CELLS = True              # from a cell goal to the next cell without stop
 # Distance from the goal at which the next cell is chosen: the robot walks it while the next
 # attempt is computed. With 0.6 m (~2 s) it stood still at 46 hand-offs out of 58 on 04-11 14:08.
 CRUISE_HANDOFF_M = 1.0
-# The attempt that starts with the robot still walking (CHAIN_CELLS) uses the last scan of the
-# cruise, already processed and in the global maps, instead of downloading and processing a
-# new one (attempt_scan._first_scan), if it is at most CHAIN_SCAN_MAX_AGE_S old. It serves
-# the graph update and the goal choice; the first move still waits for the fresh scan and
-# frontier of the first turn. Why: on 04-11 16:52 (CORE I/O) the scan at the attempt start
-# with its processing and maps cost ~0.5-1 s of the 4.1-4.7 s hand-offs, on data 0.4 s newer
-# than those the cruise had just put in the maps.
-CHAIN_REUSE_SCAN = True
 # The cruise also hands off as soon as the target cell is seen for at least
 # cell_attempt.CELL_SEEN_FRACTION in the global map (with CELL_SEEN_EXPLORED), wherever the
 # robot is: the cell exists to be seen, the goal is only where to see it from (06-11).
@@ -120,7 +112,12 @@ CRUISE_SWITCH_WAIT_S = 3.0
 # tight space: the exceptions). False = the stop-and-go turn first, as before.
 THREAD_FIRST_TURN = True
 FIRST_PLAN_WAIT_S = 3.0
-CHAIN_SCAN_MAX_AGE_S = 2.0
+# The attempt start (scan, seen check, local data into the graph, goal, path) is the first cycle
+# of the planning thread (_start_in_thread, 11-11): the first plan may take this long, that
+# cycle also chooses the goal (Dijkstra included). Without a path by then the start is tried once
+# more, then the cell is left as unreachable now (not a failure).
+START_PLAN_WAIT_S = 10.0
+START_TRIES = 2
 # Gait in cruise: back to a lighter level only after the plans have asked for it this long
 # (04-11 14:08: 239 changes in 20 min, one every 5 s, without it).
 GAIT_DOWN_HOLD_S = 2.0
@@ -266,6 +263,44 @@ class CruiseSteps:
             g._gait_hint_since = None
         return kwargs
 
+    def _start_in_thread(self, planner, scan, robot):
+        """
+        IN THE PLANNING THREAD (CruisePlanner.switch_job of the first cycle, THREAD_FIRST_TURN):
+        the attempt start on the fresh scan of the cycle -- cell already seen? local data into
+        the graph and the edges of the areas with new data, robot node, goal and path (the same
+        steps of the stop-and-go start, attempt_scan) -- then the cycle plans on that path. The
+        main thread waits for the first plan (_first_plan) and does not touch graph and maps.
+        Returns the 'switch' of the plan: kind 'start' with the path, 'seen', or 'nogoal'.
+        """
+        t0 = time.perf_counter()
+        self.robot_x, self.robot_y, self.robot_yaw = robot
+        self.scan = scan
+        HANDOFF.mark("first scan of the planning thread")
+        if self._cell_already_seen():
+            return dict(kind='seen')
+        HANDOFF.mark("seen check")
+        self._local_data_into_graph(scan)
+        if self._goal_and_path(scan) is FAILED or not self.path_waypoints:
+            return dict(kind='nogoal')
+        self._reset_counters()
+        self.loop_iter = 1          # the cruise is the first turn (_reset_counters puts 0)
+        from spot_explorer.mission.attempt_scan import save_global_maps
+        save_global_maps(self.global_grid, self.mission_folder)
+        HANDOFF.mark("attempt counters")
+        planner.path_ids = [self.robot_node_id] + [w[0] for w in self.path_waypoints]
+        planner._seg = 0
+        planner._not_edges = {(a, b) for a, b in zip(planner.path_ids, planner.path_ids[1:])
+                              if not planning_cycle._edge_in_graph(self.prm_graph, a, b)}
+        planner.goal_id = self.goal_id
+        self._thread_goals(planner)
+        return dict(kind='start', prep_s=time.perf_counter() - t0)
+
+    def _can_start_in_thread(self):
+        """The whole attempt start can be the first cycle of the planner (cruise on, tracker with
+        the planning mode, gait not forced)."""
+        return (THREAD_FIRST_TURN and CONTINUOUS_MOTION and self.verification_tracker is not None
+                and hasattr(self.verification_tracker, 'start_planning') and not self.mobility_kwargs)
+
     def _can_start_from_thread(self):
         """THREAD_FIRST_TURN: the attempt may start straight into the cruise."""
         return (THREAD_FIRST_TURN and CONTINUOUS_MOTION and self.verification_tracker is not None
@@ -280,7 +315,8 @@ class CruiseSteps:
         tracker = self.verification_tracker
         tracker.start_planning(planner, planning_cycle.PLAN_PERIOD_S)
         t0, plan = time.time(), None
-        while time.time() - t0 < FIRST_PLAN_WAIT_S:
+        wait_s = START_PLAN_WAIT_S if planner.switch_job == self._start_in_thread else FIRST_PLAN_WAIT_S
+        while time.time() - t0 < wait_s:
             time.sleep(CRUISE_POLL_S)
             p = tracker.get_plan()
             if p is not None and p.get('status') not in ('no_scan', 'error'):
@@ -289,18 +325,27 @@ class CruiseSteps:
         moving = getattr(self.env, '_moving_pc', None) is not None
         why = None
         if plan is None:
-            why = f"no plan from the planning thread within {FIRST_PLAN_WAIT_S:.0f} s"
+            why = f"no plan from the planning thread within {wait_s:.0f} s"
         else:
             self.robot_x, self.robot_y, self.robot_yaw = plan['robot']
             if planner.last_scan is not None:
                 self.scan, self.snap = planner.last_scan, planner.last_snap
             self.frontier, self.polyline = plan['frontier'], plan['polyline']
             sw = plan.get('switch')
+            if sw is not None and sw.get('kind') in ('start', 'seen', 'nogoal'):
+                planner.switch_info = None
+                if sw['kind'] == 'seen':
+                    tracker.stop_planning()
+                    return 'seen'
+                if sw['kind'] == 'nogoal':
+                    tracker.stop_planning()
+                    return 'nogoal'
+                sw = None
             if sw is not None and sw.get('kind') == 'end':
                 why = sw.get('reason')
             elif sw is not None and sw.get('kind') in ('goal', 'cell'):
                 planner.switch_info = None
-                self._apply_switch(sw, self.robot_x, self.robot_y)
+                self._apply_switch(sw)
             if why is None and plan['status'] != 'ok':
                 why = f"first plan '{plan['status']}'"
             if why is None and plan['advance'] < CRUISE_MIN_AHEAD_M:
@@ -332,20 +377,43 @@ class CruiseSteps:
         self.need_refresh = True
         return None
 
-    def _cruise(self, from_thread=False):
+    def _cruise_from_start(self):
+        """THREAD_FIRST_TURN with the attempt start in the thread: the planner starts with a
+        placeholder path at the robot node, its first cycle runs _start_in_thread. Returns as
+        _cruise, or STOP (cell already seen), FAILED (no goal), None (stop-and-go)."""
+        tracker = self.verification_tracker
+        start = self.prm_graph.robot_node if self.prm_graph.robot_node in self.prm_graph.nodes \
+            else next(iter(self.prm_graph.nodes))
+        planner = planning_cycle.CruisePlanner(self.local_grid, self.global_grid, self.prm_graph,
+                                               self.robot_state_client, start, [start])
+        planner.bundle = self._cruise_bundle_info()
+        planner.seen_cell = self._seen_cell()
+        planner.switch_job = self._start_in_thread
+        return self._cruise(from_thread=True, planner=planner)
+
+    def _cruise(self, from_thread=False, planner=None):
         """The cruise (see the module docstring). Returns CONTINUE: the loop looks again
         with a fresh scan, as after a move. from_thread (THREAD_FIRST_TURN): the first command
         comes from the first plan of the planning thread; None if it does not allow to start
         (the stop-and-go takes the turn)."""
         tracker = self.verification_tracker
-        ids = [self.robot_node_id] + [w[0] for w in self.path_waypoints]
-        planner = planning_cycle.CruisePlanner(self.local_grid, self.global_grid, self.prm_graph,
-                                               self.robot_state_client, self.goal_id, ids)
-        planner.bundle = self._cruise_bundle_info()
-        planner.seen_cell = self._seen_cell()
-        self._thread_goals(planner)
+        if planner is None:
+            ids = [self.robot_node_id] + [w[0] for w in self.path_waypoints]
+            planner = planning_cycle.CruisePlanner(self.local_grid, self.global_grid, self.prm_graph,
+                                                   self.robot_state_client, self.goal_id, ids)
+            planner.bundle = self._cruise_bundle_info()
+            planner.seen_cell = self._seen_cell()
+            self._thread_goals(planner)
         if from_thread:
             plan0 = self._first_plan(planner)
+            # Seen or no goal: only computations, no command of this attempt -- the robot keeps
+            # walking if it was (hand-off), as an attempt that ends before its loop.
+            if plan0 == 'seen':
+                self._seen_only, self.loop_iter = True, 0
+                return STOP
+            if plan0 == 'nogoal':
+                self.loop_iter = 0
+                return FAILED
             if plan0 is None:
                 return None
             ids = [planner.path_ids[0]] + list(plan0['ids'])
@@ -398,6 +466,7 @@ class CruiseSteps:
             pc.send(confirmed[1:], start_in_place_deg=start_in_place, **kwargs)
             HANDOFF.report("first send")
             n_sends += 1
+            self._visit_after_send()
             if from_thread:
                 last_version = plan0['version']       # the planner is running already
             else:
@@ -464,7 +533,7 @@ class CruiseSteps:
                     continue
                 bad, last_plan_t = 0, now
                 sw = plan.get('switch')
-                if sw is not None and sw.get('id') == last_switch_id:
+                if sw is not None and (sw.get('id') == last_switch_id or sw.get('kind') in ('start', 'seen', 'nogoal')):
                     sw = None         # already applied (it stays in the plans until cleared)
                 if switch_pending and sw is None:
                     if now - switch_t0 > CRUISE_SWITCH_WAIT_S:
@@ -487,8 +556,7 @@ class CruiseSteps:
                     # Prepared by the thread on a path lost (_on_no_path): applied at once.
                     last_switch_id = sw.get('id')
                     planner.switch_info = None
-                    rx0, ry0 = (r['x'], r['y']) if r['x'] is not None else plan['robot'][:2]
-                    self._apply_switch(sw, rx0, ry0)
+                    self._apply_switch(sw)
                     to_goal, report_switch = False, True
                     sw = None
                 if sw is not None:
@@ -500,8 +568,7 @@ class CruiseSteps:
                                            f"(not prepared in cruise: {sw.get('reason')})"), True
                         HANDOFF.start("hand-off (end of the cruise -> first command of the next move)")
                         break
-                    rx0, ry0 = (r['x'], r['y']) if r['x'] is not None else plan['robot'][:2]
-                    self._apply_switch(sw, rx0, ry0)
+                    self._apply_switch(sw)
                     to_goal, report_switch = False, True
                 if plan['status'] == 'edge_blocked':
                     reason = "the edge being walked is out of the graph"
@@ -620,7 +687,9 @@ class CruiseSteps:
                 if report_switch:
                     HANDOFF.report("first send towards the next cell")
                     report_switch = False
+                self._visit_after_send()
         finally:
+            self._visit_after_send()     # cruise ended before a send towards the next cell
             if handoff:
                 self.env._moving_pc = pc          # still walking to the goal: see CHAIN_CELLS
             elif not arrived:
@@ -633,9 +702,6 @@ class CruiseSteps:
                                    f"{self.loop_iter:03d}_{time.strftime('%H-%M-%S')}",
                                    extra={'reason': reason})
             tracker.stop_planning()
-            # The last scan of the cruise, for the next attempt (CHAIN_REUSE_SCAN).
-            self.env._chain_scan = ((planner.last_scan, time.time())
-                                    if handoff and planner.last_scan is not None else None)
             if crumb is not None:
                 crumb.join(timeout=5.0)
             self.env._moving_track = (recorder, (self.target_x, self.target_y),
@@ -752,7 +818,7 @@ class CruiseSteps:
             return info
         info['choice'] = choice
         if not choice.near:
-            info['reason'] = f"next cell ({choice.row},{choice.col}) {choice.length:.1f} m away: GraphNav"
+            info['reason'] = f"next cell ({choice.row},{choice.col}) way costing {choice.length:.1f} (m on flat ground): GraphNav"
             return info
         prev_id, next_id = self._robot_edge(planner, robot)
         prm.clear_penalties_for_attempt()
@@ -808,7 +874,7 @@ class CruiseSteps:
         planner.no_path_job = None
         return dict(kind='end', left=(row, col), reason=f"no goal with a path in cell ({row},{col})")
 
-    def _apply_switch(self, sw, x, y):
+    def _apply_switch(self, sw):
         """MAIN THREAD, a plan with what the planning thread prepared (see _prepare_next_cell,
         _on_no_path): kind 'goal' -- a new goal in the same cell; kind 'cell' -- the next cell
         (with done: the GraphNav waypoint of the cell done, exploration env._on_chained_visit;
@@ -827,9 +893,12 @@ class CruiseSteps:
             return
         done, nxt = sw.get('done'), sw['next']
         if done is not None:
+            # The GraphNav waypoint of the cell done (a call to the robot, ~0.8 s): AFTER the
+            # first command towards the next cell (_visit_after_send), not before it -- the
+            # robot must not finish the old command and stop meanwhile.
             cb = getattr(self.env, '_on_chained_visit', None)
             if cb is not None:
-                cb(done[0], done[1], x, y)
+                self._pending_visit = functools.partial(cb, done[0], done[1])
             what = f"Cell ({done[0]},{done[1]}) done while walking ({sw['why']})"
         else:
             left = sw['left']
@@ -839,9 +908,19 @@ class CruiseSteps:
         self.tried_goals, self.goal_repicks = [], 0
         self.env._chain_choice = sw['choice']
         MISSION_STATS['cruise_switches'] = MISSION_STATS.get('cruise_switches', 0) + 1
-        HANDOFF.mark("next cell prepared, waypoint of the cell done")
+        HANDOFF.mark("next cell prepared")
         print(f"[CRUISE] {what}: next cell ({nxt[0]},{nxt[1]}), goal ({sw['goal'][0]:.2f}, {sw['goal'][1]:.2f}), "
               f"{sw['n_nodes']} nodes, prepared in the planning thread in {sw['prep_s']:.2f} s.")
+
+    def _visit_after_send(self):
+        """The waypoint of the cell done (see _apply_switch), once the robot walks towards the
+        next cell. The cell is marked visited there too."""
+        job, self._pending_visit = getattr(self, '_pending_visit', None), None
+        if job is not None:
+            # Where the robot is NOW: the waypoint is recorded there (create_default_waypoint).
+            x, y, _, _ = connection.getPosition(self.robot_state_client)
+            job(x, y)
+            HANDOFF.mark("waypoint of the cell done, while walking")
 
     def _seen_cell(self):
         """(env, row, col) of the target cell for the planner's 'cell_seen', None if the seen

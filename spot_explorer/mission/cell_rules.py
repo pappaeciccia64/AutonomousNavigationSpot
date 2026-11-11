@@ -19,7 +19,12 @@ it crosses into the cell (one of the 8 around it; None if the robot is already i
 replaces the four sides. Not the edge itself: a cell is entered by dozens of edges, and on the
 forced failures of test_mission one cell failed 3 times by 3 edges from the same side.
 
-The choice: among the candidates whose way is at most NEAR_PATH_M long, the first in the
+The length of a way: its Dijkstra cost on the graph of now (the same weights of the attempt:
+length, plus the slopes of the edges already seen, plus the penalties), from the robot node to
+the goal the attempt would choose in the cell (has_goal), not metres plus a straight line to the
+centre (until 11-11). With alpha = 1 a cost is metres on flat ground.
+
+The choice: among the candidates whose way costs at most NEAR_PATH_M, the first in the
 visiting order, reached in cruise; if none is that near, the first in the visiting order
 among all the candidates, reached with GraphNav (the exception, with a stop). A cell that
 already failed comes after all the others (in the visiting order among the failed ones):
@@ -40,8 +45,13 @@ from spot_explorer.planning import roadmap
 from spot_explorer.records import MISSION_STATS
 
 CELL_RULES = True          # False = the rules before 09-11 (exploration.Mission._explore_sides)
-NEAR_PATH_M = 4.0          # a way at most this long is walked in cruise; longer, GraphNav
+NEAR_PATH_M = 4.0          # a way costing at most this (metres on flat ground) is walked in cruise; more, GraphNav
 MAX_FAILURES = 2           # real failures (the robot went and stopped) before setting aside
+# A near choice whose way to the goal crosses a cell not explored yet (possible only with
+# config.PLAN_ONLY_EXPLORED_CELLS = False: paths also through the cells never visited): that cell
+# first, if it has a goal the attempt would accept within NEAR_PATH_M -- the robot is going
+# through it anyway (user, 11-11). Off: the visiting order alone.
+EXPLORE_CELL_ON_THE_WAY = False
 
 
 class Choice:
@@ -62,7 +72,7 @@ class Choice:
 
     def describe(self):
         how = "in cruise" if self.near else "with GraphNav"
-        return f"cell ({self.row},{self.col}), way of {self.length:.1f} m, {self.describe_entry()}: {how}"
+        return f"cell ({self.row},{self.col}), way costing {self.length:.1f} (m on flat ground), {self.describe_entry()}: {how}"
 
 
 class CellRules:
@@ -95,68 +105,99 @@ class CellRules:
         return sorted(near, key=lambda rc: self.rank.get(rc, 10 ** 6))
 
     # --- the way into a cell -------------------------------------------------------------
-    def way_into(self, start, robot_xy, row, col, cells_of):
-        """(length, entry cell, entry edge, node) of the shortest way from node start into cell
-        (row, col) on the graph of now, None if there is none. length = metres to the first node of the
-        cell plus the straight line from there to the centre (where the goal will be)."""
-        prm, env = self.prm, self.env
-        target = (int(row), int(col))
-        allowed = (mission_prm.planning_cells(env, row, col, robot_xy)
-                   if P.PLAN_ONLY_EXPLORED_CELLS else None)
-        centre = env.get_world_position_from_cell(row, col)
-        dist, pred, heap = {start: 0.0}, {start: None}, [(0.0, start)]
-        while heap:
-            d, u = heapq.heappop(heap)
-            if d > dist.get(u, np.inf):
-                continue
-            if cells_of.get(u) == target and np.isfinite(prm.node_penalty(u)):
-                p = pred[u]
-                edge = None if p is None else (p, u)
-                entry = None if p is None else cells_of.get(p)
-                x, y = prm.nodes[u]
-                return d + float(np.hypot(x - centre[0], y - centre[1])), entry, edge, u
-            xu, yu = prm.nodes[u]
-            for v, _w in prm.edges.get(u, ()):
-                if allowed is not None and cells_of.get(v) not in allowed:
-                    continue
-                if not np.isfinite(prm.node_penalty(v)):
-                    continue
-                xv, yv = prm.nodes[v]
-                nd = d + float(np.hypot(xv - xu, yv - yu))
-                if nd < dist.get(v, np.inf):
-                    dist[v], pred[v] = nd, u
-                    heapq.heappush(heap, (nd, v))
-        return None
-
-    def has_goal(self, start, from_xy, row, col, cells_of, global_map, sampler):
-        """Is there a goal of the cell that the attempt starting at from_xy (node start)
-        would accept? The SAME choice as the attempt (goal.find_best_point_in_cell, on the
-        global map: no live scan here), with "reachable" = in the graph from start through
-        the cells the attempt may use. On 09-11 14:38 the rules saw a way into (1,5) (a node
-        of the cell) and the robot went there with GraphNav (22 s) to find no goal reachable."""
-        if global_map is None or sampler is None:
-            return True
+    def _costs(self, start, row, col, from_xy, cells_of, target=None):
+        """Dijkstra from node start on the graph of now, with the weights of the attempt
+        (roadmap.effective_weight: length, slopes seen, penalties), through the cells the attempt
+        may use. target = a cell: stops at the first node in it. (dist, pred, node reached)."""
         prm, env = self.prm, self.env
         allowed = (mission_prm.planning_cells(env, row, col, from_xy)
                    if P.PLAN_ONLY_EXPLORED_CELLS else None)
-        seen, stack = {start}, [start]
-        while stack:
-            u = stack.pop()
-            for v, _w in prm.edges.get(u, ()):
-                if v in seen or (allowed is not None and cells_of.get(v) not in allowed):
+        dist, pred, heap, done = {start: 0.0}, {start: None}, [(0.0, start)], set()
+        while heap:
+            d, u = heapq.heappop(heap)
+            if u in done:
+                continue
+            done.add(u)
+            if target is not None and cells_of.get(u) == target and np.isfinite(prm.node_penalty(u)):
+                return dist, pred, u
+            for v, w in prm.edges.get(u, ()):
+                if v in done or (allowed is not None and cells_of.get(v) not in allowed):
                     continue
-                if not np.isfinite(prm.node_penalty(v)):
-                    continue
-                seen.add(v)
-                stack.append(v)
+                nd = d + prm.effective_weight(u, v, w)
+                if np.isfinite(nd) and nd < dist.get(v, np.inf):
+                    dist[v], pred[v] = nd, u
+                    heapq.heappush(heap, (nd, v))
+        return dist, pred, None
+
+    def way_into(self, start, robot_xy, row, col, cells_of):
+        """(cost, entry cell, entry edge, node) of the cheapest way from node start to the first
+        node of cell (row, col) on the graph of now, None if there is none."""
+        dist, pred, u = self._costs(start, row, col, robot_xy, cells_of, target=(int(row), int(col)))
+        if u is None:
+            return None
+        p = pred[u]
+        return dist[u], (None if p is None else cells_of.get(p)), (None if p is None else (p, u)), u
+
+    def has_goal(self, start, from_xy, row, col, cells_of, global_map, sampler):
+        """The Dijkstra cost from from_xy (node start) to the goal of the cell the attempt would
+        accept, None if there is none. The SAME choice as the attempt (goal.find_best_point_in_cell,
+        on the global map: no live scan here), with "reachable" = in the graph from start through
+        the cells the attempt may use. On 09-11 14:38 the rules saw a way into (1,5) (a node of the
+        cell) and the robot went there with GraphNav (22 s) to find no goal reachable.
+        Without map or sampler: 0.0 (not checked)."""
+        if global_map is None or sampler is None:
+            return 0.0
+        prm, env = self.prm, self.env
+        dist, pred, _u = self._costs(start, row, col, from_xy, cells_of)
+        self.last_goal_path = []
+
+        def anchor(px, py):
+            return prm.anchor_node(px, py, global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M)
 
         def reachable(px, py):
-            nid = prm.anchor_node(px, py, global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M)
-            return nid is not None and nid in seen
-        gx, _gy, _v, _b = goal_choice.find_best_point_in_cell(
+            nid = anchor(px, py)
+            return nid is not None and nid in dist
+        gx, gy, _v, _b = goal_choice.find_best_point_in_cell(
             from_xy[0], from_xy[1], env, row, col, None, None, sampler, global_map=global_map,
             reachable=reachable, quiet=True, require_reachable=True)
-        return gx is not None
+        if gx is None:
+            return None
+        nid = anchor(gx, gy)
+        if nid not in dist:
+            return None
+        path, u = [], nid
+        while u is not None:
+            path.append(u)
+            u = pred[u]
+        self.last_goal_path = path[::-1]     # start -> goal node, for _on_the_way
+        return float(dist[nid])
+
+    def _on_the_way(self, ch, start, robot_xy, robot_cell, cells_of, global_map, sampler, excluded):
+        """EXPLORE_CELL_ON_THE_WAY: the first cell crossed by the way to the goal of ch that is
+        not explored yet (not done, not blocked, not excluded or set aside) and has a goal the
+        attempt would accept within NEAR_PATH_M: chosen instead of ch. ch otherwise."""
+        target = (ch.row, ch.col)
+        crossed = []
+        for n in self.last_goal_path:
+            rc = cells_of.get(n)
+            if rc is None or rc in (target, robot_cell) or rc in crossed:
+                continue
+            crossed.append(rc)
+        for (r, c) in crossed:
+            if (self.env.map[r][c] != 0 or (r, c) in excluded
+                    or len(self.failures.get((r, c), [])) >= MAX_FAILURES):
+                continue
+            way = self.way_into(start, robot_xy, r, c, cells_of)
+            cost = self.has_goal(start, robot_xy, r, c, cells_of, global_map, sampler) if way else None
+            if cost is None or max(way[0], cost) > NEAR_PATH_M:
+                continue
+            x = Choice(r, c, self.rank.get((r, c), 10 ** 6), max(way[0], cost), way[1], way[2], way[3],
+                       self.prm.nodes[way[3]])
+            print(f"[CELL RULES] Cell ({r},{c}) is on the way to ({ch.row},{ch.col}) and not explored yet: "
+                  f"that one first.")
+            MISSION_STATS['cells_on_the_way'] = MISSION_STATS.get('cells_on_the_way', 0) + 1
+            return x
+        return ch
 
     # --- the choice ----------------------------------------------------------------------
     def choose(self, robot_xy, global_map, sampler=None, waypoints=None, exclude=()):
@@ -210,17 +251,24 @@ class CellRules:
                                        f"where it already failed")
                 continue
             ch = Choice(r, c, self.rank.get((r, c), 10 ** 6), length, entry, edge, node, prm.nodes[node])
+            # Near or far: the cost of the way to the goal the attempt would choose (at least
+            # the cost to the first node of the cell, so a cell beyond that is far anyway).
+            cost = self.has_goal(start, robot_xy, r, c, cells_of, global_map, sampler) if ch.near else None
+            if cost is not None:
+                ch.length = max(length, cost)
+            ch.near = cost is not None and ch.length <= NEAR_PATH_M
             if ch.near:
-                ok = self.has_goal(start, robot_xy, r, c, cells_of, global_map, sampler)
+                ok = True
             elif waypoints:
                 nx, ny = ch.node_xy
                 ch.waypoint = min(waypoints.items(), key=lambda kv: np.hypot(kv[1]['x'] - nx, kv[1]['y'] - ny))
                 wxy = (float(ch.waypoint[1]['x']), float(ch.waypoint[1]['y']))
                 wstart = prm.anchor_node(wxy[0], wxy[1], global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M,
                                          ignore_near_m=roadmap.ANCHOR_IGNORE_NEAR_M, connected_first=True)
-                ok = wstart is not None and self.has_goal(wstart, wxy, r, c, cells_of, global_map, sampler)
+                ok = wstart is not None and self.has_goal(wstart, wxy, r, c, cells_of, global_map, sampler) is not None
             else:
-                ok = True
+                # No waypoints to check from: far is fine, near without a goal is not.
+                ok = cost is not None or length > NEAR_PATH_M
             if not ok:
                 self.status[(r, c)] = ("unreachable: a way into the cell, but no goal the attempt "
                                        "would accept is reachable" + ("" if ch.near else " from the waypoint"))
@@ -231,6 +279,8 @@ class CellRules:
                     far_failed = ch
                 continue
             if ch.near:
+                if EXPLORE_CELL_ON_THE_WAY:
+                    ch = self._on_the_way(ch, start, robot_xy, robot_cell, cells_of, global_map, sampler, excluded)
                 return ch
             if far is None:
                 far = ch

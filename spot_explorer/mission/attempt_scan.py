@@ -56,104 +56,18 @@ def save_global_maps(global_grid, folder, force=False):
 class ScanSteps:
     """Mixin of CellAttempt: the state is CellAttempt's, see its docstring for the map of the phases."""
 
-    def _first_scan(self):
-        """Get up if fallen, first scan of the attempt, robot pose, global maps updated and
-        saved. The processed scan, or None if it does not arrive."""
-        # The robot gets here from another move (navigation between cells, retreat): if it
-        # fell in the meantime it gets up before anything else. Raises RobotFallenError if it cannot.
-        # Then it leaves the hazard disk by retracing its steps: once up, it is still INSIDE
-        # the spot of the fall, and from there every PRM edge would be discarded.
-        if motion.check_and_recover_fall(self.robot_state_client, self.command_client,
-                                   self.global_grid.global_occupancy_map, "at the start of the attempt") is not None:
-            recovery.retreat_along_traveled_path(self.env, self.robot_state_client, self.command_client,
-                                        mobility_kwargs=self.mobility_kwargs)
-
-        reused = self._chained_scan()
-        if reused is not None:
-            return reused
-
-        # 1. The scan: the layers in one request, then (below) their processing
-        scan = self.local_grid.fetch_scan(self.robot_state_client)
-        HANDOFF.mark("scan download")
-        if scan is None:
-            print("[ERROR] Local grid acquisition failed.")
-            return None
-        main_proto = scan.proto
-        pts, cells_obstacle_dist = scan.pts, scan.od
-        num_x, num_y, cell_size = scan.num_x, scan.num_y, scan.cell_size
-
-        # =========================================================================
-        # GLOBAL MAPS: created at the first scan, then accumulated for the whole mission
-        # =========================================================================
+    def _ensure_global_maps(self, cell_size=0.03):
+        """GLOBAL MAPS: created at the first attempt (resolution of the local grid, 3 cm), then
+        accumulated for the whole mission."""
         if self.global_grid.global_occupancy_map is None:
             self.global_grid.global_occupancy_map = global_maps.GlobalGrid(resolution=cell_size)
             print("[MAP] Initialized new persistent global occupancy map.")
-
-        # Global height map: same native resolution as the local grid (no
-        # reduction), created like the occupancy one.
         if self.global_grid.global_terrain_map is None:
             self.global_grid.global_terrain_map = global_maps.GlobalTerrainGrid(resolution=cell_size)
             print("[MAP] Initialized new persistent global terrain map (height).")
-
         self.global_map = self.global_grid.global_occupancy_map
         self.global_terrain_map = self.global_grid.global_terrain_map
-
-        transforms_snapshot = main_proto.local_grid.transforms_snapshot
-        vision_tform_body = get_a_tform_b(transforms_snapshot, VISION_FRAME_NAME, BODY_FRAME_NAME)
-        self.robot_x, self.robot_y, self.robot_z = vision_tform_body.position.x, vision_tform_body.position.y, vision_tform_body.position.z
-
-        quat = vision_tform_body.rotation
-        self.robot_yaw = np.arctan2(2.0 * (quat.w * quat.z + quat.x * quat.y), 1.0 - 2.0 * (quat.y ** 2 + quat.z ** 2))
-
-        # 2. Body footprint, corrected terrain (from here on only terrain_real is used),
-        # slope and roughness, obstacle mask
-        self.local_grid.process_scan(scan, self.robot_x, self.robot_y, self.robot_yaw,
-                                ground_label="scan-initial")
-        HANDOFF.mark("scan processing")
-        terrain_real, is_valid = scan.terrain, scan.is_valid
-        obstacle_mask = scan.obstacle_mask
-
-        # Update the global maps (occupancy and terrain) with the data just processed
-        global_maps.fold_scan_into_global_maps(self.global_map, self.global_terrain_map, pts, terrain_real, obstacle_mask,
-                                   is_valid, cells_obstacle_dist, (num_y, num_x),
-                                   (self.robot_x, self.robot_y, self.robot_yaw))
-
-        # The terrain map serves the PRM as a fallback for the slope
         self.prm_graph.set_global_terrain_map(self.global_terrain_map)
-        HANDOFF.mark("global maps")
-
-        # Global maps on disk (.pkl): at most every MAPS_SAVE_EVERY_S
-        save_global_maps(self.global_grid, self.mission_folder)
-        HANDOFF.mark("maps on disk")
-        return scan
-
-    def _chained_scan(self):
-        """
-        attempt_cruise.CHAIN_REUSE_SCAN: robot still walking after a hand-off and the last scan
-        of the cruise at most CHAIN_SCAN_MAX_AGE_S old -> that scan (already processed and in
-        the global maps), with the robot pose of NOW (the robot kept walking). None otherwise.
-        """
-        reuse = getattr(self.env, '_chain_scan', None)
-        if (not attempt_cruise.CHAIN_REUSE_SCAN or reuse is None
-                or getattr(self.env, '_moving_pc', None) is None or self.global_grid.global_occupancy_map is None):
-            return None
-        scan, t_scan = reuse
-        age = time.time() - t_scan
-        if age > attempt_cruise.CHAIN_SCAN_MAX_AGE_S:
-            return None
-        self.global_map = self.global_grid.global_occupancy_map
-        self.global_terrain_map = self.global_grid.global_terrain_map
-        x, y, z, quat = connection.getPosition(self.robot_state_client)
-        self.robot_x, self.robot_y, self.robot_z = x, y, z
-        self.robot_yaw = np.arctan2(2.0 * (quat.w * quat.z + quat.x * quat.y), 1.0 - 2.0 * (quat.y ** 2 + quat.z ** 2))
-        self.prm_graph.set_global_terrain_map(self.global_terrain_map)
-        print(f"[ATTEMPT] Scan of the cruise reused ({age:.1f} s old, already in the maps): no new scan "
-              f"at the start of the attempt.")
-        MISSION_STATS['chained_scans_reused'] = MISSION_STATS.get('chained_scans_reused', 0) + 1
-        HANDOFF.mark("scan of the cruise reused")
-        save_global_maps(self.global_grid, self.mission_folder)
-        HANDOFF.mark("maps on disk")
-        return scan
 
     def _local_data_into_graph(self, scan):
         """Terrain, slope and obstacles of the scan into the PRM, then edge update."""
@@ -169,8 +83,6 @@ class ScanSteps:
         # ================================================================== #
         # LOCAL DATA INTO THE PRM: terrain, slope and roughness of the scan
         # ================================================================== #
-        local_x_min, local_x_max = pts[:, 0].min(), pts[:, 0].max()
-        local_y_min, local_y_max = pts[:, 1].min(), pts[:, 1].max()
 
         grid_frame_name = main_proto.local_grid.frame_name_local_grid_data
         vision_tform_grid = get_a_tform_b(transforms_snapshot, VISION_FRAME_NAME, grid_frame_name)
@@ -190,28 +102,6 @@ class ScanSteps:
             grid_origin_y=grid_origin_y,
             cell_size=cell_size
         )
-
-        # Gradient and roughness of the PRM nodes inside the local grid; those outside keep the
-        # value they have (0.0 if they do not have one yet)
-        for node_id, (nx, ny) in self.prm_graph.nodes.items():
-            if local_x_min <= nx <= local_x_max and local_y_min <= ny <= local_y_max:
-                dx = nx - grid_origin_x
-                dy = ny - grid_origin_y
-
-                col_idx = int(dx / cell_size)
-                row_idx = int(dy / cell_size)
-
-                if 0 <= row_idx < num_y and 0 <= col_idx < num_x:
-                    flat_idx = row_idx * num_x + col_idx
-                    if flat_idx < len(grad_values):
-                        self.prm_graph.node_gradients[node_id] = grad_values[flat_idx]
-                    if flat_idx < len(rough_values):
-                        self.prm_graph.node_roughness[node_id] = rough_values[flat_idx]
-            else:
-                if node_id not in self.prm_graph.node_gradients:
-                    self.prm_graph.node_gradients[node_id] = 0.0
-                if node_id not in self.prm_graph.node_roughness:
-                    self.prm_graph.node_roughness[node_id] = 0.0
 
         HANDOFF.mark("scan into the PRM")
         # The scan just made also goes into the preliminary edge discard
