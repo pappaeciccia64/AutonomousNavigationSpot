@@ -268,8 +268,7 @@ class CruiseSteps:
         # First stretch: the one confirmed by the frontier of this turn, with the same corner
         # check the planner will make.
         adv, turn_stop = planner._turns_within(self.polyline, ids[1:],
-                                               safe_frontier.allowed_advance(self.frontier), self.snap)
-        adv = planning_cycle.snap_to_node(self.polyline, adv)
+                                               planning_cycle.walk_advance(self.polyline, self.frontier), self.snap)
         confirmed = planning_cycle._cut_polyline(self.polyline, adv)
         kwargs = self._cruise_gait(planner._terrain(confirmed, ids[1:]))
         path_len = float(sum(np.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(self.polyline, self.polyline[1:])))

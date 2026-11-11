@@ -8,6 +8,10 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-11 (an edge is walked only if confirmed free whole)
+
+- **`planning_cycle.WHOLE_EDGES` ON, with the nose only at the goal** (`walk_advance`, used by the planning cycle and by the first send of the cruise): the confirmed stretch ends at the last node reached by edges confirmed free whole on the scan of the cycle (the first point not free or not seen along the path is beyond it), not half a body + margin before that point. The 0.65 m of the nose stay where the robot stops for good: on the edge to the goal (as far as the frontier allows with the nose, if beyond the goal it is not seen yet) and on the edge the robot is already on when it is not confirmed whole (an obstacle appearing). User's point: the padding of the edge (0.30 m) already keeps it away from obstacles, the extra piece beyond a node is needed only to stop there. If the robot ever stops on an intermediate node: 0.30 m around it from the edge, sharp corners checked with the whole body (`_turns_within`), Spot's body obstacle avoidance on. `test_cruise` with edges up to 1.25 m: open field and wall 1 cruise, no stop for end of data; step C 1 cruise (before 10-11's first version: 5-6 cruises, 4 stops); all suites OK. Not tried on the robot.
+
 ## 2026-11-10 (where the robot stops: the ends of its edge)
 
 - **After a cruise the robot node is an end of the edge it is on** (`attempt_cruise._stop_on_edge`): the node ahead if that edge is still in the graph (or the robot is on the node), otherwise the node it came from (the part just walked is free). Before: the nearest node with edges (`add_stop_node`), 0.20 m away median and up to 0.31 m on 09-11 14:36 (16 times), also behind or beside the robot, with a first stretch robot -> node that is not an edge. Why the robot stops halfway along an edge at all: the frontier confirms the path up to the first point not free or not seen, minus half a body; an edge seen only in part is walked while the rest comes into view, and when the cruise ends there (obstacle appearing, data not arriving, command expired) the robot is in the middle of it.

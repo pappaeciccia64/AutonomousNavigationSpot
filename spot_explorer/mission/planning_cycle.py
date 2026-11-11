@@ -356,9 +356,8 @@ class CruisePlanner:
         t1 = time.perf_counter(); ph['path'] = t1 - t; t = t1
         polyline = [(robot[0], robot[1])] + [self.prm.get_node_position(n) for n in remainder]
         frontier = safe_frontier.compute_safe_frontier(polyline, snap, allow_escape=False)
-        advance = safe_frontier.allowed_advance(frontier)
+        advance = walk_advance(polyline, frontier)
         advance, turn_stop = self._turns_within(polyline, remainder, advance, snap)
-        advance = snap_to_node(polyline, advance)
         confirmed = _cut_polyline(polyline, advance)
         t1 = time.perf_counter(); ph['frontier'] = t1 - t; t = t1
         path_len = float(sum(np.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(polyline, polyline[1:])))
@@ -483,31 +482,44 @@ def _pose_of_scan(scan):
     return float(tf.position.x), float(tf.position.y), yaw
 
 
-# WHOLE EDGES (10-11, user's rule, already asked by Marco on 08-10): an edge is walked only
-# if it is confirmed free for its whole length. The confirmed stretch ends at the last node
-# reached by edges all confirmed (the frontier already keeps the nose on confirmed terrain
-# beyond its end), not halfway along an edge seen only in part: the robot stops on a node, never
-# in the middle of an edge it was not sure of. Only the edge the robot is already on may be
-# confirmed in part (an obstacle appearing ahead: there the robot stops where it can).
-# False = the stretch as far as the frontier confirms, as before. OFF: to stop on the node
-# the robot needs the nose (0.65 m) confirmed beyond it, so a whole edge of up to 1.25 m needs
-# data up to 1.9 m beyond the node ahead, at the limit of Spot's grid (1.92 m around the
-# robot): test_cruise "step C" went from 1 cruise to 6 (6 s still), "three cells" to 7 (10 s).
-WHOLE_EDGES = False
+# WHOLE EDGES (11-11, user's rule, already asked by Marco on 08-10): an edge is walked only
+# if it is confirmed free for its whole length, with its own padding (the clearance of the
+# rule, geometry.FRONTIER_CLEARANCE_M), on the scan of the cycle. The confirmed stretch ends at
+# the last node reached by edges confirmed whole -- the first point not free or not seen along
+# the path is beyond it -- and NOT half a body + margin (0.65 m) before that point: the nose
+# beyond a node is needed only where the robot stops, and it stops for good only at the goal,
+# where the 0.65 m stay. Elsewhere, if it ever stops on a node: the edge keeps 0.30 m around
+# it, a sharp corner is a rotation checked with the whole body (CruisePlanner._turns_within),
+# and Spot's body obstacle avoidance is on. Only the edge the robot is already on may be
+# confirmed in part (an obstacle appearing: the frontier with the nose, as before).
+# Tried first (10-11) with the 0.65 m beyond every node: a whole edge of 1.25 m needed data
+# 1.9 m beyond the node ahead, at the limit of Spot's grid (1.92 m), and in test_cruise the
+# robot stopped at almost every node.
+# False = the stretch as far as the frontier confirms (allowed_advance), as before.
+WHOLE_EDGES = True
 
 
-def snap_to_node(polyline, advance):
-    """WHOLE_EDGES: advance cut back to the last vertex of polyline (robot, nodes...) within it;
-    unchanged if not even the first node is within it (the robot is on that edge already)."""
+def walk_advance(polyline, frontier):
+    """How far along polyline (robot, nodes...) the robot may walk now (see WHOLE_EDGES)."""
+    allowed = safe_frontier.allowed_advance(frontier)
     if not WHOLE_EDGES or len(polyline) < 2:
-        return advance
-    s, best = 0.0, None
+        return allowed
+    path_len = frontier['path_len']
+    free = path_len if frontier['reason'] == 'end_of_path' else float(frontier['dist'])
+    s, nodes = 0.0, []
     for a, b in zip(polyline, polyline[1:]):
         s += float(np.hypot(b[0] - a[0], b[1] - a[1]))
-        if s > advance + 1e-6:
+        if s > free + 1e-6:
             break
-        best = s
-    return advance if best is None else best
+        nodes.append(s)
+    if nodes and nodes[-1] >= path_len - 1e-6 and allowed < path_len - 1e-6:
+        # The edge to the goal is free whole, but the nose beyond the goal is not confirmed
+        # yet: along it as far as the frontier allows with the nose (the robot stops there).
+        nodes.pop()
+        return max(nodes[-1], allowed) if nodes else allowed
+    if not nodes:
+        return allowed          # still on the first edge, not confirmed whole: the frontier decides
+    return nodes[-1]
 
 
 def _cut_polyline(polyline, s):
