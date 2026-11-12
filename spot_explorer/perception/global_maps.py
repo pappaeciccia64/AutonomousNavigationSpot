@@ -3,6 +3,7 @@ import numpy as np
 from scipy.ndimage import binary_dilation, convolve
 import pickle
 from spot_explorer.perception.geometry import ROBOT_HALF_WIDTH_M
+from spot_explorer.perception import slopes
 from spot_explorer.perception.slopes import (LATERAL_SLICE_HALF_WIDTH_M, MIN_ARC_SAMPLE_FRACTION, _no_slope_data, _slope_profile_from_sampler, arc_slope_profiles_batch)
 from spot_explorer.perception.spot_grid import slope_usable_mask
 
@@ -542,6 +543,7 @@ class GlobalTerrainGrid:
             if not hasattr(self, 'update_rects'):
                 self.update_rects = []
             self.update_rects.append((float(xv.min()), float(xv.max()), float(yv.min()), float(yv.max())))
+            self._drop_plane_tiles(*self.update_rects[-1])
 
         r = self._h_r
         v = valid_flat.astype(bool)
@@ -568,11 +570,91 @@ class GlobalTerrainGrid:
     height_sum = property(lambda self: _counted_view(self._h_r, 'sum', 'n'))
     height_count = property(lambda self: _counted_view(self._h_r, 'n', 'n'))
 
+    # --- SLOPE WITH THE PLANE (slopes.PLANE_SLOPES, 12-11) ---------------------------------
+    # The same estimate as the live scan (edge_evaluation.compute_arc_slope_profile): the plane
+    # fitted in a window of +/-PLANE_EDGE_HALF_WINDOW_M around every cell, here on the mean
+    # heights of the map; along the edge the 90th percentile of the slope along and across it.
+    # Until 12-11 the map used the differences on a 0.48 m base (slopes.compute_arc_slope_
+    # profile, ~2 deg more on average than the plane): an edge changed cost only because it
+    # left the scan window.
+    # The plane field is kept per FIXED TILE of PLANE_TILE_CELLS x PLANE_TILE_CELLS cells
+    # (computed on the tile plus the window margin): a value never depends on which edges were
+    # asked together -- with a patch around the edges asked, the sums of the integral images
+    # grew with the patch and the local graph update differed from the full one by up to 0.002
+    # -- and a tile is recomputed only when a scan changes the map within its window margin.
+    PLANE_TILE_CELLS = 64
+
+    def _plane_tile(self, ti, tj):
+        """(gx, gy) of tile (ti, tj): rows y, columns x of its cells, NaN where no plane."""
+        cache = self.__dict__.setdefault('_plane_tiles', {})
+        hit = cache.get((ti, tj))
+        if hit is not None:
+            return hit
+        r = self._h_r
+        raster, gx0, gy0 = r.a['mean'], r.gx0, r.gy0
+        t = self.PLANE_TILE_CELLS
+        k = int(round(slopes.PLANE_EDGE_HALF_WINDOW_M / self.resolution))
+        a0, b0 = ti * t - k - gx0, tj * t - k - gy0           # patch in raster indices
+        n = t + 2 * k
+        z = np.full((n, n), np.nan)
+        s0, s1 = max(a0, 0), min(a0 + n, raster.shape[0])
+        u0, u1 = max(b0, 0), min(b0 + n, raster.shape[1])
+        if s1 > s0 and u1 > u0:
+            z[s0 - a0:s1 - a0, u0 - b0:u1 - b0] = raster[s0:s1, u0:u1]
+        z = z.T                                              # rows y, columns x
+        valid = np.isfinite(z)
+        if valid.any():
+            gx, gy, _ = slopes.plane_gradient_field(z, valid, self.resolution,
+                                                    half_window_m=slopes.PLANE_EDGE_HALF_WINDOW_M)
+            hit = (gx[k:k + t, k:k + t], gy[k:k + t, k:k + t])
+        else:
+            hit = (np.full((t, t), np.nan), np.full((t, t), np.nan))
+        cache[(ti, tj)] = hit
+        return hit
+
+    def _drop_plane_tiles(self, xmin, xmax, ymin, ymax):
+        """The tiles whose window margin touches the area just updated are recomputed."""
+        cache = self.__dict__.get('_plane_tiles')
+        if not cache:
+            return
+        t, res = self.PLANE_TILE_CELLS, self.resolution
+        k = int(round(slopes.PLANE_EDGE_HALF_WINDOW_M / res)) + 1
+        ti0, ti1 = (int(np.floor(xmin / res)) - k) // t, (int(np.floor(xmax / res)) + k) // t
+        tj0, tj1 = (int(np.floor(ymin / res)) - k) // t, (int(np.floor(ymax / res)) + k) // t
+        for key in [key for key in cache if ti0 <= key[0] <= ti1 and tj0 <= key[1] <= tj1]:
+            del cache[key]
+
+    def _plane_lookup(self, xs, ys):
+        """Plane gradient (gx, gy) at the points, from the tiles; NaN where none."""
+        res, t = self.resolution, self.PLANE_TILE_CELLS
+        cx = np.floor(xs / res).astype(np.int64)
+        cy = np.floor(ys / res).astype(np.int64)
+        g_x = np.full(xs.shape, np.nan)
+        g_y = np.full(xs.shape, np.nan)
+        if not self._h_r.a['mean'].size:
+            return g_x, g_y
+        ti, tj = cx // t, cy // t
+        for a, b in set(zip(ti.ravel().tolist(), tj.ravel().tolist())):
+            sel = (ti == a) & (tj == b)
+            gx, gy = self._plane_tile(a, b)
+            g_x[sel] = gx[cy[sel] - b * t, cx[sel] - a * t]
+            g_y[sel] = gy[cy[sel] - b * t, cx[sel] - a * t]
+        return g_x, g_y
+
+    def _plane_profiles(self, x1, y1, x2, y2):
+        """Rows (long, lat, has, long, lat, has) of the plane slope of the edges (arrays): the
+        window already covers the body, so the values with the body are the same."""
+        if x1.size == 0 or not self._h_r.a['mean'].size:
+            return np.zeros((x1.size, 6))
+        return slopes.plane_slope_profiles_lookup(self._plane_lookup, self.resolution, x1, y1, x2, y2)
+
     def compute_arc_slope_profiles_batch(self, x1, y1, x2, y2, perp_sample_spacing_m=0.10, body_ext_m=0.0):
         """compute_arc_slope_profile of the global map for many edges (arrays), same early
         exits. See arc_slope_profiles_batch for the result format."""
         x1 = np.asarray(x1, dtype=np.float64); y1 = np.asarray(y1, dtype=np.float64)
         x2 = np.asarray(x2, dtype=np.float64); y2 = np.asarray(y2, dtype=np.float64)
+        if slopes.PLANE_SLOPES:
+            return self._plane_profiles(x1, y1, x2, y2)
         out = np.zeros((x1.size, 6))
         rects = getattr(self, 'update_rects', None)
         near = np.ones(x1.size, dtype=bool)
@@ -604,6 +686,10 @@ class GlobalTerrainGrid:
         Returns:
             (longitudinal_slope, lateral_slope, has_data)
         """
+        if slopes.PLANE_SLOPES:
+            r = self._plane_profiles(*(np.array([v], dtype=np.float64) for v in (x1, y1, x2, y2)))[0]
+            r = (float(r[0]), float(r[1]), bool(r[2]), float(r[3]), float(r[4]), bool(r[5]))
+            return r if body_ext_m > 0 else r[:3]
         rects = getattr(self, 'update_rects', None)
         if rects is not None:
             if not rects:
@@ -675,6 +761,24 @@ class GlobalTerrainGrid:
             return out
         raster, gx0, gy0 = rr
         res = self.resolution
+        if slopes.PLANE_SLOPES:
+            # Plane: a sample has a value only with seen cells in its window, so an edge whose
+            # rectangle widened by the window has no seen cell certainly has no data (one
+            # lookup per edge in the integral image of the seen cells). Conservative: where it
+            # says False the real computation decides.
+            k = int(round(slopes.PLANE_EDGE_HALF_WINDOW_M / res)) + 2
+            key = (len(rects) if rects is not None else None, raster.shape, gx0, gy0)
+            cached = getattr(self, '_seen_integral', None)
+            if cached is None or cached[0] != key or rects is None:
+                cached = (key, np.pad(raster.astype(np.int64), ((1, 0), (1, 0))).cumsum(0).cumsum(1))
+                self._seen_integral = cached      # one per map update (update_rects grows)
+            c = cached[1]
+            a0 = np.clip(np.floor(np.minimum(x1, x2) / res).astype(np.int64) - gx0 - k, 0, raster.shape[0])
+            a1 = np.clip(np.floor(np.maximum(x1, x2) / res).astype(np.int64) - gx0 + k + 1, 0, raster.shape[0])
+            b0 = np.clip(np.floor(np.minimum(y1, y2) / res).astype(np.int64) - gy0 - k, 0, raster.shape[1])
+            b1 = np.clip(np.floor(np.maximum(y1, y2) / res).astype(np.int64) - gy0 + k + 1, 0, raster.shape[1])
+            seen = c[a1, b1] - c[a0, b1] - c[a1, b0] + c[a0, b0]
+            return seen == 0
 
         def has(px, py):
             gx = np.floor(px / res).astype(np.int64) - gx0

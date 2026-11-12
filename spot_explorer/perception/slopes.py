@@ -676,6 +676,22 @@ def plane_slope_profiles_batch(gx, gy, grid_origin_x, grid_origin_y, cell_size, 
                                min_sample_fraction=MIN_ARC_SAMPLE_FRACTION):
     """plane_slope_profile for many edges at once (arrays): rows (long, lat, has, long, lat,
     has) like arc_slope_profiles_batch with the body. Same numbers as plane_slope_along."""
+    num_rows, num_cols = gx.shape
+
+    def lookup(xs, ys):
+        c = np.floor((xs - grid_origin_x) / cell_size).astype(np.int64)
+        r = np.floor((ys - grid_origin_y) / cell_size).astype(np.int64)
+        inside = (r >= 0) & (r < num_rows) & (c >= 0) & (c < num_cols)
+        g_x = np.full(xs.shape, np.nan)
+        g_y = np.full(xs.shape, np.nan)
+        g_x[inside], g_y[inside] = gx[r[inside], c[inside]], gy[r[inside], c[inside]]
+        return g_x, g_y
+    return plane_slope_profiles_lookup(lookup, cell_size, x1, y1, x2, y2, min_sample_fraction)
+
+
+def plane_slope_profiles_lookup(lookup, cell_size, x1, y1, x2, y2, min_sample_fraction=MIN_ARC_SAMPLE_FRACTION):
+    """plane_slope_profiles_batch with the gradient read by lookup(xs, ys) -> (gx, gy) (NaN
+    where none): the same samples along the edges and the same summary."""
     x1, y1, x2, y2 = (np.asarray(v, dtype=np.float64) for v in (x1, y1, x2, y2))
     e = x1.size
     out = np.zeros((e, 6))
@@ -691,14 +707,8 @@ def plane_slope_profiles_batch(gx, gy, grid_origin_x, grid_origin_y, cell_size, 
     used = j < n[:, None]
     s = np.where(used, j / np.maximum(n[:, None] - 1, 1) * dist[:, None], 0.0)
     xs, ys = x1[:, None] + ux[:, None] * s, y1[:, None] + uy[:, None] * s
-    num_rows, num_cols = gx.shape
-    c = np.floor((xs - grid_origin_x) / cell_size).astype(np.int64)
-    r = np.floor((ys - grid_origin_y) / cell_size).astype(np.int64)
-    inside = used & (r >= 0) & (r < num_rows) & (c >= 0) & (c < num_cols)
-    g_x = np.full(xs.shape, np.nan)
-    g_y = np.full(xs.shape, np.nan)
-    g_x[inside], g_y[inside] = gx[r[inside], c[inside]], gy[r[inside], c[inside]]
-    ok = np.isfinite(g_x) & np.isfinite(g_y)
+    g_x, g_y = lookup(xs, ys)
+    ok = used & np.isfinite(g_x) & np.isfinite(g_y)
     has = good & (ok.sum(axis=1) >= min_sample_fraction * n)
     lon = np.where(ok, np.abs(g_x * ux[:, None] + g_y * uy[:, None]), np.nan)
     lat = np.where(ok, np.abs(-g_x * uy[:, None] + g_y * ux[:, None]), np.nan)

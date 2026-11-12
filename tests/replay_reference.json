@@ -302,8 +302,8 @@
     "valid_arcs": 93220,
     "discarded_arcs": 12030,
     "path_found": true,
-    "path_arcs": 4,
-    "path_len_m": 3.07
+    "path_arcs": 3,
+    "path_len_m": 3.0
    },
    {
     "attempt": 7,
@@ -327,7 +327,7 @@
     "discarded_arcs": 21638,
     "path_found": true,
     "path_arcs": 3,
-    "path_len_m": 2.71
+    "path_len_m": 2.56
    },
    {
     "attempt": 9,

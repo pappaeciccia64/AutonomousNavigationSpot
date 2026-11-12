@@ -202,8 +202,13 @@ def feed_scan(a, prm, gm, tm):
     prm.set_live_obstacles(a['od_filt'], a['seen'], a['ox'], a['oy'], a['cs'], rx, ry, ryaw)
 
 
-def edges_of(prm):
-    return {(min(a, n), max(a, n), round(w, 12)) for a, lst in prm.edges.items() for n, w in lst}
+def same_edges(prm_a, prm_b, tol=1e-9):
+    """The same edges with the same weights within tol: since 12-11 the slope of an edge from
+    the global map and from the live scan are the same plane computed on two grids (map tiles,
+    scan window), equal to ~5e-12 -- rounding both would split some of them."""
+    wa = {(min(a, n), max(a, n)): w for a, lst in prm_a.edges.items() for n, w in lst}
+    wb = {(min(a, n), max(a, n)): w for a, lst in prm_b.edges.items() for n, w in lst}
+    return wa.keys() == wb.keys() and all(abs(wa[k] - wb[k]) <= tol for k in wa)
 
 
 # --------------------------------------------------------------------------------------
@@ -288,7 +293,7 @@ def replay_mission(job):
                 if twin is not None:
                     mission_prm.rebuild_prm_edges(twin[0], twin[1], incremental=False)
                     full_checks += 1
-                    full_same += edges_of(prm) == edges_of(twin[0])
+                    full_same += same_edges(prm, twin[0])
                 # --- path towards the goal, with the mission's restrictions ------
                 if node_cells is None:
                     node_cells = mission_prm.node_cells(prm, env)
@@ -326,13 +331,22 @@ def replay_mission(job):
         global_maps.fold_scan_into_global_maps(           # with the mission's function
             global_maps.GlobalGrid(), single, a['pts'], a['z'].ravel(), a['obstacle_mask'], a['valid'].ravel(),
             a['od_raw'].ravel(), (a['ny'], a['nx']), a['robot'])
+        if slopes.PLANE_SLOPES:
+            # The estimate of the mission (edge_evaluation._live_plane_field): the plane, on the
+            # usable cells of the scan; the global map uses it too since 12-11.
+            u2 = usable.reshape(a['z'].shape)
+            pgx, pgy, _ = slopes.plane_gradient_field(np.where(u2, a['z'], np.nan), u2, a['cs'],
+                                                      half_window_m=slopes.PLANE_EDGE_HALF_WINDOW_M)
         for _ in range(ARCS_PER_SCAN):
             p = np.array([a['ox'], a['oy']]) + rng.uniform(0.3, span - 0.3, 2)
             ang = rng.uniform(0, 2 * math.pi)
             q = p + rng.uniform(0.5, 1.25) * np.array([math.cos(ang), math.sin(ang)])
             if not (a['ox'] + 0.3 < q[0] < a['ox'] + span - 0.3 and a['oy'] + 0.3 < q[1] < a['oy'] + span - 0.3):
                 continue
-            live = slopes.compute_arc_slope_profile(a['z'], a['ox'], a['oy'], a['cs'], *p, *q, valid_2d=usable)
+            if slopes.PLANE_SLOPES:
+                live = slopes.plane_slope_profile(pgx, pgy, a['ox'], a['oy'], a['cs'], *p, *q)
+            else:
+                live = slopes.compute_arc_slope_profile(a['z'], a['ox'], a['oy'], a['cs'], *p, *q, valid_2d=usable)
             if not live[2]:
                 continue
             glob_ = single.compute_arc_slope_profile(*p, *q)
