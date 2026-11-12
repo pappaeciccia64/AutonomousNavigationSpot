@@ -257,7 +257,7 @@ class CruisePlanner:
         # (env, row, col) of the target cell: every plan says how much of it the global map
         # has seen ('cell_seen', see cells.cell_seen_fraction). None = not computed.
         self.seen_cell = None
-        # The next cell prepared HERE, in the planning thread (attempt_cruise.CRUISE_SWITCH):
+        # The next cell prepared HERE, in the planning thread (step C, attempt_cruise):
         # the main thread sets switch_job (a callable job(planner, scan, robot) -> dict), the
         # next cycle runs it once on its fresh scan, before planning, and the plan carries its
         # result as 'switch'. The job may change goal_id, path_ids and seen_cell.
@@ -494,15 +494,14 @@ def _pose_of_scan(scan):
 # confirmed in part (an obstacle appearing: the frontier with the nose, as before).
 # Tried first (10-11) with the 0.65 m beyond every node: a whole edge of 1.25 m needed data
 # 1.9 m beyond the node ahead, at the limit of Spot's grid (1.92 m), and in test_cruise the
-# robot stopped at almost every node.
-# False = the stretch as far as the frontier confirms (allowed_advance), as before.
-WHOLE_EDGES = True
+# robot stopped at almost every node. Until 11-11 the stretch went as far as the frontier
+# confirmed (safe_frontier.allowed_advance): mission/legacy/__init__.py.
 
 
 def walk_advance(polyline, frontier):
-    """How far along polyline (robot, nodes...) the robot may walk now (see WHOLE_EDGES)."""
+    """How far along polyline (robot, nodes...) the robot may walk now (see WHOLE EDGES above)."""
     allowed = safe_frontier.allowed_advance(frontier)
-    if not WHOLE_EDGES or len(polyline) < 2:
+    if len(polyline) < 2:
         return allowed
     path_len = frontier['path_len']
     free = path_len if frontier['reason'] == 'end_of_path' else float(frontier['dist'])

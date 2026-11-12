@@ -36,7 +36,6 @@ from spot_explorer.perception import low_obstacles   # noqa: E402
 
 # test_e2e_loop pins the switches off for the stop-and-go: here the cruise is on, as in the field.
 attempt_cruise.CONTINUOUS_MOTION = True
-attempt_cruise.CHAIN_CELLS = True
 edge_evaluation.INCREMENTAL_REFRESH = True
 planning_cycle.get_a_tform_b = e2e.fake_get_a_tform_b
 attempt_cruise.BodyTiltRecorder = e2e._NoTilt
@@ -236,7 +235,7 @@ def main():
     check(r['clear'] >= clear_min, f"centre at least {clear_min:.2f} m from the wall ({r['clear']:.2f})")
 
     # The cell counts as explored as soon as the global map has seen 90% of it, wherever the
-    # robot is (attempt_cruise.CHAIN_ON_SEEN, 06-11): open field, two cells in a row. The cells
+    # robot is (06-11): open field, two cells in a row. The cells
     # here are 5 m and the scan window 3.84 m: before arriving the robot sees ~55% of the cell,
     # so the threshold is 50% here (90% in the mission, cells of 2 m).
     cell_attempt.CELL_SEEN_EXPLORED, frac0 = True, cell_attempt.CELL_SEEN_FRACTION

@@ -25,7 +25,7 @@ from spot_explorer.records import HANDOFF, MISSION_STATS
 from spot_explorer.robot import connection
 from spot_explorer.robot import motion
 
-# The attempt that starts with the robot still walking (CHAIN_CELLS) uses the last scan of the
+# The attempt that starts with the robot still walking (hand-off) uses the last scan of the
 # cruise, already processed and in the global maps, instead of downloading and processing a
 # new one (attempt_scan._first_scan), if it is at most CHAIN_SCAN_MAX_AGE_S old. It serves
 # the graph update and the goal choice; the first move still waits for the fresh scan and

@@ -29,7 +29,8 @@ sys.path.insert(0, os.path.dirname(HERE))   # the spot_explorer package
 
 import matplotlib  # noqa: E402
 matplotlib.use("Agg")
-from spot_explorer.mission import attempt_cruise, attempt_legs, attempt_obstacles, attempt_scan, cell_attempt, legacy_stop_and_go_start     # noqa: E402
+from spot_explorer.mission import attempt_cruise, attempt_legs, attempt_obstacles, attempt_scan, cell_attempt     # noqa: E402
+from spot_explorer.mission.legacy import stop_and_go_start as legacy_stop_and_go_start     # noqa: E402
 from spot_explorer import config
 from spot_explorer import records
 from spot_explorer.perception import geometry

@@ -498,7 +498,7 @@ def _check_cruise_mission(r):
 
 
 def _check_world(name, r, rules=True):
-    """rules: the general cell rules (cell_rules.CELL_RULES, 09-11), where the closed cell
+    """rules: the general cell rules (cell_rules, 09-11; False: legacy/side_rules.py), where the closed cell
     (2,2) is unreachable (no way in the graph) or set aside; False: the sides tried, where it
     ends blocked after every side failed."""
     log = r['log']
@@ -711,7 +711,7 @@ def _check_cell_choice():
     must look for the neighbours from (7,2), and approach (7,1) from (7,2), not again from
     (6,1) (before: a jump, then the cell dropped out of the frontier).
     """
-    print("\nCell choice: the case of 13:50 (cells (7,1) and (7,2))")
+    print("\nCell choice, old rules of the sides (legacy/side_rules.py): the case of 13:50 (cells (7,1) and (7,2))")
     from spot_explorer.mission import cells
     env = cells.EnvironmentMap(rows=8, cols=7, cell_size=2.0)
     with contextlib.redirect_stdout(io.StringIO()):
@@ -725,7 +725,8 @@ def _check_cell_choice():
            for r_ in range(8) for c_ in range(7) if env.map[r_][c_] == 1}
     ri = NS(get_manual_waypoint_by_cell=lambda r_, c_: wps.get((r_, c_)),
             find_nearest_waypoint_cell_to_target=lambda *a: (6, 1))
-    m = exploration.Mission.__new__(exploration.Mission)
+    from spot_explorer.mission.legacy import side_rules       # the sides tried: old rules
+    m = side_rules.SideRulesMission.__new__(side_rules.SideRulesMission)
     m.env, m.recordingInterface, m.robot_state_client = env, ri, None
     m._last_visited = (7, 2)
     T.ROBOT.x, T.ROBOT.y = 4.0, 12.75                 # 0.25 m outside (7,2), in (6,2)
@@ -818,8 +819,11 @@ def _check_battery(r):
 
 if __name__ == '__main__':
     from spot_explorer.mission import cell_rules
+    from spot_explorer.mission.legacy import side_rules
+    _MISSION = exploration.Mission
     for rules in (True, False):
-        cell_rules.CELL_RULES = rules
+        # The old rules from mission/legacy/side_rules.py, as tools/run_legacy_mission.py does.
+        exploration.Mission = _MISSION if rules else side_rules.SideRulesMission
         tag = "general cell rules" if rules else "OLD rules (sides tried)"
         for name, walls in WORLDS.items():
             print(f"\nWhole mission in world {name}, {tag}, fake robot and GraphNav: 3 x 3 cells of 3 m.")
@@ -834,7 +838,7 @@ if __name__ == '__main__':
         _check_common(r, return_ok=False)
         _check_rules_failures(r) if rules else _check_failures(r)
         shutil.rmtree(r['root'], ignore_errors=True)
-    cell_rules.CELL_RULES = True
+    exploration.Mission = _MISSION
     print("\nWhole mission in world A IN CRUISE: cell rules, next cell in the planning thread, "
           "first turn from the thread.")
     r = run(WORLDS['A'], "MISSION_A_cruise", cruise=True)

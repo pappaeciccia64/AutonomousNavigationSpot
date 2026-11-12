@@ -187,7 +187,7 @@ class ScanSteps:
 
         # GraphNav breadcrumb at the attempt's starting point: it is the one the robot needs to
         # be able to go back to if the cell turns out to be a dead end. Robot still walking
-        # after a hand-off (CHAIN_CELLS): the waypoint of the cell just visited is 10 cm
+        # after a hand-off: the waypoint of the cell just visited is 10 cm
         # behind and the cruise left its breadcrumbs, so only with the usual spacing (each
         # waypoint costs ~0.4 s, 04-11 14:08).
         moving = getattr(self.env, '_moving_pc', None) is not None
@@ -259,7 +259,7 @@ class ScanSteps:
         self.t_scan = time.perf_counter()
 
         # Robot pose at the same instant as the grid (same snapshot of transforms): the robot
-        # may still be walking from the previous cell (attempt_cruise.CHAIN_CELLS).
+        # may still be walking from the previous cell (the hand-off of attempt_cruise).
         tf = get_a_tform_b(scan.proto.local_grid.transforms_snapshot, VISION_FRAME_NAME, BODY_FRAME_NAME)
         q = tf.rotation
         self.robot_x, self.robot_y = tf.position.x, tf.position.y

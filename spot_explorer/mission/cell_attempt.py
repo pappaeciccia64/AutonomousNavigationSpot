@@ -21,7 +21,7 @@ from spot_explorer.mission.attempt_obstacles import ObstacleSteps
 from spot_explorer.mission.attempt_legs import LegSteps
 from spot_explorer.mission import attempt_cruise
 from spot_explorer.mission.attempt_cruise import CruiseSteps
-from spot_explorer.mission.legacy_stop_and_go_start import StopAndGoStart
+from spot_explorer.mission.legacy.stop_and_go_start import StopAndGoStart
 
 
 # =========================================================================
@@ -45,14 +45,14 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
 
     HOW IT IS MADE. The start: the first cycle of the planning thread (attempt_cruise:
     _start_in_thread -- seen check, _local_data_into_graph, _goal_and_path, _reset_counters),
-    then the cruise; in the stop-and-go mode (cruise off) _prepare (legacy_stop_and_go_start).
+    then the cruise; in the stop-and-go mode (cruise off) _prepare (legacy/stop_and_go_start.py).
     The stop-and-go loop: _loop_once until a phase decides the outcome:
 
       _guards                 too many turns, low battery, fall, robot still for too long
       _scan_and_graph         _fresh_scan, _update_graph, _replan
       _frontier_and_decision  shortcut, safe frontier, decisions.decide_next_move:
                               move / reached_node / arrived / wait / blocked
-      _moving_check           robot still walking from the previous cell (CHAIN_CELLS):
+      _moving_check           robot still walking from the previous cell (hand-off):
                               on only into a cruise with a small turn, else stop first
       _rotation               (move) cannot turn: _advance_in_cone, _back_up_to_turn,
                               trap, leg discarded
@@ -127,19 +127,11 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
                     return False
                 self.loop_iter = 0          # the first plan did not allow to start: stop-and-go
             else:
-                # Stop-and-go mode (cruise off): its own start, legacy_stop_and_go_start.
+                # Stop-and-go mode (cruise off): its own start, legacy/stop_and_go_start.py.
                 if self._prepare() is FAILED:
                     return False
                 if self._seen_only:
                     return True
-                # The first turn in the planning thread (attempt_cruise.THREAD_FIRST_TURN).
-                if self._can_start_from_thread():
-                    self.loop_iter = 1
-                    outcome = self._cruise(from_thread=True)
-                    if outcome is FAILED:
-                        return False
-                    if outcome is STOP:
-                        return self._finish()
 
             while self.path_waypoints and len(self.path_waypoints) > 0:
                 outcome = self._loop_once()
@@ -149,7 +141,7 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
                     break
             return self._finish()
         finally:
-            # A successful hand-off leaves the robot walking (see attempt_cruise.CHAIN_CELLS), and
+            # A successful hand-off leaves the robot walking (see the hand-off in attempt_cruise), and
             # so does an attempt that failed before its loop: only computations, no command (on
             # 03-11 16:02 five of those stopped the robot for nothing, cells beyond the wall).
             if not self._handoff and getattr(self, 'loop_iter', 0) > 0:

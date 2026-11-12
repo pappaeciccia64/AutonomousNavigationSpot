@@ -1,5 +1,5 @@
 """
-Which cell next: the general rules of 09-11 (switch CELL_RULES), instead of the sides tried,
+Which cell next: the general rules of 09-11, instead of the sides tried (mission/legacy/side_rules.py),
 the deferral, SKIP-ROUND, PRECHECK and the cells dropped from the frontier.
 
 A cell is
@@ -44,7 +44,6 @@ from spot_explorer.planning import goal as goal_choice
 from spot_explorer.planning import roadmap
 from spot_explorer.records import MISSION_STATS
 
-CELL_RULES = True          # False = the rules before 09-11 (exploration.Mission._explore_sides)
 NEAR_PATH_M = 4.0          # a way costing at most this (metres on flat ground) is walked in cruise; more, GraphNav
 MAX_FAILURES = 2           # real failures (the robot went and stopped) before setting aside
 # A near choice whose way to the goal crosses a cell not explored yet (possible only with
