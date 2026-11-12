@@ -1062,7 +1062,7 @@ def main():
     options.recording_user_name = ""
     options.recording_session_name = ""
     options.username = "admin"
-    options.password = "canerobotdacciaio"
+    options.password = os.environ.get("BOSDYN_CLIENT_PASSWORD", "")  # mai scritta nel codice
     options.download_filepath = os.getcwd()
 
     try:
