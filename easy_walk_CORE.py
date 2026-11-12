@@ -1063,8 +1063,8 @@ def main():
     options = SimpleNamespace()
     options.name = "autonomousMission"
     options.hostname = "192.168.50.3"
-    options.guid = "04d1e376-7819-45a8-9bbe-9430607ef4d3"
-    options.secret = "5b73c34f-5e2c-441a-b3e9-936ba9a9e5fe"
+    options.guid = os.environ.get("SPOT_PAYLOAD_GUID", "")  # mai scritto nel codice
+    options.secret = os.environ.get("SPOT_PAYLOAD_SECRET", "")  # mai scritto nel codice
     options.verbose = False
     options.recording_user_name = ""
     options.recording_session_name = ""
