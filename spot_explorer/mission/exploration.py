@@ -361,6 +361,12 @@ class Mission:
         if scan is None:
             print("[FINAL SCAN] CAREFUL: local grid not received, carrying on without the final scan.")
             return
+        # A mission that ended before any attempt has no global maps yet: created here (as
+        # the first attempt would, attempt_scan._ensure_global_maps).
+        if self.global_grid.global_occupancy_map is None:
+            self.global_grid.global_occupancy_map = global_maps.GlobalGrid(resolution=scan.cell_size)
+        if self.global_grid.global_terrain_map is None:
+            self.global_grid.global_terrain_map = global_maps.GlobalTerrainGrid(resolution=scan.cell_size)
         self.local_grid.process_scan(scan, x_final, y_final, final_yaw, ground_label="scan-final")
         # The last scan goes into the global maps too, like all the others
         global_maps.fold_scan_into_global_maps(

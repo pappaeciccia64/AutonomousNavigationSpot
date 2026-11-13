@@ -1,5 +1,6 @@
 """Safe frontier: how far the planned path is confirmed free NOW, on the filtered scan; the thread that recomputes it during the move."""
 import threading
+import traceback
 import time
 import logging
 import numpy as np
@@ -643,7 +644,11 @@ class ArcVerificationTracker:
             try:
                 plan = job()
             except Exception as e:
+                # print, not only the logger: the output goes into mission_log.txt (stdout tee),
+                # the logger only to the terminal (13-11).
+                tb = traceback.format_exc()
                 LOGGER.error(f"Error in the planning cycle: {e}")
+                print(f"[PLANNING] Error in the planning cycle: {e!r}\n{tb}")
                 plan = dict(status='error', error=repr(e))
             with self._lock:
                 self._plan_version += 1

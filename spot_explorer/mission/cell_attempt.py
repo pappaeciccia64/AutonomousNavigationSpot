@@ -119,13 +119,14 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
                     return False
                 if started is STOP:
                     return True if self._seen_only else self._finish()
-                if not self.path_waypoints:
+                if started is None and not self.path_waypoints:
                     self.loop_iter = 0
                     self.env._attempt_left_unreachable = True
                     print(f"[ATTEMPT] Cell ({self.target_row},{self.target_col}): the planning thread gave no path, "
                           f"left as unreachable now.")
                     return False
-                self.loop_iter = 0          # the first plan did not allow to start: stop-and-go
+                if started is None:
+                    self.loop_iter = 0      # the first plan did not allow to start: stop-and-go
             else:
                 # Stop-and-go mode (cruise off): its own start, legacy/stop_and_go_start.py.
                 if self._prepare() is FAILED:

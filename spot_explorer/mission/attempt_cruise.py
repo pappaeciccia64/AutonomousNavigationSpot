@@ -86,9 +86,14 @@ CRUISE_BATTERY_S = 5.0          # how often the battery is read
 CRUISE_FALL_CHECK_S = 1.0       # how often the fall is checked (the stop-and-go does it at every turn)
 CRUISE_ARRIVAL_WAIT_S = 2.0     # at the goal: wait at most this for the command to end
 CRUISE_SETTLE_S = 1.0           # after a stop: wait at most this for the robot to stand still
-# Distance from the goal at which the next cell is chosen: the robot walks it while the next
-# attempt is computed. With 0.6 m (~2 s) it stood still at 46 hand-offs out of 58 on 04-11 14:08.
-CRUISE_HANDOFF_M = 1.0
+# Distance from the goal at which the cell counts as done and the next one is chosen: the robot
+# walks it while the planning thread prepares the next cell (~0.3 s, one cycle; 0.5 m is ~1.4 s
+# at 0.35 m/s). 1.0 m until 13-11 (user: the goal must be reached more closely): it was sized for
+# the hand-off to the next ATTEMPT computed by the main thread, before step C -- with 0.6 m (~2 s)
+# the robot stood still at 46 hand-offs out of 58 on 04-11 14:08. If the next cell is not prepared
+# in cruise (far, none) the hand-off still happens here, and the next attempt starts with the
+# robot on the last 0.5 m.
+CRUISE_HANDOFF_M = 0.5
 # The cell is also done as soon as it is seen for at least cell_attempt.CELL_SEEN_FRACTION in
 # the global map (with CELL_SEEN_EXPLORED), wherever the robot is: the cell exists to be seen,
 # the goal is only where to see it from (06-11).
@@ -311,12 +316,18 @@ class CruiseSteps:
         tracker.start_planning(planner, planning_cycle.PLAN_PERIOD_S)
         t0, plan = time.time(), None
         wait_s = START_PLAN_WAIT_S if planner.switch_job == self._start_in_thread else FIRST_PLAN_WAIT_S
+        seen_bad = None
         while time.time() - t0 < wait_s:
             time.sleep(CRUISE_POLL_S)
             p = tracker.get_plan()
             if p is not None and p.get('status') not in ('no_scan', 'error'):
                 plan = p
                 break
+            if p is not None and p.get('version') != seen_bad:
+                # A plan without data or with an error: said in the log (it was skipped silently,
+                # and a start that failed read only "no plan within 10 s").
+                seen_bad = p.get('version')
+                print(f"[CRUISE] First plan {seen_bad}: {p.get('status')} {p.get('error', '')}")
         moving = getattr(self.env, '_moving_pc', None) is not None
         why = None
         if plan is None:
@@ -471,7 +482,9 @@ class CruiseSteps:
                 if r['x'] is not None and np.hypot(r['x'] - track[-1][0], r['y'] - track[-1][1]) >= CRUISE_TRACK_STEP_M:
                     track.append((r['x'], r['y']))
                 st = r['status']
-                if st == 'arrived' and to_goal:
+                if st == 'arrived' and switch_pending:
+                    pass              # at the goal of the cell done: the next cell is on its way
+                elif st == 'arrived' and to_goal:
                     reason, arrived = "arrived at the goal", True
                     break
                 if st not in ('moving', 'near_goal', 'arrived', 'comm_error'):
@@ -529,6 +542,18 @@ class CruiseSteps:
                 if sw is not None and (sw.get('id') == last_switch_id or sw.get('kind') in ('start', 'seen', 'nogoal')):
                     sw = None         # already applied (it stays in the plans until cleared)
                 if switch_pending and sw is None:
+                    # While the thread prepares the next cell the plans still go towards the cell
+                    # done, and they still count: the edge being walked out of the graph stops
+                    # the robot, and the stretch sent follows the confirmed one of every plan
+                    # (it may get shorter). Until 13-11 these plans were skipped for up to
+                    # CRUISE_SWITCH_WAIT_S, with the robot walking the last stretch sent.
+                    if plan['status'] == 'edge_blocked':
+                        reason = "the edge being walked is out of the graph (while the next cell was prepared)"
+                        planner.switch_job = None
+                        break
+                    if plan['status'] == 'ok' and len(plan.get('confirmed', [])) > 1:
+                        pc.send(plan['confirmed'][1:], hold_s=None, **self._cruise_gait(plan['terrain']))
+                        n_sends += 1
                     if now - switch_t0 > CRUISE_SWITCH_WAIT_S:
                         reason, handoff = (f"cell done ({switch_why}), the next one not prepared within "
                                            f"{CRUISE_SWITCH_WAIT_S:.0f} s: next cell while walking"), True
