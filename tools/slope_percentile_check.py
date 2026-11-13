@@ -148,7 +148,8 @@ def stretches_of(name, stretch_m, truth='gpe'):
                 and seg[0, 0] - times[k] <= MAX_SCAN_AGE_S:
             est = _along(scans[k], seg[0, 1], seg[0, 2], seg[-1, 1], seg[-1, 2])
             if est is not None:
-                out.append(dict(mission=name, est_long=_summ(est[0]), est_lat=_summ(est[1]),
+                ahead = float(np.hypot(seg[0, 1] - scans[k]['robot'][0], seg[0, 2] - scans[k]['robot'][1]))
+                out.append(dict(mission=name, est_long=_summ(est[0]), est_lat=_summ(est[1]), ahead=ahead,
                                 worst_long=float(np.percentile(seg[:, 3], 90)), mean_long=float(np.mean(seg[:, 3])),
                                 worst_lat=float(np.percentile(seg[:, 4], 90)), mean_lat=float(np.mean(seg[:, 4]))))
         i = j
@@ -171,6 +172,19 @@ def report(S, truth='gpe'):
                 err = e - truth
                 corr = float(np.corrcoef(e, truth)[0, 1]) if np.std(e) > 0 and np.std(truth) > 0 else float('nan')
                 print(f"    {m:8s} {err.mean():+6.2f} {np.abs(err).mean():6.2f} {np.percentile(np.abs(err), 90):7.2f} {corr:6.2f}")
+        # The summary of the mission (p90) against the worst, by measured slope and by how far
+        # from the robot at the scan the stretch started (how far ahead the data were seen).
+        e = np.array([s[f'est_{comp}']['p90'] for s in S])
+        ahead = np.array([s['ahead'] for s in S])
+        print("  p90 against the worst, by band:")
+        for lab, sel in [(f"measured {lo}-{hi} deg", (worst >= lo) & (worst < hi))
+                         for lo, hi in ((0, 5), (5, 10), (10, 15), (15, 90))] + \
+                        [(f"seen {lo:.0f}-{hi:.0f} m ahead", (ahead >= lo) & (ahead < hi))
+                         for lo, hi in ((0, 1), (1, 2), (2, 99))]:
+            if sel.sum():
+                err = e[sel] - worst[sel]
+                print(f"    {lab:20s} n={int(sel.sum()):4d}  bias {err.mean():+5.2f}  MAE {np.abs(err).mean():5.2f}  "
+                      f"p90|e| {np.percentile(np.abs(err), 90):5.2f}  relative {np.median(e[sel] / np.maximum(worst[sel], 0.5)):.2f}")
         steep = worst > STEEP_DEG
         if steep.any():
             print(f"  steep stretches (measured worst > {STEEP_DEG:.0f} deg): {int(steep.sum())}; "
