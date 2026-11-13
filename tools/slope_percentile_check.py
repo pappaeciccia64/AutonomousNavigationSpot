@@ -12,7 +12,9 @@ and, along the straight line from start to end of the stretch, the samples of th
 it and across it. Summaries of those samples: mean, p50, p75, p90, max.
 
 Measured, in the stretch time: the ground plane Spot estimates from the legs (gpe_long_deg,
-gpe_lat_deg, from 04-11): the slope under the feet, along and across the heading. Two truths:
+gpe_lat_deg, from 04-11): the slope under the feet, along and across the heading; before 04-11
+only the body pitch (--truth body: along only, and Spot partly levels the body, so it reads
+less than the ground -- the bias is not comparable, correlation and ranking are). Two truths:
   worst   the 90th percentile of the measured samples: what the veto and the gait must catch
           (the measured max is one sample of a noisy 5 Hz signal)
   mean    the mean of the measured samples: the typical effort, closer to what a cost wants
@@ -23,6 +25,7 @@ catches with its threshold set to the same STEEP_DEG.
 
     python3 tools/slope_percentile_check.py                  # every mission with gpe and scans
     python3 tools/slope_percentile_check.py 04-11-2026_14-08-57 --stretch 0.8
+    python3 tools/slope_percentile_check.py --outdoor --truth body   # the missions on slopes
 Read only.
 """
 import argparse
@@ -92,7 +95,22 @@ def _along(scan, x1, y1, x2, y2):
     return lon, lat
 
 
-def stretches_of(name, stretch_m):
+def outdoor_missions(min_pitch_p90_deg=5.0):
+    """The missions where the body pitch p90 is above min_pitch_p90_deg (indoors ~0.6 deg)."""
+    out = []
+    for d in sorted(glob.glob(os.path.join(ROOT, 'MissionLogs', 'Mission_*'))):
+        t = os.path.join(d, 'trajectory.csv')
+        if not os.path.exists(t):
+            continue
+        with open(t, newline='') as f:
+            p = [abs(_num(r.get('pitch_deg'))) for r in csv.DictReader(f)]
+        p = [v for v in p if np.isfinite(v)]
+        if len(p) >= 30 and np.percentile(p, 90) >= min_pitch_p90_deg:
+            out.append(os.path.basename(d)[len('Mission_'):])
+    return out
+
+
+def stretches_of(name, stretch_m, truth='gpe'):
     logs = os.path.join(ROOT, 'MissionLogs', 'Mission_' + name)
     tpath = os.path.join(logs, 'trajectory.csv')
     if not os.path.exists(tpath):
@@ -101,7 +119,10 @@ def stretches_of(name, stretch_m):
     with open(tpath, newline='') as f:
         for r in csv.DictReader(f):
             t, x, y = _num(r.get('time')), _num(r.get('x')), _num(r.get('y'))
-            gl, gt = _num(r.get('gpe_long_deg')), _num(r.get('gpe_lat_deg'))
+            if truth == 'gpe':
+                gl, gt = _num(r.get('gpe_long_deg')), _num(r.get('gpe_lat_deg'))
+            else:
+                gl, gt = _num(r.get('pitch_deg')), 0.0          # the roll is levelled by Spot
             if np.isfinite(t) and np.isfinite(x) and np.isfinite(y) and np.isfinite(gl) and np.isfinite(gt):
                 rows.append((t, x, y, abs(gl), abs(gt)))
     if not rows:
@@ -134,10 +155,10 @@ def stretches_of(name, stretch_m):
     return out
 
 
-def report(S):
+def report(S, truth='gpe'):
     print(f"\n{len(S)} stretches of the trajectory with a scan before them "
           f"({len({s['mission'] for s in S})} missions).")
-    for comp in ('long', 'lat'):
+    for comp in (('long', 'lat') if truth == 'gpe' else ('long',)):
         worst = np.array([s[f'worst_{comp}'] for s in S])
         mean = np.array([s[f'mean_{comp}'] for s in S])
         print(f"\n=== {'ALONG the heading (pitch)' if comp == 'long' else 'ACROSS the heading (roll)'}: measured "
@@ -166,19 +187,23 @@ def main():
     ap.add_argument('missions', nargs='*', help="e.g. 04-11-2026_14-08-57 (default: every mission with gpe)")
     ap.add_argument('--stretch', type=float, default=STRETCH_M)
     ap.add_argument('--steep', type=float, default=STEEP_DEG)
+    ap.add_argument('--truth', choices=('gpe', 'body'), default='gpe',
+                    help="gpe: ground plane from the legs (from 04-11); body: body pitch (all missions)")
+    ap.add_argument('--outdoor', action='store_true', help="only the missions on slopes (body pitch p90 >= 5 deg)")
     a = ap.parse_args()
     STEEP_DEG = a.steep
-    names = a.missions or sorted(os.path.basename(p)[len('Mission_'):]
-                                 for p in glob.glob(os.path.join(ROOT, 'MissionLogs', 'Mission_*')))
+    names = a.missions or (outdoor_missions() if a.outdoor else
+                           sorted(os.path.basename(p)[len('Mission_'):]
+                                  for p in glob.glob(os.path.join(ROOT, 'MissionLogs', 'Mission_*'))))
     S = []
     for n in names:
-        s = stretches_of(n, a.stretch)
+        s = stretches_of(n, a.stretch, a.truth)
         if s:
             print(f"  {n}: {len(s)} stretches")
         S += s
     if not S:
-        sys.exit("no stretch with ground plane data (gpe, from 04-11) and a scan before it")
-    report(S)
+        sys.exit("no stretch with the measure asked and a scan before it")
+    report(S, a.truth)
 
 
 if __name__ == '__main__':
