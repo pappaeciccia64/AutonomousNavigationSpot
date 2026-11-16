@@ -594,7 +594,7 @@ class ArcVerificationTracker:
         self._running = True
         self._thread = threading.Thread(target=self._process_loop, daemon=True)
         self._thread.start()
-        print("ArcVerificationTracker (safe frontier) started in the background.")
+        print("[FRONTIER] Thread of the safe frontier and of the planning started.")
 
     def stop(self):
         self._running = False
@@ -631,7 +631,9 @@ class ArcVerificationTracker:
                     if version == self._path_version:   # the path has not changed in the meantime
                         self._latest = frontier
             except Exception as e:
+                # print too: the output goes into mission_log.txt, the logger only to the terminal.
                 LOGGER.error(f"Error computing the frontier: {e}")
+                print(f"[FRONTIER] Error computing the frontier (check while moving): {e!r}\n{traceback.format_exc()}")
             time.sleep(0.2)
 
     def _planning_cycle(self, job, period):

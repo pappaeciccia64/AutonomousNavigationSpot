@@ -363,6 +363,29 @@ class PRM(EdgeEvaluation, EdgeStats):
             node = parents[node]
         return path[::-1]
 
+    def why_no_path(self, start_idx, goal_idx):
+        """Why find_path_dijkstra(start_idx, goal_idx) is None, for the log: the path exists only
+        through nodes outside allowed_nodes (cells not explored, config.PLAN_ONLY_EXPLORED_CELLS),
+        or is beyond the detour cap, or the graph is really split (every connecting edge out:
+        occupancy, slope, live scan, blocked)."""
+        if start_idx not in self.nodes or goal_idx not in self.nodes:
+            return "a node does not exist"
+        path = self._dijkstra(start_idx, goal_idx)
+        if path is not None:
+            return (f"the path exists ({len(path) - 1} edges, {self.path_length(path):.1f} m) but is beyond "
+                    f"the detour cap ({self.max_detour_ratio} x straight line + {self.detour_slack_m} m)")
+        if self.allowed_nodes is not None:
+            allowed, self.allowed_nodes = self.allowed_nodes, None
+            try:
+                free = self._dijkstra(start_idx, goal_idx)
+            finally:
+                self.allowed_nodes = allowed
+            if free is not None:
+                return (f"a path exists only through cells not explored ({len(free) - 1} edges, "
+                        f"{self.path_length(free):.1f} m; config.PLAN_ONLY_EXPLORED_CELLS)")
+        return ("the graph is split between the two: every connecting edge is out (occupancy, slope, "
+                "live scan or blocked)")
+
     def reachable_from(self, start_idx, global_map=None, edge_safety_margin=0.0):
         """
         reachable(x, y) -> bool: has the node (x, y) is attached to (anchor_node) a path from

@@ -88,7 +88,27 @@ def _emit_mission_summary_once():
             pct = (100.0 * count / total_gait) if total_gait > 0 else 0.0
             print(f"  {tier:10s}: {count:6d}  ({pct:5.1f}%)")
         print(f"Total replans: {MISSION_STATS['replan_count']}")
-        for f in MISSION_STATS.get('start_failures', []):
+        # --- The continuous motion and the cells (the mission as in the field since 11-11) ---
+        g = MISSION_STATS.get
+        print(f"Cruises: {g('cruises', 0)}, {g('cruise_m', 0.0):.1f} m in {g('cruise_s', 0.0):.0f} s"
+              + (f" ({g('cruise_m', 0.0) / g('cruise_s', 1.0):.2f} m/s)" if g('cruise_s') else "")
+              + f", {g('cruise_plans', 0)} plans, {g('cruise_replans', 0)} path changes while walking, "
+              f"at most {g('cruise_max_dev_cm', 0.0):.0f} cm from the line")
+        print(f"Cells: chosen near {g('cell_choices_near', 0)} / far (GraphNav) {g('cell_choices_far', 0)}; "
+              f"done while walking with the next one prepared in the planning thread {g('cruise_switches', 0)} "
+              f"(waits at the goal {g('cruise_switch_waits_at_goal', 0)}, next cell late beyond the wait "
+              f"{g('cruise_switch_timeouts', 0)}), hand-offs to the next attempt {g('cruise_handoffs', 0)}; "
+              f"closed because seen: in cruise {g('cruise_seen_handoffs', 0)}, at the attempt start "
+              f"{g('cells_seen_only', 0)}, before moving {g('cells_seen_before_moving', 0)}; on the way "
+              f"{g('cells_on_the_way', 0)}")
+        print(f"Attempt starts from the planning thread: {g('thread_first_turns', 0)}, stop-and-go instead "
+              f"{g('thread_first_turn_fallbacks', 0)}, failed {len(g('start_failures', []))}; cell failures "
+              f"{g('cell_failures', 0)}, cruises that did not walk {g('cruise_stalls', 0)}; goals chosen again "
+              f"while walking {g('cruise_goal_repicks', 0)}")
+        exits = g('cruise_exits') or {}
+        if exits:
+            print("Ends of the cruises: " + ", ".join(f"{k} {v}" for k, v in sorted(exits.items(), key=lambda kv: -kv[1])))
+        for f in g('start_failures', []):
             print(f"Attempt start failed on cell ({f['cell'][0]},{f['cell'][1]}): {f['reason']}")
         print(f"Segments recorded in the CSV: {MISSION_STATS['segments_logged']}")
         print(f".npz saves for edges near the threshold: {MISSION_STATS['near_threshold_saves']}")

@@ -596,7 +596,7 @@ if __name__ == '__main__':
     tgt = [l for l in r['log'].splitlines() if l.startswith('[TARGET] Cell (0,1)')]
     check(bool(tgt) and 'using the geometric centre' not in tgt[0],
           f"goal in the free strip: {tgt[0][:120] if tgt else 'no [TARGET] line'}")
-    check('GRAPH DISCONNECTED' not in r['log'], "the graph reaches the chosen goal")
+    check('[NO PATH]' not in r['log'], "the graph reaches the chosen goal")
     check(r['ok'] is True, f"the cell counts as reached (final position "
                            f"({r['final'][0]:.2f}, {r['final'][1]:.2f}), border at x = 6.00)")
     check(r['final'][0] >= 6.0 - config.ARRIVAL_OUTSIDE_CELL_M - 0.02,

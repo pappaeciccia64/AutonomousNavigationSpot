@@ -166,10 +166,8 @@ class ScanSteps:
 
         if path_ids is None:
             print(
-                f"[GRAPH DISCONNECTED] No path in the PRM from node {self.robot_node_id} to node "
-                f"{self.goal_id}: the two nodes are in separate components of the graph. It is not a "
-                f"Dijkstra error -- it means that all the connecting edges have "
-                f"been vetoed (occupancy or slope). See the counts in [PRM MISSION SUMMARY].")
+                f"[NO PATH] No path in the graph from node {self.robot_node_id} to the goal node "
+                f"{self.goal_id}: {self.prm_graph.why_no_path(self.robot_node_id, self.goal_id)}.")
             print(f" -> Robot start coordinates: ({self.robot_x:.2f}, {self.robot_y:.2f})")
             print(f" -> Cell target coordinates: ({self.target_x:.2f}, {self.target_y:.2f})")
 

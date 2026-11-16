@@ -8,6 +8,14 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-16 (the logs: in the file, the new behaviours visible, the summary of the cruise)
+
+- **Into `mission_log.txt` what went only to the terminal**: the errors of the frontier check while moving (`[FRONTIER] Error ...`, with the traceback; the logger only reached the terminal) and the motors power-on (`[ROBOT]`, was the SDK logger); the start of the frontier/planning thread gets its tag.
+- **The stop at the goal while the next cell is prepared is said** (`[CRUISE] At the goal of the cell done, X s after asking the next cell: standing until it is prepared`), once per wait; stat `cruise_switch_waits_at_goal`.
+- **The `[CRUISE] Plan` line gives the terrain the gait is chosen from** (`terrain X deg rough Y cm`: worst plane slope along or across and roughness of the first metre of the confirmed stretch), to compare in the log itself with the ground under the feet (gpe in `trajectory.csv`) at the next outdoor mission.
+- **The end-of-mission summary has the cruise and the cells**: cruises (metres, time, speed, plans, path changes, deviation), cells chosen near/far, done while walking with the next prepared in the thread (waits at the goal, late beyond the wait), hand-offs, closed because seen (in cruise, at the attempt start, before moving), on the way, attempt starts from the thread / stop-and-go instead / failed (with their cause), cell failures, cruises that did not walk, goals chosen again while walking, ends of the cruises by reason. Until now it listed mostly the stop-and-go counters; these were only in `mission_summary.json`.
+- **`[NO PATH]` with the real cause** (`PRM.why_no_path`), instead of `[GRAPH DISCONNECTED]` "the two nodes are in separate components": the path exists but beyond the detour cap, or only through cells not explored (`PLAN_ONLY_EXPLORED_CELLS`), or the graph is really split. `tools/mission_report.py` counts the three tags.
+
 ## 2026-11-16 (imports: unused ones out, no import inside functions to dodge cycles)
 
 - **Unused imports removed** (left by the changes of the last days, used by no test nor tool): `config` (`spot_grid`: config is imported by every module, it must not pull a perception module), `exploration` (`geometry`, `goal`, `mission_prm`, `recovery`, `spot_grid`: the side rules), `attempt_scan` (`attempt_cruise`, `motion`, `recovery`: the old start), `run` and `legacy/stop_and_go_start` (`numpy`), `attempt_cruise` (`safe_frontier`), `recovery` (`roadmap`), `goal` (`global_maps`). `spot_grid`: the frame names explicit instead of `from bosdyn.client.frame_helpers import *`, the bosdyn imports in one guarded block.

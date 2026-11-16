@@ -344,10 +344,10 @@ def easy_walk(options):
 
         command_client = robot.ensure_client(RobotCommandClient.default_service_name)
         robot.time_sync.wait_for_sync()
-        robot.logger.info('Powering on the robot...')
+        print("[ROBOT] Powering on the motors...")
         robot.power_on()
         assert robot.is_powered_on(), 'Robot power-on failed.'
-        robot.logger.info('Robot powered on.')
+        print("[ROBOT] Motors on.")
         try:
             blocking_stand(command_client)
 

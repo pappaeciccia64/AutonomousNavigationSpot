@@ -526,7 +526,7 @@ def section_checks(log, segments):
     unreach = len(re.findall(r"(?:NESSUN punto della cella e' raggiungibile dal robot nel grafo|NO point of the cell is reachable from the robot in the graph)", log))
     outside_ok = len(re.findall(r"\[(?:OBIETTIVO|GOAL)\] (?:Il robot e' fuori dalla cella .* vale come arrivo|The robot is outside cell .* counts as arrival)", log))
     outside_no = len(re.findall(r"(?:ancora fuori dalla cella .*: non vale come arrivo|still outside cell .*: it does not count as arrival)", log))
-    disc = len(re.findall(r'\[(?:GRAFO DISCONNESSO|GRAPH DISCONNECTED)\]', log))
+    disc = len(re.findall(r'\[(?:GRAFO DISCONNESSO|GRAPH DISCONNECTED|NO PATH)\]', log))
     chosen = re.findall(r"\[TARGET\] (?:Cella|Cell) \((\d+),(\d+)\): .*?\((-?[\d.]+), (-?[\d.]+)\)", log)
     repeat = 0
     excl = {}

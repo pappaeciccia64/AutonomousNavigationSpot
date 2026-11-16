@@ -467,6 +467,7 @@ class CruiseSteps:
         reason, arrived, no_path_end = None, False, False
         switch_pending = report_switch = False
         switch_t0, switch_why, last_switch_id = 0.0, "", None
+        waiting_logged = False
         n_plans = n_sends = bad = 0
         last_version, last_plan_t = 0, t0
         last_crumb_t, last_battery_t, last_fall_t = t0, t0, t0
@@ -488,7 +489,13 @@ class CruiseSteps:
                     track.append((r['x'], r['y']))
                 st = r['status']
                 if st == 'arrived' and switch_pending:
-                    pass              # at the goal of the cell done: the next cell is on its way
+                    # At the goal of the cell done: the next cell is on its way. Said once (a stop
+                    # standing on the goal, otherwise invisible in the log).
+                    if not waiting_logged:
+                        waiting_logged = True
+                        MISSION_STATS['cruise_switch_waits_at_goal'] = MISSION_STATS.get('cruise_switch_waits_at_goal', 0) + 1
+                        print(f"[CRUISE] At the goal of the cell done, {now - switch_t0:.1f} s after asking the next "
+                              f"cell: standing until it is prepared (at most {CRUISE_SWITCH_WAIT_S:.0f} s).")
                 elif st == 'arrived' and to_goal:
                     reason, arrived = "arrived at the goal", True
                     break
@@ -615,6 +622,11 @@ class CruiseSteps:
                       + (f", Spot grid +{plan['grid_dt']:.2f} s" if plan.get('grid_dt') is not None else "")
                       + f", robot at {100 * r['deviation']:.0f} cm from the line"
                       + (f", cell seen {100 * plan['cell_seen']:.0f}%" if plan.get('cell_seen') is not None else "")
+                      # The terrain the gait is chosen from (first GAIT_LOOKAHEAD_M of the confirmed
+                      # stretch): worst slope (90th percentile of the plane, along or across) and
+                      # roughness -- to compare with the ground under the feet (gpe, trajectory.csv).
+                      + (f", terrain {np.degrees(np.arctan(plan['terrain'][0])):.1f} deg "
+                         f"rough {100 * plan['terrain'][1]:.1f} cm" if plan.get('terrain') else "")
                       + (" | edges: slopes {0} recomputed, {1} kept, {2} untouched, {3} out (live scan)".format(*plan['edges'])
                          + (f", {plan['edges'][4]} nodes pruned" if plan['edges'][4] else "")
                          if plan.get('edges') else ""))
@@ -668,6 +680,7 @@ class CruiseSteps:
                             self._prepare_next_cell, done=(self.target_row, self.target_col), why=why,
                             where=where)
                         switch_pending, switch_t0, switch_why = True, time.time(), why
+                        waiting_logged = False
                         HANDOFF.start("next cell prepared in the planning thread -> first command towards it")
                         continue
                     reason, handoff = f"{where}{why}: next cell while walking", True
