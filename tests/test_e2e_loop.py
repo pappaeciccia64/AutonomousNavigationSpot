@@ -149,7 +149,7 @@ class FakeLocalGrid(spot_grid.LocalGrid):
         self.local_grid_client = None
         self.rejected_scans = 0
 
-    def return_local_grid(self, layers, robot_state_client=None):
+    def return_local_grid(self, layers, robot_state_client=None, max_attempts=3, timeout=None):
         pts, od, terr, valid, snap = window()
         data = {'obstacle_distance': {'pts': pts, 'values': od},
                 'terrain': {'values': terr, 'raw_zero': float(np.float32(-0.00052261)), 'scale': 0.001},
@@ -754,6 +754,34 @@ if __name__ == '__main__':
     check(r['err'] is None, "no exception")
     check("[ALMOST]" not in r['log'] and "failed mechanically" in r['log'],
           "beyond the threshold it stays a physical failure")
+
+    # S18: Spot does not answer the scan request (16-11, spot_grid.SCAN_TIMEOUT_S): the download
+    # ends at once with the cause, no fall back to one request per layer, the single request is
+    # still used afterwards; the planning cycle ends 'no_scan' with that cause.
+    print("\n== S18. scan request without an answer: short timeout, the cause in the plan ==")
+    from bosdyn.client.exceptions import TimedOutError
+    from spot_explorer.mission import planning_cycle
+    calls = []
+
+    def silent(names, **kw):
+        calls.append((tuple(names), kw.get('timeout')))
+        raise TimedOutError(None, "fake: no answer")
+    lg = spot_grid.LocalGrid.__new__(spot_grid.LocalGrid)
+    lg.local_grid_client = NS(get_local_grids=silent)
+    with contextlib.redirect_stdout(io.StringIO()):
+        scan = lg.fetch_scan(None, timeout=spot_grid.SCAN_TIMEOUT_S, max_attempts=1)
+    check(scan is None and "no answer from Spot" in (lg.last_fetch_problem or ''),
+          f"no scan, the cause kept ({lg.last_fetch_problem})")
+    check(len(calls) == 1 and calls[0][1] == spot_grid.SCAN_TIMEOUT_S,
+          f"one request, with the short timeout ({calls})")
+    check(getattr(lg, '_multi_request_ok', True) and getattr(lg, '_multi_request_fails', 0) == 0,
+          "the single request for all the layers is not given up for a timeout")
+    planner = planning_cycle.CruisePlanner.__new__(planning_cycle.CruisePlanner)
+    planner.local_grid, planner.robot_state_client = lg, None
+    with contextlib.redirect_stdout(io.StringIO()):
+        plan = planner()
+    check(plan['status'] == 'no_scan' and "no answer from Spot" in plan.get('error', ''),
+          f"planning cycle: 'no_scan' with the cause ({plan.get('status')}: {plan.get('error')})")
 
     for d in [x for x in os.listdir(tempfile.gettempdir()) if x.startswith("mission_e2e_")]:
         shutil.rmtree(os.path.join(tempfile.gettempdir(), d), ignore_errors=True)

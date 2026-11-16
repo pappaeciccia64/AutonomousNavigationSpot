@@ -657,9 +657,11 @@ class ArcVerificationTracker:
         time.sleep(max(0.0, period - (time.time() - t0)))
 
     def _fresh_snapshot(self):
+        # The same short timeout as the planning cycle: this check runs during the stop-and-go
+        # moves, it must not hang on a request.
         grids_data, main_proto, _ = self._local_grid.return_local_grid(
             ['obstacle_distance', 'terrain', 'terrain_valid'],
-            robot_state_client=self._robot_state_client)
+            robot_state_client=self._robot_state_client, max_attempts=1, timeout=spot_grid.SCAN_TIMEOUT_S)
         if grids_data is None or 'obstacle_distance' not in grids_data:
             return None
 

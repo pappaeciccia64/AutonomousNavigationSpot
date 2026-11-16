@@ -308,9 +308,10 @@ class CruisePlanner:
     def __call__(self):
         t0 = time.perf_counter()
         ph = {}
-        scan = self.local_grid.fetch_scan(self.robot_state_client)
+        scan = self.local_grid.fetch_scan(self.robot_state_client, timeout=spot_grid.SCAN_TIMEOUT_S, max_attempts=1)
         if scan is None:
-            return dict(status='no_scan', cycle_s=time.perf_counter() - t0)
+            return dict(status='no_scan', error=getattr(self.local_grid, 'last_fetch_problem', None) or '',
+                        cycle_s=time.perf_counter() - t0)
         t = time.perf_counter(); ph['scan'] = t - t0
         grid_dt = self._grid_time(scan)
         robot = _pose_of_scan(scan)

@@ -2,6 +2,7 @@
 import numpy as np
 from scipy.ndimage import uniform_filter, distance_transform_edt
 import time
+from bosdyn.client.exceptions import TimedOutError
 try:
     import bosdyn.client
     from bosdyn.client.frame_helpers import *
@@ -15,6 +16,12 @@ from spot_explorer.perception.geometry import OBSTACLE_THRESHOLD
 from spot_explorer.perception.slopes import SLOPE_BASELINE_M
 from spot_explorer.robot import connection
 
+# Every request to Spot of a scan in the planning thread and in the frontier check (the layers,
+# the robot state): at most this, then the cycle ends without a scan ('no_scan', with the cause)
+# and the next one asks again. A scan arrives in 0.07-0.2 s on the laptop; with the library
+# default (30 s) a stuck request held the cycle, and the main thread waiting for it, that long
+# (09-11 15:32: a download of 21 s).
+SCAN_TIMEOUT_S = 2.0
 ROUGH_THRESHOLD = 0.15      # local roughness (std-dev of terrain height, m)
 
 # Spot's `terrain_valid` layer contains 0 and 1, but after scale and offset 0 becomes
@@ -81,7 +88,7 @@ class LocalGrid:
         self.last_ground_filter = {'ground_z': None, 'n_above': 0, 'max_above': 0.0,
                                    'source': 'not run yet', 'n_ref': 0}
 
-    def create_vtk_no_step_grid(self, proto, robot_state_client):
+    def create_vtk_no_step_grid(self, proto, robot_state_client, timeout=None):
         """
         "no_step" layer of the response: (points (x, y, z) in the VISION frame, values, RGB
         colours: red = not walkable, blue = walkable). Empty arrays if the layer is missing.
@@ -105,7 +112,7 @@ class LocalGrid:
         # Get the estimated height (z value) of the ground in the vision frame as if the robot was standing.
         transforms_snapshot = local_grid_proto.local_grid.transforms_snapshot
         vision_tform_body = get_a_tform_b(transforms_snapshot, VISION_FRAME_NAME, BODY_FRAME_NAME)
-        z_ground_in_vision_frame = self.compute_ground_height_in_vision_frame(robot_state_client)
+        z_ground_in_vision_frame = self.compute_ground_height_in_vision_frame(robot_state_client, timeout)
         # Numpy vstack makes it so that each column is (x,y,z) for a single no step grid point. The height values come
         # from the estimated height of the ground plane.
         cell_count = local_grid_proto.local_grid.extent.num_cells_x * local_grid_proto.local_grid.extent.num_cells_y
@@ -129,7 +136,7 @@ class LocalGrid:
         return pts, cells_no_step, color
 
 
-    def create_vtk_obstacle_grid(self, proto, robot_state_client):
+    def create_vtk_obstacle_grid(self, proto, robot_state_client, timeout=None):
         """
         "obstacle_distance" layer: signed distance (m) from the nearest obstacle, negative
         inside an obstacle. Unlike no_step it does not treat grass as an obstacle, which is
@@ -159,7 +166,7 @@ class LocalGrid:
 
         # Use ground-plane height for the z coordinate.
         transforms_snapshot = local_grid_proto.local_grid.transforms_snapshot
-        z_ground_in_vision_frame = self.compute_ground_height_in_vision_frame(robot_state_client)
+        z_ground_in_vision_frame = self.compute_ground_height_in_vision_frame(robot_state_client, timeout)
         cell_count = local_grid_proto.local_grid.extent.num_cells_x * local_grid_proto.local_grid.extent.num_cells_y
         z = np.ones(cell_count, dtype=np.float32) * z_ground_in_vision_frame
 
@@ -184,9 +191,11 @@ class LocalGrid:
         return pts, cells_obstacle_dist, color
 
 
-    def compute_ground_height_in_vision_frame(self, robot_state_client):
-        """Get the z-height of the ground plane in vision frame from the current robot state."""
-        robot_state = robot_state_client.get_robot_state()
+    def compute_ground_height_in_vision_frame(self, robot_state_client, timeout=None):
+        """Get the z-height of the ground plane in vision frame from the current robot state.
+        timeout: of the request, s (None: the library default, 30 s)."""
+        robot_state = (robot_state_client.get_robot_state() if timeout is None
+                       else robot_state_client.get_robot_state(timeout=timeout))
         vision_tform_ground_plane = get_a_tform_b(robot_state.kinematic_state.transforms_snapshot,
                                                   VISION_FRAME_NAME, GROUND_PLANE_FRAME_NAME)
         return vision_tform_ground_plane.position.z
@@ -267,16 +276,21 @@ class LocalGrid:
                 cells_pz_full.append(cells_pz[i])
         return np.array(cells_pz_full)
 
-    def _fetch_layers(self, types_of_grid):
+    def _fetch_layers(self, types_of_grid, timeout=None):
         """
         Download the requested layers with ONE single request (same snapshot for all); if
-        that does not work fall back on one request per layer.
+        that does not work fall back on one request per layer. timeout: of each request, s
+        (None: the library default, 30 s); a request that times out raises TimedOutError (no
+        fall back: the robot is not answering, asking layer by layer would wait three times).
         """
+        kw = {} if timeout is None else {'timeout': timeout}
         if getattr(self, '_multi_request_ok', True):
             try:
-                out = list(self.local_grid_client.get_local_grids(list(types_of_grid)))
+                out = list(self.local_grid_client.get_local_grids(list(types_of_grid), **kw))
                 self._multi_request_fails = 0
                 return out
+            except TimedOutError:
+                raise
             except Exception as e:
                 # After 3 failures in a row it is no longer tried (a request that always fails
                 # would cost a network round trip at every scan); a single network error
@@ -289,7 +303,9 @@ class LocalGrid:
         p = []
         for t in types_of_grid:
             try:
-                p.extend(self.local_grid_client.get_local_grids([t]))
+                p.extend(self.local_grid_client.get_local_grids([t], **kw))
+            except TimedOutError:
+                raise
             except Exception as e:
                 print(f"[WARNING] Failed to fetch layer '{t}': {e}")
         return p
@@ -304,14 +320,16 @@ class LocalGrid:
         return (tf.position.x, tf.position.y, float(yaw), g.extent.num_cells_x, g.extent.num_cells_y,
                 g.extent.cell_size)
 
-    def fetch_scan(self, robot_state_client):
+    def fetch_scan(self, robot_state_client, timeout=None, max_attempts=3):
         """
         Download the layers of a scan (obstacle_distance, terrain, terrain_valid) and read
-        their values and geometry. Returns a Scan, or None if the layers do not arrive. The
-        processing (terrain correction, slope, obstacle mask) is done by process_scan.
+        their values and geometry. Returns a Scan, or None if the layers do not arrive (why:
+        last_fetch_problem). The processing (terrain correction, slope, obstacle mask) is done
+        by process_scan. timeout, max_attempts: see return_local_grid.
         """
         grids_data, proto, _ = self.return_local_grid(
-            ['obstacle_distance', 'terrain', 'terrain_valid'], robot_state_client)
+            ['obstacle_distance', 'terrain', 'terrain_valid'], robot_state_client,
+            max_attempts=max_attempts, timeout=timeout)
         if grids_data is None or 'obstacle_distance' not in grids_data:
             return None
         ext = proto.local_grid.extent
@@ -402,7 +420,7 @@ class LocalGrid:
                 continue
         return out
 
-    def return_local_grid(self, types_of_grid, robot_state_client, max_attempts=3):
+    def return_local_grid(self, types_of_grid, robot_state_client, max_attempts=3, timeout=None):
         """
         Download and decode the requested layers.
 
@@ -414,7 +432,13 @@ class LocalGrid:
 
         Warns once if the grid is rotated relative to VISION: all the code assumes it is
         not (cell indices computed with the translation only).
+
+        timeout: of every request to the robot, s (None: the library default, 30 s; the
+        planning thread uses a short one, planning_cycle.SCAN_TIMEOUT_S: a request stuck for
+        30 s blocked the cycle that long). A request that times out ends the download at
+        once, without the other attempts. Why a download failed: last_fetch_problem.
         """
+        self.last_fetch_problem = None
         if isinstance(types_of_grid, str):
             types_of_grid = [types_of_grid]
 
@@ -422,7 +446,11 @@ class LocalGrid:
         for attempt in range(1, max_attempts + 1):
             if attempt > 1:
                 time.sleep(0.05)
-            p = self._fetch_layers(types_of_grid)
+            try:
+                p = self._fetch_layers(types_of_grid, timeout)
+            except TimedOutError:
+                p, problem = [], f"no answer from Spot within {timeout} s"
+                break
             names = [lg.local_grid_type_name for lg in p]
             missing = [t for t in types_of_grid if t not in names]
             if missing:
@@ -448,6 +476,7 @@ class LocalGrid:
             break
 
         if problem is not None or not p:
+            self.last_fetch_problem = problem or 'no layer downloaded'
             self.rejected_scans = getattr(self, 'rejected_scans', 0) + 1
             print(f"[ERROR] Local grids not usable after {max_attempts} attempts: "
                   f"{problem or 'no layer downloaded'} (scans discarded so far: {self.rejected_scans}).")
@@ -461,10 +490,15 @@ class LocalGrid:
         for lg in p:
             grid_type = lg.local_grid_type_name
             if grid_type == 'obstacle_distance':
-                pts, vals, color = self.create_vtk_obstacle_grid(p, robot_state_client)
+                try:
+                    pts, vals, color = self.create_vtk_obstacle_grid(p, robot_state_client, timeout)
+                except TimedOutError:
+                    self.last_fetch_problem = f"robot state: no answer from Spot within {timeout} s"
+                    print(f"[ERROR] Local grids not usable: {self.last_fetch_problem}.")
+                    return None, None, None
                 grids_data[grid_type] = {'pts': pts, 'values': vals, 'color': color}
             elif grid_type == 'no_step':
-                pts, vals, color = self.create_vtk_no_step_grid(p, robot_state_client)
+                pts, vals, color = self.create_vtk_no_step_grid(p, robot_state_client, timeout)
                 grids_data[grid_type] = {'pts': pts, 'values': vals, 'color': color}
             elif grid_type in ['terrain', 'intensity', 'terrain_valid']:
                 pts, vals, color = self.create_vtk_terrain_grid(p, robot_state_client, layer_name=grid_type)

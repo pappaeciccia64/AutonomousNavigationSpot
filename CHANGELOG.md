@@ -8,6 +8,11 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-16 (a short timeout on the scan requests of the planning thread)
+
+- **`spot_grid.SCAN_TIMEOUT_S` = 2 s** on every request to Spot of a scan of the planning cycle and of the frontier check (the layers, and the robot state read while decoding them: `fetch_scan` / `return_local_grid(timeout=, max_attempts=)`, `_fetch_layers`, `compute_ground_height_in_vision_frame`). Before: the library default, 30 s, with up to 3 attempts; a stuck request held the cycle, and the main thread waiting for it at an attempt start, that long (09-11 15:32: a scan download of 21 s). A scan arrives in 0.07-0.2 s on the laptop. A request that times out ends the download at once: no other attempt (the next cycle asks again), no fall back to one request per layer (it would wait three times), and it does not count towards giving up the single request for all layers. The cycle ends `no_scan` with the cause (`LocalGrid.last_fetch_problem`, e.g. "no answer from Spot within 2.0 s"), which reaches the log and, for an attempt start that fails, `start_failures`. The stop-and-go scans keep the default.
+- `test_e2e_loop` S18: a fake Spot that does not answer -- one request with the short timeout, no fall back, the cause in the plan.
+
 ## 2026-11-16 (code review: one function for one job; goal choice with one search)
 
 - **One search on the graph** (`PRM.costs_from`: Dijkstra with the weights of the attempt, nodes allowed, optional stop; `PRM.path_to`): `PRM._dijkstra` (the path), `PRM.reachable_count` and `cell_rules.CellRules._costs` are built on it; before, three copies of the same loop (the third written for the cell rules on 09-11). Same order of the steps: on a graph of 414 nodes with random edges, cells allowed and the detour cap, 1200 paths out of 1200 identical to the old Dijkstra.

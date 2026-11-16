@@ -332,10 +332,10 @@ class CruiseSteps:
             # mission summary: a start that fails is a failure of the cell, the cause tells
             # whether the graph or the computer was to blame.
             errors = [e for st, e in bad if st == 'error']
-            n_noscan = sum(1 for st, _e in bad if st == 'no_scan')
+            noscan = [e for st, e in bad if st == 'no_scan']
             why = (f"no plan from the planning thread within {wait_s:.0f} s: "
                    + (f"{len(errors)} cycles in error, the last: {errors[-1]}" if errors else
-                      f"{n_noscan} cycles without the scan of Spot" if n_noscan else
+                      f"{len(noscan)} cycles without the scan of Spot ({noscan[-1] or 'no cause'})" if noscan else
                       "no cycle ended (thread busy or stuck)"))
             self.start_failure_reason = why
         else:
