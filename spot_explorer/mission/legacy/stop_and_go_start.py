@@ -15,7 +15,6 @@ longer leaves that scan (the thread scans by itself), so here it never applies.
 """
 import time
 
-import numpy as np
 from bosdyn.client.frame_helpers import BODY_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b
 
 from spot_explorer.mission import recovery
@@ -113,7 +112,7 @@ class StopAndGoStart:
         HANDOFF.mark("global maps")
 
         # Global maps on disk (.pkl): at most every MAPS_SAVE_EVERY_S
-        _save_global_maps(self.global_grid, self.mission_folder)
+        global_maps.save_global_maps(self.global_grid, self.mission_folder)
         HANDOFF.mark("maps on disk")
         return scan
 
@@ -141,11 +140,6 @@ class StopAndGoStart:
               f"at the start of the attempt.")
         MISSION_STATS['chained_scans_reused'] = MISSION_STATS.get('chained_scans_reused', 0) + 1
         HANDOFF.mark("scan of the cruise reused")
-        _save_global_maps(self.global_grid, self.mission_folder)
+        global_maps.save_global_maps(self.global_grid, self.mission_folder)
         HANDOFF.mark("maps on disk")
         return scan
-
-
-def _save_global_maps(global_grid, folder):
-    from spot_explorer.mission.attempt_scan import save_global_maps
-    save_global_maps(global_grid, folder)

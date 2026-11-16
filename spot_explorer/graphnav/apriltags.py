@@ -7,6 +7,8 @@ from spot_explorer import config as P
 from spot_explorer.robot import connection
 from spot_explorer.records import MISSION_CTX, MISSION_STATS
 from spot_explorer.graphnav.navigation import graphnav_navigate_to
+from bosdyn.api import world_object_pb2
+from bosdyn.client.world_object import WorldObjectClient
 
 
 def find_fiducials(robot, robot_state_client, wait_s=0.0, fiducial_id=None):
@@ -17,8 +19,6 @@ def find_fiducials(robot, robot_state_client, wait_s=0.0, fiducial_id=None):
     Empty list if none, or if the service does not answer (never raises).
     """
     try:
-        from bosdyn.api import world_object_pb2
-        from bosdyn.client.world_object import WorldObjectClient
         client = robot.ensure_client(WorldObjectClient.default_service_name)
     except Exception as e:
         print(f"[FIDUCIAL] World-object service not available: {e}")

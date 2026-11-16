@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.dirname(HERE))   # the spot_explorer package
 
 import matplotlib  # noqa: E402
 matplotlib.use("Agg")
-from spot_explorer.mission import attempt_cruise, attempt_legs, attempt_obstacles, attempt_scan, cell_attempt     # noqa: E402
+from spot_explorer.mission import attempt_common, attempt_cruise, attempt_legs, attempt_obstacles, attempt_scan, cell_attempt     # noqa: E402
 from spot_explorer.mission.legacy import stop_and_go_start as legacy_stop_and_go_start     # noqa: E402
 from spot_explorer import config
 from spot_explorer import records
@@ -41,8 +41,8 @@ from spot_explorer.planning import decisions
 from spot_explorer.planning import safe_frontier
 from spot_explorer.perception import low_obstacles   # noqa: E402
 # The fake sensor sees through the obstacles: from the next cell a cell is "all seen" at once,
-# and these scenarios are about entering it (see cell_attempt.CELL_SEEN_EXPLORED).
-cell_attempt.CELL_SEEN_EXPLORED = False
+# and these scenarios are about entering it (see attempt_common.CELL_SEEN_EXPLORED).
+attempt_common.CELL_SEEN_EXPLORED = False
 from spot_explorer.planning import roadmap
 from spot_explorer.planning import edge_evaluation
 from spot_explorer.robot import motion

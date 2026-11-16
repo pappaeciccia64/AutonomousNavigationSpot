@@ -2,15 +2,18 @@
 import numpy as np
 from scipy.ndimage import uniform_filter, distance_transform_edt
 import time
-from bosdyn.client.exceptions import TimedOutError
 try:
-    import bosdyn.client
-    from bosdyn.client.frame_helpers import *
-    from bosdyn.client.frame_helpers import get_a_tform_b
+    from bosdyn.client.exceptions import TimedOutError
+    from bosdyn.client.frame_helpers import (BODY_FRAME_NAME, GROUND_PLANE_FRAME_NAME, VISION_FRAME_NAME,
+                                             get_a_tform_b)
     from bosdyn.api import local_grid_pb2
     from bosdyn.client.local_grid import LocalGridClient
 except ImportError:
     get_a_tform_b = local_grid_pb2 = LocalGridClient = None
+    BODY_FRAME_NAME, GROUND_PLANE_FRAME_NAME, VISION_FRAME_NAME = 'body', 'gpe', 'vision'
+
+    class TimedOutError(Exception):
+        pass
 from spot_explorer.perception import low_obstacles
 from spot_explorer.perception.geometry import OBSTACLE_THRESHOLD
 from spot_explorer.perception.slopes import SLOPE_BASELINE_M

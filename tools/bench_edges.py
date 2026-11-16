@@ -240,7 +240,7 @@ def replay(name, max_scans=None, b_radius='same', b_frontier_edges=False):
                     t0 = time.perf_counter()
                     p.refresh_local_edge_weights(global_map=gm_, edge_safety_margin=geometry.PRM_EDGE_SAFETY_MARGIN_M)
                     TIMES.setdefault((k, 'TOTAL refresh'), []).append(time.perf_counter() - t0)
-                    safe_frontier.prune_prm_nodes_in_obstacles(p, snap)
+                    roadmap.prune_prm_nodes_in_obstacles(p, snap)
         new_node = node
         if it == prev_it:
             for k in 'AB':

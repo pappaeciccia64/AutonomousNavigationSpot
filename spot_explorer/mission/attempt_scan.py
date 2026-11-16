@@ -6,7 +6,6 @@ import time
 import numpy as np
 from bosdyn.client.frame_helpers import BODY_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b
 from spot_explorer.graphnav import map_recording
-from spot_explorer.robot import motion
 from spot_explorer.robot import photos
 from spot_explorer.robot import connection
 from spot_explorer.perception import geometry
@@ -19,39 +18,8 @@ from spot_explorer.mission import mission_prm
 from spot_explorer import config as P
 from spot_explorer.records import (HANDOFF, MISSION_STATS, MISSION_CTX, save_npz_async, timing_add, visualize_grid_with_candidates)
 from spot_explorer.planning import goal
-from spot_explorer.mission import recovery
 from spot_explorer.mission import planning_cycle
-from spot_explorer.mission import attempt_cruise
 from spot_explorer.mission.attempt_common import STOP, FAILED
-
-# The global maps on disk (global_occupancy_map.pkl, global_terrain_map.pkl in the mission
-# folder) are read only after the mission (tools/mission_viewer.py): they are saved at most
-# every MAPS_SAVE_EVERY_S at the attempt starts, and always after the final scan and on an
-# interrupted mission. Before, at every attempt start: ~50 ms on the laptop on the maps of
-# 04-11 16:52, several times that on the CORE I/O, growing with the mission; and the data
-# after the last attempt start (last cruise, final scan) were never saved.
-MAPS_SAVE_EVERY_S = 60.0
-_maps_saved_at = [None]
-
-
-def save_global_maps(global_grid, folder, force=False):
-    """Both global maps in folder (see MAPS_SAVE_EVERY_S); force = now in any case."""
-    occ = getattr(global_grid, 'global_occupancy_map', None)
-    ter = getattr(global_grid, 'global_terrain_map', None)
-    if folder is None or occ is None or ter is None:
-        return
-    now = time.time()
-    if not force and _maps_saved_at[0] is not None and now - _maps_saved_at[0] < MAPS_SAVE_EVERY_S:
-        return
-    t0 = time.perf_counter()
-    occ.save_map(os.path.join(folder, "global_occupancy_map.pkl"))
-    ter.mission_z0 = MISSION_CTX.get('mission_z0')
-    ter.save_map(os.path.join(folder, "global_terrain_map.pkl"))
-    _maps_saved_at[0] = now
-    timing_add('maps on disk', time.perf_counter() - t0)
-    if force:
-        print(f"[MAP] Global maps saved in {time.perf_counter() - t0:.2f} s.")
-
 
 class ScanSteps:
     """Mixin of CellAttempt: the state is CellAttempt's, see its docstring for the map of the phases."""

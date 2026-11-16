@@ -56,12 +56,13 @@ from spot_explorer.graphnav import map_recording
 from spot_explorer.mission import planning_cycle
 from spot_explorer.mission import mission_prm
 from spot_explorer.planning import goal as goal_choice
+from spot_explorer.mission import attempt_common
 from spot_explorer.mission.attempt_common import CONTINUE, STOP, FAILED, battery_return_due
 from spot_explorer.perception import gait
+from spot_explorer.perception import global_maps
 from spot_explorer.perception import geometry
 from spot_explorer.planning import decisions
 from spot_explorer.planning import roadmap
-from spot_explorer.planning import safe_frontier
 from spot_explorer.records import HANDOFF, MISSION_STATS, BodyTiltRecorder, append_trajectory, timing_add
 from spot_explorer.robot import connection
 from spot_explorer.robot import motion
@@ -94,7 +95,7 @@ CRUISE_SETTLE_S = 1.0           # after a stop: wait at most this for the robot 
 # in cruise (far, none) the hand-off still happens here, and the next attempt starts with the
 # robot on the last 0.5 m.
 CRUISE_HANDOFF_M = 0.5
-# The cell is also done as soon as it is seen for at least cell_attempt.CELL_SEEN_FRACTION in
+# The cell is also done as soon as it is seen for at least attempt_common.CELL_SEEN_FRACTION in
 # the global map (with CELL_SEEN_EXPLORED), wherever the robot is: the cell exists to be seen,
 # the goal is only where to see it from (06-11).
 # STEP C (09-11): when the target cell is done the cruise does not end. The planning thread,
@@ -155,12 +156,6 @@ def stop_if_moving(env, command_client, reason):
     pc.stop(reason)
     CruiseSteps._cruise_settle(pc)
     _close_track(env)
-
-
-def cell_attempt_seen_fraction():
-    """cell_attempt.CELL_SEEN_FRACTION (imported here: cell_attempt imports this module)."""
-    from spot_explorer.mission import cell_attempt
-    return cell_attempt.CELL_SEEN_FRACTION
 
 
 def _close_track(env):
@@ -290,8 +285,7 @@ class CruiseSteps:
             return dict(kind='nogoal')
         self._reset_counters()
         self.loop_iter = 1          # the cruise is the first turn (_reset_counters puts 0)
-        from spot_explorer.mission.attempt_scan import save_global_maps
-        save_global_maps(self.global_grid, self.mission_folder)
+        global_maps.save_global_maps(self.global_grid, self.mission_folder)
         HANDOFF.mark("attempt counters")
         planner.set_path([self.robot_node_id] + [w[0] for w in self.path_waypoints], self.goal_id)
         self._thread_goals(planner)
@@ -649,8 +643,8 @@ class CruiseSteps:
                 seen = plan.get('cell_seen')
                 why = None
                 if (seen is not None
-                        and seen >= cell_attempt_seen_fraction()):
-                    why = (f"cell seen {100 * seen:.0f}% (threshold {100 * cell_attempt_seen_fraction():.0f}%), "
+                        and seen >= attempt_common.CELL_SEEN_FRACTION):
+                    why = (f"cell seen {100 * seen:.0f}% (threshold {100 * attempt_common.CELL_SEEN_FRACTION:.0f}%), "
                            f"{to_go:.2f} m from the goal")
                     where = ""
                     MISSION_STATS['cruise_seen_handoffs'] = MISSION_STATS.get('cruise_seen_handoffs', 0) + 1
@@ -912,8 +906,7 @@ class CruiseSteps:
     def _seen_cell(self):
         """(env, row, col) of the target cell for the planner's 'cell_seen', None if the seen
         rule is off."""
-        from spot_explorer.mission import cell_attempt
-        if not cell_attempt.CELL_SEEN_EXPLORED:
+        if not attempt_common.CELL_SEEN_EXPLORED:
             return None
         return (self.env, self.target_row, self.target_col)
 

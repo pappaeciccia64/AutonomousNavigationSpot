@@ -4,7 +4,6 @@ import sys
 import time
 from time import sleep
 from datetime import datetime
-import numpy as np
 
 import bosdyn.client
 import bosdyn.client.lease
@@ -39,6 +38,8 @@ from spot_explorer.mission import attempt_common
 from spot_explorer.mission import attempt_scan
 from spot_explorer.mission import exploration
 from spot_explorer.mission import summary
+import argparse
+import traceback
 
 # Where MissionMap/, MissionLogs/ and graph/ are created (the tests move it to a temporary folder).
 DATA_ROOT = REPO_ROOT
@@ -78,7 +79,7 @@ def _emergency_shutdown(robot, command_client, recordingInterface, exc):
     except BaseException:
         pass
     try:
-        attempt_scan.save_global_maps(MISSION_CTX.get('global_grid'), MISSION_CTX.get('mission_folder'),
+        global_maps.save_global_maps(MISSION_CTX.get('global_grid'), MISSION_CTX.get('mission_folder'),
                                       force=True)
     except BaseException as e:
         print(f"[EMERGENCY] Global maps not saved ({e!r}).")
@@ -448,7 +449,6 @@ def _parse_args(argv=None):
     of config.py (MISSION_GRID_ROWS, MISSION_GRID_COLS, MISSION_CELL_SIZE_M,
     MISSION_LATTICE_SPACING_M, MISSION_LATTICE_RINGS, MISSION_GRAPH_SAMPLING...).
     """
-    import argparse
     p = argparse.ArgumentParser(description="Autonomous exploration mission with Spot")
     p.add_argument('--rows', type=int, default=None,
                    help=f"rows of cells, to the robot's left (default {P.MISSION_GRID_ROWS})")
@@ -565,7 +565,6 @@ def main():
         logger = bosdyn.client.util.get_logger()
         logger.error('The mission was interrupted by an exception: %r', exc)
         try:
-            import traceback
             print(f"[LOG] The mission ended with an exception: {exc!r}")
             print(traceback.format_exc())
         except Exception:

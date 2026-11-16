@@ -69,8 +69,9 @@ mission_prm.PLAN_ALSO_SHARED_NEIGHBOUR_CELLS = False
 # Same for the goal nearest to the centre and the cells seen from outside (04-11 16:10).
 from spot_explorer.planning import goal as goal_choice   # noqa: E402
 from spot_explorer.mission import cell_attempt as _cell_attempt   # noqa: E402
+from spot_explorer.mission import attempt_common   # noqa: E402
 goal_choice.GOAL_CENTRE_FIRST = False
-_cell_attempt.CELL_SEEN_EXPLORED = False
+attempt_common.CELL_SEEN_EXPLORED = False
 from spot_explorer.robot import battery
 from spot_explorer.mission import attempt_cruise, attempt_legs, cell_attempt, exploration
 from spot_explorer.mission import run as mission_run
@@ -685,14 +686,14 @@ def _check_seen_before_moving():
     rank = {cell: i for i, cell in enumerate(m.path)}
     open_cells = sorted([(1, 1), (0, 3), (1, 0)], key=lambda rc: rank[rc])
     T.ROBOT = T.Robot(2.3, 1.7, 0.0)              # inside (1,1), 0.3 m from its border
-    was = _cell_attempt.CELL_SEEN_EXPLORED
-    _cell_attempt.CELL_SEEN_EXPLORED = True
+    was = attempt_common.CELL_SEEN_EXPLORED
+    attempt_common.CELL_SEEN_EXPLORED = True
     try:
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             n = m._close_seen_cells(lambda: [rc for rc in open_cells if env.map[rc[0]][rc[1]] == 0])
     finally:
-        _cell_attempt.CELL_SEEN_EXPLORED = was
+        attempt_common.CELL_SEEN_EXPLORED = was
     log = out.getvalue()
     check(n == 2 and env.map[1][1] == 1 and env.map[0][3] == 1 and env.map[1][0] == 0,
           f"(1,1) and (0,3) visited without moving, (1,0) half seen still to do (closed {n})")

@@ -7,6 +7,7 @@ from bosdyn.api.graph_nav import graph_nav_pb2 as _graph_nav_pb2
 from spot_explorer import config as P
 from spot_explorer.robot import connection
 from spot_explorer.records import MISSION_STATS, append_csv
+from bosdyn.api.graph_nav import nav_pb2 as _nav_pb2
 
 _DRIFT_COLUMNS = ['time', 'where', 'waypoint', 'age_s', 'dx', 'dy', 'd', 'gn_x', 'gn_y', 'vision_x',
                   'vision_y']
@@ -154,8 +155,6 @@ def graphnav_relocalize(recordingInterface, robot_state_client, why=""):
         if wp is None:
             print(f"[LOCALIZATION] Re-anchoring {why}: {name} is not in the graph.")
             return False
-        from bosdyn.client.math_helpers import SE3Pose
-        from bosdyn.api.graph_nav import nav_pb2 as _nav_pb2
         state = robot_state_client.get_robot_state()
         odom_tform_body = get_odom_tform_body(state.kinematic_state.transforms_snapshot)
         guess = SE3Pose.from_proto(wp.waypoint_tform_ko) * odom_tform_body

@@ -14,7 +14,6 @@ use, so the tests (test_replay.py, test_e2e_loop.py) can change them too.
 import numpy as np
 
 from spot_explorer.perception import geometry
-from spot_explorer.perception import spot_grid
 
 # =========================================================================================
 # THE MISSION: size, node graph, edges

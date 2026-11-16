@@ -422,7 +422,7 @@ class SideRulesMission(exploration.Mission):
         """SEEN_BEFORE_MOVING: the frontier cells already seen enough become visited without
         moving, in rank order; the neighbours they add to the frontier are checked too.
         Returns how many."""
-        if not (exploration.SEEN_BEFORE_MOVING and exploration.cell_attempt.CELL_SEEN_EXPLORED):
+        if not (exploration.SEEN_BEFORE_MOVING and attempt_common.CELL_SEEN_EXPLORED):
             return 0
         gmap = self.global_grid.global_occupancy_map
         if gmap is None or not self.frontier:
@@ -436,14 +436,14 @@ class SideRulesMission(exploration.Mission):
                 if self.env.map[r][c] != 0:
                     continue
                 frac = cells.cell_seen_fraction(self.env, gmap, r, c)
-                if frac is None or frac < exploration.cell_attempt.CELL_SEEN_FRACTION:
+                if frac is None or frac < attempt_common.CELL_SEEN_FRACTION:
                     continue
                 border = cells.cell_border_distance(self.env, r, c, x, y)
                 here = border is not None and -border <= P.ARRIVAL_OUTSIDE_CELL_M
                 center = self.env.get_world_position_from_cell(r, c)
                 dist = float(np.hypot(center[0] - x, center[1] - y))
                 print(f"[SEEN] Cell ({r},{c}): {100 * frac:.0f}% of it already in the global map "
-                      f"(threshold {100 * exploration.cell_attempt.CELL_SEEN_FRACTION:.0f}%) before moving there: "
+                      f"(threshold {100 * attempt_common.CELL_SEEN_FRACTION:.0f}%) before moving there: "
                       f"explored without going, "
                       + ("the robot is in it: its GraphNav waypoint here." if here else
                          f"centre {dist:.1f} m from the robot: no GraphNav waypoint of its own."))

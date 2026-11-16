@@ -16,6 +16,8 @@ from google.protobuf import wrappers_pb2 as wrappers
 from spot_explorer import config as P
 from spot_explorer.robot import connection
 from spot_explorer.graphnav.localization import graphnav_log_localization
+from bosdyn.api.graph_nav import map_processing_pb2
+from datetime import datetime
 
 class LoopClosureUploadError(Exception):
     """Spot computed the loop-closure edges but uploading them failed."""
@@ -62,8 +64,6 @@ class RecordingInterface(object):
         print(f"[ANCHORING] Starting global anchoring optimization...")
 
         try:
-            from google.protobuf import wrappers_pb2 as wrappers
-            from bosdyn.api.graph_nav import map_processing_pb2
 
             # Call the service without any "initial_hint"
             response = self._map_processing_client.process_anchoring(
@@ -199,7 +199,6 @@ class RecordingInterface(object):
         Path of a new folder for the download, like
         "Graph_10-02-2026_14-30-00" (Grafo_... in missions before 30-10-2026) (day-month-year_hours-minutes-seconds).
         """
-        from datetime import datetime
 
         timestamp = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
         unique_folder = f"{base_name}_{timestamp}"
@@ -223,7 +222,6 @@ class RecordingInterface(object):
         The fiducial must ALREADY be in the map: in the mission it is called after creating
         wp_0 with the tag in view, so it is in its snapshot (see find_fiducials).
         """
-        import time
 
         print(f"\n[{'=' * 40}]")
         print(f"[FIDUCIAL INIT] Initialization with the FIDUCIAL...")

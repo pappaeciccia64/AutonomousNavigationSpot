@@ -2,10 +2,13 @@
 import numpy as np
 from scipy.ndimage import binary_dilation, convolve
 import pickle
+import os
+import time
 from spot_explorer.perception.geometry import ROBOT_HALF_WIDTH_M
 from spot_explorer.perception import slopes
 from spot_explorer.perception.slopes import (LATERAL_SLICE_HALF_WIDTH_M, MIN_ARC_SAMPLE_FRACTION, _no_slope_data, _slope_profile_from_sampler, arc_slope_profiles_batch)
 from spot_explorer.perception.spot_grid import slope_usable_mask
+from spot_explorer.records import MISSION_CTX, timing_add
 
 # =========================================================================
 # GLOBAL OBSTACLE MAP (see GlobalGrid.update)
@@ -872,6 +875,35 @@ def mask_for_global_map(obstacle_mask, is_valid, pts=None, robot_pose=None,
     out[ring & (out < 0)] = 0.0
     out[core] = 1.0
     return (out, core) if return_core else out
+
+
+# The global maps on disk (global_occupancy_map.pkl, global_terrain_map.pkl in the mission
+# folder) are read only after the mission (tools/mission_viewer.py): they are saved at most
+# every MAPS_SAVE_EVERY_S at the attempt starts, and always after the final scan and on an
+# interrupted mission. Before, at every attempt start: ~50 ms on the laptop on the maps of
+# 04-11 16:52, several times that on the CORE I/O, growing with the mission; and the data
+# after the last attempt start (last cruise, final scan) were never saved.
+MAPS_SAVE_EVERY_S = 60.0
+_maps_saved_at = [None]
+
+
+def save_global_maps(global_grid, folder, force=False):
+    """Both global maps in folder (see MAPS_SAVE_EVERY_S); force = now in any case."""
+    occ = getattr(global_grid, 'global_occupancy_map', None)
+    ter = getattr(global_grid, 'global_terrain_map', None)
+    if folder is None or occ is None or ter is None:
+        return
+    now = time.time()
+    if not force and _maps_saved_at[0] is not None and now - _maps_saved_at[0] < MAPS_SAVE_EVERY_S:
+        return
+    t0 = time.perf_counter()
+    occ.save_map(os.path.join(folder, "global_occupancy_map.pkl"))
+    ter.mission_z0 = MISSION_CTX.get('mission_z0')
+    ter.save_map(os.path.join(folder, "global_terrain_map.pkl"))
+    _maps_saved_at[0] = now
+    timing_add('maps on disk', time.perf_counter() - t0)
+    if force:
+        print(f"[MAP] Global maps saved in {time.perf_counter() - t0:.2f} s.")
 
 
 def ensure_global_maps(global_grid, resolution=0.03):

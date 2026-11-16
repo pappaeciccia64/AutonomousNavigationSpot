@@ -6,6 +6,7 @@ from spot_explorer.records import MISSION_CTX, MISSION_STATS
 from spot_explorer.graphnav.localization import graphnav_localization
 from spot_explorer.graphnav.map_recording import graphnav_is_recording
 from spot_explorer.graphnav.localization import wp_name_by_id
+import heapq
 
 
 def segment_seen_free(global_map, x1, y1, x2, y2, margin_m, step_m=0.05):
@@ -20,7 +21,6 @@ def segment_seen_free(global_map, x1, y1, x2, y2, margin_m, step_m=0.05):
 
 def graph_route(adj, start, goal):
     """Dijkstra on {wp: {neighbour: length}}: (length, [wp...]) or (None, None)."""
-    import heapq
     dist, prev, pq = {start: 0.0}, {}, [(0.0, start)]
     while pq:
         d, u = heapq.heappop(pq)

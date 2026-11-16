@@ -25,6 +25,7 @@ from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
 from spot_explorer.perception import spot_grid
 from spot_explorer.planning import edge_evaluation
+from spot_explorer.planning import roadmap
 from spot_explorer.planning import safe_frontier
 from spot_explorer.records import MISSION_STATS, mission_z0, save_npz_async
 from spot_explorer.robot import motion
@@ -141,7 +142,7 @@ def refresh_graph(prm, snap, global_map, robot_xyyaw, refresh, quiet=False):
         stats['prm_refresh_skipped'] = stats.get('prm_refresh_skipped', 0) + 1
 
     # Nodes INSIDE obstacles: out of the graph (see prune_prm_nodes_in_obstacles).
-    pruned_nodes = safe_frontier.prune_prm_nodes_in_obstacles(prm, snap)
+    pruned_nodes = roadmap.prune_prm_nodes_in_obstacles(prm, snap)
     if quiet:
         prm.cycle_counts = getattr(prm, 'cycle_counts', (0, 0, 0, 0, 0))[:4] + (len(pruned_nodes),)
     elif pruned_nodes:

@@ -8,6 +8,7 @@ import numpy as np
 from typing import Tuple, Optional
 from spot_explorer.perception import geometry
 from spot_explorer.perception import slopes
+from spot_explorer.planning import safe_frontier
 
 
 # Samples per metre with which occupancy is checked along an edge (minimum 5), the same
@@ -262,7 +263,6 @@ class EdgeEvaluation:
         """FRONTIER_EDGES: for each edge (ends xy1, xy2, length d) True if THE rule of the
         frontier (safe_frontier.sample_flags) finds an obstacle or a roughness veto on its
         samples, taken as the frontier takes them on a segment, from either end."""
-        from spot_explorer.planning import safe_frontier
         snap = self.live_snap
         thr = FRONTIER_EDGES_CLEARANCE_M
         step = geometry.FRONTIER_SAMPLE_STEP_M
@@ -1055,7 +1055,6 @@ class EdgeEvaluation:
             if FRONTIER_EDGES and getattr(self, 'live_snap', None) is not None:
                 # Where the scan of this cycle sees, it decides (with the frontier's rule, see
                 # _frontier_blocked_xy); the global map only where it does not see.
-                from spot_explorer.planning import safe_frontier
                 rows, cols, inside = safe_frontier._cells(self.live_snap, sx, sy)
                 occ &= ~(inside & self.live_snap.seen[rows, cols])
             out[sel] = occ.any(axis=1)

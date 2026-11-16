@@ -95,6 +95,8 @@ from collections import deque
 import numpy as np
 
 from spot_explorer import config as P
+import random
+from scipy.spatial import cKDTree
 
 
 # ----------------------------------------------------------------------------------------
@@ -220,7 +222,6 @@ def lattice_pairs(spacing, ij, xy, min_edge_m, reach_m):
 
 def draw_seed():
     """A new seed, when none was requested: 31 bits from the system."""
-    import random
     return random.SystemRandom().randrange(2 ** 31)
 
 
@@ -343,7 +344,6 @@ def radius_pairs(xy, min_edge_m, reach_m):
     The node pairs between min_edge_m and reach_m apart, with the length, sorted like those
     of the lattice. Returns (pairs, lengths, n_below_threshold).
     """
-    from scipy.spatial import cKDTree
     found = cKDTree(xy).query_pairs(r=float(reach_m), output_type='ndarray')
     if len(found) == 0:
         return np.zeros((0, 2), np.int64), np.zeros(0), 0
@@ -362,7 +362,6 @@ def measured_covering(xy, box, step=0.05):
     dense grid in the rectangle and the nearest node. For the lattice there is the formula
     (covering_radius); for random nodes it must be measured.
     """
-    from scipy.spatial import cKDTree
     x0, x1, y0, y1 = box
     gx, gy = np.meshgrid(np.arange(x0, x1 + 1e-9, step), np.arange(y0, y1 + 1e-9, step))
     d, _ = cKDTree(xy).query(np.column_stack((gx.ravel(), gy.ravel())))

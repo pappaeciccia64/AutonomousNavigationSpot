@@ -2,12 +2,12 @@
 import numpy as np
 
 from spot_explorer.perception import geometry
-from spot_explorer.perception import global_maps
 from spot_explorer.mission import cells
 
 
 from spot_explorer import config as P
 from spot_explorer.records import MISSION_STATS
+from scipy.spatial import cKDTree
 
 # Criterion 3 of find_best_point_in_cell: nearest to the centre before the free space.
 GOAL_CENTRE_FIRST = True
@@ -103,7 +103,6 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
     live_od = None
     if pts is not None and cells_obstacle_dist is not None:
         try:
-            from scipy.spatial import cKDTree
             p2 = np.asarray(pts, dtype=np.float64).reshape(-1, np.shape(pts)[-1])[:, :2]
             od = np.asarray(cells_obstacle_dist, dtype=np.float64).ravel()
             if len(p2) == len(od) and len(p2):

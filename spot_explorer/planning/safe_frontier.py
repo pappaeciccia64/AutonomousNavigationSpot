@@ -7,7 +7,6 @@ import numpy as np
 from bosdyn.client.robot_state import RobotStateClient
 from bosdyn.client.frame_helpers import get_a_tform_b, VISION_FRAME_NAME, BODY_FRAME_NAME
 from spot_explorer import config as P
-from spot_explorer.planning import roadmap
 from spot_explorer.robot import connection
 from spot_explorer.perception import geometry
 from spot_explorer.perception import slopes
@@ -754,43 +753,3 @@ def goal_still_reachable(snap, goal_x, goal_y):
         return True
     return float(snap.obstacle_dist[rows[0], cols[0]]) >= geometry.FRONTIER_CLEARANCE_M
 
-
-def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=P.PRM_NODE_MIN_CLEARANCE_M):
-    """
-    Discard from the graph the nodes that fall INSIDE an obstacle.
-
-    The edges crossing occupied cells are vetoed (_occupancy_blocked), but the nodes are
-    born from the lattice before the robot has seen anything: a node inside an obstacle
-    would remain a destination or waypoint, to be discovered only on the spot.
-
-    Threshold min_clearance_m = FRONTIER_CLEARANCE_M (0.30): below that the body centre
-    does not fit and the frontier will never get there, so the node is useless both as a
-    destination and as a waypoint.
-
-    Discarded ONLY where the cell has really been observed: unknown is not occupied (the
-    same rule by which the frontier tells 'end_of_data' from 'obstacle'). A node outside the
-    window or never seen stays where it is and will be judged when it is seen.
-
-    Re-evaluated at every loop, so a node found to be inside a wall drops at once; and
-    since the edges are removed NON-permanently, a node misjudged by a noisy reading comes
-    back into play when the fresh data contradicts it.
-
-    The scan window contains only a small part of the graph (~7%), and the discard is
-    soft: at the next refresh the edges come back.
-    """
-    ids = [nid for nid in prm.nodes if prm.edges.get(nid)]   # already isolated: nothing to remove
-    if not ids:
-        return []
-    xy = np.array([prm.nodes[nid] for nid in ids], dtype=np.float64)
-    rows, cols, inside = _cells(snap, xy[:, 0], xy[:, 1])
-    bad = np.zeros(len(ids), dtype=bool)
-    if np.any(inside):
-        r, c = rows[inside], cols[inside]
-        bad[inside] = snap.seen[r, c] & (snap.obstacle_dist[r, c] < min_clearance_m)
-    pruned = []
-    for k in np.nonzero(bad)[0]:
-        nid = ids[int(k)]
-        for nb in [n for n, _ in prm.edges.get(nid, [])]:
-            roadmap.mark_edge_blocked_soft(prm, nid, nb)
-        pruned.append(nid)
-    return pruned

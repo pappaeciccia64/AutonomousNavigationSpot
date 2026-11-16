@@ -7,7 +7,6 @@ from spot_explorer.perception import geometry
 from spot_explorer.robot import connection
 from spot_explorer.planning import safe_frontier
 
-from spot_explorer.planning import roadmap
 
 from spot_explorer import config as P
 from spot_explorer.records import MISSION_STATS, TrajectoryLog

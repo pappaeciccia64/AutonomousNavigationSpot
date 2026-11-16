@@ -6,21 +6,16 @@ import numpy as np
 from spot_explorer.graphnav import map_shortcuts
 from spot_explorer.graphnav import navigation
 from spot_explorer.robot import motion
-from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
-from spot_explorer.perception import spot_grid
 from spot_explorer.mission import attempt_cruise
 from spot_explorer.mission import cells
 from spot_explorer.robot import connection
 
-from spot_explorer.mission import mission_prm
 
 from spot_explorer import config as P
 from spot_explorer.records import HANDOFF, MISSION_STATS, visualize_grid_with_candidates
 from spot_explorer.mission import attempt_common, attempt_scan, cell_attempt
 from spot_explorer.mission import cell_rules
-from spot_explorer.planning import goal
-from spot_explorer.mission import recovery
 
 
 # =========================================================================
@@ -28,8 +23,8 @@ from spot_explorer.mission import recovery
 # =========================================================================
 
 # Before moving towards a cell (GraphNav trip or attempt), the frontier cells already seen
-# for at least cell_attempt.CELL_SEEN_FRACTION in the global map are marked visited where
-# they are (only with cell_attempt.CELL_SEEN_EXPLORED). The GraphNav waypoint of the cell is
+# for at least attempt_common.CELL_SEEN_FRACTION in the global map are marked visited where
+# they are (only with attempt_common.CELL_SEEN_EXPLORED). The GraphNav waypoint of the cell is
 # made only if the robot is in it (or just outside, ARRIVAL_OUTSIDE_CELL_M), as after an
 # attempt; a cell seen from afar gets none. Why: on 04-11 16:52 the robot, standing in (1,3)
 # and in (1,0), went with GraphNav to a neighbouring waypoint (9 s and 4 s) and only there
@@ -222,7 +217,7 @@ class Mission:
         """SEEN_BEFORE_MOVING: the candidate cells (candidates(): the open cells, in visiting
         order) already seen enough become visited without moving; the cells they open are
         checked too (candidates() asked again after every one). Returns how many."""
-        if not (SEEN_BEFORE_MOVING and cell_attempt.CELL_SEEN_EXPLORED):
+        if not (SEEN_BEFORE_MOVING and attempt_common.CELL_SEEN_EXPLORED):
             return 0
         gmap = self.global_grid.global_occupancy_map
         if gmap is None:
@@ -236,14 +231,14 @@ class Mission:
                 if self.env.map[r][c] != 0:
                     continue
                 frac = cells.cell_seen_fraction(self.env, gmap, r, c)
-                if frac is None or frac < cell_attempt.CELL_SEEN_FRACTION:
+                if frac is None or frac < attempt_common.CELL_SEEN_FRACTION:
                     continue
                 border = cells.cell_border_distance(self.env, r, c, x, y)
                 here = border is not None and -border <= P.ARRIVAL_OUTSIDE_CELL_M
                 center = self.env.get_world_position_from_cell(r, c)
                 dist = float(np.hypot(center[0] - x, center[1] - y))
                 print(f"[SEEN] Cell ({r},{c}): {100 * frac:.0f}% of it already in the global map "
-                      f"(threshold {100 * cell_attempt.CELL_SEEN_FRACTION:.0f}%) before moving there: "
+                      f"(threshold {100 * attempt_common.CELL_SEEN_FRACTION:.0f}%) before moving there: "
                       f"explored without going, "
                       + ("the robot is in it: its GraphNav waypoint here." if here else
                          f"centre {dist:.1f} m from the robot: no GraphNav waypoint of its own."))
@@ -346,7 +341,7 @@ class Mission:
             self.global_grid.global_occupancy_map, self.global_grid.global_terrain_map, scan.pts,
             scan.terrain, scan.obstacle_mask, scan.is_valid, scan.od,
             (scan.num_y, scan.num_x), (x_final, y_final, final_yaw))
-        attempt_scan.save_global_maps(self.global_grid, self.mission_folder, force=True)
+        global_maps.save_global_maps(self.global_grid, self.mission_folder, force=True)
 
         final_save_path = os.path.join(
             self.mission_folder, f"iteration_{self.visualization_counter}_FINAL_SCAN.png"

@@ -6,6 +6,7 @@ from spot_explorer.robot import motion
 from spot_explorer.mission import attempt_cruise
 from spot_explorer.mission import mission_prm
 from spot_explorer.mission import cell_attempt
+from spot_explorer.mission import attempt_common
 from spot_explorer.mission import exploration
 from spot_explorer.mission import cell_rules
 from spot_explorer.planning import goal as goal_choice
@@ -46,7 +47,7 @@ def mission_switches():
         'attempt_cruise.CONTINUOUS_MOTION': attempt_cruise.CONTINUOUS_MOTION,
         'config.PLAN_ONLY_EXPLORED_CELLS': P.PLAN_ONLY_EXPLORED_CELLS,
         'mission_prm.PLAN_ALSO_SHARED_NEIGHBOUR_CELLS': mission_prm.PLAN_ALSO_SHARED_NEIGHBOUR_CELLS,
-        'cell_attempt.CELL_SEEN_EXPLORED': cell_attempt.CELL_SEEN_EXPLORED,
+        'attempt_common.CELL_SEEN_EXPLORED': attempt_common.CELL_SEEN_EXPLORED,
         'exploration.SEEN_BEFORE_MOVING': exploration.SEEN_BEFORE_MOVING,
         'exploration.Mission': exploration.Mission.__name__,   # SideRulesMission: the old rules
         'cell_rules.NEAR_PATH_M': cell_rules.NEAR_PATH_M,

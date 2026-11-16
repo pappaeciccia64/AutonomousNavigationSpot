@@ -15,6 +15,7 @@ from spot_explorer import config as P
 from spot_explorer.records import HANDOFF, MISSION_STATS, timing_add
 from spot_explorer.planning import goal
 from spot_explorer.mission import recovery
+from spot_explorer.mission import attempt_common
 from spot_explorer.mission.attempt_common import CONTINUE, STOP, FAILED, battery_return_due
 from spot_explorer.mission.attempt_scan import ScanSteps
 from spot_explorer.mission.attempt_obstacles import ObstacleSteps
@@ -29,9 +30,6 @@ from spot_explorer.mission.legacy.stop_and_go_start import StopAndGoStart
 # =========================================================================
 
 
-# A cell already seen almost all from outside counts as explored (see _cell_already_seen).
-CELL_SEEN_EXPLORED = True
-CELL_SEEN_FRACTION = 0.90
 
 class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStart):
     """Try to enter cell (target_row, target_col) from the robot's current position.
@@ -179,8 +177,8 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
 
     def _cell_already_seen(self):
         """
-        CELL_SEEN_EXPLORED: the cell counts as explored without entering it when at least
-        CELL_SEEN_FRACTION of it is already in the global map (seen free or obstacle, after the
+        attempt_common.CELL_SEEN_EXPLORED: the cell counts as explored without entering it when at least
+        attempt_common.CELL_SEEN_FRACTION of it is already in the global map (seen free or obstacle, after the
         first scan of this attempt). The robot stays where it is (still walking after a
         hand-off: like an attempt that ends before its loop) and the mission marks the cell
         visited, its GraphNav waypoint where the robot is. Why: on 04-11 16:10 (1,3), (1,0) and
@@ -188,13 +186,13 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
         entering them (goal against the furniture) cost back-offs, rotations refused and two
         returns with GraphNav; the cells ahead of the robot were 5-45% seen.
         """
-        if not CELL_SEEN_EXPLORED or self.global_map is None:
+        if not attempt_common.CELL_SEEN_EXPLORED or self.global_map is None:
             return False
         frac = cells.cell_seen_fraction(self.env, self.global_map, self.target_row, self.target_col)
-        if frac is None or frac < CELL_SEEN_FRACTION:
+        if frac is None or frac < attempt_common.CELL_SEEN_FRACTION:
             return False
         print(f"[SEEN] Cell ({self.target_row},{self.target_col}): {100 * frac:.0f}% of it already in the "
-              f"global map (threshold {100 * CELL_SEEN_FRACTION:.0f}%): explored without entering it.")
+              f"global map (threshold {100 * attempt_common.CELL_SEEN_FRACTION:.0f}%): explored without entering it.")
         MISSION_STATS['cells_seen_only'] = MISSION_STATS.get('cells_seen_only', 0) + 1
         self._seen_only = True
         return True
