@@ -293,11 +293,7 @@ class CruiseSteps:
         from spot_explorer.mission.attempt_scan import save_global_maps
         save_global_maps(self.global_grid, self.mission_folder)
         HANDOFF.mark("attempt counters")
-        planner.path_ids = [self.robot_node_id] + [w[0] for w in self.path_waypoints]
-        planner._seg = 0
-        planner._not_edges = {(a, b) for a, b in zip(planner.path_ids, planner.path_ids[1:])
-                              if not planning_cycle._edge_in_graph(self.prm_graph, a, b)}
-        planner.goal_id = self.goal_id
+        planner.set_path([self.robot_node_id] + [w[0] for w in self.path_waypoints], self.goal_id)
         self._thread_goals(planner)
         return dict(kind='start', prep_s=time.perf_counter() - t0)
 
@@ -316,7 +312,7 @@ class CruiseSteps:
         tracker.start_planning(planner, planning_cycle.PLAN_PERIOD_S)
         t0, plan = time.time(), None
         wait_s = START_PLAN_WAIT_S if planner.switch_job == self._start_in_thread else FIRST_PLAN_WAIT_S
-        seen_bad = None
+        seen_bad, bad = None, []
         while time.time() - t0 < wait_s:
             time.sleep(CRUISE_POLL_S)
             p = tracker.get_plan()
@@ -327,11 +323,21 @@ class CruiseSteps:
                 # A plan without data or with an error: said in the log (it was skipped silently,
                 # and a start that failed read only "no plan within 10 s").
                 seen_bad = p.get('version')
+                bad.append((p.get('status'), p.get('error', '')))
                 print(f"[CRUISE] First plan {seen_bad}: {p.get('status')} {p.get('error', '')}")
         moving = getattr(self.env, '_moving_pc', None) is not None
         why = None
         if plan is None:
-            why = f"no plan from the planning thread within {wait_s:.0f} s"
+            # Why: kept for the attempt (start_failure_reason), it ends up in the log and in the
+            # mission summary: a start that fails is a failure of the cell, the cause tells
+            # whether the graph or the computer was to blame.
+            errors = [e for st, e in bad if st == 'error']
+            n_noscan = sum(1 for st, _e in bad if st == 'no_scan')
+            why = (f"no plan from the planning thread within {wait_s:.0f} s: "
+                   + (f"{len(errors)} cycles in error, the last: {errors[-1]}" if errors else
+                      f"{n_noscan} cycles without the scan of Spot" if n_noscan else
+                      "no cycle ended (thread busy or stuck)"))
+            self.start_failure_reason = why
         else:
             self.robot_x, self.robot_y, self.robot_yaw = plan['robot']
             if planner.last_scan is not None:
@@ -383,17 +389,26 @@ class CruiseSteps:
         self.need_refresh = True
         return None
 
+    def _new_planner(self, goal_id, path_ids, thread_goals=True):
+        """The planning cycle of a cruise of this attempt: towards goal_id along path_ids, scan
+        bundles, share seen of the target cell; with thread_goals the new goal or cell chosen by
+        the thread itself (_thread_goals: needs the counters of the attempt, see _reset_counters;
+        at the attempt start in the thread _start_in_thread sets it)."""
+        planner = planning_cycle.CruisePlanner(self.local_grid, self.global_grid, self.prm_graph,
+                                               self.robot_state_client, goal_id, path_ids)
+        planner.bundle = self._cruise_bundle_info()
+        planner.seen_cell = self._seen_cell()
+        if thread_goals:
+            self._thread_goals(planner)
+        return planner
+
     def _cruise_from_start(self):
         """The attempt start in the thread: the planner starts with a
         placeholder path at the robot node, its first cycle runs _start_in_thread. Returns as
         _cruise, or STOP (cell already seen), FAILED (no goal), None (stop-and-go)."""
-        tracker = self.verification_tracker
         start = self.prm_graph.robot_node if self.prm_graph.robot_node in self.prm_graph.nodes \
             else next(iter(self.prm_graph.nodes))
-        planner = planning_cycle.CruisePlanner(self.local_grid, self.global_grid, self.prm_graph,
-                                               self.robot_state_client, start, [start])
-        planner.bundle = self._cruise_bundle_info()
-        planner.seen_cell = self._seen_cell()
+        planner = self._new_planner(start, [start], thread_goals=False)
         planner.switch_job = self._start_in_thread
         return self._cruise(from_thread=True, planner=planner)
 
@@ -404,12 +419,8 @@ class CruiseSteps:
         (the stop-and-go takes the turn)."""
         tracker = self.verification_tracker
         if planner is None:
-            ids = [self.robot_node_id] + [w[0] for w in self.path_waypoints]
-            planner = planning_cycle.CruisePlanner(self.local_grid, self.global_grid, self.prm_graph,
-                                                   self.robot_state_client, self.goal_id, ids)
-            planner.bundle = self._cruise_bundle_info()
-            planner.seen_cell = self._seen_cell()
-            self._thread_goals(planner)
+            planner = self._new_planner(self.goal_id, [self.robot_node_id] + [w[0] for w in self.path_waypoints])
+        ids = list(planner.path_ids)
         if from_thread:
             plan0 = self._first_plan(planner)
             # Seen or no goal: only computations, no command of this attempt -- the robot keeps
@@ -739,15 +750,6 @@ class CruiseSteps:
         """The next cell can be prepared in cruise: the cell rules of the mission at hand."""
         return getattr(self.env, '_cell_rules', None) is not None
 
-    def _robot_edge(self, planner, robot):
-        """(prev, next): the edge of the planner's path the robot is walking."""
-        coords = [self.prm_graph.get_node_position(n) for n in planner.path_ids]
-        _, seg = motion.path_ahead(coords, robot[0], robot[1], from_seg=planner._seg)
-        k = min(seg, len(planner.path_ids) - 2) if len(planner.path_ids) > 1 else 0
-        prev_id = planner.path_ids[k]
-        next_id = planner.path_ids[k + 1] if len(planner.path_ids) > 1 else planner.path_ids[0]
-        return prev_id, next_id
-
     def _goal_with_path(self, row, col, scan, robot, next_id, exclude):
         """IN THE PLANNING THREAD: the goal of cell (row, col) (goal.find_best_point_in_cell,
         reachable from next_id) and the path to it, up to GOAL_REPICK_CANDIDATES points.
@@ -755,9 +757,7 @@ class CruiseSteps:
         env, prm, gm = self.env, self.prm_graph, self.global_map
         mission_prm.restrict_planning_to_explored_cells(prm, env, row, col, (robot[0], robot[1]))
 
-        def reachable(px, py):
-            nid = prm.anchor_node(px, py, gm, geometry.PRM_EDGE_SAFETY_MARGIN_M)
-            return nid is not None and prm.find_path_dijkstra(next_id, nid) is not None
+        reachable = prm.reachable_from(next_id, gm, geometry.PRM_EDGE_SAFETY_MARGIN_M)
         for _k in range(P.GOAL_REPICK_CANDIDATES):
             tx, ty, _vs, _rs = goal_choice.find_best_point_in_cell(
                 robot[0], robot[1], env, row, col, scan.pts, scan.od, self.sampler,
@@ -775,11 +775,7 @@ class CruiseSteps:
     @staticmethod
     def _planner_to(planner, prm, prev_id, next_id, ids, gid, cell):
         """The planner goes on along ids towards goal gid of cell, keeping the edge being walked."""
-        planner.path_ids = ([prev_id] if prev_id != next_id else []) + list(ids)
-        planner._seg = 0
-        planner._not_edges = {(a, b) for a, b in zip(planner.path_ids, planner.path_ids[1:])
-                              if not planning_cycle._edge_in_graph(prm, a, b)}
-        planner.goal_id = gid
+        planner.set_path(([prev_id] if prev_id != next_id else []) + list(ids), gid)
         if planner.seen_cell is not None:
             planner.seen_cell = (planner.seen_cell[0], cell[0], cell[1])
         if planner.bundle is not None:
@@ -811,7 +807,7 @@ class CruiseSteps:
         if not choice.near:
             info['reason'] = f"next cell ({choice.row},{choice.col}) way costing {choice.length:.1f} (m on flat ground): GraphNav"
             return info
-        prev_id, next_id = self._robot_edge(planner, robot)
+        _seg, prev_id, next_id = planner.robot_edge(robot)
         prm.clear_penalties_for_attempt()
         ids, gid, tx, ty = self._goal_with_path(choice.row, choice.col, scan, robot, next_id, [])
         if ids is None:

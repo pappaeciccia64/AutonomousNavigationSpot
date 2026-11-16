@@ -120,10 +120,16 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
                 if started is STOP:
                     return True if self._seen_only else self._finish()
                 if started is None and not self.path_waypoints:
+                    # Not "unreachable now": that is a fact of the graph, this may be a slow or
+                    # stuck computer (09-11 15:32: scan 20 s, graph 31 s). A failure of the
+                    # cell (retried later, set aside after cell_rules.MAX_FAILURES), with its cause.
                     self.loop_iter = 0
-                    self.env._attempt_left_unreachable = True
-                    print(f"[ATTEMPT] Cell ({self.target_row},{self.target_col}): the planning thread gave no path, "
-                          f"left as unreachable now.")
+                    why = getattr(self, 'start_failure_reason', None) or "the planning thread gave no path"
+                    self.env._attempt_fail_why = f"start in the planning thread failed: {why}"
+                    MISSION_STATS.setdefault('start_failures', []).append(
+                        dict(cell=[self.target_row, self.target_col], reason=why))
+                    print(f"[ATTEMPT] Cell ({self.target_row},{self.target_col}): no start from the planning thread "
+                          f"after {attempt_cruise.START_TRIES} tries ({why}): a failure of the cell, retried later.")
                     return False
                 if started is None:
                     self.loop_iter = 0      # the first plan did not allow to start: stop-and-go
@@ -230,9 +236,10 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
         self.arrived_near_goal = False   # arrival accepted with the robot just outside the cell
         self.trap_state = {'n': 0}   # goings back in THIS attempt, never reset (see _trap_backtrack)
 
-    def _reachable_from_robot(self, px, py):
-        nid = self.prm_graph.anchor_node(px, py, self.global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M)
-        return nid is not None and self.prm_graph.find_path_dijkstra(self.robot_node_id, nid) is not None
+    def _reachable_from_robot(self):
+        """reachable(x, y) for the goal choice: a path from the robot node (one search, see
+        PRM.reachable_from). To be asked again after the graph changes."""
+        return self.prm_graph.reachable_from(self.robot_node_id, self.global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M)
 
     def _waypoints_from_ids(self, ids):
         """[(node_id, x, y), ...] without the first node (the robot position)."""
@@ -348,11 +355,12 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
         # path, towards the point just excluded.
         old = (self.target_x, self.target_y, self.goal_id)
         new_ids = None
+        reachable = self._reachable_from_robot()
         for _k in range(P.GOAL_REPICK_CANDIDATES):
             new_tx, new_ty, _vs, _rs = goal.find_best_point_in_cell(
                 self.robot_x, self.robot_y, self.env, self.target_row, self.target_col, self.scan.pts, self.scan.od,
                 self.sampler, global_map=self.global_map, exclude=self.tried_goals,
-                reachable=self._reachable_from_robot)
+                reachable=reachable)
             if new_tx is None or new_ty is None:
                 print("[TARGET] No other valid point in this cell.")
                 break
@@ -407,8 +415,7 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
 
         self.robot_x, self.robot_y, self.robot_z, robot_quat = connection.getPosition(self.robot_state_client)
 
-        self.robot_yaw = np.arctan2(2.0 * (robot_quat.w * robot_quat.z + robot_quat.x * robot_quat.y),
-                               1.0 - 2.0 * (robot_quat.y ** 2 + robot_quat.z ** 2))
+        self.robot_yaw = connection.yaw_of(robot_quat)
 
         # --- Generic anti-stall guard: how many turns in a row without moving.
         if self.last_xy is not None and float(np.hypot(self.robot_x - self.last_xy[0], self.robot_y - self.last_xy[1])) < P.IDLE_MOVE_M:

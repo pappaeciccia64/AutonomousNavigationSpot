@@ -32,6 +32,7 @@ from google.protobuf import wrappers_pb2
 from spot_explorer import config as P
 from spot_explorer.perception import gait
 from spot_explorer.records import MISSION_STATS
+from spot_explorer.robot import connection
 
 
 # =========================================================================
@@ -893,7 +894,7 @@ def navigate_to(target_x, target_y, robot_x, robot_y, robot_state_client, comman
     target_yaw = np.arctan2(dy, dx)
 
     quat = vision_tform_body.rotation
-    current_yaw = np.arctan2(2.0 * (quat.w * quat.z + quat.x * quat.y), 1.0 - 2.0 * (quat.y ** 2 + quat.z ** 2))
+    current_yaw = connection.yaw_of(quat)
     dyaw = np.arctan2(np.sin(target_yaw - current_yaw), np.cos(target_yaw - current_yaw))
 
     if keep_heading:

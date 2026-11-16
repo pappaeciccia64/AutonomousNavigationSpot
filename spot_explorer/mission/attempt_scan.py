@@ -59,14 +59,7 @@ class ScanSteps:
     def _ensure_global_maps(self, cell_size=0.03):
         """GLOBAL MAPS: created at the first attempt (resolution of the local grid, 3 cm), then
         accumulated for the whole mission."""
-        if self.global_grid.global_occupancy_map is None:
-            self.global_grid.global_occupancy_map = global_maps.GlobalGrid(resolution=cell_size)
-            print("[MAP] Initialized new persistent global occupancy map.")
-        if self.global_grid.global_terrain_map is None:
-            self.global_grid.global_terrain_map = global_maps.GlobalTerrainGrid(resolution=cell_size)
-            print("[MAP] Initialized new persistent global terrain map (height).")
-        self.global_map = self.global_grid.global_occupancy_map
-        self.global_terrain_map = self.global_grid.global_terrain_map
+        self.global_map, self.global_terrain_map = global_maps.ensure_global_maps(self.global_grid, cell_size)
         self.prm_graph.set_global_terrain_map(self.global_terrain_map)
 
     def _local_data_into_graph(self, scan):
@@ -165,7 +158,7 @@ class ScanSteps:
         # Search for the target point and planning
         self.target_x, self.target_y, valid_samples, rejected_samples = goal.find_best_point_in_cell(
             self.robot_x, self.robot_y, self.env, self.target_row, self.target_col, pts, cells_obstacle_dist, self.sampler,
-            global_map=self.global_map, reachable=self._reachable_from_robot)
+            global_map=self.global_map, reachable=self._reachable_from_robot())
         HANDOFF.mark("goal choice")
 
         # The goal of this attempt, for the recovery right after a failure
@@ -263,7 +256,7 @@ class ScanSteps:
         tf = get_a_tform_b(scan.proto.local_grid.transforms_snapshot, VISION_FRAME_NAME, BODY_FRAME_NAME)
         q = tf.rotation
         self.robot_x, self.robot_y = tf.position.x, tf.position.y
-        self.robot_yaw = np.arctan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y ** 2 + q.z ** 2))
+        self.robot_yaw = connection.yaw_of(q)
         self.scan = scan
         self.snap, self.t_proc, self.t_maps = planning_cycle.scan_into_maps(
             self.local_grid, self.prm_graph, self.global_map, self.global_terrain_map, scan,

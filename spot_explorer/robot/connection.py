@@ -40,6 +40,11 @@ def check_line_of_sight(x1, y1, x2, y2, pts, cells, obstacle_threshold=0.0, max_
 
 # --- robot connection ---
 """Connection to the robot (SDK, login, lease, state) and E-Stop."""
+
+def yaw_of(q):
+    """Yaw (rad) of a quaternion with attributes w, x, y, z: the heading in the VISION frame."""
+    return float(np.arctan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y ** 2 + q.z ** 2)))
+
 import os
 import bosdyn.client
 import bosdyn.client.lease

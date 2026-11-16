@@ -28,7 +28,7 @@ def find_fiducials(robot, robot_state_client, wait_s=0.0, fiducial_id=None):
         found = []
         try:
             rx, ry, _, q = connection.getPosition(robot_state_client)
-            yaw = float(np.arctan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y ** 2 + q.z ** 2)))
+            yaw = float(connection.yaw_of(q))
             resp = client.list_world_objects(object_type=[world_object_pb2.WORLD_OBJECT_APRILTAG])
             for o in resp.world_objects:
                 tag = o.apriltag_properties

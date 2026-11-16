@@ -394,8 +394,7 @@ def easy_walk(options):
 
             # --- Starting pose, BEFORE building the graph: the lattice is relative to it ---
             x_boot, y_boot, z_boot, quat_boot = connection.getPosition(robot_state_client)
-            yaw_boot = np.arctan2(2.0 * (quat_boot.w * quat_boot.z + quat_boot.x * quat_boot.y),
-                                  1.0 - 2.0 * (quat_boot.y ** 2 + quat_boot.z ** 2))
+            yaw_boot = connection.yaw_of(quat_boot)
             env.set_origin(x_boot, y_boot, yaw_boot, start_row=start_row, start_col=start_col)
             set_mission_z0(robot_state_client, z_boot)
 

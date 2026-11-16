@@ -622,29 +622,16 @@ def plane_slope_along(gx, gy, grid_origin_x, grid_origin_y, cell_size, x1, y1, x
     Slope of the edge (x1, y1) -> (x2, y2) on a plane gradient field: one sample per cell
     along the edge (extended by body_ext_m at both ends), longitudinal = |gradient . direction|,
     lateral = |gradient . perpendicular|, each summarized with the 90th percentile as
-    compute_arc_slope_profile does. Returns (long, lat, has_data), as tangents.
+    compute_arc_slope_profile does. Returns (long, lat, has_data), as tangents. The same
+    computation as plane_slope_profiles_batch, on one edge.
     """
-    dx, dy = x2 - x1, y2 - y1
-    dist = float(np.hypot(dx, dy))
-    if dist < 1e-6:
-        return 0.0, 0.0, False
-    ux, uy = dx / dist, dy / dist
-    n = max(2, int(np.ceil((dist + 2 * body_ext_m) / cell_size)) + 1)
-    s = np.linspace(-body_ext_m, dist + body_ext_m, n)
-    xs, ys = x1 + ux * s, y1 + uy * s
-    num_rows, num_cols = gx.shape
-    c = np.floor((xs - grid_origin_x) / cell_size).astype(np.int64)
-    r = np.floor((ys - grid_origin_y) / cell_size).astype(np.int64)
-    inside = (r >= 0) & (r < num_rows) & (c >= 0) & (c < num_cols)
-    g_x = np.full(n, np.nan)
-    g_y = np.full(n, np.nan)
-    g_x[inside], g_y[inside] = gx[r[inside], c[inside]], gy[r[inside], c[inside]]
-    ok = np.isfinite(g_x) & np.isfinite(g_y)
-    if np.count_nonzero(ok) < min_sample_fraction * n:
-        return 0.0, 0.0, False
-    lon = np.abs(g_x[ok] * ux + g_y[ok] * uy)
-    lat = np.abs(-g_x[ok] * uy + g_y[ok] * ux)
-    return p90(lon), p90(lat), True
+    d = float(np.hypot(x2 - x1, y2 - y1))
+    if d >= 1e-6 and body_ext_m > 0:
+        ux, uy = (x2 - x1) / d, (y2 - y1) / d
+        x1, y1, x2, y2 = x1 - ux * body_ext_m, y1 - uy * body_ext_m, x2 + ux * body_ext_m, y2 + uy * body_ext_m
+    r = plane_slope_profiles_batch(gx, gy, grid_origin_x, grid_origin_y, cell_size, [x1], [y1], [x2], [y2],
+                                   min_sample_fraction)[0]
+    return float(r[0]), float(r[1]), bool(r[2])
 
 
 def plane_slope_profile(gx, gy, grid_origin_x, grid_origin_y, cell_size, x1, y1, x2, y2,
@@ -672,31 +659,39 @@ def _p90_rows_nan(m):
     return np.where(k > 0, out, 0.0)
 
 
-def plane_slope_profiles_batch(gx, gy, grid_origin_x, grid_origin_y, cell_size, x1, y1, x2, y2,
-                               min_sample_fraction=MIN_ARC_SAMPLE_FRACTION):
-    """plane_slope_profile for many edges at once (arrays): rows (long, lat, has, long, lat,
-    has) like arc_slope_profiles_batch with the body. Same numbers as plane_slope_along."""
+def grid_lookup(gx, gy, grid_origin_x, grid_origin_y, cell_size):
+    """lookup(xs, ys) -> (gx, gy) on a gradient field of a grid (NaN outside)."""
     num_rows, num_cols = gx.shape
 
     def lookup(xs, ys):
         c = np.floor((xs - grid_origin_x) / cell_size).astype(np.int64)
         r = np.floor((ys - grid_origin_y) / cell_size).astype(np.int64)
         inside = (r >= 0) & (r < num_rows) & (c >= 0) & (c < num_cols)
-        g_x = np.full(xs.shape, np.nan)
-        g_y = np.full(xs.shape, np.nan)
+        g_x = np.full(np.shape(xs), np.nan)
+        g_y = np.full(np.shape(xs), np.nan)
         g_x[inside], g_y[inside] = gx[r[inside], c[inside]], gy[r[inside], c[inside]]
         return g_x, g_y
-    return plane_slope_profiles_lookup(lookup, cell_size, x1, y1, x2, y2, min_sample_fraction)
+    return lookup
 
 
-def plane_slope_profiles_lookup(lookup, cell_size, x1, y1, x2, y2, min_sample_fraction=MIN_ARC_SAMPLE_FRACTION):
-    """plane_slope_profiles_batch with the gradient read by lookup(xs, ys) -> (gx, gy) (NaN
-    where none): the same samples along the edges and the same summary."""
+def plane_slope_profiles_batch(gx, gy, grid_origin_x, grid_origin_y, cell_size, x1, y1, x2, y2,
+                               min_sample_fraction=MIN_ARC_SAMPLE_FRACTION):
+    """plane_slope_profile for many edges at once (arrays): rows (long, lat, has, long, lat,
+    has) like arc_slope_profiles_batch with the body."""
+    return plane_slope_profiles_lookup(grid_lookup(gx, gy, grid_origin_x, grid_origin_y, cell_size),
+                                       cell_size, x1, y1, x2, y2, min_sample_fraction)
+
+
+def plane_slope_samples(lookup, cell_size, x1, y1, x2, y2, min_sample_fraction=MIN_ARC_SAMPLE_FRACTION):
+    """
+    THE sampling of the plane slope along edges (arrays): one sample per cell from (x1, y1) to
+    (x2, y2), the gradient read by lookup(xs, ys) -> (gx, gy) (NaN where none). Returns
+    (lon, lat, has): |slope along| and |slope across| per sample (rows = edges, NaN where no
+    value or beyond the edge), has = enough samples with a value (min_sample_fraction).
+    Summarized by plane_slope_profiles_lookup (90th percentile); tools/slope_percentile_check.py
+    compares other summaries on the same samples.
+    """
     x1, y1, x2, y2 = (np.asarray(v, dtype=np.float64) for v in (x1, y1, x2, y2))
-    e = x1.size
-    out = np.zeros((e, 6))
-    if e == 0:
-        return out
     dx, dy = x2 - x1, y2 - y1
     dist = np.hypot(dx, dy)
     good = dist >= 1e-6
@@ -712,9 +707,19 @@ def plane_slope_profiles_lookup(lookup, cell_size, x1, y1, x2, y2, min_sample_fr
     has = good & (ok.sum(axis=1) >= min_sample_fraction * n)
     lon = np.where(ok, np.abs(g_x * ux[:, None] + g_y * uy[:, None]), np.nan)
     lat = np.where(ok, np.abs(-g_x * uy[:, None] + g_y * ux[:, None]), np.nan)
-    p_lon, p_lat = _p90_rows_nan(lon), _p90_rows_nan(lat)
-    p_lon = np.where(has, p_lon, 0.0)
-    p_lat = np.where(has, p_lat, 0.0)
+    return lon, lat, has
+
+
+def plane_slope_profiles_lookup(lookup, cell_size, x1, y1, x2, y2, min_sample_fraction=MIN_ARC_SAMPLE_FRACTION):
+    """Rows (long, lat, has, long, lat, has) of the edges (arrays): the samples of
+    plane_slope_samples, 90th percentile of each component; 0 without enough samples."""
+    e = np.size(x1)
+    out = np.zeros((e, 6))
+    if e == 0:
+        return out
+    lon, lat, has = plane_slope_samples(lookup, cell_size, x1, y1, x2, y2, min_sample_fraction)
+    p_lon = np.where(has, _p90_rows_nan(lon), 0.0)
+    p_lat = np.where(has, _p90_rows_nan(lat), 0.0)
     out[:, 0], out[:, 1], out[:, 2] = p_lon, p_lat, has
     out[:, 3], out[:, 4], out[:, 5] = p_lon, p_lat, has
     return out

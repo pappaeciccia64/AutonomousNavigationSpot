@@ -87,6 +87,8 @@ def _emit_mission_summary_once():
             pct = (100.0 * count / total_gait) if total_gait > 0 else 0.0
             print(f"  {tier:10s}: {count:6d}  ({pct:5.1f}%)")
         print(f"Total replans: {MISSION_STATS['replan_count']}")
+        for f in MISSION_STATS.get('start_failures', []):
+            print(f"Attempt start failed on cell ({f['cell'][0]},{f['cell'][1]}): {f['reason']}")
         print(f"Segments recorded in the CSV: {MISSION_STATS['segments_logged']}")
         print(f".npz saves for edges near the threshold: {MISSION_STATS['near_threshold_saves']}")
         print(f"Blocks confirmed by the frontier: {MISSION_STATS['frontier_blocks']}, "

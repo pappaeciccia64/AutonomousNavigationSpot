@@ -13,6 +13,8 @@ except ImportError:
 from spot_explorer.perception import low_obstacles
 from spot_explorer.perception.geometry import OBSTACLE_THRESHOLD
 from spot_explorer.perception.slopes import SLOPE_BASELINE_M
+from spot_explorer.robot import connection
+
 ROUGH_THRESHOLD = 0.15      # local roughness (std-dev of terrain height, m)
 
 # Spot's `terrain_valid` layer contains 0 and 1, but after scale and offset 0 becomes
@@ -298,7 +300,7 @@ class LocalGrid:
         g = lg.local_grid
         tf = get_a_tform_b(g.transforms_snapshot, VISION_FRAME_NAME, g.frame_name_local_grid_data)
         q = tf.rotation
-        yaw = np.degrees(np.arctan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y ** 2 + q.z ** 2)))
+        yaw = np.degrees(connection.yaw_of(q))
         return (tf.position.x, tf.position.y, float(yaw), g.extent.num_cells_x, g.extent.num_cells_y,
                 g.extent.cell_size)
 

@@ -375,7 +375,7 @@ class BodyTiltRecorder:
             tf = get_a_tform_b(snap, VISION_FRAME_NAME, BODY_FRAME_NAME)
             x, y, q = tf.position.x, tf.position.y, tf.rotation
             roll, pitch = _quat_to_roll_pitch_deg(q)
-            yaw = float(np.degrees(np.arctan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y ** 2 + q.z ** 2))))
+            yaw = float(np.degrees(connection.yaw_of(q)))
             gpe_long, gpe_lat = _ground_plane_slopes_deg(snap, np.radians(yaw))
         except Exception:
             with self._lock:

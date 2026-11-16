@@ -32,7 +32,6 @@ its second try comes later, from where the robot is then, not at once from the s
 (04-11 14:08: (0,5) failed in the tall grass, the mission tried it again 17 attempts later
 from another side, and it worked).
 """
-import heapq
 
 import numpy as np
 
@@ -105,28 +104,18 @@ class CellRules:
 
     # --- the way into a cell -------------------------------------------------------------
     def _costs(self, start, row, col, from_xy, cells_of, target=None):
-        """Dijkstra from node start on the graph of now, with the weights of the attempt
-        (roadmap.effective_weight: length, slopes seen, penalties), through the cells the attempt
-        may use. target = a cell: stops at the first node in it. (dist, pred, node reached)."""
+        """The search on the graph of now (PRM.costs_from: the weights of the attempt) from node
+        start, through the cells the attempt may use. target = a cell: stops at the first node
+        in it. (dist, pred, node reached)."""
         prm, env = self.prm, self.env
         allowed = (mission_prm.planning_cells(env, row, col, from_xy)
                    if P.PLAN_ONLY_EXPLORED_CELLS else None)
-        dist, pred, heap, done = {start: 0.0}, {start: None}, [(0.0, start)], set()
-        while heap:
-            d, u = heapq.heappop(heap)
-            if u in done:
-                continue
-            done.add(u)
-            if target is not None and cells_of.get(u) == target and np.isfinite(prm.node_penalty(u)):
-                return dist, pred, u
-            for v, w in prm.edges.get(u, ()):
-                if v in done or (allowed is not None and cells_of.get(v) not in allowed):
-                    continue
-                nd = d + prm.effective_weight(u, v, w)
-                if np.isfinite(nd) and nd < dist.get(v, np.inf):
-                    dist[v], pred[v] = nd, u
-                    heapq.heappush(heap, (nd, v))
-        return dist, pred, None
+        stop = None
+        if target is not None:
+            def stop(u):
+                return cells_of.get(u) == target and np.isfinite(prm.node_penalty(u))
+        return prm.costs_from(start, allowed=None if allowed is None else (lambda v: cells_of.get(v) in allowed),
+                              stop=stop)
 
     def way_into(self, start, robot_xy, row, col, cells_of):
         """(cost, entry cell, entry edge, node) of the cheapest way from node start to the first
@@ -154,8 +143,9 @@ class CellRules:
             return prm.anchor_node(px, py, global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M)
 
         def reachable(px, py):
+            # As the attempt (PRM.reachable_from): a path, within the detour cap.
             nid = anchor(px, py)
-            return nid is not None and nid in dist
+            return nid is not None and nid in pred and prm._within_caps(prm.path_to(pred, nid), None)
         gx, gy, _v, _b = goal_choice.find_best_point_in_cell(
             from_xy[0], from_xy[1], env, row, col, None, None, sampler, global_map=global_map,
             reachable=reachable, quiet=True, require_reachable=True)

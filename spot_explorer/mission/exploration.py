@@ -142,6 +142,7 @@ class Mission:
                 MISSION_STATS.get('cell_choices_near' if choice.near else 'cell_choices_far', 0) + 1
             self.env._chain_choice = None
             self.env._attempt_left_unreachable = False
+            self.env._attempt_fail_why = None
             self.env._cells_left_unreachable = []
             if choice.near:
                 ok = self._attempt(choice.row, choice.col)
@@ -167,8 +168,8 @@ class Mission:
                 print(f"[CELL RULES] Cell ({choice.row},{choice.col}) unreachable now (no goal with a "
                       f"path): not a failure, skipped at the next choice.")
             else:
-                rules.record_failure(choice, "attempt failed" if (choice.near or ok is not None)
-                                     else "GraphNav did not get there")
+                default = "attempt failed" if (choice.near or ok is not None) else "GraphNav did not get there"
+                rules.record_failure(choice, getattr(self.env, '_attempt_fail_why', None) or default)
             rules.skip_once |= set(map(tuple, getattr(self.env, '_cells_left_unreachable', [])))
         attempt_cruise.stop_if_moving(self.env, self.command_client, "end of the exploration")
         rules.explain_end(self._attempt_count)
@@ -331,19 +332,14 @@ class Mission:
         """The area around the last position, before going back: it goes into the global maps."""
         print("[FINAL SCAN] Last scan around the robot before going back to the start...")
         x_final, y_final, z_final, quat_final = connection.getPosition(self.robot_state_client)
-        final_yaw = np.arctan2(2.0 * (quat_final.w * quat_final.z + quat_final.x * quat_final.y),
-                               1.0 - 2.0 * (quat_final.y ** 2 + quat_final.z ** 2))
+        final_yaw = connection.yaw_of(quat_final)
 
         scan = self.local_grid.fetch_scan(self.robot_state_client)
         if scan is None:
             print("[FINAL SCAN] CAREFUL: local grid not received, carrying on without the final scan.")
             return
-        # A mission that ended before any attempt has no global maps yet: created here (as
-        # the first attempt would, attempt_scan._ensure_global_maps).
-        if self.global_grid.global_occupancy_map is None:
-            self.global_grid.global_occupancy_map = global_maps.GlobalGrid(resolution=scan.cell_size)
-        if self.global_grid.global_terrain_map is None:
-            self.global_grid.global_terrain_map = global_maps.GlobalTerrainGrid(resolution=scan.cell_size)
+        # A mission that ended before any attempt has no global maps yet.
+        global_maps.ensure_global_maps(self.global_grid, scan.cell_size)
         self.local_grid.process_scan(scan, x_final, y_final, final_yaw, ground_label="scan-final")
         # The last scan goes into the global maps too, like all the others
         global_maps.fold_scan_into_global_maps(

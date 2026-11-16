@@ -28,6 +28,7 @@ from spot_explorer.planning import edge_evaluation
 from spot_explorer.planning import safe_frontier
 from spot_explorer.records import MISSION_STATS, mission_z0, save_npz_async
 from spot_explorer.robot import motion
+from spot_explorer.robot import connection
 
 PLAN_PERIOD_S = 0.4            # one cycle every 0.4 s at most (2.5 Hz)
 # Phases of a cycle, timed for the log: scan download, processing + global maps, edge
@@ -237,13 +238,7 @@ class CruisePlanner:
         self.global_terrain_map = global_grid.global_terrain_map
         self.prm = prm
         self.robot_state_client = robot_state_client
-        self.goal_id = goal_id
-        self.path_ids = list(path_ids)     # from the node the robot starts from
-        # Stretches of the starting path that are not graph edges (shortcut of the
-        # stop-and-go, see decisions.shortcut_index): not 'edge_blocked' for that.
-        self._not_edges = {(a, b) for a, b in zip(self.path_ids, self.path_ids[1:])
-                           if not _edge_in_graph(prm, a, b)}
-        self._seg = 0                      # edge of path_ids being walked
+        self.set_path(path_ids, goal_id)
         self.cycles = 0
         self.replans = 0
         self.last_scan = None
@@ -292,6 +287,24 @@ class CruisePlanner:
             self.grid_dt.append(dt)
         return dt
 
+    def set_path(self, path_ids, goal_id):
+        """The path to follow from now (path_ids, from the node the robot starts from or the
+        edge it is walking) towards goal_id. Stretches that are not graph edges (shortcut of the
+        stop-and-go, see decisions.shortcut_index) are not 'edge_blocked' for that."""
+        self.goal_id = goal_id
+        self.path_ids = list(path_ids)
+        self._not_edges = {(a, b) for a, b in zip(self.path_ids, self.path_ids[1:])
+                           if not _edge_in_graph(self.prm, a, b)}
+        self._seg = 0                      # edge of path_ids being walked
+
+    def robot_edge(self, robot):
+        """(seg, prev, next): the edge of the path the robot (x, y, ...) is walking."""
+        coords = [self.prm.get_node_position(n) for n in self.path_ids]
+        _, seg = motion.path_ahead(coords, robot[0], robot[1], from_seg=self._seg)
+        k = min(seg, len(self.path_ids) - 2) if len(self.path_ids) > 1 else 0
+        nxt = self.path_ids[k + 1] if len(self.path_ids) > 1 else self.path_ids[0]
+        return seg, self.path_ids[k], nxt
+
     def __call__(self):
         t0 = time.perf_counter()
         ph = {}
@@ -315,11 +328,8 @@ class CruisePlanner:
 
         # Where the robot is along the path: the edge it is walking stays (committed), the
         # plan changes from the next node on.
-        coords = [self.prm.get_node_position(n) for n in self.path_ids]
-        _, self._seg = motion.path_ahead(coords, robot[0], robot[1], from_seg=self._seg)
+        self._seg, prev_id, next_id = self.robot_edge(robot)
         k = min(self._seg, len(self.path_ids) - 2) if len(self.path_ids) > 1 else 0
-        prev_id = self.path_ids[k]
-        next_id = self.path_ids[k + 1] if len(self.path_ids) > 1 else self.path_ids[0]
         self.prm.set_robot_node(next_id, 0.0)
 
         refresh_graph(self.prm, snap, self.global_map, robot, refresh=True, quiet=True)
@@ -478,7 +488,7 @@ def _pose_of_scan(scan):
     """(x, y, yaw) of the body in VISION at the instant of the grid."""
     tf = get_a_tform_b(scan.proto.local_grid.transforms_snapshot, VISION_FRAME_NAME, BODY_FRAME_NAME)
     q = tf.rotation
-    yaw = float(np.arctan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y ** 2 + q.z ** 2)))
+    yaw = float(connection.yaw_of(q))
     return float(tf.position.x), float(tf.position.y), yaw
 
 

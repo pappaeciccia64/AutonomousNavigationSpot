@@ -72,27 +72,16 @@ def _field(scan):
 
 
 def _along(scan, x1, y1, x2, y2):
-    """|slope along| and |slope across| (degrees) at every cell sample of the segment, None if
-    fewer than half have a value (as plane_slope_along)."""
+    """|slope along| and |slope across| (degrees) at every cell sample of the segment, the
+    samples of the mission (slopes.plane_slope_samples); None if fewer than half have a value."""
     gx, gy = _field(scan)
     ox, oy = scan['origin']
-    cs = scan['cs']
-    d = float(np.hypot(x2 - x1, y2 - y1))
-    ux, uy = (x2 - x1) / d, (y2 - y1) / d
-    n = max(2, int(np.ceil(d / cs)) + 1)
-    s = np.linspace(0.0, d, n)
-    xs, ys = x1 + ux * s, y1 + uy * s
-    c = np.floor((xs - ox) / cs).astype(int)
-    r = np.floor((ys - oy) / cs).astype(int)
-    ok = (r >= 0) & (r < gx.shape[0]) & (c >= 0) & (c < gx.shape[1])
-    g_x, g_y = np.full(n, np.nan), np.full(n, np.nan)
-    g_x[ok], g_y[ok] = gx[r[ok], c[ok]], gy[r[ok], c[ok]]
-    good = np.isfinite(g_x) & np.isfinite(g_y)
-    if good.sum() < slopes.MIN_ARC_SAMPLE_FRACTION * n:
+    lon, lat, has = slopes.plane_slope_samples(slopes.grid_lookup(gx, gy, ox, oy, scan['cs']), scan['cs'],
+                                               [x1], [y1], [x2], [y2])
+    if not has[0]:
         return None
-    lon = np.degrees(np.arctan(np.abs(g_x[good] * ux + g_y[good] * uy)))
-    lat = np.degrees(np.arctan(np.abs(-g_x[good] * uy + g_y[good] * ux)))
-    return lon, lat
+    ok = np.isfinite(lon[0])
+    return np.degrees(np.arctan(lon[0][ok])), np.degrees(np.arctan(lat[0][ok]))
 
 
 def outdoor_missions(min_pitch_p90_deg=5.0):

@@ -320,45 +320,81 @@ class PRM(EdgeEvaluation, EdgeStats):
             return new_path
         return self._stable_plan(current_path_ids, new_path, margin)
 
-    def _dijkstra(self, start_idx, goal_idx, ignore_penalties=False):
-        """Minimum-cost path start -> goal (list of ids), None if there is none."""
-        distances = {node: float('inf') for node in self.nodes.keys()}
-        distances[start_idx] = 0
-        parents = {node: None for node in self.nodes.keys()}
-        pq = [(0, start_idx)]
-        visited = set()
-        allowed = self.allowed_nodes
-
+    def costs_from(self, start_idx, allowed=None, stop=None, ignore_penalties=False):
+        """
+        THE search on the graph (Dijkstra) from start_idx, on the edges of finite cost: geometric
+        weight + cost layer (effective_weight; ignore_penalties: the weight only). allowed(v):
+        may node v be entered (None: every node). stop(u): the search ends at the first node
+        settled for which it is true. Returns (dist, parents, the node it stopped at or None):
+        dist has every node reached (settled or not), parents the way back.
+        Used by the path (find_path_dijkstra), by reachable_count and by the cell rules.
+        """
+        dist, parents = {start_idx: 0.0}, {start_idx: None}
+        pq, done = [(0.0, start_idx)], set()
         while pq:
-            current_dist, current = heapq.heappop(pq)
-            if current in visited:
+            d, u = heapq.heappop(pq)
+            if u in done:
                 continue
-            visited.add(current)
+            done.add(u)
+            if stop is not None and stop(u):
+                return dist, parents, u
+            for v, weight in self.edges.get(u, []):
+                if v in done or (allowed is not None and not allowed(v)):
+                    continue
+                # Cost = geometric + cost layer: an impassable edge or node has infinite
+                # penalty and the search does not cross it.
+                w = weight if ignore_penalties else self.effective_weight(u, v, weight)
+                if not np.isfinite(w):
+                    continue
+                nd = d + w
+                if nd < dist.get(v, float('inf')):
+                    dist[v], parents[v] = nd, u
+                    heapq.heappush(pq, (nd, v))
+        return dist, parents, None
 
-            if current == goal_idx:
-                path = []
-                node = goal_idx
-                while node is not None:
-                    path.append(node)
-                    node = parents[node]
-                return path[::-1]
+    @staticmethod
+    def path_to(parents, node):
+        """The ids from the start of costs_from to node."""
+        path = []
+        while node is not None:
+            path.append(node)
+            node = parents[node]
+        return path[::-1]
 
-            for neighbor, weight in self.edges.get(current, []):
-                if (allowed is not None and neighbor not in allowed
-                        and neighbor != goal_idx):
-                    continue          # outside the allowed cells (see set_allowed_nodes)
-                if neighbor not in visited:
-                    # Cost = geometric + cost layer: an impassable edge or node has
-                    # infinite penalty and Dijkstra does not cross it.
-                    w = weight if ignore_penalties else self.effective_weight(current, neighbor, weight)
-                    if not np.isfinite(w):
-                        continue
-                    new_dist = current_dist + w
-                    if new_dist < distances[neighbor]:
-                        distances[neighbor] = new_dist
-                        parents[neighbor] = current
-                        heapq.heappush(pq, (new_dist, neighbor))
-        return None
+    def reachable_from(self, start_idx, global_map=None, edge_safety_margin=0.0):
+        """
+        reachable(x, y) -> bool: has the node (x, y) is attached to (anchor_node) a path from
+        start_idx, as find_path_dijkstra(start_idx, node) would answer -- inside allowed_nodes,
+        within the detour cap -- with ONE search for all the points asked (the goal choice asks
+        dozens of points of a cell; with no reachable point, every one cost a whole Dijkstra).
+        The path to a node from a search run to the end is the one a search stopped at that
+        node finds. A node outside allowed_nodes (the goal is always allowed) gets its own search.
+        """
+        allowed = self.allowed_nodes
+        if start_idx not in self.nodes:
+            return lambda px, py: False
+        _dist, parents, _end = self.costs_from(
+            start_idx, allowed=None if allowed is None else (lambda v: v in allowed))
+
+        def reachable(px, py):
+            nid = self.anchor_node(px, py, global_map, edge_safety_margin)
+            if nid is None:
+                return False
+            if allowed is not None and nid not in allowed and nid != start_idx:
+                return self.find_path_dijkstra(start_idx, nid) is not None
+            if nid not in parents:
+                return False
+            return self._within_caps(self.path_to(parents, nid), None)
+        return reachable
+
+    def _dijkstra(self, start_idx, goal_idx, ignore_penalties=False):
+        """Minimum-cost path start -> goal (list of ids), None if there is none. Inside
+        allowed_nodes (see set_allowed_nodes); the goal is always allowed."""
+        allowed = self.allowed_nodes
+        _dist, parents, end = self.costs_from(
+            start_idx, allowed=None if allowed is None else (lambda v: v in allowed or v == goal_idx),
+            stop=lambda u: u == goal_idx, ignore_penalties=ignore_penalties)
+        return None if end is None else self.path_to(parents, end)
 
     def _within_caps(self, path, max_edges):
         """
@@ -400,18 +436,13 @@ class PRM(EdgeEvaluation, EdgeStats):
         """
         if start_idx not in self.nodes:
             return 0
-        allowed = self.allowed_nodes
-        seen, stack = {start_idx}, [start_idx]
-        while stack and len(seen) < limit:
-            u = stack.pop()
-            for v, w in self.edges.get(u, []):
-                if v in seen or (allowed is not None and v not in allowed):
-                    continue
-                if not np.isfinite(self.effective_weight(u, v, w)):
-                    continue
-                seen.add(v)
-                stack.append(v)
-        return min(len(seen), limit)
+        allowed, settled = self.allowed_nodes, [0]
+
+        def enough(_u):
+            settled[0] += 1
+            return settled[0] >= limit
+        self.costs_from(start_idx, allowed=None if allowed is None else (lambda v: v in allowed), stop=enough)
+        return min(settled[0], limit)
 
     def get_node_position(self, node_idx: int) -> Optional[Tuple[float, float]]:
         """Node position (x, y), None if it does not exist."""

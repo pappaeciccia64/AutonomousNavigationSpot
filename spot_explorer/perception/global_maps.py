@@ -874,6 +874,18 @@ def mask_for_global_map(obstacle_mask, is_valid, pts=None, robot_pose=None,
     return (out, core) if return_core else out
 
 
+def ensure_global_maps(global_grid, resolution=0.03):
+    """The two global maps of the mission (occupancy, terrain heights) in global_grid, created
+    empty at the resolution of the local grid if missing. Returns (occupancy, terrain)."""
+    if global_grid.global_occupancy_map is None:
+        global_grid.global_occupancy_map = GlobalGrid(resolution=resolution)
+        print("[MAP] Initialized new persistent global occupancy map.")
+    if global_grid.global_terrain_map is None:
+        global_grid.global_terrain_map = GlobalTerrainGrid(resolution=resolution)
+        print("[MAP] Initialized new persistent global terrain map (height).")
+    return global_grid.global_occupancy_map, global_grid.global_terrain_map
+
+
 def fold_scan_into_global_maps(global_map, global_terrain_map, pts, terrain, obstacle_mask, is_valid,
                                cells_obstacle_dist, shape, robot_pose):
     """

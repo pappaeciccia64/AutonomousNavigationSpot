@@ -93,7 +93,7 @@ class StopAndGoStart:
         self.robot_x, self.robot_y, self.robot_z = vision_tform_body.position.x, vision_tform_body.position.y, vision_tform_body.position.z
 
         quat = vision_tform_body.rotation
-        self.robot_yaw = np.arctan2(2.0 * (quat.w * quat.z + quat.x * quat.y), 1.0 - 2.0 * (quat.y ** 2 + quat.z ** 2))
+        self.robot_yaw = connection.yaw_of(quat)
 
         # 2. Body footprint, corrected terrain (from here on only terrain_real is used),
         # slope and roughness, obstacle mask
@@ -135,7 +135,7 @@ class StopAndGoStart:
         self.global_terrain_map = self.global_grid.global_terrain_map
         x, y, z, quat = connection.getPosition(self.robot_state_client)
         self.robot_x, self.robot_y, self.robot_z = x, y, z
-        self.robot_yaw = np.arctan2(2.0 * (quat.w * quat.z + quat.x * quat.y), 1.0 - 2.0 * (quat.y ** 2 + quat.z ** 2))
+        self.robot_yaw = connection.yaw_of(quat)
         self.prm_graph.set_global_terrain_map(self.global_terrain_map)
         print(f"[ATTEMPT] Scan of the cruise reused ({age:.1f} s old, already in the maps): no new scan "
               f"at the start of the attempt.")

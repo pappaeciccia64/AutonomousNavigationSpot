@@ -676,7 +676,7 @@ class ArcVerificationTracker:
         vision_tform_body = get_a_tform_b(transforms_snapshot, VISION_FRAME_NAME, BODY_FRAME_NAME)
         robot_x, robot_y = vision_tform_body.position.x, vision_tform_body.position.y
         q = vision_tform_body.rotation
-        robot_yaw = np.arctan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y ** 2 + q.z ** 2))
+        robot_yaw = connection.yaw_of(q)
 
         footprint_mask_2d = self._local_grid.compute_robot_footprint_mask(
             pts, robot_x, robot_y, robot_yaw, num_x, num_y)
