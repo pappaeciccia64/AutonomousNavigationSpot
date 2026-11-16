@@ -67,15 +67,12 @@ class Mission:
               f"(from {P.MISSION_VISIT_ORDER}), first cells "
               + " ".join(f"({r},{c})" for r, c in self.path[:8])
               + (" ..." if len(self.path) > 8 else ""))
-        self.frontier = []
         self.visualization_counter = 0   # running number of the saved images
         # Progress (see _log_progress): start instant, closed cells at the start and
         # at the last printed line, points of the mission rectangle for the seen area.
         self._t0 = None
         self._closed_at_start = 0
-        self._last_visited = None      # see _robot_cell
-        self._attempt_count = 0               # attempts to enter a cell (see _explain_end)
-        self._dropped_cells = []            # removed from the frontier: untried sides face only non-visited cells
+        self._attempt_count = 0               # attempts to enter a cell
         self._closed_logged = None
         self._area_points = None
 
@@ -95,10 +92,10 @@ class Mission:
 
     def _on_visited(self, row, col, x, y):
         """Cell (row, col) visited with the robot at (x, y): GraphNav waypoint of the cell and
-        new candidates around it. The waypoint (and the robot cell of the grid) only if the
-        robot is in the cell or within ARRIVAL_OUTSIDE_CELL_M of it: a cell seen from afar
-        (cell seen at the attempt start, or in cruise, see attempt_cruise, the cell seen) gets
-        no waypoint of its own, and the cell the robot is in is not marked visited for it."""
+        the cell marked visited. The waypoint (and the robot cell of the grid) only if the robot
+        is in the cell or within ARRIVAL_OUTSIDE_CELL_M of it: a cell seen from afar (at the
+        attempt start, or in cruise) gets no waypoint of its own. Also for the cells done in
+        cruise (env._on_chained_visit), called once the robot walks towards the next cell."""
         border = cells.cell_border_distance(self.env, row, col, x, y)
         if border is not None and -border <= P.ARRIVAL_OUTSIDE_CELL_M:
             self.env.update_position(x, y)
@@ -108,12 +105,6 @@ class Mission:
                   f"waypoint of its own.")
         HANDOFF.mark("waypoint of the visited cell")
         self.env.mark_cell_visited(row, col)
-        self._last_visited = (int(row), int(col))
-        # The neighbours of the cell JUST VISITED, not of the one the robot is in: with
-        # arrival just outside the cell (ARRIVAL_OUTSIDE_CELL_M) the robot may still be
-        # in the previous cell.
-        self.frontier.extend(cells.find_new_borders(
-            self.env, row, col, self.path, self.frontier))
 
     def explore(self):
         """
@@ -126,7 +117,7 @@ class Mission:
         rules = self.rules = cell_rules.CellRules(self.env, self.prm, self.path)
         # For the next cell prepared in the cruise (step C, attempt_cruise).
         self.env._cell_rules = rules
-        self.env._on_chained_visit = self._chained_visit
+        self.env._on_chained_visit = self._on_visited
         self._t0 = time.time()
         self._closed_at_start = self._cell_counts()[0]
         while True:
@@ -139,8 +130,7 @@ class Mission:
                 break
             x, y, _, _ = connection.getPosition(self.robot_state_client)
             robot_cell = tuple(int(v) for v in self.env.get_cell_from_world(x, y))
-            self.frontier = [(r, c, rules.rank.get((r, c), 10 ** 6)) for r, c in rules.open_cells(robot_cell)]
-            self._close_seen_cells()
+            self._close_seen_cells(lambda: rules.open_cells(robot_cell))
             HANDOFF.mark("progress and seen cells")
             x, y, _, _ = connection.getPosition(self.robot_state_client)
             choice = rules.choose((x, y), self.global_grid.global_occupancy_map, self.sampler,
@@ -183,17 +173,6 @@ class Mission:
         attempt_cruise.stop_if_moving(self.env, self.command_client, "end of the exploration")
         rules.explain_end(self._attempt_count)
         self._log_progress(final=True)
-
-    def _chained_visit(self, row, col, x, y):
-        """A cell done in cruise, the next one already prepared by the planning thread (which
-        marked it visited): its GraphNav waypoint, as _on_visited, from the main thread."""
-        border = cells.cell_border_distance(self.env, row, col, x, y)
-        if border is not None and -border <= P.ARRIVAL_OUTSIDE_CELL_M:
-            self.recordingInterface.create_default_waypoint(cell_row=row, cell_col=col)
-        else:
-            print(f"[VISITED] Cell ({row},{col}) seen from {-border:.1f} m outside: no GraphNav "
-                  f"waypoint of its own.")
-        self._last_visited = (int(row), int(col))
 
     def _travel_to_choice(self, choice):
         """GraphNav to the waypoint nearest to the node the way enters the cell at, then the
@@ -238,21 +217,21 @@ class Mission:
             return 'fall'
         return 'ok' if ok else 'fail'
 
-    def _close_seen_cells(self):
-        """SEEN_BEFORE_MOVING: the frontier cells already seen enough become visited without
-        moving, in rank order; the neighbours they add to the frontier are checked too.
-        Returns how many."""
+    def _close_seen_cells(self, candidates):
+        """SEEN_BEFORE_MOVING: the candidate cells (candidates(): the open cells, in visiting
+        order) already seen enough become visited without moving; the cells they open are
+        checked too (candidates() asked again after every one). Returns how many."""
         if not (SEEN_BEFORE_MOVING and cell_attempt.CELL_SEEN_EXPLORED):
             return 0
         gmap = self.global_grid.global_occupancy_map
-        if gmap is None or not self.frontier:
+        if gmap is None:
             return 0
         x, y, _, _ = connection.getPosition(self.robot_state_client)
         closed, changed = 0, True
         while changed:
             changed = False
-            for entry in sorted(self.frontier, key=lambda f: f[2]):
-                r, c = int(entry[0]), int(entry[1])
+            for r, c in candidates():
+                r, c = int(r), int(c)
                 if self.env.map[r][c] != 0:
                     continue
                 frac = cells.cell_seen_fraction(self.env, gmap, r, c)
@@ -267,12 +246,10 @@ class Mission:
                       f"explored without going, "
                       + ("the robot is in it: its GraphNav waypoint here." if here else
                          f"centre {dist:.1f} m from the robot: no GraphNav waypoint of its own."))
-                self.frontier.remove(entry)
                 if here:
                     self._on_visited(r, c, x, y)
                 else:
                     self.env.mark_cell_visited(r, c)
-                    self.frontier.extend(cells.find_new_borders(self.env, r, c, self.path, self.frontier))
                 MISSION_STATS['cells_seen_before_moving'] = MISSION_STATS.get('cells_seen_before_moving', 0) + 1
                 closed += 1
                 changed = True

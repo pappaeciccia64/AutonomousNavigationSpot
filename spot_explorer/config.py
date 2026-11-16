@@ -413,12 +413,6 @@ GRAPHNAV_RELOC_MAX_DIST_M = 0.5        # ICP search radius around the guess
 GRAPHNAV_RELOC_MAX_YAW_RAD = float(np.radians(20.0))
 GRAPHNAV_RELOC_MAX_WP_DIST_M = 3.0     # beyond this distance from the nearest waypoint it is not tried
 
-# Before moving with GraphNav to the waypoint from which to attempt a cell, the graph is checked
-# to reach the cell from there (see graph_reaches_cell). In the test of 22-10
-# 15:24, three moves out of six ended in an attempt failed in less than a second with
-# "GRAPH DISCONNECTED", which the graph already knew before leaving: ~25 s out of 3 minutes.
-# False = it leaves anyway and the attempt decides.
-GRAPHNAV_PRECHECK = True
 
 # STARTING FIDUCIAL. At start-up a fiducial seen by any camera is searched for
 # (the rear one too) and remembered: it goes into the snapshot of wp_0, the robot localizes

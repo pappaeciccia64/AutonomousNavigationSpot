@@ -682,16 +682,15 @@ def _check_seen_before_moving():
     m.env, m.recordingInterface, m.robot_state_client = env, ri, None
     m.global_grid = NS(global_occupancy_map=gmap)
     m.path = env.generate_visit_path('auto', start_cell=(0, 0))
-    m._last_visited = (0, 1)
     rank = {cell: i for i, cell in enumerate(m.path)}
-    m.frontier = [(1, 1, rank[(1, 1)]), (0, 3, rank[(0, 3)]), (1, 0, rank[(1, 0)])]
+    open_cells = sorted([(1, 1), (0, 3), (1, 0)], key=lambda rc: rank[rc])
     T.ROBOT = T.Robot(2.3, 1.7, 0.0)              # inside (1,1), 0.3 m from its border
     was = _cell_attempt.CELL_SEEN_EXPLORED
     _cell_attempt.CELL_SEEN_EXPLORED = True
     try:
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            n = m._close_seen_cells()
+            n = m._close_seen_cells(lambda: [rc for rc in open_cells if env.map[rc[0]][rc[1]] == 0])
     finally:
         _cell_attempt.CELL_SEEN_EXPLORED = was
     log = out.getvalue()
@@ -700,8 +699,6 @@ def _check_seen_before_moving():
     check(made == [(1, 1)], f"GraphNav waypoint only for the cell the robot is in: {made}")
     check("the robot is in it" in log and "no GraphNav waypoint of its own" in log,
           "the [SEEN] lines say where the robot is")
-    check(any(f[:2] == (1, 0) for f in m.frontier) and not any(f[:2] in ((1, 1), (0, 3)) for f in m.frontier),
-          f"frontier after: {[f[:2] for f in m.frontier]}")
 
 
 def _check_cell_choice():
@@ -713,6 +710,7 @@ def _check_cell_choice():
     """
     print("\nCell choice, old rules of the sides (legacy/side_rules.py): the case of 13:50 (cells (7,1) and (7,2))")
     from spot_explorer.mission import cells
+    from spot_explorer.mission.legacy import side_rules       # the sides tried: adds their bookkeeping
     env = cells.EnvironmentMap(rows=8, cols=7, cell_size=2.0)
     with contextlib.redirect_stdout(io.StringIO()):
         env.set_origin(0.0, 0.0, 0.0)
@@ -725,7 +723,6 @@ def _check_cell_choice():
            for r_ in range(8) for c_ in range(7) if env.map[r_][c_] == 1}
     ri = NS(get_manual_waypoint_by_cell=lambda r_, c_: wps.get((r_, c_)),
             find_nearest_waypoint_cell_to_target=lambda *a: (6, 1))
-    from spot_explorer.mission.legacy import side_rules       # the sides tried: old rules
     m = side_rules.SideRulesMission.__new__(side_rules.SideRulesMission)
     m.env, m.recordingInterface, m.robot_state_client = env, ri, None
     m._last_visited = (7, 2)

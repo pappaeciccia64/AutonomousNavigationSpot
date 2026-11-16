@@ -8,6 +8,13 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-16 (code review: side bookkeeping out of the main modules)
+
+- **The side bookkeeping moves into `mission/legacy/side_rules.py`**, the only user: the side methods of `cells.EnvironmentMap` (`mark_cell_side_explored`, `all_sides_explored`, `untried_side_neighbours`, `get_valid_neighbor_sides_mask`, `get_side_bit_facing_origin`, `get_adjacent_frontier_cells`, `get_lowest_rank_from_frontier_list`, `is_cell_blocked`), `cells.find_new_borders`, `recovery.finalize_or_defer_blocked_cell`, `mission_prm.graph_reaches_cell` / `unreached_cell_reason` / `_reach_from`, `RecordingInterface.get_manual_waypoint_by_cell` / `find_nearest_waypoint_cell_to_target`, `config.GRAPHNAV_PRECHECK` (now `side_rules.GRAPHNAV_PRECHECK`). Importing the module adds the methods to the two classes. `EnvironmentMap.explored_sides` and `get_cell_sides_status` stay (data of the saved cell state, 0 with the cell rules).
+- **`exploration.Mission` without the frontier list**: with the cell rules the candidates are worked out again at every turn (`CellRules.open_cells`); the list grown by every visit (`self.frontier`, `find_new_borders`), `_last_visited` and `_dropped_cells` were bookkeeping of the sides. `_close_seen_cells(candidates)` takes the open cells (asked again after every cell closed: the cells it opens are checked too); `SideRulesMission` keeps the frontier list, its `_on_visited` and its `_close_seen_cells`.
+- **`Mission._chained_visit` removed**: it repeated the waypoint part of `_on_visited`; the cruise calls `_on_visited` for the cells done while walking (marking visited again a cell already visited changes nothing; it also updates the robot cell of the grid, as every other visit).
+- All suites as before.
+
 ## 2026-11-13 (code review: fixes)
 
 - **While the next cell is prepared the plans still count** (`attempt_cruise._cruise`): after a cell done, the main thread waits up to `CRUISE_SWITCH_WAIT_S` (3 s; usually 0.3-1 s) for the next cell prepared in the planning thread. Until now it skipped every plan meanwhile, with the robot walking the whole last stretch sent: an edge going out of the graph in that window did not stop it. Now the edge being walked out of the graph stops the cruise, and the stretch sent follows the confirmed one of every plan (it may get shorter).

@@ -58,67 +58,6 @@ def node_cells(prm, env):
     return cache
 
 
-def graph_reaches_cell(prm, env, from_xy, row, col, global_map=None):
-    """
-    From the point from_xy (the waypoint the cell would be attempted from) does the graph
-    reach at least one node of cell (row, col)? Same rules as the attempt: with
-    PLAN_ONLY_EXPLORED_CELLS it passes only through the visited cells, the starting cell and
-    the goal cell; edges and nodes as they are now (a node with infinite penalty does not
-    count). It is a NECESSARY condition: if False the attempt would surely fail with "GRAPH
-    DISCONNECTED"; if True the attempt decides (goal point, detour cap, frontier).
-    Breadth-first search, no effect on the graph. None if the graph has no nodes.
-    """
-    reach = _reach_from(prm, env, from_xy, row, col, global_map)
-    if reach is None:
-        return None
-    seen, cells = reach
-    target = (int(row), int(col))
-    return any(cells.get(u) == target and np.isfinite(prm.node_penalty(u)) for u in seen)
-
-
-def unreached_cell_reason(prm, env, from_xy, row, col, global_map=None):
-    """Why graph_reaches_cell is False, for the [PRECHECK] line: the cell has no usable node
-    (all inside obstacles), or the edges entering it from the reachable area are all out
-    of the graph (vetoed by obstacles or slope, even if the inside of the cell was never
-    seen: 03-11 11:09, cells behind the wall of the room)."""
-    reach = _reach_from(prm, env, from_xy, row, col, global_map)
-    if reach is None:
-        return "graph without nodes"
-    seen, cells = reach
-    target = (int(row), int(col))
-    in_cell = [u for u, c in cells.items() if c == target]
-    usable = [u for u in in_cell if np.isfinite(prm.node_penalty(u))]
-    if not usable:
-        return f"all the {len(in_cell)} nodes of the cell are discarded as inside obstacles"
-    reached = sum(1 for u in seen if cells.get(u) != target)
-    return (f"no edge of the graph links the {reached} nodes reachable from there to the "
-            f"{len(usable)} usable nodes of the cell: the edges in between are vetoed "
-            f"(obstacle or slope on the way)")
-
-
-def _reach_from(prm, env, from_xy, row, col, global_map):
-    """(nodes reachable from from_xy, cell of every node) with the rules of
-    graph_reaches_cell; None if the graph has no nodes."""
-    start = prm.anchor_node(float(from_xy[0]), float(from_xy[1]), global_map,
-                            geometry.PRM_EDGE_SAFETY_MARGIN_M,
-                            ignore_near_m=roadmap.ANCHOR_IGNORE_NEAR_M, connected_first=True)
-    if start is None:
-        return None
-    cells = node_cells(prm, env)
-    ok_cells = planning_cells(env, row, col, from_xy) if P.PLAN_ONLY_EXPLORED_CELLS else None
-    seen, queue = {start}, [start]
-    while queue:
-        u = queue.pop()
-        for v, _w in prm.edges.get(u, ()):
-            if v in seen:
-                continue
-            if ok_cells is not None and cells.get(v) not in ok_cells:
-                continue
-            seen.add(v)
-            queue.append(v)
-    return seen, cells
-
-
 # The cells next to both the robot's and the goal's are allowed too (see planning_cells).
 PLAN_ALSO_SHARED_NEIGHBOUR_CELLS = True
 

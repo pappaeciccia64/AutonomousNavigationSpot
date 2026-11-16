@@ -573,11 +573,6 @@ class RecordingInterface(object):
         print(f"[WAYPOINTS] {len(waypoints_by_cell)} manual waypoints with their cell")
         return waypoints_by_cell
 
-    def get_manual_waypoint_by_cell(self, cell_row, cell_col):
-        """The data of the waypoint created in the cell, None if there is none."""
-        waypoints_by_cell = self.get_all_manual_waypoints_with_cells()
-        return waypoints_by_cell.get((cell_row, cell_col))
-
     def create_edge_between_waypoint_objs(self, from_wp, to_wp):
         """
         Create an edge between two waypoints already read from the graph (map_pb2.Waypoint
@@ -589,53 +584,6 @@ class RecordingInterface(object):
         new_edge.id.to_waypoint = to_wp.id
         new_edge.from_tform_to.CopyFrom(self._get_transform(from_wp, to_wp))
         self._recording_client.create_edge(edge=new_edge)
-
-    def find_nearest_waypoint_cell_to_target(self, target_cell, waypoints_by_cell, env_map):
-        """
-        The visited cell with a waypoint nearest to target_cell: an adjacent one first,
-        otherwise the nearest in Manhattan distance. None if there are none.
-        waypoints_by_cell as from get_all_manual_waypoints_with_cells.
-        """
-        target_row, target_col = target_cell
-
-        directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
-
-        adjacent_with_waypoint = []
-        for dr, dc in directions:
-            adj_row, adj_col = target_row + dr, target_col + dc
-            adj_cell = (adj_row, adj_col)
-
-            if (0 <= adj_row < env_map.rows and
-                0 <= adj_col < env_map.cols and
-                adj_cell in waypoints_by_cell and
-                env_map.map[adj_row][adj_col] == 1):  # visited
-                adjacent_with_waypoint.append(adj_cell)
-
-        if adjacent_with_waypoint:
-            print(f"[NEAREST_WP] Waypoint in a neighbouring cell: {adjacent_with_waypoint[0]}")
-            return adjacent_with_waypoint[0]
-
-        # No adjacent one: the nearest among all
-        min_distance = float('inf')
-        nearest_cell = None
-
-        for cell in waypoints_by_cell.keys():
-            cell_row, cell_col = cell
-
-            if env_map.map[cell_row][cell_col] != 1:
-                continue
-
-            distance = abs(cell_row - target_row) + abs(cell_col - target_col)
-
-            if distance < min_distance:
-                min_distance = distance
-                nearest_cell = cell
-
-        if nearest_cell:
-            print(f"[NEAREST_WP] Nearest waypoint in cell {nearest_cell} (distance: {min_distance})")
-
-        return nearest_cell
-
 
 def graphnav_is_recording(recordingInterface):
     """True/False from the GraphNav recording, None if it cannot be known."""
