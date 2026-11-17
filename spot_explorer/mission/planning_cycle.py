@@ -24,6 +24,7 @@ from spot_explorer.mission import cells
 from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
 from spot_explorer.perception import spot_grid
+from spot_explorer.perception import gait
 from spot_explorer.planning import edge_evaluation
 from spot_explorer.planning import roadmap
 from spot_explorer.planning import safe_frontier
@@ -480,7 +481,15 @@ class CruisePlanner:
             n2 = ids[k] if k < len(ids) and near[k + 1] == full[k + 1] else None
             try:
                 lo, la, ro = self.prm.sample_terrain_between_points(x1, y1, x2, y2, node_idx1=n1, node_idx2=n2)
-            except Exception:
+            except Exception as e:
+                # A stretch whose terrain cannot be read is not flat ground: the most careful
+                # gait (until 17-11 it was skipped, read as flat, and the gait could get lighter
+                # exactly there). Said once per planner, counted every time.
+                MISSION_STATS['terrain_errors'] = MISSION_STATS.get('terrain_errors', 0) + 1
+                if not getattr(self, '_terrain_error_said', False):
+                    self._terrain_error_said = True
+                    print(f"[CRUISE] Terrain of the stretch not readable ({e!r}): the most careful gait for it.")
+                grad = max(grad, gait.slope_thresholds()[1] + 1e-3)
                 continue
             grad, rough = max(grad, lo, la), max(rough, ro)
         return grad, rough

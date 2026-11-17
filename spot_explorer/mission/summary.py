@@ -93,7 +93,8 @@ def _emit_mission_summary_once():
         print(f"Cruises: {g('cruises', 0)}, {g('cruise_m', 0.0):.1f} m in {g('cruise_s', 0.0):.0f} s"
               + (f" ({g('cruise_m', 0.0) / g('cruise_s', 1.0):.2f} m/s)" if g('cruise_s') else "")
               + f", {g('cruise_plans', 0)} plans, {g('cruise_replans', 0)} path changes while walking, "
-              f"at most {g('cruise_max_dev_cm', 0.0):.0f} cm from the line")
+              f"at most {g('cruise_max_dev_cm', 0.0):.0f} cm from the line"
+              + (f", terrain not readable {g('terrain_errors')} times (careful gait)" if g('terrain_errors') else ""))
         print(f"Cells: chosen near {g('cell_choices_near', 0)} / far (GraphNav) {g('cell_choices_far', 0)}; "
               f"done while walking with the next one prepared in the planning thread {g('cruise_switches', 0)} "
               f"(waits at the goal {g('cruise_switch_waits_at_goal', 0)}, next cell late beyond the wait "

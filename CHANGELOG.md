@@ -8,6 +8,11 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-17 (more checks: tools, legacy runner, repeatability; unreadable terrain)
+
+- **A stretch whose terrain cannot be read gets the most careful gait** (`CruisePlanner._terrain`): an exception there was swallowed, the stretch skipped, i.e. read as flat ground -- the gait could get lighter exactly where the terrain is unknown. Now it counts as above the HARD threshold, said once per planner (`[CRUISE] Terrain of the stretch not readable ...`), counted (`terrain_errors`, in the summary).
+- Checked, nothing to change: every tool starts (`--help`) and uses only names that still exist after the moves of 16-11; the log readers do not parse the lines changed on 16-11 (`mission_report` counts `[NO PATH]` too); `tools/preflight.py` consistent; `tools/run_legacy_mission.py --tag legacy-switches-2026-11-11 --set attempt_cruise.CRUISE_SWITCH=False --set planning_cycle.WHOLE_EDGES=False` really runs the code of the tag (`WHOLE_EDGES` exists only there); `test_cruise` three times in a row, all OK (the change of cell while walking depends on thread timing); the counters and the step timer written by both threads are not locked, at worst an increment lost or a `[TIMING]` line mixing two steps, nothing stops; the other silent `except` are diagnostics or optional settings.
+
 ## 2026-11-16 (the change of cell while walking in one class)
 
 - **`attempt_cruise.CellSwitch`**: the change of goal or cell while walking, seen from the main thread of a cruise, in one place -- `ask` (the cell is done: the next one asked to the planning thread), `take` (the switch of a plan not applied yet), `blocked` / `late` (a plan while the next cell is prepared: the edge out of the graph stops the robot; beyond `CRUISE_SWITCH_WAIT_S` the hand-off), `at_goal` (the wait standing on the goal, said once), `apply` (new goal or cell for the attempt, or the end of the cruise). Before, the same logic was spread over the loop of `_cruise`: six variables (`switch_pending`, `switch_t0`, `switch_why`, `last_switch_id`, `waiting_logged`, `report_switch`) and four places. Same behaviour (same order: while waiting, the stretch of the plan is sent before the wait is found too long).
