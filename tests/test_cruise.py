@@ -178,9 +178,43 @@ def run(name, rects, start, cells_seq, on_step=None, env=None):
     return res
 
 
+def check_cell_switch():
+    """attempt_cruise.CellSwitch, the change of goal or cell while walking, case by case."""
+    print("\n== CellSwitch: the change of goal or cell while walking ==")
+    applied = []
+    cruise = NS(env=NS(_attempt_left_unreachable=False), target_row=0, target_col=1,
+                _prepare_next_cell=lambda *a, **k: None, _apply_switch=lambda sw: applied.append(sw['kind']))
+    planner = NS(switch_job=None, switch_info='x')
+    sw = attempt_cruise.CellSwitch(cruise, planner)
+    check(sw.take({'switch': None}) is None and sw.take({'switch': {'kind': 'start', 'id': 1}}) is None,
+          "no switch, or the attempt start: nothing to apply")
+    sw.ask("seen 90%", "")
+    check(sw.pending and planner.switch_job is not None, "cell done: the next cell asked to the thread")
+    check(sw.blocked({'status': 'edge_blocked'}) is not None and planner.switch_job is None,
+          "waiting: the edge out of the graph ends the cruise, the request withdrawn")
+    sw.ask("seen 90%", "")
+    check(sw.blocked({'status': 'ok'}) is None and sw.late(sw.t0 + 1.0) is None, "waiting: a plan ok, in time")
+    check(sw.late(sw.t0 + attempt_cruise.CRUISE_SWITCH_WAIT_S + 0.1) is not None and planner.switch_job is None,
+          "waiting: beyond the wait, the hand-off")
+    end = sw.apply({'kind': 'end', 'id': 2, 'reason': 'no goal', 'left': (0, 1)})
+    check(end == ('no goal', False, True) and cruise.env._attempt_left_unreachable and planner.switch_info is None,
+          f"'end': the cruise ends, the cell left as unreachable now ({end})")
+    check(sw.take({'switch': {'kind': 'end', 'id': 2}}) is None, "a switch already applied is not taken again")
+    check(sw.apply({'kind': 'goal', 'id': 3, 'cell': (0, 1), 'done': None}) is None and applied[-1] == 'goal'
+          and sw.report, "path lost: the new goal applied, the cruise goes on")
+    sw.ask("0.40 m from the goal", "in the cell, ")
+    end = sw.apply({'kind': 'cell', 'id': 4, 'done': (0, 1), 'next': None, 'why': '0.40 m from the goal',
+                    'where': 'in the cell, ', 'reason': 'far: GraphNav'})
+    check(end is not None and end[1] and not sw.pending, f"cell done, the next not in cruise: hand-off ({end})")
+    sw.ask("0.40 m from the goal", "in the cell, ")
+    check(sw.apply({'kind': 'cell', 'id': 5, 'done': (0, 1), 'next': (1, 1)}) is None and applied[-1] == 'cell'
+          and not sw.pending, "cell done, the next one prepared: applied, the cruise goes on")
+
+
 def main():
     t_all = time.time()
     clear_min = geometry.FRONTIER_CLEARANCE_M - 0.01
+    check_cell_switch()
 
     r = run("open field", [], (2.0, 2.0, 0.785), [(0, 1)])
     check(r['oks'] == [True], "entered the cell")

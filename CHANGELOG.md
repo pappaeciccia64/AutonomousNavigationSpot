@@ -8,6 +8,12 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-16 (the change of cell while walking in one class)
+
+- **`attempt_cruise.CellSwitch`**: the change of goal or cell while walking, seen from the main thread of a cruise, in one place -- `ask` (the cell is done: the next one asked to the planning thread), `take` (the switch of a plan not applied yet), `blocked` / `late` (a plan while the next cell is prepared: the edge out of the graph stops the robot; beyond `CRUISE_SWITCH_WAIT_S` the hand-off), `at_goal` (the wait standing on the goal, said once), `apply` (new goal or cell for the attempt, or the end of the cruise). Before, the same logic was spread over the loop of `_cruise`: six variables (`switch_pending`, `switch_t0`, `switch_why`, `last_switch_id`, `waiting_logged`, `report_switch`) and four places. Same behaviour (same order: while waiting, the stretch of the plan is sent before the wait is found too long).
+- **The `[CRUISE] Plan` line in one function** (`CruiseSteps._log_plan`), also for the plans while the next cell is prepared (`[CRUISE] Plan N (waiting for the next cell): ...`): until now that window, 0.3-3 s, had no line.
+- `test_cruise`: `check_cell_switch`, every case of the class with a fake cruise and planner; the cruise scenarios (step C, cell without a reachable goal, cell seen) as before.
+
 ## 2026-11-16 (the logs: in the file, the new behaviours visible, the summary of the cruise)
 
 - **Into `mission_log.txt` what went only to the terminal**: the errors of the frontier check while moving (`[FRONTIER] Error ...`, with the traceback; the logger only reached the terminal) and the motors power-on (`[ROBOT]`, was the SDK logger); the start of the frontier/planning thread gets its tag.

@@ -202,6 +202,102 @@ def _tier(grad, rough):
     return 'HARD'
 
 
+class CellSwitch:
+    """
+    The change of goal or cell while walking, seen from the main thread of a cruise (_cruise).
+    The planning thread prepares it (_prepare_next_cell when a cell is done, _on_no_path when
+    the path is lost) and puts it in every plan ('switch', with an id) until it is applied here.
+
+        ask(why, where)     the cell is done: the thread is asked for the next one (pending)
+        take(plan)          the switch of the plan not applied yet, or None
+        blocked(plan)       a plan while pending still counts: the edge out of the graph stops
+                            the robot (the stretch sent follows the plan, see _cruise)
+        late(now)           beyond CRUISE_SWITCH_WAIT_S: the hand-off
+        at_goal(now)        the robot reached the goal of the cell done while pending: said once
+        apply(sw)           the switch: new goal or cell for the attempt, or the end of the cruise
+
+    Before 16-11 the same logic was spread over the loop of _cruise (six variables, four places).
+    """
+
+    def __init__(self, cruise, planner):
+        self.cruise, self.planner = cruise, planner
+        self.pending = False          # a cell done, the next one asked to the thread
+        self.t0, self.why = 0.0, ""   # when and why it was asked
+        self.last_id = None           # id of the last switch applied (it stays in the plans)
+        self.waiting_logged = False
+        self.report = False           # the first send towards the new goal or cell is still to come
+
+    def ask(self, why, where):
+        cruise = self.cruise
+        self.planner.switch_job = functools.partial(
+            cruise._prepare_next_cell, done=(cruise.target_row, cruise.target_col), why=why, where=where)
+        self.pending, self.t0, self.why, self.waiting_logged = True, time.time(), why, False
+        HANDOFF.start("next cell prepared in the planning thread -> first command towards it")
+
+    def take(self, plan):
+        sw = plan.get('switch')
+        if sw is None or sw.get('id') == self.last_id or sw.get('kind') in ('start', 'seen', 'nogoal'):
+            return None           # none, already applied, or the attempt start (see _first_plan)
+        return sw
+
+    def at_goal(self, now):
+        # At the goal of the cell done: the next cell is on its way. Said once (a stop standing
+        # on the goal, otherwise invisible in the log).
+        if not self.waiting_logged:
+            self.waiting_logged = True
+            MISSION_STATS['cruise_switch_waits_at_goal'] = MISSION_STATS.get('cruise_switch_waits_at_goal', 0) + 1
+            print(f"[CRUISE] At the goal of the cell done, {now - self.t0:.1f} s after asking the next "
+                  f"cell: standing until it is prepared (at most {CRUISE_SWITCH_WAIT_S:.0f} s).")
+
+    def blocked(self, plan):
+        """A plan while the next cell is prepared: it still goes towards the cell done, and it
+        still counts (until 13-11 these plans were skipped, with the robot walking the last
+        stretch sent). The reason to end the cruise if the edge being walked is out, else None."""
+        if plan['status'] == 'edge_blocked':
+            self.planner.switch_job = None
+            return "the edge being walked is out of the graph (while the next cell was prepared)"
+        return None
+
+    def late(self, now):
+        """The reason of the hand-off if the next cell is not prepared within CRUISE_SWITCH_WAIT_S,
+        else None."""
+        if now - self.t0 <= CRUISE_SWITCH_WAIT_S:
+            return None
+        self.planner.switch_job = None
+        MISSION_STATS['cruise_switch_timeouts'] = MISSION_STATS.get('cruise_switch_timeouts', 0) + 1
+        HANDOFF.start("hand-off (end of the cruise -> first command of the next move)")
+        return (f"cell done ({self.why}), the next one not prepared within {CRUISE_SWITCH_WAIT_S:.0f} s: "
+                f"next cell while walking")
+
+    def apply(self, sw):
+        """The switch of a plan. Returns None when the cruise goes on (new goal or cell applied,
+        the plan is handled as usual), otherwise (reason, handoff, no_path_end)."""
+        cruise = self.cruise
+        self.last_id = sw.get('id')
+        self.planner.switch_info = None
+        if sw.get('kind') == 'end':
+            # No goal with a path and no cell to go on to (_on_no_path).
+            if sw.get('left') is not None:
+                cruise.env._attempt_left_unreachable = True
+            return sw['reason'], False, True
+        if sw.get('done') is None:
+            # Prepared by the thread on a path lost (_on_no_path): another goal, or the next cell
+            # with this one left as unreachable now.
+            cruise._apply_switch(sw)
+            self.report = True
+            return None
+        # The cell done (ask): the next cell, or the hand-off when it could not be prepared in
+        # cruise (far: GraphNav; none).
+        self.pending = False
+        if sw.get('next') is None:
+            HANDOFF.start("hand-off (end of the cruise -> first command of the next move)")
+            return (f"{sw['where']}{sw['why']}: next cell while walking "
+                    f"(not prepared in cruise: {sw.get('reason')})"), True, False
+        cruise._apply_switch(sw)
+        self.report = True
+        return None
+
+
 class CruiseSteps:
     """Mixin of CellAttempt: the state is CellAttempt's, see its docstring for the map of the phases."""
 
@@ -465,9 +561,7 @@ class CruiseSteps:
         t0 = time.time()
         track = [(self.robot_x, self.robot_y)]
         reason, arrived, no_path_end = None, False, False
-        switch_pending = report_switch = False
-        switch_t0, switch_why, last_switch_id = 0.0, "", None
-        waiting_logged = False
+        switch = CellSwitch(self, planner)
         n_plans = n_sends = bad = 0
         last_version, last_plan_t = 0, t0
         last_crumb_t, last_battery_t, last_fall_t = t0, t0, t0
@@ -488,14 +582,8 @@ class CruiseSteps:
                 if r['x'] is not None and np.hypot(r['x'] - track[-1][0], r['y'] - track[-1][1]) >= CRUISE_TRACK_STEP_M:
                     track.append((r['x'], r['y']))
                 st = r['status']
-                if st == 'arrived' and switch_pending:
-                    # At the goal of the cell done: the next cell is on its way. Said once (a stop
-                    # standing on the goal, otherwise invisible in the log).
-                    if not waiting_logged:
-                        waiting_logged = True
-                        MISSION_STATS['cruise_switch_waits_at_goal'] = MISSION_STATS.get('cruise_switch_waits_at_goal', 0) + 1
-                        print(f"[CRUISE] At the goal of the cell done, {now - switch_t0:.1f} s after asking the next "
-                              f"cell: standing until it is prepared (at most {CRUISE_SWITCH_WAIT_S:.0f} s).")
+                if st == 'arrived' and switch.pending:
+                    switch.at_goal(now)
                 elif st == 'arrived' and to_goal:
                     reason, arrived = "arrived at the goal", True
                     break
@@ -550,56 +638,28 @@ class CruiseSteps:
                         reason = f"{bad} plans in a row without data ({plan['status']})"
                     continue
                 bad, last_plan_t = 0, now
-                sw = plan.get('switch')
-                if sw is not None and (sw.get('id') == last_switch_id or sw.get('kind') in ('start', 'seen', 'nogoal')):
-                    sw = None         # already applied (it stays in the plans until cleared)
-                if switch_pending and sw is None:
-                    # While the thread prepares the next cell the plans still go towards the cell
-                    # done, and they still count: the edge being walked out of the graph stops
-                    # the robot, and the stretch sent follows the confirmed one of every plan
-                    # (it may get shorter). Until 13-11 these plans were skipped for up to
-                    # CRUISE_SWITCH_WAIT_S, with the robot walking the last stretch sent.
-                    if plan['status'] == 'edge_blocked':
-                        reason = "the edge being walked is out of the graph (while the next cell was prepared)"
-                        planner.switch_job = None
+                sw = switch.take(plan)
+                if switch.pending and sw is None:
+                    reason = switch.blocked(plan)
+                    if reason is not None:
                         break
                     if plan['status'] == 'ok' and len(plan.get('confirmed', [])) > 1:
+                        # The stretch sent follows the confirmed one of every plan (it may get
+                        # shorter), whole (no dead man: the robot walks it while waiting).
                         pc.send(plan['confirmed'][1:], hold_s=None, **self._cruise_gait(plan['terrain']))
                         n_sends += 1
-                    if now - switch_t0 > CRUISE_SWITCH_WAIT_S:
-                        reason, handoff = (f"cell done ({switch_why}), the next one not prepared within "
-                                           f"{CRUISE_SWITCH_WAIT_S:.0f} s: next cell while walking"), True
-                        planner.switch_job = None
-                        MISSION_STATS['cruise_switch_timeouts'] = MISSION_STATS.get('cruise_switch_timeouts', 0) + 1
-                        HANDOFF.start("hand-off (end of the cruise -> first command of the next move)")
+                        self._log_plan(plan, r, "waiting for the next cell")
+                    reason = switch.late(now)
+                    if reason is not None:
+                        handoff = True
                         break
-                    continue          # plans still towards the cell done: the robot walks the stretch sent
-                if sw is not None and sw.get('kind') == 'end':
-                    last_switch_id = sw.get('id')
-                    planner.switch_info = None
-                    reason, no_path_end = sw['reason'], True
-                    if sw.get('left') is not None:
-                        self.env._attempt_left_unreachable = True
-                    break
-                if sw is not None and sw.get('kind') in ('goal', 'cell') and sw.get('done') is None \
-                        and sw.get('next', sw.get('cell')) is not None:
-                    # Prepared by the thread on a path lost (_on_no_path): applied at once.
-                    last_switch_id = sw.get('id')
-                    planner.switch_info = None
-                    self._apply_switch(sw)
-                    to_goal, report_switch = False, True
-                    sw = None
+                    continue
                 if sw is not None:
-                    last_switch_id = sw.get('id')
-                    planner.switch_info = None
-                    switch_pending = False
-                    if sw.get('next') is None:
-                        reason, handoff = (f"{sw['where']}{sw['why']}: next cell while walking "
-                                           f"(not prepared in cruise: {sw.get('reason')})"), True
-                        HANDOFF.start("hand-off (end of the cruise -> first command of the next move)")
+                    end = switch.apply(sw)
+                    if end is not None:
+                        reason, handoff, no_path_end = end
                         break
-                    self._apply_switch(sw)
-                    to_goal, report_switch = False, True
+                    to_goal = False
                 if plan['status'] == 'edge_blocked':
                     reason = "the edge being walked is out of the graph"
                     break
@@ -611,29 +671,11 @@ class CruiseSteps:
                 rx, ry = (r['x'], r['y']) if r['x'] is not None else plan['robot'][:2]
                 ahead = plan['advance'] - _along(plan['polyline'], rx, ry)
                 f = plan['frontier']
-                print(f"[CRUISE] Plan {last_version}: {ahead:.2f} m confirmed ahead"
-                      + (" up to the goal" if plan['to_goal'] else f" ({f['reason']})")
-                      + (f", rotation not clear at node {plan['turn_stop']}" if plan['turn_stop'] else "")
-                      + f", {len(plan['ids'])} nodes to the goal"
-                      + (", PATH CHANGED" if plan['replanned'] else "")
-                      + f" | cycle {plan['cycle_s']:.2f} s"
-                      + (" (" + " ".join(f"{k} {v:.2f}" for k, v in plan['phases'].items()) + ")"
-                         if plan.get('phases') else "")
-                      + (f", Spot grid +{plan['grid_dt']:.2f} s" if plan.get('grid_dt') is not None else "")
-                      + f", robot at {100 * r['deviation']:.0f} cm from the line"
-                      + (f", cell seen {100 * plan['cell_seen']:.0f}%" if plan.get('cell_seen') is not None else "")
-                      # The terrain the gait is chosen from (first GAIT_LOOKAHEAD_M of the confirmed
-                      # stretch): worst slope (90th percentile of the plane, along or across) and
-                      # roughness -- to compare with the ground under the feet (gpe, trajectory.csv).
-                      + (f", terrain {np.degrees(np.arctan(plan['terrain'][0])):.1f} deg "
-                         f"rough {100 * plan['terrain'][1]:.1f} cm" if plan.get('terrain') else "")
-                      + (" | edges: slopes {0} recomputed, {1} kept, {2} untouched, {3} out (live scan)".format(*plan['edges'])
-                         + (f", {plan['edges'][4]} nodes pruned" if plan['edges'][4] else "")
-                         if plan.get('edges') else ""))
+                self._log_plan(plan, r)
                 # The new stretch must start where the robot is: after a path change while
                 # walking the line can pass beside it (see PathCommand.send).
                 off = motion.distance_from_polyline(rx, ry, plan['confirmed'])
-                if off > CRUISE_REJOIN_MAX_M and report_switch:
+                if off > CRUISE_REJOIN_MAX_M and switch.report:
                     # The plan with the next cell was computed on a scan a moment old and the
                     # robot, walking the stretch sent, has moved on: the next plan starts from
                     # where it is (test_cruise step C, 1 run in 6: 31 cm, cruise ended).
@@ -676,12 +718,7 @@ class CruiseSteps:
                     n_sends += 1
                     self.env._handoff_t = time.time()
                     if self._can_switch():
-                        planner.switch_job = functools.partial(
-                            self._prepare_next_cell, done=(self.target_row, self.target_col), why=why,
-                            where=where)
-                        switch_pending, switch_t0, switch_why = True, time.time(), why
-                        waiting_logged = False
-                        HANDOFF.start("next cell prepared in the planning thread -> first command towards it")
+                        switch.ask(why, where)
                         continue
                     reason, handoff = f"{where}{why}: next cell while walking", True
                     HANDOFF.start("hand-off (end of the cruise -> first command of the next move)")
@@ -698,9 +735,9 @@ class CruiseSteps:
                 to_goal = plan['to_goal']
                 pc.send(plan['confirmed'][1:], **self._cruise_gait(plan['terrain']))
                 n_sends += 1
-                if report_switch:
+                if switch.report:
                     HANDOFF.report("first send towards the next cell")
-                    report_switch = False
+                    switch.report = False
                 self._visit_after_send()
         finally:
             self._visit_after_send()     # cruise ended before a send towards the next cell
@@ -744,6 +781,33 @@ class CruiseSteps:
             MISSION_STATS['cruise_handoffs'] = MISSION_STATS.get('cruise_handoffs', 0) + 1
             return STOP
         return outcome
+
+    def _log_plan(self, plan, r, note=None):
+        """The [CRUISE] Plan line of a plan: confirmed stretch ahead and why it ends, path,
+        timings of the cycle phases, deviation, share of the cell seen, terrain of the first
+        metre (the gait comes from it), edges updated."""
+        rx, ry = (r['x'], r['y']) if r['x'] is not None else plan['robot'][:2]
+        ahead = plan['advance'] - _along(plan['polyline'], rx, ry)
+        f = plan['frontier']
+        print(f"[CRUISE] Plan {plan['version']}" + (f" ({note})" if note else "") + f": {ahead:.2f} m confirmed ahead"
+              + (" up to the goal" if plan['to_goal'] else f" ({f['reason']})")
+              + (f", rotation not clear at node {plan['turn_stop']}" if plan['turn_stop'] else "")
+              + f", {len(plan['ids'])} nodes to the goal"
+              + (", PATH CHANGED" if plan['replanned'] else "")
+              + f" | cycle {plan['cycle_s']:.2f} s"
+              + (" (" + " ".join(f"{k} {v:.2f}" for k, v in plan['phases'].items()) + ")"
+                 if plan.get('phases') else "")
+              + (f", Spot grid +{plan['grid_dt']:.2f} s" if plan.get('grid_dt') is not None else "")
+              + f", robot at {100 * r['deviation']:.0f} cm from the line"
+              + (f", cell seen {100 * plan['cell_seen']:.0f}%" if plan.get('cell_seen') is not None else "")
+              # The terrain the gait is chosen from (first GAIT_LOOKAHEAD_M of the confirmed
+              # stretch): worst slope (90th percentile of the plane, along or across) and
+              # roughness -- to compare with the ground under the feet (gpe, trajectory.csv).
+              + (f", terrain {np.degrees(np.arctan(plan['terrain'][0])):.1f} deg "
+                 f"rough {100 * plan['terrain'][1]:.1f} cm" if plan.get('terrain') else "")
+              + (" | edges: slopes {0} recomputed, {1} kept, {2} untouched, {3} out (live scan)".format(*plan['edges'])
+                 + (f", {plan['edges'][4]} nodes pruned" if plan['edges'][4] else "")
+                 if plan.get('edges') else ""))
 
     def _thread_goals(self, planner):
         """The planner chooses itself the new goal (or cell) when the path is lost
