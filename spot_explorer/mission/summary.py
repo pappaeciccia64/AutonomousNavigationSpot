@@ -4,6 +4,7 @@ import json
 
 from spot_explorer.robot import motion
 from spot_explorer.mission import attempt_cruise
+from spot_explorer.mission import planning_cycle
 from spot_explorer.mission import mission_prm
 from spot_explorer.mission import cell_attempt
 from spot_explorer.mission import attempt_common
@@ -16,6 +17,7 @@ from spot_explorer.perception import low_obstacles
 from spot_explorer.perception import spot_grid
 
 from spot_explorer.planning import edge_evaluation
+from spot_explorer.planning import roadmap
 from spot_explorer.planning import mission_graph                   # mission node lattice
 
 from spot_explorer import config as P
@@ -45,6 +47,13 @@ def mission_switches():
         'low_obstacles.LOW_OBSTACLE_FILTER': low_obstacles.LOW_OBSTACLE_FILTER,
         'motion.PATH_COMMAND_FOR_LEGS': motion.PATH_COMMAND_FOR_LEGS,
         'attempt_cruise.CONTINUOUS_MOTION': attempt_cruise.CONTINUOUS_MOTION,
+        'attempt_cruise.CRUISE_WAKE_ON_PLAN': attempt_cruise.CRUISE_WAKE_ON_PLAN,
+        'attempt_cruise.CRUISE_STATE_CACHE': attempt_cruise.CRUISE_STATE_CACHE,
+        'planning_cycle.PLAN_EVENT_DRIVEN': planning_cycle.PLAN_EVENT_DRIVEN,
+        'planning_cycle.PLAN_PERIOD_S': planning_cycle.PLAN_PERIOD_S,
+        'spot_grid.GROUND_FROM_GRID': spot_grid.GROUND_FROM_GRID,
+        'roadmap.A_STAR_PATH': roadmap.A_STAR_PATH,
+        'edge_evaluation.BATCH_ADJACENCY': edge_evaluation.BATCH_ADJACENCY,
         'config.PLAN_ONLY_EXPLORED_CELLS': P.PLAN_ONLY_EXPLORED_CELLS,
         'mission_prm.PLAN_ALSO_SHARED_NEIGHBOUR_CELLS': mission_prm.PLAN_ALSO_SHARED_NEIGHBOUR_CELLS,
         'attempt_common.CELL_SEEN_EXPLORED': attempt_common.CELL_SEEN_EXPLORED,

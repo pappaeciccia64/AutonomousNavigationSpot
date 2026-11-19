@@ -88,6 +88,13 @@ _EXEMPT_R_M = max(geometry.FRONTIER_ROBOT_RADIUS_M,
 # FAST REFRESH (06-11): the same refresh with the fixed costs cut (see tools/bench_edges.py,
 # which checks the result identical to the bit on the real scans). False = the code before.
 FAST_REFRESH = True
+# The adjacency lists of the refresh rebuilt once per node at the end instead of at every edge
+# (switch, off; 19-11, to try): _refresh_edge rewrote both neighbour lists of every edge, so a
+# node with k refreshed edges had its list rebuilt k times (~2600 edges per cycle in
+# test_cruise; with _edge_weight's linear scans ~10% of the cycle, tools/profile_cycle.py).
+# Same lists, same order: the untouched neighbours as before, then the refreshed valid ones
+# in refresh order (tests/test_batch_adjacency.py).
+BATCH_ADJACENCY = False
 REFRESH_COVERAGE_GAIN = 0.15
 REFRESH_CLOSER_M = 0.5
 
@@ -475,6 +482,24 @@ class EdgeEvaluation:
                              for (a, b, _d), o, r in zip(pairs, occ_flags, reuse)], dtype=bool)
             live_profs = self.precompute_arc_slopes(pairs, skip=skip)
 
+        self._batch_adj = {} if BATCH_ADJACENCY else None
+        try:
+            self._refresh_pairs_loop(pairs, occ_flags, live_profs, reuse, cov, mid_d, global_map)
+        finally:
+            batch, self._batch_adj = self._batch_adj, None
+            if batch:
+                self._apply_batch_adjacency(batch)
+
+        # The valid edges of the window outside the refresh radius at least go through the
+        # preliminary discard on the live scan (live_prune_valid_edges).
+        done = {(min(a, b), max(a, b)) for a, b, _d in pairs}
+        self.live_prune_last = self.live_prune_valid_edges(skip_keys=done)
+        self.flush_slope_log("refresh")
+
+        return set(local_nodes)
+
+    def _refresh_pairs_loop(self, pairs, occ_flags, live_profs, reuse, cov, mid_d, global_map):
+        """The edge by edge part of refresh_local_edge_weights."""
         n_new = n_reused = n_untouched = 0
         for i, ((idx1, idx2, dist), occ_flag, live_prof) in enumerate(zip(pairs, occ_flags, live_profs)):
             ev = reuse[i]
@@ -497,14 +522,6 @@ class EdgeEvaluation:
                     float(mid_d[i]) if ev is None else ev.mid_d,
                     prof, self.edge_validity.get(key), self._edge_weight(idx1, idx2))
         self.refresh_counts_last = (n_new, n_reused, n_untouched)
-
-        # The valid edges of the window outside the refresh radius at least go through the
-        # preliminary discard on the live scan (live_prune_valid_edges).
-        done = {(min(a, b), max(a, b)) for a, b, _d in pairs}
-        self.live_prune_last = self.live_prune_valid_edges(skip_keys=done)
-        self.flush_slope_log("refresh")
-
-        return set(local_nodes)
 
     def _node_arrays(self):
         """FAST_REFRESH: (ids, xy) of all the nodes in the order of self.nodes, rebuilt only
@@ -660,8 +677,30 @@ class EdgeEvaluation:
         return out
 
     def _edge_weight(self, idx1, idx2):
-        """Weight of the edge in the graph, None if it is not there."""
+        """Weight of the edge in the graph, None if it is not there (during a BATCH_ADJACENCY
+        refresh: as it is after the edges refreshed so far)."""
+        batch = getattr(self, '_batch_adj', None)
+        if batch:
+            if (idx1, idx2) in batch:
+                return batch[(idx1, idx2)]
+            if (idx2, idx1) in batch:
+                return batch[(idx2, idx1)]
         return next((w for n, w in self.edges.get(idx1, ()) if n == idx2), None)
+
+    def _apply_batch_adjacency(self, batch):
+        """BATCH_ADJACENCY: the neighbour lists after the refresh, rebuilt once per node: what
+        _refresh_edge edge by edge leaves (each refreshed edge removed, then appended at the end
+        if valid, in refresh order)."""
+        done, add = {}, {}
+        for (a, b), w in batch.items():
+            done.setdefault(a, set()).add(b)
+            done.setdefault(b, set()).add(a)
+            if w is not None:
+                add.setdefault(a, []).append((b, w))
+                add.setdefault(b, []).append((a, w))
+        for node, gone in done.items():
+            self.edges[node] = ([(n, w) for n, w in self.edges.get(node, []) if n not in gone]
+                                + add.get(node, []))
 
     def _refresh_edge(self, idx1, idx2, dist, global_map, occ_blocked, live_prof):
         """
@@ -705,16 +744,25 @@ class EdgeEvaluation:
                     self.slope_flip_count += 1
                     self._slope_pending()['flip'] += 1
 
-        self.edges[idx1] = [(n, w) for n, w in self.edges.get(idx1, []) if n != idx2]
-        self.edges[idx2] = [(n, w) for n, w in self.edges.get(idx2, []) if n != idx1]
+        batch = getattr(self, '_batch_adj', None)
+        if batch is None:
+            self.edges[idx1] = [(n, w) for n, w in self.edges.get(idx1, []) if n != idx2]
+            self.edges[idx2] = [(n, w) for n, w in self.edges.get(idx2, []) if n != idx1]
         if blocked:
             self.edge_validity[key] = False
+            if batch is not None:
+                batch.pop((idx2, idx1), None)
+                batch[(idx1, idx2)] = None
         else:
             # The live profile is already computed (even when it says "no data"):
             # it is not redone inside the weight computation.
             weight = self._compute_edge_weight(idx1, idx2, dist, precomputed_slope=prof)
-            self.edges[idx1].append((idx2, weight))
-            self.edges[idx2].append((idx1, weight))
+            if batch is None:
+                self.edges[idx1].append((idx2, weight))
+                self.edges[idx2].append((idx1, weight))
+            else:
+                batch.pop((idx2, idx1), None)
+                batch[(idx1, idx2)] = weight
             self.edge_validity[key] = True
         # The slope profile used, for INCREMENTAL_REFRESH (None if it was not computed: the
         # edge was blocked by occupancy).

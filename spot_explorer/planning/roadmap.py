@@ -41,6 +41,12 @@ ANCHOR_IGNORE_NEAR_M = 0.30
 # disk (0.50 m) marked around the spot: without it, every outgoing edge would be discarded.
 # Applies ONLY to the current node (set_robot_node).
 STOP_NODE_MAP_IGNORE_M = 0.70
+# Path search with A* instead of Dijkstra (switch, off; 19-11, to try): the heuristic is
+# alpha x the straight-line distance to the goal, never more than the real cost (an edge costs
+# alpha x its length plus slope terms >= 0; checked on 606 815 edges of the saved missions,
+# none below its length), so the path is the same (up to equal-cost ties) with fewer nodes
+# explored. The search was ~15% of the planning cycle (tools/profile_cycle.py).
+A_STAR_PATH = False
 
 
 class PRM(EdgeEvaluation, EdgeStats):
@@ -322,7 +328,7 @@ class PRM(EdgeEvaluation, EdgeStats):
             return new_path
         return self._stable_plan(current_path_ids, new_path, margin)
 
-    def costs_from(self, start_idx, allowed=None, stop=None, ignore_penalties=False):
+    def costs_from(self, start_idx, allowed=None, stop=None, ignore_penalties=False, heuristic=None):
         """
         THE search on the graph (Dijkstra) from start_idx, on the edges of finite cost: geometric
         weight + cost layer (effective_weight; ignore_penalties: the weight only). allowed(v):
@@ -330,13 +336,17 @@ class PRM(EdgeEvaluation, EdgeStats):
         settled for which it is true. Returns (dist, parents, the node it stopped at or None):
         dist has every node reached (settled or not), parents the way back.
         Used by the path (find_path_dijkstra), by reachable_count and by the cell rules.
+        heuristic(v): A* (A_STAR_PATH), a lower bound of the cost from v to the target; the
+        queue is ordered by cost + heuristic, dist stays the real cost.
         """
         dist, parents = {start_idx: 0.0}, {start_idx: None}
-        pq, done = [(0.0, start_idx)], set()
+        h = heuristic if heuristic is not None else (lambda _v: 0.0)
+        pq, done = [(h(start_idx), start_idx)], set()
         while pq:
-            d, u = heapq.heappop(pq)
+            _f, u = heapq.heappop(pq)
             if u in done:
                 continue
+            d = dist[u]
             done.add(u)
             if stop is not None and stop(u):
                 return dist, parents, u
@@ -351,7 +361,7 @@ class PRM(EdgeEvaluation, EdgeStats):
                 nd = d + w
                 if nd < dist.get(v, float('inf')):
                     dist[v], parents[v] = nd, u
-                    heapq.heappush(pq, (nd, v))
+                    heapq.heappush(pq, (nd + h(v), v))
         return dist, parents, None
 
     @staticmethod
@@ -416,9 +426,15 @@ class PRM(EdgeEvaluation, EdgeStats):
         """Minimum-cost path start -> goal (list of ids), None if there is none. Inside
         allowed_nodes (see set_allowed_nodes); the goal is always allowed."""
         allowed = self.allowed_nodes
+        heuristic = None
+        if A_STAR_PATH:
+            gx, gy = self.nodes[goal_idx]
+            a = min(float(self.alpha), 1.0) if self.alpha > 0 else 0.0
+            nodes = self.nodes
+            heuristic = lambda v: a * float(np.hypot(nodes[v][0] - gx, nodes[v][1] - gy))
         _dist, parents, end = self.costs_from(
             start_idx, allowed=None if allowed is None else (lambda v: v in allowed or v == goal_idx),
-            stop=lambda u: u == goal_idx, ignore_penalties=ignore_penalties)
+            stop=lambda u: u == goal_idx, ignore_penalties=ignore_penalties, heuristic=heuristic)
         return None if end is None else self.path_to(parents, end)
 
     def _within_caps(self, path, max_edges):

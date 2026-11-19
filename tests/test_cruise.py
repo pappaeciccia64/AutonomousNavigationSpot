@@ -57,12 +57,13 @@ class PlanTracker(e2e.FakeTracker):
     def __init__(self):
         super().__init__()
         self._lock, self._cycle_lock = threading.Lock(), threading.Lock()
+        self._plan_cond = threading.Condition(self._lock)
         self._job, self._plan, self._plan_version, self._job_period_s = None, None, 0, 0.4
         self._running = True
         threading.Thread(target=self._loop, daemon=True).start()
 
-    start_planning, stop_planning, get_plan, _planning_cycle = (AVT.start_planning, AVT.stop_planning,
-                                                                AVT.get_plan, AVT._planning_cycle)
+    start_planning, stop_planning, get_plan, wait_plan, _planning_cycle = (
+        AVT.start_planning, AVT.stop_planning, AVT.get_plan, AVT.wait_plan, AVT._planning_cycle)
 
     def _loop(self):
         while self._running:

@@ -545,6 +545,7 @@ class ArcVerificationTracker:
         self._job_period_s = 0.4
         self._plan = None
         self._plan_version = 0
+        self._plan_cond = threading.Condition(self._lock)   # notified at every plan published
         self._cycle_lock = threading.Lock()   # held for the whole planning cycle
 
     # --- interface for the main loop -----------------------------------------------------
@@ -571,7 +572,9 @@ class ArcVerificationTracker:
             return None if self._latest is None else dict(self._latest)
 
     def start_planning(self, job, period_s=0.4):
-        """Planning mode: run job() every period_s and publish its result (get_plan)."""
+        """Planning mode: run job() every period_s at most and publish its result (get_plan);
+        a cycle longer than period_s is followed at once by the next. job() returning None
+        publishes nothing (planning_cycle.PLAN_EVENT_DRIVEN: the same Spot grid again)."""
         with self._lock:
             self._job, self._job_period_s = job, float(period_s)
             self._plan = None
@@ -587,6 +590,16 @@ class ArcVerificationTracker:
         """Last plan published (dict, with 'version' and 'time'), or None."""
         with self._lock:
             return self._plan
+
+    def wait_plan(self, after_version, timeout):
+        """Wait until a plan newer than after_version is published, at most timeout s. Returns
+        that plan, or None at the timeout (the main thread wakes at once on a new plan instead
+        of sleeping a fixed time, see attempt_cruise.CRUISE_WAKE_ON_PLAN)."""
+        with self._plan_cond:
+            self._plan_cond.wait_for(lambda: self._plan is not None and self._plan['version'] > after_version,
+                                     timeout=timeout)
+            p = self._plan
+            return p if p is not None and p['version'] > after_version else None
 
     def start(self):
         if self._running:
@@ -651,10 +664,12 @@ class ArcVerificationTracker:
                 LOGGER.error(f"Error in the planning cycle: {e}")
                 print(f"[PLANNING] Error in the planning cycle: {e!r}\n{tb}")
                 plan = dict(status='error', error=repr(e))
-            with self._lock:
-                self._plan_version += 1
-                plan['version'], plan['time'] = self._plan_version, time.time()
-                self._plan = plan
+            if plan is not None:              # None: the cycle had nothing new (same Spot grid)
+                with self._lock:
+                    self._plan_version += 1
+                    plan['version'], plan['time'] = self._plan_version, time.time()
+                    self._plan = plan
+                    self._plan_cond.notify_all()
         time.sleep(max(0.0, period - (time.time() - t0)))
 
     def _fresh_snapshot(self):

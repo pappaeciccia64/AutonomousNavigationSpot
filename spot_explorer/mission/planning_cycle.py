@@ -33,6 +33,22 @@ from spot_explorer.robot import motion
 from spot_explorer.robot import connection
 
 PLAN_PERIOD_S = 0.4            # one cycle every 0.4 s at most (2.5 Hz)
+# Event-driven planning (switch, off; 19-11, to try on the robot): a cycle starts as soon as
+# the previous one ends (at most every PLAN_EVENT_MIN_PERIOD_S) and a Spot grid already
+# processed is not processed again (the cycle publishes nothing), unless the last one
+# processed is older than PLAN_EVENT_MAX_SKIP_S (plans keep coming if Spot stops renewing).
+# The 0.4 s were ours, not Spot's: the grids came at our request rate, never the same twice
+# (04-11, 09-11). Offline model: plan in force ~0.1 s fresher from the laptop, the same on
+# the CORE (there the cycle is mostly computation). tools/grid_rate_check.py measures how
+# often Spot renews them.
+PLAN_EVENT_DRIVEN = False
+PLAN_EVENT_MIN_PERIOD_S = 0.03
+PLAN_EVENT_MAX_SKIP_S = 0.6
+
+
+def plan_period():
+    """The period passed to the planning thread (see PLAN_EVENT_DRIVEN)."""
+    return PLAN_EVENT_MIN_PERIOD_S if PLAN_EVENT_DRIVEN else PLAN_PERIOD_S
 # Phases of a cycle, timed for the log: scan download, processing + global maps, edge
 # refresh, Dijkstra, frontier + rotation checks, the rest (bundle, gait terrain).
 PHASES = ('scan', 'maps', 'edges', 'path', 'frontier', 'other')
@@ -276,6 +292,8 @@ class CruisePlanner:
         self.phase_s = {k: [] for k in PHASES}
         self.grid_dt = []
         self._grid_t = None
+        self.skipped = 0                   # cycles not processed: same grid (PLAN_EVENT_DRIVEN)
+        self._processed_t = None           # time.time() of the last cycle processed
 
     def _grid_time(self, scan):
         try:
@@ -316,6 +334,12 @@ class CruisePlanner:
                         cycle_s=time.perf_counter() - t0)
         t = time.perf_counter(); ph['scan'] = t - t0
         grid_dt = self._grid_time(scan)
+        now = time.time()
+        if (PLAN_EVENT_DRIVEN and grid_dt is not None and grid_dt <= 1e-6 and self._processed_t is not None
+                and now - self._processed_t < PLAN_EVENT_MAX_SKIP_S):
+            self.skipped += 1
+            return None
+        self._processed_t = now
         robot = _pose_of_scan(scan)
         snap, _, _ = scan_into_maps(self.local_grid, self.prm, self.global_map, self.global_terrain_map,
                                     scan, robot, ground_label=None)
@@ -397,7 +421,11 @@ class CruisePlanner:
             dt = np.array(self.grid_dt)
             new = dt[dt > 1e-6]
             txt += (f" | Spot grid every {np.median(new):.2f} s" if new.size else " | Spot grid never new") \
-                + f", {int(np.sum(dt <= 1e-6))} read twice out of {dt.size}"
+                + f", {int(np.sum(dt <= 1e-6))} read twice out of {dt.size}" \
+                + (f" ({self.skipped} not processed)" if self.skipped else "")
+        g = getattr(self.local_grid, 'ground_from_grid', None)
+        if g:
+            txt += f" | ground height from the grid {g['grid']}, from a robot state request {g['robot_state']}"
         return txt
 
     def _save_bundle(self, scan, snap, robot, polyline, ids, next_id, frontier, advance, confirmed):

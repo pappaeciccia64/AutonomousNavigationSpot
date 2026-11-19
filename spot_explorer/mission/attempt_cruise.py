@@ -6,7 +6,7 @@ confirmed free of every new plan (motion.PathCommand).
 
     stop-and-go decides 'move' --> _cruise():
         send the stretch confirmed by the frontier of the stop-and-go
-        thread: scan, maps, edges, Dijkstra, frontier every PLAN_PERIOD_S
+        thread: scan, maps, edges, Dijkstra, frontier every PLAN_PERIOD_S (planning_cycle.plan_period)
         main:   at every new plan, send its confirmed stretch (it replaces the previous
                 one without stopping the robot); the robot never goes beyond the stretch
                 confirmed by the last plan
@@ -67,10 +67,20 @@ from spot_explorer.records import HANDOFF, MISSION_STATS, BodyTiltRecorder, appe
 from spot_explorer.robot import connection
 from spot_explorer.robot import motion
 from spot_explorer.robot import photos
+from spot_explorer.robot import state_cache
 
 CONTINUOUS_MOTION = True
 CRUISE_POLL_S = 0.2             # main thread: one feedback reading every 0.2 s
 CRUISE_PLAN_STALE_S = 1.2       # no new plan for this long: stop
+# Main thread woken as soon as a plan is published (switch, off; 19-11, to try on the robot)
+# instead of sleeping CRUISE_POLL_S: on average the plan was read ~0.1 s after it was ready.
+# The feedback is still read at least every CRUISE_POLL_S.
+CRUISE_WAKE_ON_PLAN = False
+# One thread reads the robot state for the cruise (switch, off; 19-11, to try on the robot):
+# command feedback pose, paths sent, tilt recorder, fall check and the planning thread's ground
+# height take the last reading (at most state_cache.MAX_AGE_S old) instead of a network round
+# trip each (~15 requests a second before). See robot/state_cache.py.
+CRUISE_STATE_CACHE = False
 CRUISE_MIN_AHEAD_M = 0.10       # confirmed stretch ahead of the robot below this: stop
 CRUISE_BAD_PLANS = 3            # consecutive plans without scan or with an error: stop
 CRUISE_MAX_S = 180.0
@@ -156,6 +166,17 @@ def stop_if_moving(env, command_client, reason):
     pc.stop(reason)
     CruiseSteps._cruise_settle(pc)
     _close_track(env)
+
+
+def _main_timing(turn_t, poll_s, send_s):
+    """The [CRUISE] Main thread line: interval between two turns of the cruise loop and what
+    the network requests of a turn cost (feedback + pose, path sent). On 04-11 and 09-11 the
+    turn was ~0.47 s against the 0.4 s of the plans: 2-33% of the plans never read."""
+    ms = lambda a, q: f"{1000 * float(np.percentile(a, q)):.0f}" if len(a) else "-"
+    dt = np.diff(turn_t) if len(turn_t) > 1 else np.zeros(0)
+    return (f"[CRUISE] Main thread: turn every p50/p90 {ms(dt, 50)}/{ms(dt, 90)} ms, feedback + pose "
+            f"{ms(poll_s, 50)}/{ms(poll_s, 90)} ms, path sent {ms(send_s, 50)}/{ms(send_s, 90)} ms "
+            f"({len(turn_t)} turns, {len(send_s)} sends timed)")
 
 
 def _close_track(env):
@@ -399,7 +420,7 @@ class CruiseSteps:
         the first node clear), None otherwise: then the planning is stopped and the stop-and-go
         takes the turn. Leaves the robot pose, scan, snapshot, frontier and polyline of the plan."""
         tracker = self.verification_tracker
-        tracker.start_planning(planner, planning_cycle.PLAN_PERIOD_S)
+        tracker.start_planning(planner, planning_cycle.plan_period())
         t0, plan = time.time(), None
         wait_s = START_PLAN_WAIT_S if planner.switch_job == self._start_in_thread else FIRST_PLAN_WAIT_S
         seen_bad, bad = None, []
@@ -485,7 +506,7 @@ class CruiseSteps:
         the thread itself (_thread_goals: needs the counters of the attempt, see _reset_counters;
         at the attempt start in the thread _start_in_thread sets it)."""
         planner = planning_cycle.CruisePlanner(self.local_grid, self.global_grid, self.prm_graph,
-                                               self.robot_state_client, goal_id, path_ids)
+                                               self._cruise_state_client(), goal_id, path_ids)
         planner.bundle = self._cruise_bundle_info()
         planner.seen_cell = self._seen_cell()
         if thread_goals:
@@ -555,14 +576,17 @@ class CruiseSteps:
         self.env._moving_pc = None
         _close_track(self.env)
         handoff = False
-        pc = motion.PathCommand(self.command_client, self.robot_state_client)
-        recorder = BodyTiltRecorder(self.robot_state_client)
+        state_client = self._cruise_state_client()
+        planner.robot_state_client = state_client
+        pc = motion.PathCommand(self.command_client, state_client)
+        recorder = BodyTiltRecorder(state_client)
         recorder.start()
         t0 = time.time()
         track = [(self.robot_x, self.robot_y)]
         reason, arrived, no_path_end = None, False, False
         switch = CellSwitch(self, planner)
         n_plans = n_sends = bad = 0
+        turn_t, poll_s, send_s = [], [], []      # main thread timing (19-11), see _main_timing
         last_version, last_plan_t = 0, t0
         last_crumb_t, last_battery_t, last_fall_t = t0, t0, t0
         crumb = None
@@ -574,11 +598,16 @@ class CruiseSteps:
             if from_thread:
                 last_version = plan0['version']       # the planner is running already
             else:
-                tracker.start_planning(planner, planning_cycle.PLAN_PERIOD_S)
+                tracker.start_planning(planner, planning_cycle.plan_period())
             while reason is None:
-                time.sleep(CRUISE_POLL_S)
+                if CRUISE_WAKE_ON_PLAN:
+                    tracker.wait_plan(last_version, CRUISE_POLL_S)
+                else:
+                    time.sleep(CRUISE_POLL_S)
                 now = time.time()
+                turn_t.append(now)
                 r = pc.poll()
+                poll_s.append(time.time() - now)
                 if r['x'] is not None and np.hypot(r['x'] - track[-1][0], r['y'] - track[-1][1]) >= CRUISE_TRACK_STEP_M:
                     track.append((r['x'], r['y']))
                 st = r['status']
@@ -601,7 +630,7 @@ class CruiseSteps:
                 if now - last_fall_t >= CRUISE_FALL_CHECK_S:
                     last_fall_t = now
                     try:
-                        fall = motion.check_fall(self.robot_state_client)
+                        fall = motion.check_fall(state_client)
                     except Exception:
                         fall = None
                     if fall is not None and fall.get('fallen'):
@@ -733,7 +762,9 @@ class CruiseSteps:
                                      else f['reason']) + ")")
                     break
                 to_goal = plan['to_goal']
+                t_send = time.time()
                 pc.send(plan['confirmed'][1:], **self._cruise_gait(plan['terrain']))
+                send_s.append(time.time() - t_send)
                 n_sends += 1
                 if switch.report:
                     HANDOFF.report("first send towards the next cell")
@@ -753,6 +784,9 @@ class CruiseSteps:
                                    f"{self.loop_iter:03d}_{time.strftime('%H-%M-%S')}",
                                    extra={'reason': reason})
             tracker.stop_planning()
+            print(_main_timing(turn_t, poll_s, send_s))
+            if CRUISE_STATE_CACHE:
+                print(f"[CRUISE] {state_client.summary()}")
             if crumb is not None:
                 crumb.join(timeout=5.0)
             self.env._moving_track = (recorder, (self.target_x, self.target_y),
@@ -782,6 +816,13 @@ class CruiseSteps:
             return STOP
         return outcome
 
+    def _cruise_state_client(self):
+        """The robot state client of the cruise: the shared cache (CRUISE_STATE_CACHE) or the
+        client itself."""
+        if CRUISE_STATE_CACHE:
+            return state_cache.shared(self.robot_state_client)
+        return self.robot_state_client
+
     def _log_plan(self, plan, r, note=None):
         """The [CRUISE] Plan line of a plan: confirmed stretch ahead and why it ends, path,
         timings of the cycle phases, deviation, share of the cell seen, terrain of the first
@@ -798,6 +839,8 @@ class CruiseSteps:
               + (" (" + " ".join(f"{k} {v:.2f}" for k, v in plan['phases'].items()) + ")"
                  if plan.get('phases') else "")
               + (f", Spot grid +{plan['grid_dt']:.2f} s" if plan.get('grid_dt') is not None else "")
+              # how long the plan waited before the main thread read it (CRUISE_WAKE_ON_PLAN)
+              + (f", read after {1000 * (time.time() - plan['time']):.0f} ms" if plan.get('time') else "")
               + f", robot at {100 * r['deviation']:.0f} cm from the line"
               + (f", cell seen {100 * plan['cell_seen']:.0f}%" if plan.get('cell_seen') is not None else "")
               # The terrain the gait is chosen from (first GAIT_LOOKAHEAD_M of the confirmed
