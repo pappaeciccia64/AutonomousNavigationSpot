@@ -150,7 +150,7 @@ class ScanSteps:
         # be able to go back to if the cell turns out to be a dead end. Robot still walking
         # after a hand-off: the waypoint of the cell just visited is 10 cm
         # behind and the cruise left its breadcrumbs, so only with the usual spacing (each
-        # waypoint costs ~0.4 s, 04-11 14:08).
+        # waypoint costs ~0.4 s).
         moving = getattr(self.env, '_moving_pc', None) is not None
         map_recording.graphnav_drop_breadcrumb(self.env, self.recordingInterface, self.robot_state_client, self.robot_node_id,
                                  self.target_row, self.target_col, force=not moving)

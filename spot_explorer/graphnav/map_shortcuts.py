@@ -164,8 +164,7 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, loop_cl
     if P.GRAPHNAV_SDK_LOOP_CLOSURE and budget > 0 and recording is not True:
         # Spot computes without writing and we upload the edges ourselves (upload_result): no
         # MapModifiedError at the end of processing. Every failed attempt ends up in the log with
-        # its duration, and the time reported is the TOTAL (on 26-10 15:36 the failed attempts
-        # did not show up and the time was only that of the last one: 65 s reported out of 138).
+        # its duration, and the time reported is the total, failed attempts included.
         what = 'full'
         t_all = time.perf_counter()
         write_on_spot = False

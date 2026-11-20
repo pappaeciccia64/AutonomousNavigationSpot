@@ -227,7 +227,7 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
         self.retreats_in_a_row = 0   # consecutive back-offs: reset by a real advance
         self.early_replans = 0       # replans at the first blocking cell ('wait' branch)
         self.arrival_refusals = 0    # steps refused because the arrival pose has no exits
-        self.early_replanned_edges = set()   # legs already discarded by [SUBITO] in this attempt
+        self.early_replanned_edges = set()   # legs already discarded by [EARLY] in this attempt
         self.goal_repicks = 0        # how many times the goal point was chosen again
         self.tried_goals = []        # goal points already tried and found unreachable
         self.arrived_near_goal = False   # arrival accepted with the robot just outside the cell

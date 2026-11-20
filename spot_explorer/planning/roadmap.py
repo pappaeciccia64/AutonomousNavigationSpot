@@ -533,7 +533,7 @@ def mark_edge_blocked_soft(prm, idx1, idx2):
 
     PRM.mark_edge_invalid() also puts it in `tracker_blocked_edges`, which is NEVER
     recreated -- neither by the refresh nor by the edge rebuild. Right for a block
-    confirmed by three still scans; wrong for [SUBITO], which discards after ONE
+    confirmed by three still scans; wrong for [EARLY], which discards after ONE
     scan: a marginal obstacle seen once would isolate a node for the whole mission.
 
     Here only the edge and its validity are removed: at the next re-evaluation, if the fresh

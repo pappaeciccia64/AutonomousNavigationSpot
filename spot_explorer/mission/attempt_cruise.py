@@ -25,7 +25,7 @@ PATH_HOLD_S, so the main thread has that long):
   - goal isolated (plan 'no_path'): the planning thread itself chooses another goal in the
     cell, or the next cell (_on_no_path); with none the cruise ends;
   - the cell done (seen CELL_SEEN_FRACTION, or the goal within CRUISE_HANDOFF_M): the planning
-    thread prepares the next cell and the same cruise goes on (_prepare_next_cell, step C);
+    thread prepares the next cell and the same cruise goes on (_prepare_next_cell);
   - the next cell not prepared in cruise (far: GraphNav; none): the hand-off. Inside the
     target cell and within CRUISE_HANDOFF_M of the goal (or within
     GOAL_REACHED_TOLERANCE_M with the last stretch closed by an obstacle), the attempt

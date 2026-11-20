@@ -188,7 +188,7 @@ class ObstacleSteps:
     def _repick_unreachable_goal(self):
         """The frontier does not allow advancing: if the goal is to blame (inside an obstacle, or
         frontier stopped right next to it) another one is chosen. The outcome, or None."""
-        # Before insisting: is the goal still reachable on the FRESH data? The
+        # Before insisting: is the goal still reachable on the fresh data? The
         # point is chosen at the start of the attempt, from metres away, when the
         # cell is still entirely unknown; getting there it may turn out to be right next to a wall,
         # and then no number of scans will make it reachable.
@@ -219,7 +219,7 @@ class ObstacleSteps:
         return None
 
     def _replan_now(self):
-        """[SUBITO]: at the first blocking cell the leg is discarded and another way is searched,
+        """[EARLY]: at the first blocking cell the leg is discarded and another way is searched,
         without waiting for the confirmation while still. The outcome, or None if it stays waiting."""
         # REPLAN AT ONCE, at the FIRST blocking cell, instead of staying still for three
         # scans on the same edge. The obstacle_distance noise is already filtered
@@ -258,12 +258,9 @@ class ObstacleSteps:
             # NON-permanent discard: after a single scan the edge must be removed from the plan,
             # not condemned for the mission (see mark_edge_blocked_soft).
             self._drop_edge(ea, eb, 'now')
-            # But if it is the SECOND time on the same leg, the "for now" discard was not
-            # enough: the refresh put it back into the graph (the preliminary discard looks at one
-            # scan at 0.25 m, the frontier at the median of three with hysteresis up to 0.29),
-            # and the plan went back to the previous one. Out of the plan for the rest of the
-            # attempt, like the returns and [ARRIVO]. On 28-10 14:23, 8 [SUBITO] out of 14 were
-            # repetitions of the same leg (197->569 four times in a row).
+            # If it is the second time on the same leg, the "for now" discard was not enough:
+            # the refresh put it back into the graph and the plan went back to it. Out of the
+            # plan for the rest of the attempt, like the returns and the refused arrivals.
             key_s = (min(ea, eb), max(ea, eb))
             if key_s in self.early_replanned_edges:
                 self._drop_edge(ea, eb, 'attempt')
@@ -322,7 +319,7 @@ class ObstacleSteps:
                     return outcome
 
             # Here the block is confirmed by FRONTIER_BLOCK_CONFIRM_SCANS still scans:
-            # the invalidation stays permanent (unlike [SUBITO], see
+            # the invalidation stays permanent (unlike [EARLY], see
             # mark_edge_blocked_soft). Exception: on the first leg, if the robot
             # is not on the node it is attached to, the blocked leg is robot->node, not
             # the graph edge: the edge is discarded only for now.

@@ -159,7 +159,7 @@ def shortcut_index(robot_xy, path_waypoints, snap, global_map=None, prm=None, ro
             key = (min(robot_node_id, wid), max(robot_node_id, wid))
             if key in getattr(prm, 'tracker_blocked_edges', ()):
                 continue
-            # Also the soft discards (mark_edge_blocked_soft: [SUBITO], rotation refused),
+            # Also the soft discards (mark_edge_blocked_soft: [EARLY], rotation refused),
             # otherwise the shortcut points again at the node just discarded for rotation.
             if getattr(prm, 'edge_validity', {}).get(key) is False:
                 continue
