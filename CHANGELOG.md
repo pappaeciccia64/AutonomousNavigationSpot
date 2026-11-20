@@ -8,6 +8,37 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-20 (cleanup: comments, switches, one-off tools)
+
+The code says what it does; the history is here. Behaviour unchanged except where said: every
+step checked with the tests, and `test_replay --all` printing the same as before. The state
+before the cleanup is the tag `switches-before-cleanup-2026-11-20`.
+
+- **Comments**: dates, mission anecdotes and "before it did X" out of the code (they were
+  already in this file; the missing 09-11 entry added); no all-caps emphasis; stale names
+  fixed (`[EARLY]` for `[SUBITO]`, `[LOCALIZATION]`, the loop of `cell_attempt`).
+- **Switches removed, only the branch in use kept**: `low_obstacles.LOW_OBSTACLE_FILTER`,
+  `geometry.ROTATION_CHECK_PENETRATION`, `config.REPICK_ON_REPLAN_FAIL`,
+  `edge_evaluation.FAST_REFRESH` (the fast helpers take the plain names) and `FRONTIER_EDGES`,
+  `motion.PATH_COMMAND_FOR_LEGS`, `edge_evaluation.INCREMENTAL_REFRESH`, `slopes.PLANE_SLOPES`
+  (the plane estimate everywhere; gait slope thresholds 0.13 / 0.20; the difference-based slope
+  of the global map removed), `goal.GOAL_CENTRE_FIRST`, `mission_prm.PLAN_ALSO_SHARED_NEIGHBOUR_CELLS`.
+- **Tests on the behaviour in use**: `test_mission` no longer turns the new behaviours off; the
+  whole missions with the old cell rules leave it (they go with the old rules to the local
+  variants); the arrival just outside (1,1) is covered by `test_e2e_loop` S14. `test_e2e_loop`:
+  the fake robot answers `navigate_to_path`; S15 with graph seeds that give its cases with the
+  plane slopes. `test_mission` and `test_cruise` remove their data from /tmp at the end (6.7 GB
+  had piled up and filled the disk; `KEEP_TEST_DATA=1` keeps the cruise runs).
+- **One-off tools out of the repository** (kept on the PC in the local `varianti/` folder, ignored
+  here): `bench_edges`, `bench_refresh`, `compare_cell_rules`, `plane_thresholds`, `slope_check`,
+  `slope_percentile_check`, `route_vs_shortest`, `terrain_3d`, `try_path`, `run_legacy_mission`,
+  `cruise_timing`.
+- **`test_replay --all` and its reference**: the 185 differences from the reference come from the
+  0.30 m threshold of 09-11 (`d6699f3`): the reference updates of 06-11, 09-11 and 12-11 refreshed
+  only the two default missions. About 0.1-0.5% more edges discarded per cell start, a few paths
+  one edge or a few cm different, and on 13-10 11:22 the path to (0,3) (4.8 m, a narrow passage
+  the robot walked that day) is gone. To update after the simulator trials (user, 20-11).
+
 ## 2026-11-19 evening (the route of the visit in the path; exploration by frontier; simulator plan)
 
 All off by default, to compare on fake missions and in a simulator (the robot was out of order).
