@@ -930,17 +930,15 @@ def navigate_to(target_x, target_y, robot_x, robot_y, robot_state_client, comman
 
 
 # =========================================================================================
-# One mission leg with the path command (switch PATH_COMMAND_FOR_LEGS)
+# One mission leg with the path command (the legs of the stop-and-go)
 #
 # Same leg as navigate_to -- same target, same stop halfway (should_abort), same maximum
 # time, same check of the real advance -- but rotation and walk are one trajectory
 # (PathCommand) instead of two commands each waiting for the body to settle. The rotation
 # is still on the spot at the start, exactly the one the mission has checked
 # (geometry.rotation_is_clear): beyond ROTATION_CHECK_MIN_DYAW_DEG the trajectory starts
-# with it. It is the first step towards the continuous motion: the command on the real
-# robot, with all the safety nets of the stop-and-go.
+# with it.
 # =========================================================================================
-PATH_COMMAND_FOR_LEGS = True
 LEG_START_IN_PLACE_DEG = 10.0     # = geometry.ROTATION_CHECK_MIN_DYAW_DEG
 
 

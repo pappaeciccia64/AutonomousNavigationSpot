@@ -334,10 +334,10 @@ class FakeSampler:
 attempt_scan.get_a_tform_b = legacy_stop_and_go_start.get_a_tform_b = attempt_obstacles.get_a_tform_b = attempt_legs.get_a_tform_b = spot_grid.get_a_tform_b = fake_get_a_tform_b
 connection.getPosition = lambda rsc: (ROBOT.x, ROBOT.y, -2.7, quat(ROBOT.yaw))
 motion.navigate_to = fake_navigate_to
+motion.navigate_to_path = fake_navigate_to     # the legs: same arguments, same outcome
 motion.move_to_world_point_without_turning = fake_move_no_turn
-# These scenarios check the stop-and-go, with the full refresh: the fake robot moves only
-# through navigate_to, and the logs are compared with those of the full refresh.
-motion.PATH_COMMAND_FOR_LEGS = False
+# These scenarios check the stop-and-go, with the full refresh: the logs are compared with
+# those of the full refresh.
 attempt_cruise.CONTINUOUS_MOTION = False
 edge_evaluation.INCREMENTAL_REFRESH = False
 config.FRONTIER_RESCAN_WAIT_S = 0.0

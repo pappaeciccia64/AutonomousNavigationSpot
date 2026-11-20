@@ -275,8 +275,7 @@ class LegSteps:
         tilt_recorder.start()
         try:
             self.need_refresh = True              # end of a move: see event refresh
-            navigate = motion.navigate_to_path if motion.PATH_COMMAND_FOR_LEGS else motion.navigate_to
-            success_move, distance_traveled, distance_commanded = navigate(
+            success_move, distance_traveled, distance_commanded = motion.navigate_to_path(
                 move_x, move_y, self.robot_x, self.robot_y, self.robot_state_client, self.command_client,
                 vision_tform_body_current, should_abort=_should_abort_move,
                 keep_heading=self.keep_heading,
