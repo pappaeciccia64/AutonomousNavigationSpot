@@ -20,7 +20,7 @@ confirmed free of every new plan (motion.PathCommand).
 While the thread plans the main thread does not touch graph and maps: it sends commands,
 reads plans and the robot state. It takes them back after stop_planning().
 
-WITHOUT STOPPING, while the robot walks on the last stretch confirmed (the command lasts
+Without stopping, while the robot walks on the last stretch confirmed (the command lasts
 PATH_HOLD_S, so the main thread has that long):
   - goal isolated (plan 'no_path'): the planning thread itself chooses another goal in the
     cell, or the next cell (_on_no_path); with none the cruise ends;
@@ -37,12 +37,8 @@ PATH_HOLD_S, so the main thread has that long):
     clear with CHAIN_TURN_EXTRA_AIR_M more air (_moving_check); otherwise, and for any other
     decision, the robot is stopped first and the turn is made standing as today. An attempt
     that fails before its loop (no valid goal, cell not reachable in the graph: only
-    computations) leaves the robot walking, and the mission goes on to the next cell. stop_if_moving stops it before
-    GraphNav and at the end of the exploration.
-
-The switches of the steps that led here (CHAIN_CELLS, CHAIN_ON_SEEN, CRUISE_SWITCH,
-THREAD_FIRST_TURN; planning_cycle.WHOLE_EDGES) are gone from the code since 12-11: the old
-behaviours run from the tag legacy-switches-2026-11-11 (see mission/legacy/__init__.py).
+    computations) leaves the robot walking, and the mission goes on to the next cell.
+    stop_if_moving stops it before GraphNav and at the end of the exploration.
 """
 import functools
 import re
@@ -72,23 +68,19 @@ from spot_explorer.robot import state_cache
 CONTINUOUS_MOTION = True
 CRUISE_POLL_S = 0.2             # main thread: one feedback reading every 0.2 s
 CRUISE_PLAN_STALE_S = 1.2       # no new plan for this long: stop
-# Main thread woken as soon as a plan is published (switch, off; 19-11, to try on the robot)
-# instead of sleeping CRUISE_POLL_S: on average the plan was read ~0.1 s after it was ready.
-# The feedback is still read at least every CRUISE_POLL_S.
+# Wake the main thread as soon as a plan is published instead of sleeping CRUISE_POLL_S. The
+# feedback is still read at least every CRUISE_POLL_S.
 CRUISE_WAKE_ON_PLAN = False
-# One thread reads the robot state for the cruise (switch, off; 19-11, to try on the robot):
-# command feedback pose, paths sent, tilt recorder, fall check and the planning thread's ground
-# height take the last reading (at most state_cache.MAX_AGE_S old) instead of a network round
-# trip each (~15 requests a second before). See robot/state_cache.py.
+# One thread reads the robot state for the cruise and the other readers (command feedback,
+# paths sent, tilt recorder, fall check, ground height of the planning thread) take its last
+# reading, at most state_cache.MAX_AGE_S old, instead of a network request each.
 CRUISE_STATE_CACHE = False
 CRUISE_MIN_AHEAD_M = 0.10       # confirmed stretch ahead of the robot below this: stop
 CRUISE_BAD_PLANS = 3            # consecutive plans without scan or with an error: stop
 CRUISE_MAX_S = 180.0
-# Cruises in a row that walk less than CRUISE_STALL_M (not arrived, no hand-off) before the
-# attempt is given up. On 09-11 14:53 the goal of (0,5) was 9 cm from a wall: the attempt
-# planned a way back through a node behind the robot (the frontier confirmed 1.26 m of it),
-# the cruise put the robot on the last edge, already blocked (0.00 m ahead), and so on for 61
-# cruises of 2-5 cm in 90 s. The other nets did not trigger: every cruise moves a little.
+# MAX_CRUISE_STALLS cruises in a row shorter than CRUISE_STALL_M (not arrived, no hand-off) end
+# the attempt: the robot is stuck in front of a stretch it cannot walk, and every short cruise
+# would otherwise reset the other stall checks.
 CRUISE_STALL_M = 0.10
 MAX_CRUISE_STALLS = 3
 CRUISE_TRACK_STEP_M = 0.30      # spacing of the walked track kept for the retreat
@@ -97,62 +89,46 @@ CRUISE_BATTERY_S = 5.0          # how often the battery is read
 CRUISE_FALL_CHECK_S = 1.0       # how often the fall is checked (the stop-and-go does it at every turn)
 CRUISE_ARRIVAL_WAIT_S = 2.0     # at the goal: wait at most this for the command to end
 CRUISE_SETTLE_S = 1.0           # after a stop: wait at most this for the robot to stand still
-# Distance from the goal at which the cell counts as done and the next one is chosen: the robot
-# walks it while the planning thread prepares the next cell (~0.3 s, one cycle; 0.5 m is ~1.4 s
-# at 0.35 m/s). 1.0 m until 13-11 (user: the goal must be reached more closely): it was sized for
-# the hand-off to the next ATTEMPT computed by the main thread, before step C -- with 0.6 m (~2 s)
-# the robot stood still at 46 hand-offs out of 58 on 04-11 14:08. If the next cell is not prepared
-# in cruise (far, none) the hand-off still happens here, and the next attempt starts with the
-# robot on the last 0.5 m.
+# Distance from the goal at which the cell counts as done and the next one is chosen. The robot
+# walks it while the planning thread prepares the next cell (one cycle, ~0.3 s; 0.5 m is ~1.4 s at
+# 0.35 m/s). If the next cell cannot be prepared in cruise (far, or none) the hand-off happens
+# here and the next attempt starts with the robot on the last 0.5 m.
 CRUISE_HANDOFF_M = 0.5
-# The cell is also done as soon as it is seen for at least attempt_common.CELL_SEEN_FRACTION in
-# the global map (with CELL_SEEN_EXPLORED), wherever the robot is: the cell exists to be seen,
-# the goal is only where to see it from (06-11).
-# STEP C (09-11): when the target cell is done the cruise does not end. The planning thread,
-# the only one touching graph, maps and cells, marks the cell, chooses the next one with the
-# cell rules (cell_rules, only 'near' choices: within NEAR_PATH_M), its goal and the path,
-# and goes on planning towards it (_prepare_next_cell, run by CruisePlanner.switch_job);
-# meanwhile the robot walks the last confirmed stretch. The main thread only makes the
-# GraphNav waypoint of the cell done and logs. When the next cell cannot be prepared (far,
-# none, no goal with a path) the cruise ends with the hand-off as before. Needs the cell rules
-# of the mission (env._cell_rules, set by exploration.Mission.explore).
-# The main thread waits at most this for the next cell prepared by the thread; then the cruise
-# ends with the hand-off as before (the robot walks the stretch sent, ~3 s).
+# A cell is also done as soon as attempt_common.CELL_SEEN_FRACTION of it is seen in the global
+# map, wherever the robot is: the goal is only a place to see the cell from.
+# When the target cell is done the cruise goes on. The planning thread (the only one touching
+# graph, maps and cells) marks the cell, chooses the next one with the cell rules (only cells
+# within NEAR_PATH_M), its goal and the path, and keeps planning towards it (_prepare_next_cell,
+# run by CruisePlanner.switch_job), while the robot walks the last confirmed stretch. The main
+# thread only records the GraphNav waypoint of the cell done. If the next cell cannot be prepared
+# the cruise ends with the hand-off. The main thread waits at most CRUISE_SWITCH_WAIT_S for it.
 CRUISE_SWITCH_WAIT_S = 3.0
-# THE FIRST TURN IN THE PLANNING THREAD (11-11, user's request): after the attempt start (goal
-# and path) the cruise starts at once, and its first command comes from the first plan of the
-# thread -- scan, maps, edges, Dijkstra, frontier, the same cycle as every other -- instead of
-# a turn of the stop-and-go made by the main thread first (the same work with its own code).
-# The checks of that turn stay, on the plan: a confirmed stretch of at least CRUISE_MIN_AHEAD_M,
-# the rotation towards the first node clear with the body (decisions.rotation_plan standing;
-# with CHAIN_TURN_EXTRA_AIR_M more air while walking). If the first plan does not allow to
-# start, the thread stops and the stop-and-go takes the turn (wait, block, rotation refused,
-# tight space: the exceptions).
+# The first command of a cruise comes from the first plan of the planning thread (the same
+# cycle as every other). The checks of a stop-and-go turn are applied to that plan: a confirmed
+# stretch of at least CRUISE_MIN_AHEAD_M and a clear rotation towards the first node
+# (decisions.rotation_plan; with CHAIN_TURN_EXTRA_AIR_M more air while walking). If the plan
+# does not allow to start, the thread stops and the stop-and-go takes the turn.
 FIRST_PLAN_WAIT_S = 3.0
 # The attempt start (scan, seen check, local data into the graph, goal, path) is the first cycle
-# of the planning thread (_start_in_thread, 11-11): the first plan may take this long, that
-# cycle also chooses the goal (Dijkstra included). Without a path by then the start is tried once
-# more, then the cell is left as unreachable now (not a failure).
+# of the planning thread (_start_in_thread), so the first plan can take this long. Without a path
+# by then the start is tried once more, then the cell is left as unreachable for now (not a
+# failure).
 START_PLAN_WAIT_S = 10.0
 START_TRIES = 2
-# Gait in cruise: back to a lighter level only after the plans have asked for it this long
-# (04-11 14:08: 239 changes in 20 min, one every 5 s, without it).
+# Gait in cruise: a lighter level only after the plans have asked for it this long, so the gait
+# does not flip back and forth on mixed terrain.
 GAIT_DOWN_HOLD_S = 2.0
-# The locomotion_hint (AUTO <-> CRAWL) changes only after this long of plans asking for it,
-# both ways: at every change while walking Spot made a side step of 10-15 cm (04-11 14:08:
-# 10 of the 12 sideways jumps of the cruise came within 2 s of one of the 118 changes; cell
-# (0,1): MODERATE, PLAIN, MODERATE in one second, then 15 cm sideways). On that mission it
-# would leave 29 changes instead of 117.
+# The locomotion_hint (AUTO <-> CRAWL) changes only after this long of plans asking for it, both
+# ways: Spot makes a side step of 10-15 cm at every hint change while walking.
 GAIT_HINT_HOLD_S = 3.0
-# A bigger turn than PATH_START_IN_PLACE_DEG with the robot still walking: rotation on the spot
-# inside the new command, without stopping first, if the swept area is clear with this much
-# more air. The check is made at the pose of the scan, and the robot still walks some cm
-# before the command arrives.
+# A turn larger than PATH_START_IN_PLACE_DEG with the robot still walking is made on the spot
+# inside the new command, without stopping first, if the swept area is clear with this much more
+# air. The check uses the pose of the scan, and the robot walks a few cm more before the command
+# arrives.
 CHAIN_TURN_EXTRA_AIR_M = 0.15
-# After a path change while walking the new line starts where the robot was at the scan, and
-# the robot has walked on meanwhile: it rejoins the line with a short step if it is closer
-# than this, otherwise the cruise stops and the stop-and-go takes over. With 0.10 m two path
-# changes out of ten ended the cruise in the end-to-end world with the gap (12 and 15 cm).
+# After a path change while walking, the new line starts where the robot was at the scan and the
+# robot has moved on meanwhile: it rejoins the line with a short step if it is closer than this,
+# otherwise the cruise stops and the stop-and-go takes over.
 CRUISE_REJOIN_MAX_M = 0.20
 
 
@@ -170,8 +146,8 @@ def stop_if_moving(env, command_client, reason):
 
 def _main_timing(turn_t, poll_s, send_s):
     """The [CRUISE] Main thread line: interval between two turns of the cruise loop and what
-    the network requests of a turn cost (feedback + pose, path sent). On 04-11 and 09-11 the
-    turn was ~0.47 s against the 0.4 s of the plans: 2-33% of the plans never read."""
+    the network requests of a turn cost (feedback + pose, path sent). A turn longer than the
+    planning period means some plans are never read."""
     ms = lambda a, q: f"{1000 * float(np.percentile(a, q)):.0f}" if len(a) else "-"
     dt = np.diff(turn_t) if len(turn_t) > 1 else np.zeros(0)
     return (f"[CRUISE] Main thread: turn every p50/p90 {ms(dt, 50)}/{ms(dt, 90)} ms, feedback + pose "
@@ -181,8 +157,8 @@ def _main_timing(turn_t, poll_s, send_s):
 
 def _close_track(env):
     """The trajectory of a cruise is recorded until the robot stops or the next command
-    takes over: after a hand-off it goes on walking (on 03-11 15:39 the stretch after the
-    hand-off was missing from trajectory.csv: 'unrecorded leg' in the viewer)."""
+    takes over: after a hand-off the robot is still walking, and that stretch belongs to the
+    cruise too."""
     rec = getattr(env, '_moving_track', None)
     env._moving_track = None
     if rec is None:
@@ -236,8 +212,6 @@ class CellSwitch:
         late(now)           beyond CRUISE_SWITCH_WAIT_S: the hand-off
         at_goal(now)        the robot reached the goal of the cell done while pending: said once
         apply(sw)           the switch: new goal or cell for the attempt, or the end of the cruise
-
-    Before 16-11 the same logic was spread over the loop of _cruise (six variables, four places).
     """
 
     def __init__(self, cruise, planner):
@@ -272,8 +246,7 @@ class CellSwitch:
 
     def blocked(self, plan):
         """A plan while the next cell is prepared: it still goes towards the cell done, and it
-        still counts (until 13-11 these plans were skipped, with the robot walking the last
-        stretch sent). The reason to end the cruise if the edge being walked is out, else None."""
+        still counts. The reason to end the cruise if the edge being walked is out, else None."""
         if plan['status'] == 'edge_blocked':
             self.planner.switch_job = None
             return "the edge being walked is out of the graph (while the next cell was prepared)"
@@ -383,7 +356,7 @@ class CruiseSteps:
 
     def _start_in_thread(self, planner, scan, robot):
         """
-        IN THE PLANNING THREAD (CruisePlanner.switch_job of the first cycle):
+        In the planning thread (CruisePlanner.switch_job of the first cycle):
         the attempt start on the fresh scan of the cycle -- cell already seen? local data into
         the graph and the edges of the areas with new data, robot node, goal and path (the same
         steps of the stop-and-go start, attempt_scan) -- then the cycle plans on that path. The
@@ -431,8 +404,7 @@ class CruiseSteps:
                 plan = p
                 break
             if p is not None and p.get('version') != seen_bad:
-                # A plan without data or with an error: said in the log (it was skipped silently,
-                # and a start that failed read only "no plan within 10 s").
+                # A plan without data or with an error is logged, so a failed start says why.
                 seen_bad = p.get('version')
                 bad.append((p.get('status'), p.get('error', '')))
                 print(f"[CRUISE] First plan {seen_bad}: {p.get('status')} {p.get('error', '')}")
@@ -586,7 +558,7 @@ class CruiseSteps:
         reason, arrived, no_path_end = None, False, False
         switch = CellSwitch(self, planner)
         n_plans = n_sends = bad = 0
-        turn_t, poll_s, send_s = [], [], []      # main thread timing (19-11), see _main_timing
+        turn_t, poll_s, send_s = [], [], []      # main thread timing, see _main_timing
         last_version, last_plan_t = 0, t0
         last_crumb_t, last_battery_t, last_fall_t = t0, t0, t0
         crumb = None
@@ -641,8 +613,8 @@ class CruiseSteps:
                     if battery_return_due():
                         reason = "low battery"
                         break
-                # GraphNav waypoint in another thread: creating it took up to 1.6 s on 03-11
-                # 14:48, with the main thread not reading plans nor sending in the meantime.
+                # The GraphNav waypoint is created in another thread: it can take more than a
+                # second, and meanwhile the main thread must keep reading plans and sending.
                 if now - last_crumb_t >= CRUISE_BREADCRUMB_S and (crumb is None or not crumb.is_alive()):
                     last_crumb_t = now
                     k = min(planner._seg, len(planner.path_ids) - 1)
@@ -707,7 +679,7 @@ class CruiseSteps:
                 if off > CRUISE_REJOIN_MAX_M and switch.report:
                     # The plan with the next cell was computed on a scan a moment old and the
                     # robot, walking the stretch sent, has moved on: the next plan starts from
-                    # where it is (test_cruise step C, 1 run in 6: 31 cm, cruise ended).
+                    # where it is.
                     continue
                 if off > CRUISE_REJOIN_MAX_M:
                     reason = (f"the new path passes {100 * off:.0f} cm from the robot "
@@ -716,13 +688,12 @@ class CruiseSteps:
                 # Hand-off to the next cell, robot inside the target cell: goal
                 # confirmed and within CRUISE_HANDOFF_M; or the frontier stops for an obstacle
                 # (roughness, slope) with the goal within GOAL_REACHED_TOLERANCE_M along the
-                # path, the arrival the stop-and-go would accept standing (decisions: 'arrived';
-                # 03-11 15:39, 4 cells out of 6 ended like that, each with a stop).
+                # path, the arrival the stop-and-go would accept standing (decisions: 'arrived').
                 to_go = (sum(float(np.hypot(b[0] - a[0], b[1] - a[1]))
                              for a, b in zip(plan['polyline'], plan['polyline'][1:]))
                          - _along(plan['polyline'], rx, ry))
                 # Or the cell already seen enough (CELL_SEEN_FRACTION of it in the global map),
-                # wherever the robot is: the cell exists to be seen (06-11).
+                # wherever the robot is.
                 seen = plan.get('cell_seen')
                 why = None
                 if (seen is not None
@@ -777,8 +748,7 @@ class CruiseSteps:
             elif not arrived:
                 pc.stop(f"end of the cruise: {reason}")
                 self._cruise_settle(pc)
-                # What the robot had in front when the cruise stopped on the terrain (only the
-                # confirmed blocks had photos: one on 04-11 14:08, tall grass, against 23 stops).
+                # Photos of what the robot had in front when the cruise stopped on the terrain.
                 if reason and re.search(r'obstacle|slope|roughness|out of the graph', reason):
                     photos.capture(f"cruise_it{self.iteration:03d}_cell{self.target_row}_{self.target_col}_"
                                    f"{self.loop_iter:03d}_{time.strftime('%H-%M-%S')}",
@@ -865,7 +835,7 @@ class CruiseSteps:
         return getattr(self.env, '_cell_rules', None) is not None
 
     def _goal_with_path(self, row, col, scan, robot, next_id, exclude):
-        """IN THE PLANNING THREAD: the goal of cell (row, col) (goal.find_best_point_in_cell,
+        """In the planning thread: the goal of cell (row, col) (goal.find_best_point_in_cell,
         reachable from next_id) and the path to it, up to GOAL_REPICK_CANDIDATES points.
         (ids, goal_id, x, y), ids None if no goal has a path; the points tried go into exclude."""
         env, prm, gm = self.env, self.prm_graph, self.global_map
@@ -899,7 +869,7 @@ class CruiseSteps:
 
     def _prepare_next_cell(self, planner, scan, robot, done, why, where="", exclude=()):
         """
-        IN THE PLANNING THREAD (CruisePlanner.switch_job, or _on_no_path), on the fresh scan of
+        In the planning thread (CruisePlanner.switch_job, or _on_no_path), on the fresh scan of
         the cycle: the cell done is marked (done None: the cell is left because unreachable
         now, not marked), the next one chosen (cell_rules, only within NEAR_PATH_M, not in
         exclude), its goal and the path; the planner goes on towards it, keeping the edge being
@@ -934,11 +904,11 @@ class CruiseSteps:
 
     def _on_no_path(self, planner, scan, robot, prev_id, next_id):
         """
-        IN THE PLANNING THREAD (CruisePlanner.no_path_job): no path from the node the robot
+        In the planning thread (CruisePlanner.no_path_job): no path from the node the robot
         walks to towards the goal. If from there the graph goes on (the goal is the problem,
         not the robot): the goal is excluded for the mission and another one chosen in the cell
         (up to MAX_BLOCK_REPLANS per cell); with none, the cell is unreachable now and the
-        next one is chosen (_prepare_next_cell, the cell left NOT marked done nor failed).
+        next one is chosen (_prepare_next_cell; the cell is not marked done nor failed).
         Returns the 'switch' of the plan: kind 'goal' or 'cell' with the new path ids, or kind
         'end' with the reason (the cruise ends).
         """
@@ -976,7 +946,7 @@ class CruiseSteps:
         return dict(kind='end', left=(row, col), reason=f"no goal with a path in cell ({row},{col})")
 
     def _apply_switch(self, sw):
-        """MAIN THREAD, a plan with what the planning thread prepared (see _prepare_next_cell,
+        """Main thread, a plan with what the planning thread prepared (see _prepare_next_cell,
         _on_no_path): kind 'goal' -- a new goal in the same cell; kind 'cell' -- the next cell
         (with done: the GraphNav waypoint of the cell done, exploration env._on_chained_visit;
         with left: the cell left because unreachable now, recorded for the mission in
@@ -994,9 +964,9 @@ class CruiseSteps:
             return
         done, nxt = sw.get('done'), sw['next']
         if done is not None:
-            # The GraphNav waypoint of the cell done (a call to the robot, ~0.8 s): AFTER the
-            # first command towards the next cell (_visit_after_send), not before it -- the
-            # robot must not finish the old command and stop meanwhile.
+            # The GraphNav waypoint of the cell done (a call to the robot, ~0.8 s) is made after
+            # the first command towards the next cell (_visit_after_send), so the robot does not
+            # finish the old command and stop meanwhile.
             cb = getattr(self.env, '_on_chained_visit', None)
             if cb is not None:
                 self._pending_visit = functools.partial(cb, done[0], done[1])
@@ -1018,7 +988,7 @@ class CruiseSteps:
         next cell. The cell is marked visited there too."""
         job, self._pending_visit = getattr(self, '_pending_visit', None), None
         if job is not None:
-            # Where the robot is NOW: the waypoint is recorded there (create_default_waypoint).
+            # The waypoint is recorded where the robot is now (create_default_waypoint).
             x, y, _, _ = connection.getPosition(self.robot_state_client)
             job(x, y)
             HANDOFF.mark("waypoint of the cell done, while walking")
@@ -1074,9 +1044,9 @@ class CruiseSteps:
     @staticmethod
     def _cruise_settle(pc):
         """After a stop at 0.3 m/s the robot still slides a few centimetres: wait until it
-        stands (less than 1 cm and 1 deg in 0.1 s), at most CRUISE_SETTLE_S. On 03-11 15:04
-        the next move started 0.28 s after the stop, from a pose still moving, and ended at
-        once 11 cm off its line; and the scan of the stop-and-go is made with the robot standing."""
+        stands (less than 1 cm and 1 deg in 0.1 s), at most CRUISE_SETTLE_S: a move started from
+        a pose still moving begins off its line, and the stop-and-go scans with the robot
+        standing."""
         t_end = time.time() + CRUISE_SETTLE_S
         try:
             prev = pc.pose()
@@ -1102,11 +1072,10 @@ class CruiseSteps:
         return bool(clear)
 
     def _stop_on_edge(self, planner, x, y):
-        """The robot node after a cruise: an END of the edge it is on, not the nearest node
-        (10-11): the node ahead if the edge is still in the graph (or the robot is on it),
-        otherwise the node it came from -- the part just walked is free. Before: the nearest
-        node with edges, 0.20 m away (median) on 09-11 14:36, also behind or beside the robot,
-        with a first stretch robot -> node that is not an edge."""
+        """The robot node after a cruise: an end of the edge it is on, not the nearest node. The
+        node ahead if the edge is still in the graph (or the robot is on it), otherwise the node
+        it came from, since the part just walked is free. The nearest node could be behind or
+        beside the robot, with a first stretch robot -> node that is not an edge."""
         k = min(planner._seg, max(len(planner.path_ids) - 2, 0))
         prev_id = planner.path_ids[k]
         next_id = planner.path_ids[min(k + 1, len(planner.path_ids) - 1)]
