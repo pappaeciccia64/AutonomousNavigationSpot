@@ -41,13 +41,11 @@ ANCHOR_IGNORE_NEAR_M = 0.30
 # disk (0.50 m) marked around the spot: without it, every outgoing edge would be discarded.
 # Applies ONLY to the current node (set_robot_node).
 STOP_NODE_MAP_IGNORE_M = 0.70
-# Path search with A* instead of Dijkstra (switch, off; 19-11, to try): the heuristic is
-# alpha x the straight-line distance to the goal, never more than the real cost (an edge costs
-# alpha x its length plus slope terms >= 0; checked on 606 815 edges of the saved missions,
-# none below its length), so the path is the same (up to equal-cost ties) with fewer nodes
-# explored. The search was ~15% of the planning cycle (tools/profile_cycle.py).
+# Path search with A* instead of Dijkstra: the heuristic is alpha x the straight-line distance
+# to the goal, never more than the real cost (an edge costs alpha x its length plus slope terms
+# >= 0), so the path is the same (up to equal-cost ties) with fewer nodes explored.
 A_STAR_PATH = False
-# Path kept on the route of the visit (switch, off; 19-11, an experiment): every node entered by
+# Path kept on the route of the visit: every node entered by
 # the PATH search costs ROUTE_LINE_WEIGHT x its distance from the route line (the polyline
 # through the cell centres in visiting order, set by the mission: set_route_line), saturated at
 # ROUTE_LINE_SATURATION_M so that going round a big obstacle stays possible. With the
@@ -218,14 +216,13 @@ class PRM(EdgeEvaluation, EdgeStats):
     def anchor_node(self, x: float, y: float, global_map=None, edge_safety_margin: float = 0.0,
                     ignore_near_m: float = 0.0, connected_first: bool = False) -> Optional[int]:
         """
-        The EXISTING node to attach the position (x, y) to, without creating new ones.
+        The existing node to attach the position (x, y) to, without creating new ones.
 
         Not simply the nearest (after a stop halfway along an edge the nearest may lie beyond
         what stopped the robot): the nearest, within ANCHOR_SEARCH_M, that
           - with connected_first (the robot), has at least one edge: a node next to an
             obstacle loses all its edges in the live refresh, and attached there the robot is
-            cut off from the graph (04-11 11:21, cell (0,4): node 0.15 m away with no edge,
-            two connected ones at 0.32 and 0.39 m);
+            cut off from the graph;
           - has no infinite penalty;
           - is reachable in a straight line without passing over occupied cells of the global
             map (the first ignore_near_m around (x, y) do not count: the robot is there).

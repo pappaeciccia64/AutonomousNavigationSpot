@@ -106,17 +106,16 @@ class RecordingInterface(object):
                             icp_iters=None, feature_matching=None, upload_result=False,
                             prune_edges=None):
         """
-        Spot's loop closures (fiducial + odometry) DURING the mission, with Spot's
+        Spot's loop closures (fiducial + odometry) during the mission, with Spot's
         collision check on the new edges, so the graph does not stay a chain and a return
         does not have to retrace the whole way.
 
-        timeout_s: maximum processing time ON SPOT'S SIDE (Params.timeout_seconds). When it
-        expires Spot returns the edges found so far (timed_out = True) and a following call
-        starts over (bench test of 26-10: it does not resume the work). Without it, Spot
-        stops by itself after ~30 s, together with the RPC: on 22-10 the RPC expired first
-        and no result arrived. Spot's limit is approximate and after every map change the
-        call gets longer (4 s requested -> up to 12 s; 60 s -> over 120 s once): the RPC
-        limit here is three times timeout_s, at least + 15 s.
+        timeout_s: maximum processing time on Spot's side (Params.timeout_seconds). When it
+        expires Spot returns the edges found so far (timed_out = True), and a following call
+        starts over (it does not resume the work). Without it, Spot stops by itself after
+        ~30 s, together with the RPC, and no result arrives. Spot's limit is approximate and
+        grows after every map change, so the RPC limit here is three times timeout_s, at
+        least + 15 s.
         max_path_m / min_path_m: limits on the distance between the two waypoints along the
         graph (max/min_loop_closure_path_length); None = Spot's values.
         modify_map_on_server, check_collision: False only for bench measurements
@@ -124,11 +123,10 @@ class RecordingInterface(object):
         icp_iters (0 = no ICP) and feature_matching: without them, Spot finishes in a few
         seconds but the edges are not corrected on the scans; None = Spot's values (with
         ICP). Only for bench measurements, like max_path_m, min_path_m and prune_edges.
-        upload_result: Spot computes WITHOUT writing to the map and this function uploads
+        upload_result: Spot computes without writing to the map and this function uploads
         the edges (upload_graph, which adds them to the map in one go). Writing by itself,
-        Spot can answer MapModifiedError AT THE END of the processing, if the map changed
-        in the meantime, and the processing is lost: on 26-10 15:36, right after stopping
-        the recording, ~73 s of failed attempts before the good one.
+        Spot can answer MapModifiedError at the end of the processing if the map changed in
+        the meantime (for example right after the recording stops), and the work is lost.
         prune_edges: False = also keeps the candidate edges in areas already connected (by
         default Spot keeps only one per area, the "best"); None = Spot's value.
 
@@ -197,7 +195,7 @@ class RecordingInterface(object):
     def _generate_unique_map_folder(self, base_name='Graph'):
         """
         Path of a new folder for the download, like
-        "Graph_10-02-2026_14-30-00" (Grafo_... in missions before 30-10-2026) (day-month-year_hours-minutes-seconds).
+        "Graph_10-02-2026_14-30-00" (day-month-year_hours-minutes-seconds).
         """
 
         timestamp = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
@@ -597,16 +595,14 @@ def graphnav_drop_breadcrumb(env, recordingInterface, robot_state_client, prm_no
     Drop a breadcrumb: a GraphNav waypoint at the point where the robot is, linked to the
     PRM node it is passing through.
 
-    Used for returns. Walking BACKWARDS over the recorded legs
-    (retreat_along_traveled_path) the robot cannot see where it puts its feet, does not
-    relocalize, and an error accumulates. With a trail of waypoints the return is done by
-    GraphNav, which walks forwards, with Boston Dynamics' localization and obstacle
-    avoidance (user's decision).
+    Used for returns. Walking backwards over the recorded legs (retreat_along_traveled_path)
+    the robot cannot see where it puts its feet, does not relocalize, and an error
+    accumulates. With a trail of waypoints the return is done by GraphNav, which walks
+    forwards, with Boston Dynamics' localization and obstacle avoidance.
 
     Density: a waypoint only if the robot is at least GRAPHNAV_WAYPOINT_MIN_SPACING_M from
-    the last one dropped, plus always one on entering a cell (force=True). A waypoint for
-    EVERY stop position would give a map that is too dense: partial steps leave stops
-    20-60 cm apart.
+    the last one dropped, plus always one on entering a cell (force=True). A waypoint at
+    every stop would make the map too dense: partial steps leave stops 20-60 cm apart.
 
     The trail lives on env (_graphnav_trail) because it must survive the cell attempts.
     Never raises: a missed breadcrumb is a breadcrumb, not a reason to stop the robot.

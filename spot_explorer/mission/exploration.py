@@ -26,11 +26,10 @@ from spot_explorer.mission import cell_rules
 # for at least attempt_common.CELL_SEEN_FRACTION in the global map are marked visited where
 # they are (only with attempt_common.CELL_SEEN_EXPLORED). The GraphNav waypoint of the cell is
 # made only if the robot is in it (or just outside, ARRIVAL_OUTSIDE_CELL_M), as after an
-# attempt; a cell seen from afar gets none. Why: on 04-11 16:52 the robot, standing in (1,3)
-# and in (1,0), went with GraphNav to a neighbouring waypoint (9 s and 4 s) and only there
-# found the cells 93% and 100% seen: the check was made only at the start of the attempt.
+# attempt; a cell seen from afar gets none. This saves GraphNav trips towards cells that are
+# already seen from where the robot stands.
 SEEN_BEFORE_MOVING = True
-# Where the goal comes from (19-11): 'cells' (this module, the cell rules) or 'frontier'
+# Where the goal comes from: 'cells' (this module, the cell rules) or 'frontier'
 # (mission/frontier.py: the first frontier node of a Dijkstra search with the distance from
 # the route of the visit; an experiment, for the fake missions and a future lidar).
 GOAL_SOURCE = 'cells'
@@ -38,10 +37,9 @@ GOAL_SOURCE = 'cells'
 
 class Mission:
     """The mission cell by cell, after start-up (see run.py): explore() with the cell rules
-    (cell_rules, 09-11): at every turn the cells already seen are closed, then the next cell
-    is the first in the visiting order with a near way (attempt from here, in cruise; the cruise
-    goes on into the next cells, step C), otherwise the first with any way (GraphNav, then the
-    attempt). The rules of the sides tried (before 09-11): mission/legacy/side_rules.py.
+    (cell_rules): at every turn the cells already seen are closed, then the next cell is the
+    first in the visiting order with a near way (attempt from here, in cruise; the cruise goes
+    on into the next cells), otherwise the first with any way (GraphNav, then the attempt).
 
     On low battery (see battery.py) exploration stops even with cells left: the saved state
     tells what was left to explore.
@@ -117,7 +115,7 @@ class Mission:
         A real failure counts against the cell with its entry; no candidate = the end.
         """
         rules = self.rules = cell_rules.CellRules(self.env, self.prm, self.path)
-        # For the next cell prepared in the cruise (step C, attempt_cruise).
+        # For the next cell prepared in the cruise (see attempt_cruise).
         self.env._cell_rules = rules
         self.env._on_chained_visit = self._on_visited
         self._t0 = time.time()
@@ -151,8 +149,8 @@ class Mission:
             else:
                 attempt_cruise.stop_if_moving(self.env, self.command_client, "next cell far: GraphNav")
                 ok = self._travel_to_choice(choice)
-            # The cruise may have gone on into other cells (step C, attempt_cruise): the
-            # outcome is that of the last one.
+            # The cruise may have gone on into other cells (see attempt_cruise): the outcome
+            # is that of the last one.
             choice = getattr(self.env, '_chain_choice', None) or choice
             if ok == 'fall':
                 rules.record_failure(choice, "fall during the GraphNav move")

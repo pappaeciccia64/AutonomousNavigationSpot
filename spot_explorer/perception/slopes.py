@@ -554,22 +554,14 @@ def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
 # =========================================================================
 PLANE_HALF_WINDOW_M = 0.25
 PLANE_MIN_VALID_FRACTION = 0.5
-# Switch for the edges of the PRM on the live scan (edge_evaluation): off = differences on a
-# base along the edge, as before. On = the plane of a square window as long as the body
-# (PLANE_EDGE_HALF_WINDOW_M = half body length) at every position of the robot centre between
-# the two nodes, 90th percentile of those. The window already covers the body, so the values
-# "with the body" are the same. tools/slope_check.py on 46800 samples of 40 missions, against
-# the measured body pitch: mean error 0.91 deg against 2.15 (bias -0.1 against +2.0); on the
-# slopes of 22-10/26-10/28-10/29-10 1.2 against 3.0. The lateral cannot be checked on the body
-# (Spot keeps it level): from 04-11 trajectory.csv also has the ground plane of the legs (gpe).
-# The gait levels have thresholds of their own for the plane (gait.slope_thresholds). The
-# veto stays SLOPE_THRESHOLD (Spot's limit, ~30 deg): with the plane it is closer to the real
-# slope, while the old estimate reads more and vetoes earlier. The slope cost weights are
-# still those of the old estimate (tools/plane_thresholds.py).
-# On 04-11 14:08 (outdoors, ground up to 22 deg) against the ground plane of the legs (gpe,
-# max of long/lat) on 323 cruise stretches of 1 m: plane |error| 1.1 deg median (bias -0.5),
-# old 2.2 (bias +2.2); gait level right 89% with 0.13/0.20 against 76% with 0.15/0.25. The
-# frontier uses the same estimate (safe_frontier._plane_field). On from 04-11.
+# Slope of the PRM edges on the live scan (edge_evaluation): on = the plane fitted in a square
+# window as long as the body (PLANE_EDGE_HALF_WINDOW_M = half body length) at every position of
+# the robot centre between the two nodes, 90th percentile of those; the window already covers
+# the body, so the values "with the body" are the same. Off = differences on a base along the
+# edge. The plane is closer to the slope the robot's body and legs measure (tools/slope_check.py).
+# The gait levels have thresholds of their own for the plane (gait.slope_thresholds); the veto
+# stays SLOPE_THRESHOLD (Spot's limit, ~30 deg). The frontier uses the same estimate
+# (safe_frontier._plane_field).
 PLANE_SLOPES = True
 PLANE_EDGE_HALF_WINDOW_M = ROBOT_HALF_LENGTH_M
 

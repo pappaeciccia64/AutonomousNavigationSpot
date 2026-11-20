@@ -1,25 +1,22 @@
 """
-LOW INTERMITTENT OBSTACLES (grass): Spot's obstacle_distance filtered on the history of each
+Low intermittent obstacles (grass): Spot's obstacle_distance filtered on the history of each
 point of the world.
 
-On 04-11 14:08 (lawn) the cells Spot marked as obstacle, observed at least 5 times from
-0.6-1.9 m, were obstacle in this share of their observations (median): 17% below 10 cm above
-the ground, 45% at 10-30 cm, 87% at 30-60 cm, 100% above 60 cm (92% of those in at least 80%
-of the observations). The low ones come and go from one scan to the next, so edges and
-frontier said "free", then "blocked" as the robot got closer, then "free" again.
+On a lawn, low obstacle cells (grass a few cm to 30 cm high) come and go from one scan to the
+next, while tall ones (bushes, walls) are seen at almost every look. Without a filter edges and
+frontier say "free", then "blocked" as the robot gets closer, then "free" again.
 
 The rule, cell by cell of the scan:
-  - an obstacle cell (obstacle_distance <= 0) HIGHER than LOW_OBSTACLE_HEIGHT_M above the local
+  - an obstacle cell (obstacle_distance <= 0) higher than LOW_OBSTACLE_HEIGHT_M above the local
     ground, or without a reliable height (walls, whose terrain correct_terrain fills with the
     ground), always counts, at the first sight;
-  - a LOW obstacle cell counts if that point of the world was obstacle in at least
+  - a low obstacle cell counts if that point of the world was obstacle in at least
     LOW_OBSTACLE_KEEP_FRAC of its last LOW_OBSTACLE_HISTORY observations, or if it has been
-    observed fewer than LOW_OBSTACLE_MIN_OBS times (new: as before), or if it was obstacle in
+    observed fewer than LOW_OBSTACLE_MIN_OBS times (too new to judge), or if it was obstacle in
     its last two observations in a row (just appeared: counts with the frontier's latency);
   - a low cell within LOW_OBSTACLE_NEAR_KEPT_M of an obstacle cell that counts (high or
     steady) stays: the edge of a real obstacle, also one that reads the floor height (under
-    a table). Without it the gap of (1,3) on 04-11 11:38 was freed, and on 16:10 the edge of a
-    piece of furniture in (1,0). So only isolated specks are dropped (grass in the open);
+    a table). So only isolated specks are dropped (grass in the open);
   - the others are dropped, and obstacle_distance is recomputed without them: never below
     Spot's value, never beyond what the window lets us check (distance to its border).
 Local ground: the minimum of the reliable raw heights within LOW_OBSTACLE_GROUND_HALF_M.
@@ -124,8 +121,7 @@ def filter_obstacle_distance(od, terrain_raw, terrain_seen, num_x, num_y, origin
         if drop.any():
             # Not next to an obstacle cell that counts (high, or steady): the edge of a real
             # obstacle stays as it is, also when all of it reads the floor height (under a
-            # table or a bench: 04-11 16:10, cell (1,0), its edge was dropped up to 0.20 m
-            # from the steady cells and the frontier let the robot on 0.65 m instead of 0.29).
+            # table or a bench).
             stay = core & ~drop
             if stay.any():
                 drop &= distance_transform_edt(~stay) * cs > LOW_OBSTACLE_NEAR_KEPT_M
