@@ -42,7 +42,6 @@ def mission_switches():
         'config.MISSION_GRAPH_SAMPLING': P.MISSION_GRAPH_SAMPLING,
         'mission_graph.BATCH_SLOPES': mission_graph.BATCH_SLOPES,
         'edge_evaluation.REFRESH_BATCH_SLOPES': edge_evaluation.REFRESH_BATCH_SLOPES,
-        'edge_evaluation.INCREMENTAL_REFRESH': edge_evaluation.INCREMENTAL_REFRESH,
         'slopes.PLANE_SLOPES': slopes.PLANE_SLOPES,
         'attempt_cruise.CONTINUOUS_MOTION': attempt_cruise.CONTINUOUS_MOTION,
         'attempt_cruise.CRUISE_WAKE_ON_PLAN': attempt_cruise.CRUISE_WAKE_ON_PLAN,

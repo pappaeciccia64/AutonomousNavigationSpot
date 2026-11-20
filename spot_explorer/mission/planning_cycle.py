@@ -136,7 +136,7 @@ def refresh_graph(prm, snap, global_map, robot_xyyaw, refresh, quiet=False):
             global_map=global_map, edge_safety_margin=geometry.PRM_EDGE_SAFETY_MARGIN_M)
         stats['prm_refresh'] = stats.get('prm_refresh', 0) + 1
         n_new, n_reused, n_untouched = getattr(prm, 'refresh_counts_last', (0, 0, 0))
-        if edge_evaluation.INCREMENTAL_REFRESH and not quiet:
+        if not quiet:
             for k, v in (('refresh_slopes_new', n_new), ('refresh_slopes_reused', n_reused),
                          ('refresh_edges_untouched', n_untouched)):
                 MISSION_STATS[k] = MISSION_STATS.get(k, 0) + v

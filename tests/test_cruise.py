@@ -36,7 +36,6 @@ from spot_explorer.perception import low_obstacles   # noqa: E402
 
 # test_e2e_loop pins the switches off for the stop-and-go: here the cruise is on, as in the field.
 attempt_cruise.CONTINUOUS_MOTION = True
-edge_evaluation.INCREMENTAL_REFRESH = True
 planning_cycle.get_a_tform_b = e2e.fake_get_a_tform_b
 attempt_cruise.BodyTiltRecorder = e2e._NoTilt
 

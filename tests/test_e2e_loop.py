@@ -336,10 +336,8 @@ connection.getPosition = lambda rsc: (ROBOT.x, ROBOT.y, -2.7, quat(ROBOT.yaw))
 motion.navigate_to = fake_navigate_to
 motion.navigate_to_path = fake_navigate_to     # the legs: same arguments, same outcome
 motion.move_to_world_point_without_turning = fake_move_no_turn
-# These scenarios check the stop-and-go, with the full refresh: the logs are compared with
-# those of the full refresh.
+# These scenarios check the stop-and-go.
 attempt_cruise.CONTINUOUS_MOTION = False
-edge_evaluation.INCREMENTAL_REFRESH = False
 config.FRONTIER_RESCAN_WAIT_S = 0.0
 motion.check_fall = fake_check_fall
 motion.recover_from_fall = fake_recover

@@ -47,7 +47,6 @@ REFRESH_BATCH_SLOPES = True
 # evaluation (heights read from close by are the reliable ones). Occupancy and the live discard
 # are redone at every refresh anyway: they are cheap and something can enter the edge later. An
 # edge left as the evaluation found it (validity and weight) is not touched.
-INCREMENTAL_REFRESH = True
 
 # One rule for graph and frontier: in the scan window an edge is discarded by the live scan with
 # the rule of the safe frontier (safe_frontier.sample_flags: obstacle with the filter hysteresis,
@@ -94,7 +93,7 @@ DIRTY_MARGIN_M = (slopes.ARC_BODY_EXTENSION_M + slopes.LATERAL_SLICE_HALF_WIDTH_
 
 
 class _LiveEval:
-    """Last live evaluation of an edge (INCREMENTAL_REFRESH): node positions, centre-line
+    """Last live evaluation of an edge (incremental refresh): node positions, centre-line
     coverage and robot distance from the edge middle at that moment, slope profile, and the
     validity and weight it left in the graph."""
     __slots__ = ('xy_a', 'xy_b', 'cov', 'mid_d', 'prof', 'valid', 'weight')
@@ -159,7 +158,7 @@ class EdgeEvaluation:
         self.dirty_rects = []
         self.hazards_seen = 0         # hazards of the global map already applied (mission_graph)
 
-        # INCREMENTAL_REFRESH: per edge, the last live evaluation (see _LiveEval), and the
+        # Incremental refresh: per edge, the last live evaluation (see _LiveEval), and the
         # counts of the last refresh (recomputed, reused profile, untouched).
         self._live_eval = {}
         self.refresh_counts_last = (0, 0, 0)
@@ -455,7 +454,7 @@ class EdgeEvaluation:
                 n_reused += 1
                 live_prof = ev.prof
             prof = self._refresh_edge(idx1, idx2, dist, global_map, occ_flag, live_prof)
-            if INCREMENTAL_REFRESH and prof is not None:
+            if prof is not None:
                 if ev is None:
                     n_new += 1
                 key = (min(idx1, idx2), max(idx1, idx2))
@@ -521,11 +520,11 @@ class EdgeEvaluation:
         return pairs
 
     def _reusable_profiles(self, pairs, occ_flags):
-        """INCREMENTAL_REFRESH: for each pair the _LiveEval whose profile still holds (no
+        """Incremental refresh: for each pair the _LiveEval whose profile still holds (no
         better data since), otherwise None; with the coverage and the robot distance of
-        now, to store with a new evaluation. All None when the switch is off."""
+        now, to store with a new evaluation."""
         n = len(pairs)
-        if not INCREMENTAL_REFRESH or n == 0:
+        if n == 0:
             return [None] * n, np.zeros(n), np.zeros(n)
         cov = self._live_coverage_many(pairs)
         lo = self.live_obstacles
@@ -664,7 +663,7 @@ class EdgeEvaluation:
                 batch.pop((idx2, idx1), None)
                 batch[(idx1, idx2)] = weight
             self.edge_validity[key] = True
-        # The slope profile used, for INCREMENTAL_REFRESH (None if it was not computed: the
+        # The slope profile used, for the incremental refresh (None if it was not computed: the
         # edge was blocked by occupancy).
         return None if bool(occ_blocked) else prof
 
