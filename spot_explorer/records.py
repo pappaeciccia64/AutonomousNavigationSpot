@@ -125,11 +125,8 @@ _SEGMENT_COLUMNS = [
 _CSV_LOCK = threading.Lock()
 
 
-# trajectory.csv columns. 'move' (2026-10-26) tells what kind of movement produced the
-# sample: 'prm' (navigation loop leg), 'graphnav', 'cone', 'backoff',
-# 'retreat'. Until 2026-10-26 movements other than 'prm' did NOT end up in the file: the
-# viewer joined with a straight line the last point before a GraphNav return and the first
-# after, a line that cut through obstacles (mission of 22-10, around 16:00).
+# trajectory.csv columns. 'move' tells what kind of movement produced the sample: 'prm'
+# (navigation loop leg), 'cruise', 'graphnav', 'cone', 'backoff', 'retreat'.
 _TRAJECTORY_COLUMNS = ['time', 'iteration', 'cell_row', 'cell_col', 'loop_iter', 'node_from', 'node_to',
                        'x', 'y', 'yaw_deg', 'roll_deg', 'pitch_deg', 'target_x', 'target_y', 'move',
                        'gpe_long_deg', 'gpe_lat_deg']
@@ -142,9 +139,8 @@ def timing_add(phase, seconds):
 
 class StepTimer:
     """
-    Stopwatch of the steps between two moves, for the slow hand-offs of the CORE I/O (04-11
-    16:52: 4.1-4.7 s from the end of a cruise to the start of the next, 0.9-1.6 s from the
-    laptop, and 1 s of it explained by no log line). start() at the end of a cruise (or at
+    Stopwatch of the steps between two moves, to see where the time of a hand-off goes
+    (slower on the CORE I/O than on the laptop). start() at the end of a cruise (or at
     the attempt start, robot standing), mark(step) after every step, report() at the first
     command of the next move: one line [TIMING] <label> with the total and every step, and
     the sums per step in MISSION_STATS['handoff_steps_s'] ({step: [seconds, count]}).

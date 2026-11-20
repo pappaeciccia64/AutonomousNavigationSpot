@@ -38,13 +38,12 @@ def graphnav_localization(recordingInterface):
 
 def graphnav_log_drift(recordingInterface, robot_state_client, where):
     """
-    ODOMETRY DRIFT, measured at every GraphNav arrival. GraphNav localizes on the
+    Odometry drift, measured at every GraphNav arrival. GraphNav localizes on the
     waypoint's scans and says where the body is relative to it (waypoint_tform_body);
     composing it with the VISION pose the waypoint had when we created it gives where the
-    robot SHOULD be in VISION without drift. The difference from the current VISION pose is
+    robot should be in VISION without drift. The difference from the current VISION pose is
     the drift accumulated since the waypoint was created: the same drift that shifts, in our
-    global maps (built in VISION), what was seen many minutes earlier. On 26-10 15:11, on
-    arrival at wp_0, the raw offset was 0.66 m (arrival tolerance included).
+    global maps (built in VISION), what was seen many minutes earlier.
 
     Measurement only: nothing is corrected. Only measurable on waypoints we created (cell
     waypoints and breadcrumbs), whose VISION pose is known. Never raises to the caller.
@@ -185,10 +184,10 @@ def _distance_from_waypoint(recordingInterface, robot_state_client, waypoint_id,
         if loc.waypoint_id == waypoint_id:
             p = loc.waypoint_tform_body.position
             return float(np.hypot(p.x, p.y)), 'from GraphNav'
-        # Localized on ANOTHER waypoint (for example a breadcrumb at the start, next to
+        # Localized on another waypoint (for example a breadcrumb at the start, next to
         # wp_0): body pose relative to it, composed with the poses of the two waypoints saved
         # at creation. The drift between the two creations is small if they are close in time,
-        # much less than that of the current VISION poses (28-10 14:23: ~1 m on wp_0).
+        # much less than that of the current VISION poses.
         poses = getattr(recordingInterface, 'waypoint_poses', None) or {}
         by_id = {p.get('waypoint_id'): p for p in poses.values() if p.get('waypoint_id')}
         a, b = by_id.get(loc.waypoint_id), by_id.get(waypoint_id)

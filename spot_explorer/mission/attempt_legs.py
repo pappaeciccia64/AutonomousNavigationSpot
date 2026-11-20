@@ -103,11 +103,10 @@ class LegSteps:
                       f"exits: {n_us_a}/{len(fan_arr)} usable directions ({fan_txt_a}). "
                       f"I do not go ({self.arrival_refusals}/{P.MAX_ARRIVAL_REFUSALS}), I discard the leg "
                       f"{self.robot_node_id}->{self.next_node_id} for the rest of the attempt and replan.")
-                # Out of the plan for the REST OF THE ATTEMPT (attempt penalty, like the
-                # returns: see _trap_backtrack), not only for now: the leg itself is free,
-                # it is the arrival point that has no exits, so the refresh would put it back
-                # into the graph at the next turn and the same plan would be made again. On 28-10 12:16 the
-                # same step was refused three times in a row, and executed at the third.
+                # Out of the plan for the rest of the attempt (attempt penalty, like the
+                # returns: see _trap_backtrack), not only for now: the leg itself is free, it
+                # is the arrival point that has no exits, so the refresh would put it back into
+                # the graph at the next turn and the same plan would be made again.
                 self._drop_edge(self.robot_node_id, self.next_node_id, 'attempt')
                 new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id)
                 if new_ids is not None and len(new_ids) > 1:
@@ -127,9 +126,9 @@ class LegSteps:
     def _prepare_leg(self, leg_i, n_legs, move_x, move_y):
         """Before an intermediate multi-node leg: true pose, possible rotation and exits on
         arrival. The VISION pose to start from, or None if it stops to look again."""
-        # TRUE pose after the previous leg. It serves three purposes, all necessary:
+        # True pose after the previous leg. It serves three purposes:
         #  - navigate_to computes the rotation angle from the heading it receives,
-        #    and relative_move rotates RELATIVE TO THE CURRENT POSE: with the heading
+        #    and relative_move rotates relative to the current pose: with the heading
         #    of the initial scan (before leg 0) the robot would rotate
         #    by the wrong angle and walk off the verified path;
         #  - the distance to travel is computed from (robot_x, robot_y);
@@ -337,10 +336,9 @@ class LegSteps:
         success_move, distance_traveled, distance_commanded, abort_reason = self._move_and_record(
             move_x, move_y, vision_tform_body_current, terrain_info)
         # Command ended badly (timeout, Spot not settled...) without a stop requested
-        # by the frontier, but with the robot ARRIVED within a few cm of the point: the leg counts as
-        # successful instead of as a physical failure (edge discarded forever and return).
-        # 28-10 13:50, cell (3,2): 20 degree climb in HARD, 0.42 m out of 0.44 past the 15 s.
-        # segments.csv keeps the real outcome of the command.
+        # by the frontier, but with the robot within a few cm of the point: the leg counts as
+        # done instead of as a physical failure (edge discarded for good and return), e.g. a
+        # slow climb that runs past the command time. segments.csv keeps the real outcome.
         if not success_move and abort_reason is None:
             try:
                 ax, ay, _, _ = connection.getPosition(self.robot_state_client)

@@ -309,7 +309,7 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
     How far the path is confirmed free now.
 
     Args:
-        polyline: [(x, y), ...] -- the FIRST point is the robot position, then the waypoints.
+        polyline: [(x, y), ...] -- the first point is the robot position, then the waypoints.
         snap: GridSnapshot of the scan.
         extend_end_m: extend the last segment by this length beyond the goal, to also check
             the terrain under the nose when the robot gets there. Default
@@ -318,22 +318,20 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
         body: (half footprint along the travel, half footprint across), see
             geometry.body_extents. Default: robot facing where it goes (0.55, 0.25).
         air_m: air between flank and obstacle. None = ROBOT_CLEARANCE_AIR_M (0.05), i.e. the
-            minimum distance 0.30 with which it DECIDES to start. The stop thread passes
+            minimum distance 0.30 with which it decides to start. The stop thread passes
             geometry.FRONTIER_ABORT_AIR_M (0.0): while moving it only stops for a real
             intrusion, closer than half the width (0.25). The 5 cm between the two thresholds
             avoid stopping on a stretch just declared free. With an air different from the
             nominal one the hysteresis does not apply (it is tuned on the 0.30 threshold).
 
         allow_escape: the exit rule from a tight space (see below). The cruise passes False:
-            recomputed every 0.4 s from where the robot has got to, the rule lowered the
-            threshold a little at every cycle and the robot crept towards a wall corner
-            (0.24 m from the centre, smoke run of 03-11 on the wall with a gap; 0.34 m with
-            the stop-and-go).
+            recomputed every cycle from where the robot has got to, the rule would lower the
+            threshold a little each time and let the robot creep towards a wall.
 
         The samples under the robot's body now are never an obstacle (see _under_body).
 
     Returns: dict with
-        dist        distance along the path of the first NON-free point (m)
+        dist        distance along the path of the first non-free point (m)
         reason      see the module docstring
         stop_xy     where the frontier stops
         value       the value that stopped the frontier (obstacle_distance, slope, ...)
@@ -514,14 +512,14 @@ class ArcVerificationTracker:
     Background thread that recomputes the safe frontier on the current path at every scan
     (~5 Hz), with its own fresh data.
 
-    Used DURING the move: the main loop queries it to stop the robot if the frontier gets
+    Used during the move: the main loop queries it to stop the robot if the frontier gets
     shorter than the point it is heading to. Before starting the main loop computes the
     frontier itself, on its own scan.
 
     The result carries the version of the path it was computed on: after a replan an old
     frontier cannot be mistaken for a new one.
 
-    PLANNING MODE (cruise, continuous motion): start_planning(job) makes the same thread run
+    Planning mode (cruise, continuous motion): start_planning(job) makes the same thread run
     job() -- the whole planning cycle, see mission/planning_cycle.CruisePlanner -- every
     period_s instead of the frontier alone, and publish its result as the plan
     (get_plan, with 'version' and 'time'). While it plans, the thread is the only one
@@ -659,7 +657,7 @@ class ArcVerificationTracker:
                 plan = job()
             except Exception as e:
                 # print, not only the logger: the output goes into mission_log.txt (stdout tee),
-                # the logger only to the terminal (13-11).
+                # the logger only to the terminal.
                 tb = traceback.format_exc()
                 LOGGER.error(f"Error in the planning cycle: {e}")
                 print(f"[PLANNING] Error in the planning cycle: {e!r}\n{tb}")

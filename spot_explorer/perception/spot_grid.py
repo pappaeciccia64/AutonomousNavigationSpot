@@ -22,14 +22,14 @@ from spot_explorer.robot import connection
 # Every request to Spot of a scan in the planning thread and in the frontier check (the layers,
 # the robot state): at most this, then the cycle ends without a scan ('no_scan', with the cause)
 # and the next one asks again. A scan arrives in 0.07-0.2 s on the laptop; with the library
-# default (30 s) a stuck request held the cycle, and the main thread waiting for it, that long
-# (09-11 15:32: a download of 21 s).
+# default (30 s) a stuck request would hold the cycle, and the main thread waiting for it, that
+# long.
 SCAN_TIMEOUT_S = 2.0
 # Ground height of the obstacle layer from the ground plane frame ('gpe') carried by the grid
-# itself, when there, instead of a robot state request (switch, off; 19-11, to try on the
-# robot: tools/grid_rate_check.py says whether the grid carries it). Saves the second network
-# round trip of every scan and takes the ground at the instant of the grid, not a moment later.
-# Without the frame: the robot state request as before (ground_from_grid counts which one).
+# itself, when there, instead of a robot state request (tools/grid_rate_check.py says whether
+# the grid carries it). Saves the second network round trip of every scan and takes the ground
+# at the instant of the grid. Without the frame: the robot state request (ground_from_grid
+# counts which one).
 GROUND_FROM_GRID = False
 ROUGH_THRESHOLD = 0.15      # local roughness (std-dev of terrain height, m)
 

@@ -21,8 +21,8 @@ _GN = _graph_nav_pb2.NavigationFeedbackResponse
 
 def _feedback_details(fb):
     """route_following_status / blockage_status / stuck_reason of a NavigationFeedbackResponse,
-    as short names ('-' if the SDK lacks the field). STATUS_STUCK alone does not say WHY
-    GraphNav stopped (28-10 13:50: stuck in the grass at 0.63 m from wp_0, cause unknown)."""
+    as short names ('-' if the SDK lacks the field). STATUS_STUCK alone does not say why
+    GraphNav stopped."""
     out = []
     for name, prefix in (('route_following_status', 'ROUTE_FOLLOWING_STATUS_'),
                          ('blockage_status', 'BLOCKAGE_STATUS_'), ('stuck_reason', 'STUCK_REASON_')):
@@ -82,7 +82,7 @@ def graphnav_navigate_to(recordingInterface, waypoint_id, robot_state_client, co
     waypoint heading. With GRAPHNAV_ARRIVAL_HEADING = 'free', if face_xy is given the
     robot arrives without turning. move: label of the move in trajectory.csv."""
     # Before moving: Spot's loop closures (with recording stopped). The shortcuts from
-    # the map are added by the caller, BEFORE stopping the recording.
+    # the map are added by the caller, before stopping the recording.
     # Everything in here ends up in the 'GraphNav' entry of [TIMING]: it is one of the
     # longest phases of the mission (the return to wp_0 alone can take minutes).
     _t_gn = time.perf_counter()
@@ -222,9 +222,8 @@ def graphnav_return_to_start(recordingInterface, robot_state_client, command_cli
     Return to wp_0 at the end of the mission, with a time limit. Three outcomes:
       'arrived'      GraphNav says it has arrived;
       'near'        GraphNav stopped without arriving (STUCK, timeout...) but the robot
-                      is within P.GRAPHNAV_RETURN_NEAR_M of wp_0: the return did NOT
-                      succeed, but the fiducial and the drift are measured anyway (13:50 on
-                      28-10: stuck in the grass at 0.63 m, measurements lost);
+                      is within P.GRAPHNAV_RETURN_NEAR_M of wp_0: the return did not
+                      succeed, but the fiducial and the drift are measured anyway;
       'not_arrived'  everything else.
     The distance from wp_0 is the one GraphNav reports if it is localized on wp_0,
     otherwise the one from the VISION poses (with the odometry drift in it).
@@ -292,8 +291,8 @@ def graphnav_step_back(env, recordingInterface, robot_state_client, command_clie
     crumb = trail[idx]
     d_crumb = float(np.hypot(crumb['x'] - rx, crumb['y'] - ry))
     if d_crumb < min_dist_m:
-        # All breadcrumbs are around here (22-10 16:22: the robot was ON wp_138): GraphNav
-        # would not move the robot. Replan from where it is, without moving.
+        # All breadcrumbs are around here (the robot may stand on one): GraphNav would not
+        # move the robot. Replan from where it is, without moving.
         MISSION_STATS['backtracks_in_place'] += 1
         print(f"[RETURN] The farthest breadcrumb behind, {crumb['wp_name']}, is {d_crumb:.2f} m away "
               f"(less than {min_dist_m:.2f}): I do not move, I replan from here.")
