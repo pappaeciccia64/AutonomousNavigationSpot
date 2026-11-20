@@ -14,7 +14,7 @@ from spot_explorer.robot import connection
 
 from spot_explorer import config as P
 from spot_explorer.records import HANDOFF, MISSION_STATS, visualize_grid_with_candidates
-from spot_explorer.mission import attempt_common, attempt_scan, cell_attempt
+from spot_explorer.mission import attempt_common, cell_attempt
 from spot_explorer.mission import cell_rules
 
 

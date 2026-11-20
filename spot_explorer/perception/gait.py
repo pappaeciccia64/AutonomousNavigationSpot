@@ -1,5 +1,4 @@
 """Per-leg gait thresholds (PLAIN / MODERATE / HARD), see robot.motion.select_mobility_params."""
-from spot_explorer.perception import slopes
 
 # =========================================================================
 # Gait selection (see motion.select_mobility_params)

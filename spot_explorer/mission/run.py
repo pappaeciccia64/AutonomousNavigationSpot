@@ -35,7 +35,6 @@ from spot_explorer import config as P
 from spot_explorer import REPO_ROOT
 from spot_explorer.records import (MISSION_STATS, MISSION_CTX, SegmentLog, install_stdout_tee, remove_stdout_tee, set_mission_z0)
 from spot_explorer.mission import attempt_common
-from spot_explorer.mission import attempt_scan
 from spot_explorer.mission import exploration
 from spot_explorer.mission import frontier
 from spot_explorer.mission import summary

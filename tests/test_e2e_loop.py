@@ -36,7 +36,6 @@ from spot_explorer import records
 from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
 from spot_explorer.perception import spot_grid
-from spot_explorer.perception import slopes
 from spot_explorer.planning import decisions
 from spot_explorer.planning import safe_frontier
 from spot_explorer.perception import low_obstacles   # noqa: E402
@@ -44,7 +43,6 @@ from spot_explorer.perception import low_obstacles   # noqa: E402
 # and these scenarios are about entering it (see attempt_common.CELL_SEEN_EXPLORED).
 attempt_common.CELL_SEEN_EXPLORED = False
 from spot_explorer.planning import roadmap
-from spot_explorer.planning import edge_evaluation
 from spot_explorer.robot import motion
 from spot_explorer.robot import connection
 

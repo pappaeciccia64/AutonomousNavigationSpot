@@ -5,7 +5,6 @@ import json
 from spot_explorer.robot import motion
 from spot_explorer.mission import attempt_cruise
 from spot_explorer.mission import planning_cycle
-from spot_explorer.mission import cell_attempt
 from spot_explorer.mission import attempt_common
 from spot_explorer.mission import exploration
 from spot_explorer.mission import cell_rules

@@ -6,7 +6,6 @@ import logging
 import numpy as np
 from bosdyn.client.robot_state import RobotStateClient
 from bosdyn.client.frame_helpers import get_a_tform_b, VISION_FRAME_NAME, BODY_FRAME_NAME
-from spot_explorer import config as P
 from spot_explorer.robot import connection
 from spot_explorer.perception import geometry
 from spot_explorer.perception import slopes

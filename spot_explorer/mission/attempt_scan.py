@@ -16,7 +16,7 @@ from spot_explorer.planning import roadmap
 from spot_explorer.planning import edge_evaluation
 from spot_explorer.mission import mission_prm
 from spot_explorer import config as P
-from spot_explorer.records import (HANDOFF, MISSION_STATS, MISSION_CTX, save_npz_async, timing_add, visualize_grid_with_candidates)
+from spot_explorer.records import (HANDOFF, MISSION_STATS, save_npz_async, timing_add, visualize_grid_with_candidates)
 from spot_explorer.planning import goal
 from spot_explorer.mission import planning_cycle
 from spot_explorer.mission.attempt_common import STOP, FAILED
