@@ -2,7 +2,7 @@
 graph_nodes.py -- the nodes and the geometric pairs of the mission graph (see mission_graph.py):
 the rectangular lattice or the random nodes, the coverage, the connected components.
 
-WHY A LATTICE
+Why A LATTICE
   1. Reproducibility. The graph depends only on the parameters: same parameters, same
      graph, bit for bit. The replay reproduces the planner's choices and two missions in the
      same room are comparable.
@@ -14,23 +14,23 @@ WHY A LATTICE
   4. The pairs are those of the lattice, ready-made: there is no geometric pairing either at
      start-up or at every update (see add_edges_to_prm).
 
-WHY RECTANGULAR AND NOT TRIANGULAR
-  The triangular one would be more isotropic and give shorter paths, but it CANNOT CONTAIN
-  THE CELL CENTRES, which are the exploration goals and must not move. It would need
+Why rectangular and not triangular
+  The triangular one would be more isotropic and give shorter paths, but it cannot contain
+  The cell centres, which are the exploration goals and must not move. It would need
   cell_size to be a multiple of both s and s*sqrt(3)/2, and with sqrt(3) irrational that
   does not happen for any spacing. In the rectangular one with spacing cell_size/n the
   centres are nodes by construction. If the question were to be reopened, this is the point
   to attack, not isotropy.
 
 SPACING
-  The requested spacing is ALWAYS rounded to cell_size/n with n integer: it is the
+  The requested spacing is always rounded to cell_size/n with n integer: it is the
   condition that makes every cell centre a lattice node. The [GRAPH] line of the log gives
   the actual spacing. Mission default: P.MISSION_LATTICE_SPACING_M = 0.5 m (= 4/8); without
   it, 0.25 m (DEFAULT_LATTICE_SPACING_M).
   The spacing can be shorter than min_edge_length: neighbours that are too close are simply
   not linked, and the edges start from the outer rings. The edge threshold is for the slope
   (an edge that is too short says nothing about the terrain); the dense spacing serves to
-  ALWAYS have a row of nodes inside a corridor (see ALIASING).
+  Always have a row of nodes inside a corridor (see ALIASING).
 
 RINGS -- how many connections
   Ring k is the square of nodes k index steps away (ring 1 = the 8 around, ring 2 = the 16
@@ -44,12 +44,12 @@ RINGS -- how many connections
     rings=3 -> additionally 0.75, 0.79, 0.90, 1.00, 1.03, 1.06 m: longer stretches, ~2.5
                times the edges.
   Long straight stretches are produced anyway by decisions.shortcut_index, which skips the
-  intermediate nodes when the SAFE FRONTIER confirms the stretch on the live data.
+  intermediate nodes when the safe frontier confirms the stretch on the live data.
   rings=None goes up to min(connection_radius, max_edge_length).
 
 ANCHORING
   The lattice is anchored at the ORIGIN, which by the way cells.EnvironmentMap is written is
-  both the robot's power-on pose AND the centre of the starting cell
+  both the robot's power-on pose and the centre of the starting cell
   (get_world_position_from_cell: "Cell (0,0) center is at the origin"). So there is a node
   exactly under the robot at start-up, see origin_node_id. The indices (i, j) can be
   negative; the rectangle crops them.
@@ -63,9 +63,9 @@ ALIASING -- the limit to know
   Guaranteed passage: lattice 2c + spacing, random nodes 2c + 2 * coverage. At spacing 0.25
   every strip wider than 0.25 m contains a row of nodes.
 
-RANDOM NODES (P.MISSION_GRAPH_SAMPLING = 'random')
+Random nodes (P.MISSION_GRAPH_SAMPLING = 'random')
   As an alternative to the lattice, the nodes can be scattered at random over the mission
-  area, to compare the two methods. The cell centres ALWAYS stay nodes (they are the goals,
+  area, to compare the two methods. The cell centres always stay nodes (they are the goals,
   and the centre of the starting cell is the power-on point); the other nodes follow one of
   these distributions, with P.MISSION_RANDOM_DENSITY nodes per m^2:
     'uniform'   independent uniform points: the classic PRM, with holes and clumps;
@@ -100,7 +100,7 @@ from scipy.spatial import cKDTree
 
 
 # ----------------------------------------------------------------------------------------
-# HOW THE NODES ARE GENERATED (see RANDOM NODES above).
+# How the nodes are generated (see random nodes above).
 #   'lattice' the rectangular lattice, deterministic (default);
 #   'random'  scattered nodes with P.MISSION_RANDOM_DISTRIBUTION, cell centres always included.
 # They are changed for a single mission with the arguments of run_mission.py (--graph,
@@ -112,7 +112,7 @@ RANDOM_DISTRIBUTIONS = ('uniform', 'poisson', 'jittered', 'halton')
 
 def covering_radius(spacing):
     """
-    Maximum distance between ANY point of the area and the nearest node: half the diagonal
+    Maximum distance between any point of the area and the nearest node: half the diagonal
     of the mesh. It is the number that matters for aliasing.
     """
     return spacing / math.sqrt(2.0)
@@ -144,7 +144,7 @@ def suggested_spacing(cell_size_m=5.0, min_edge_length=P.PRM_MIN_EDGE_M):
 
 def mission_extent(rows, cols, cell_size_m, start_cell):
     """
-    Mission rectangle in the GRID FRAME (x = columns, y = rows), with the centre of the
+    Mission rectangle in the grid frame (x = columns, y = rows), with the centre of the
     starting cell at the origin -- the same convention as
     EnvironmentMap.get_world_position_from_cell. The borders are half a cell from the
     outermost centres, like the boundaries used by get_cell_from_world (round on the cells).
@@ -217,7 +217,7 @@ def lattice_pairs(spacing, ij, xy, min_edge_m, reach_m):
 
 
 # ----------------------------------------------------------------------------------------
-# RANDOM NODES
+# Random nodes
 # ----------------------------------------------------------------------------------------
 
 def draw_seed():

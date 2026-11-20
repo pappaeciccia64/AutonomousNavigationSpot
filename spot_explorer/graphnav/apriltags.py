@@ -116,7 +116,7 @@ def graphnav_check_start_fiducial(robot, robot_state_client):
 def graphnav_correct_wp0_with_fiducial(robot, recordingInterface, robot_state_client, command_client,
                                        offset):
     """
-    CORRECTION OF THE RETURN TO wp_0 (see WP0_FIDUCIAL_CORRECTION). GraphNav says "arrived",
+    Correction of the return to wp_0 (see WP0_FIDUCIAL_CORRECTION). GraphNav says "arrived",
     but the starting tag says the robot is `offset` m from the start: GraphNav localized
     badly (29-10 10:57: 1.2 m on a lawn with a single hedge as reference). GraphNav is
     relocalized on the tag (as at start-up) and the robot goes back to wp_0 again, up to

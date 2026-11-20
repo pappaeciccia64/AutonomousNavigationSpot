@@ -42,7 +42,7 @@ class ScanSteps:
         transforms_snapshot = main_proto.local_grid.transforms_snapshot
 
         # ================================================================== #
-        # LOCAL DATA INTO THE PRM: terrain, slope and roughness of the scan
+        # Local data into the PRM: terrain, slope and roughness of the scan
         # ================================================================== #
 
         grid_frame_name = main_proto.local_grid.frame_name_local_grid_data
@@ -112,9 +112,9 @@ class ScanSteps:
                                              (self.robot_x, self.robot_y))
         HANDOFF.mark("allowed cells")
 
-        # --- Start and arrival nodes: EXISTING graph nodes ------------------------------------
+        # --- Start and arrival nodes: Existing graph nodes ------------------------------------
         # add_stop_node attaches the position to the suitable node instead of creating one. The
-        # robot node is needed BEFORE the goal choice: the choice is among the points the graph
+        # robot node is needed before the goal choice: the choice is among the points the graph
         # connects to the robot (see find_best_point_in_cell, criterion 2).
         self.robot_node_id = self.prm_graph.add_stop_node(
             self.robot_x, self.robot_y, self.global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M,
@@ -208,7 +208,7 @@ class ScanSteps:
     def _fresh_scan(self):
         """Scan, processing, global maps, local data into the PRM, snapshot for the frontier
         and free-space map. FAILED if the scan does not arrive."""
-        # 1. FRESH SCAN, before anything else
+        # 1. Fresh scan, before anything else
         scan = self.local_grid.fetch_scan(self.robot_state_client)
         if scan is None:
             print("[ERROR] Local acquisition failed during tracking. Precautionary stop.")
@@ -231,7 +231,7 @@ class ScanSteps:
     def _update_graph(self):
         """Edges re-evaluated on the new data (only after a move or an event), nodes in
         obstacles out, rotation refusals still valid. The nodes touched by the refresh."""
-        # --- EVENT REFRESH -------------------------------------------------------------
+        # --- Event refresh -------------------------------------------------------------
         # Edge weights and slopes change only when the data under them changes,
         # i.e. when the window moves: with the robot still a refresh would recompute the
         # same numbers, and about half the scans are rescans while still (block
@@ -240,8 +240,8 @@ class ScanSteps:
         # interrupted or failed, even if it crossed several PRM nodes and edges) and after
         # the EVENTS that change the plan (confirmed block, edge discarded,
         # replan, goal chosen again, return with GraphNav, fall).
-        # THIS DOES NOT AFFECT SAFETY: the protection net is not the graph vetoes but
-        # the SAFE FRONTIER, which is recomputed from scratch at every scan (0.5 ms) and at ~5 Hz
+        # This does not affect safety: the protection net is not the graph vetoes but
+        # the safe FRONTIER, which is recomputed from scratch at every scan (0.5 ms) and at ~5 Hz
         # during the move in the thread. Postponing the refresh only delays the moment
         # the PLANNER learns of a new obstacle; if the robot is still there is
         # nothing new to learn, and if something really enters the field the frontier gets
@@ -254,7 +254,7 @@ class ScanSteps:
         if refresh:
             self.need_refresh = False
 
-        # Edges already refused for rotation FROM THIS NODE: they stay out until the robot
+        # Edges already refused for rotation from this node: they stay out until the robot
         # moves. The discard is soft, so refresh_local_edge_weights would put them back
         # into play at every turn, and the robot could stay still alternating two refused
         # edges without ever getting to the retreat. The robot can stay attached to the

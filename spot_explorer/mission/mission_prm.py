@@ -9,14 +9,14 @@ from spot_explorer.planning.mission_graph import build_mission_graph
 
 
 # =========================================================================================
-# THE GRAPH DURING THE MISSION: PRM construction, edge update, cells
+# The graph during the mission: PRM construction, edge update, cells
 # allowed for planning
 # =========================================================================================
 def build_mission_prm(env, verbose=True):
     """
     Create the mission graph (lattice or random nodes, see MISSION_GRAPH_SAMPLING) and the
     PRM with its nodes, from the mission size and the starting pose `env` already holds
-    (set_origin must be done BEFORE).
+    (set_origin must be done before).
 
     Returns (prm, sampler, mission_lattice): `sampler` gives the nodes cell by cell (see
     mission_graph.LatticeSampler), `mission_lattice` is the MissionGraph.

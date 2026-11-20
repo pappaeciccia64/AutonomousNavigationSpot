@@ -4,7 +4,7 @@ Exploration by FRONTIER, an alternative to the cells (exploration.GOAL_SOURCE = 
 
 The goal does not come from the next cell: one Dijkstra search from the robot, with the
 distance from the route of the visit as a node cost (roadmap.ROUTE_LINE_PENALTY, on in this
-mode), stops at the FIRST frontier node it settles -- the one that minimizes the way there
+mode), stops at the first frontier node it settles -- the one that minimizes the way there
 plus the distance from the route. Frontier node: a node of the graph inside the mission
 area, seen free in the global map, with a valid edge towards a node never seen.
 

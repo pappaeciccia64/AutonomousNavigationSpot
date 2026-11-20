@@ -127,7 +127,7 @@ def refresh_graph(prm, snap, global_map, robot_xyyaw, refresh, quiet=False):
     """
     stats = {} if quiet else MISSION_STATS
     robot_x, robot_y, robot_yaw = robot_xyyaw
-    # The preliminary edge discard reads the FILTERED obstacle_distance
+    # The preliminary edge discard reads the filtered obstacle_distance
     # (median over 3 scans + hysteresis), the same as the frontier.
     prm.set_live_snapshot(snap)
     if refresh:
@@ -155,7 +155,7 @@ def refresh_graph(prm, snap, global_map, robot_xyyaw, refresh, quiet=False):
         touched_nodes = set()
         stats['prm_refresh_skipped'] = stats.get('prm_refresh_skipped', 0) + 1
 
-    # Nodes INSIDE obstacles: out of the graph (see prune_prm_nodes_in_obstacles).
+    # Nodes inside obstacles: out of the graph (see prune_prm_nodes_in_obstacles).
     pruned_nodes = roadmap.prune_prm_nodes_in_obstacles(prm, snap)
     if quiet:
         prm.cycle_counts = getattr(prm, 'cycle_counts', (0, 0, 0, 0, 0))[:4] + (len(pruned_nodes),)
@@ -538,7 +538,7 @@ def _pose_of_scan(scan):
 
 
 def walk_advance(polyline, frontier):
-    """How far along polyline (robot, nodes...) the robot may walk now (see WHOLE EDGES above)."""
+    """How far along polyline (robot, nodes...) the robot may walk now (see whole edges above)."""
     allowed = safe_frontier.allowed_advance(frontier)
     if len(polyline) < 2:
         return allowed

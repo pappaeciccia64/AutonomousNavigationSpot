@@ -217,7 +217,7 @@ class RecordingInterface(object):
         Localize the robot on the GraphNav map using a visible fiducial. fiducial_id:
         a specific tag; None = the nearest. True if it succeeds.
 
-        The fiducial must ALREADY be in the map: in the mission it is called after creating
+        The fiducial must already be in the map: in the mission it is called after creating
         wp_0 with the tag in view, so it is in its snapshot (see find_fiducials).
         """
 

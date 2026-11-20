@@ -48,7 +48,7 @@ FRONTIER_MARGIN_M = 0.10
 FRONTIER_ABORT_AIR_M = 0.0
 
 # =========================================================================
-# ROTATION IN PLACE (see rotation_is_clear)
+# Rotation in place (see rotation_is_clear)
 # Rotating in place the body corners trace a circle of radius equal to the
 # half diagonal, ~0.60 m. The cells the body really sweeps are checked.
 #   ROTATION_CLEARANCE_AIR_M: air on the rotation, 0: refused only if the body really
@@ -71,7 +71,7 @@ ROTATION_NOISE_TOLERANCE_M = 0.15
 # minus obstacle_distance. The minimum of obstacle_distance alone is not enough: inside a thin
 # obstacle it does not go below half its thickness (a 10 cm pole does not go below -0.05), and
 # with the tolerance at 0.15 a pole entering the body would be approved. For a wall the two
-# metrics coincide. The cells under the body NOW are excluded: the robot is standing on them.
+# metrics coincide. The cells under the body now are excluded: the robot is standing on them.
 ROTATION_CHECK_PENETRATION = True
 
 
@@ -142,7 +142,7 @@ def rotation_is_clear(obstacle_dist, origin_x, origin_y, cell_size, robot_x, rob
     num_steps = max(2, int(abs(np.degrees(dyaw)) / step_deg) + 2)
     worst = float('inf')
     if ROTATION_CHECK_PENETRATION:
-        # Cells under the body NOW: the robot stands on them, they are free by definition.
+        # Cells under the body now: the robot stands on them, they are free by definition.
         c_now, s_now = np.cos(robot_yaw), np.sin(robot_yaw)
         under_now = ((np.abs(dx * c_now + dy * s_now) <= half_along) &
                      (np.abs(-dx * s_now + dy * c_now) <= half_across))

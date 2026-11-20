@@ -36,7 +36,7 @@ from spot_explorer.robot import connection
 
 
 # =========================================================================
-# SPEED LIMITS.
+# Speed limits.
 #
 # Every motion command sets a limit: without it, Spot walks up to its own maximum
 # (~1.6 m/s), too much for outdoor terrain even when flat. The limits per terrain
@@ -44,9 +44,9 @@ from spot_explorer.robot import connection
 # (below). These are the values used when the caller passes none (commands
 # isolated, retreat).
 #
-# CAREFUL: in Spot the limit is a pair (min_vel, max_vel). Setting only
+# Careful: in Spot the limit is a pair (min_vel, max_vel). Setting only
 # max_vel, min_vel stays ZERO and the robot can no longer move backwards or
-# sideways to the left: the retreat would stop working WITHOUT any error. That is why
+# sideways to the left: the retreat would stop working without any error. That is why
 # _build_mobility_params always sets both, symmetric.
 # =========================================================================
 DEFAULT_MAX_LINEAR_VEL_MPS = 0.5
@@ -54,7 +54,7 @@ DEFAULT_MAX_ANGULAR_VEL_RPS = 0.6
 RETREAT_MAX_LINEAR_VEL_MPS = 0.3     # backwards the robot sees worse: go slower
 
 # =========================================================================
-# MAXIMUM TIME OF A MOVE and NETWORK ERRORS.
+# Maximum time of a move and network errors.
 #
 # If Spot cannot get there (body stopped by its collision avoidance, legs slipping
 # on a wet slope) it must not stay there trying forever. Maximum
@@ -72,15 +72,15 @@ MOVE_MAX_RPC_ERRORS = 3
 
 
 # =========================================================================
-# SPOT FOOT COLLISION AVOIDANCE -- mission default.
+# Spot foot collision avoidance -- mission default.
 #
 # `disable_vision_foot_obstacle_avoidance` turns off the check with which Spot,
 # autonomously and at low level, avoids PLACING A FOOT on an obstacle
-# it sees. It does NOT concern the body: `disable_vision_body_obstacle_avoidance`
+# it sees. It does not concern the body: `disable_vision_body_obstacle_avoidance`
 # stays at its default (False), so Spot still refuses to
 # take the body into an obstacle.
 #
-# WHY IT STAYS DISABLED (True): Spot's `no_step` classification considers
+# Why it stays disabled (True): Spot's `no_step` classification considers
 # GRASS an obstacle -- the very same reason this project uses
 # `obstacle_distance` instead of `no_step` (see the comment in
 # spot_grid.LocalGrid). With the protection on, on a lawn Spot
@@ -88,7 +88,7 @@ MOVE_MAX_RPC_ERRORS = 3
 # of this system is OUTDOOR exploration: indoor tests are an
 # expedient, not the use case, so the default follows outdoors.
 #
-# CONSEQUENCE TO KEEP IN MIND: with this protection off, the only safety
+# Consequence to keep in mind: with this protection off, the only safety
 # net under the feet is our safe frontier (safe_frontier), with the stop
 # halfway through a move and the retreat. There are no independent checks below: that is why
 # unconfirmed legs are never travelled.
@@ -117,7 +117,7 @@ def _build_mobility_params(locomotion_hint=None, ground_mu_hint=None, swing_heig
     from each other.
 
     max_linear_vel / max_angular_vel: limits in m/s and rad/s. None = module default.
-    The limit is ALWAYS set: without it, Spot uses its own maximum (~1.6 m/s).
+    The limit is always set: without it, Spot uses its own maximum (~1.6 m/s).
     """
     if disable_foot_obstacle_avoidance is None:
         disable_foot_obstacle_avoidance = DISABLE_FOOT_OBSTACLE_AVOIDANCE_DEFAULT
@@ -148,14 +148,14 @@ def _build_mobility_params(locomotion_hint=None, ground_mu_hint=None, swing_heig
 # FALLS -- detection and self-righting.
 #
 # A fall is recognized if the robot state reports a behaviour fault with
-# cause CAUSE_FALL, OR if the body is tilted beyond FALL_TILT_DEG (this also holds if the
+# cause CAUSE_FALL, or if the body is tilted beyond FALL_TILT_DEG (this also holds if the
 # fault is absent, for example a robot overturned halfway through a self-right).
 #
 # The recovery: clears the clearable faults, self-rights (selfright), checks that the body
 # is back within UPRIGHT_TILT_DEG, stands up again, checks that it is really
 # standing. At most SELF_RIGHT_MAX_ATTEMPTS attempts.
 #
-# NOTHING is attempted -- and RobotFallenError is raised -- if a fault is NOT clearable or
+# Nothing is attempted -- and RobotFallenError is raised -- if a fault is not clearable or
 # if the motors are off (E-Stop, failure): in those cases the operator is needed, and a robot
 # on the ground must not try to do anything else by itself.
 # =========================================================================
@@ -445,7 +445,7 @@ def move_to_world_point_without_turning(target_x, target_y, frame_name,
 
 
 # =========================================================================
-# PATH COMMAND -- several points, without waiting (continuous motion).
+# Path command -- several points, without waiting (continuous motion).
 #
 # One SE2 trajectory along the path of the graph, nose first, that the robot follows
 # without stopping at the nodes. The POSITION stays on the edges: the points are the nodes
@@ -464,7 +464,7 @@ def move_to_world_point_without_turning(target_x, target_y, frame_name,
 # stops it when needed.
 #
 # Times of the points: the longer of length / speed limit and heading change / angular
-# limit, times PATH_TIME_FACTOR (so the robot slows down only in the sharper turns). Spot follows the trajectory IN
+# limit, times PATH_TIME_FACTOR (so the robot slows down only in the sharper turns). Spot follows the trajectory in
 # TIME: with times it cannot keep, the reference runs ahead and the robot heads for a
 # point further on, cutting the corner. The factor keeps the reference a little slower
 # than the limits. In any case poll() measures the distance of the robot from the line of
@@ -512,7 +512,7 @@ def path_trajectory(path_xy, start_xy, start_yaw, max_linear_vel, max_angular_ve
                     first_is_step=False):
     """
     Points (x, y, heading, t) of the trajectory from the start pose (t=0) along the path,
-    as described above (PATH COMMAND). t in seconds from the start.
+    as described above (Path command). t in seconds from the start.
     """
     pts = [(float(start_xy[0]), float(start_xy[1]))]
     for x, y in path_xy:
@@ -619,7 +619,7 @@ def _path_command(points, frame_name, params, reference_time_secs):
 
 class PathCommand:
     """
-    Multi-point move that does not block: send(path) and poll() (see PATH COMMAND above).
+    Multi-point move that does not block: send(path) and poll() (see path command above).
 
     poll() returns a dict with 'status' and the pose read with the feedback (x, y, yaw,
     travelled = metres walked since the first send, along the real track, deviation =
@@ -627,7 +627,7 @@ class PathCommand:
       moving       the robot is following the path
       near_goal    close to the last point
       arrived      at the last point
-      blocked      Spot reports the last point blocked (its own planner) AND the robot has
+      blocked      Spot reports the last point blocked (its own planner) and the robot has
                    been standing for PATH_BLOCKED_STILL_S (see the constant)
       off_path     farther than PATH_MAX_DEVIATION_M from the line: robot stopped here
       expired      the dead man expired before a new send: the robot has stopped
@@ -773,7 +773,7 @@ class PathCommand:
 
 
 # =========================================================================================
-# ONE MISSION LEG: gait, move with stop check, falls
+# One mission leg: gait, move with stop check, falls
 # =========================================================================================
 def check_and_recover_fall(robot_state_client, command_client, global_map, where):
     """
@@ -812,7 +812,7 @@ def select_mobility_params(gradient, roughness):
     travelled (see roadmap.PRM.sample_terrain_between_points), instead of a fixed profile
     for the whole mission.
 
-    The worse of slope and roughness decides (exceeding the threshold on ONE of the two is
+    The worse of slope and roughness decides (exceeding the threshold on one of the two is
     enough to move to the harder level) -- the same OR logic as the obstacle veto in
     spot_grid.LocalGrid.fuse_obstacle_mask. Thresholds, frictions and speeds are in gait.GAIT_*.
 
@@ -868,10 +868,10 @@ def navigate_to(target_x, target_y, robot_x, robot_y, robot_state_client, comman
     Take the robot to the point (target_x, target_y): first rotate towards the point, then
     walk straight (two calls to relative_move).
 
-    keep_heading: if True the robot does NOT rotate before moving, it reaches the point with
+    keep_heading: if True the robot does not rotate before moving, it reaches the point with
         the heading it has (even sideways or backwards). The navigation loop always passes
         False: sideways Spot takes 1.10 m instead of 0.50 and the frontier requires
-        0.59 m of obstacle_distance instead of 0.30 (see ROTATION AND BACK-OFF in config.py).
+        0.59 m of obstacle_distance instead of 0.30 (see rotation and back-off in config.py).
         The parameter stays for the tests.
 
     mobility_kwargs: optional gait passed to relative_move, e.g.
@@ -930,10 +930,10 @@ def navigate_to(target_x, target_y, robot_x, robot_y, robot_state_client, comman
 
 
 # =========================================================================================
-# ONE MISSION LEG WITH THE PATH COMMAND (switch PATH_COMMAND_FOR_LEGS)
+# One mission leg with the path command (switch PATH_COMMAND_FOR_LEGS)
 #
 # Same leg as navigate_to -- same target, same stop halfway (should_abort), same maximum
-# time, same check of the real advance -- but rotation and walk are ONE trajectory
+# time, same check of the real advance -- but rotation and walk are one trajectory
 # (PathCommand) instead of two commands each waiting for the body to settle. The rotation
 # is still on the spot at the start, exactly the one the mission has checked
 # (geometry.rotation_is_clear): beyond ROTATION_CHECK_MIN_DYAW_DEG the trajectory starts

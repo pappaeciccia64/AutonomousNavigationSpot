@@ -19,7 +19,7 @@ from spot_explorer.mission import cell_rules
 
 
 # =========================================================================
-# THE MISSION: the cell-by-cell loop, start-up and closure
+# The mission: the cell-by-cell loop, start-up and closure
 # =========================================================================
 
 # Before moving towards a cell (GraphNav trip or attempt), the frontier cells already seen

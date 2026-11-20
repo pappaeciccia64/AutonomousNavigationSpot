@@ -1,5 +1,5 @@
 """
-MISSION RECORDS: statistics, logs and data saved to disk.
+Mission records: statistics, logs and data saved to disk.
 
 Nothing here decides the robot's behaviour: it serves to understand afterwards what
 happened (mission_report.py, mission_viewer.py, test_replay.py).
@@ -31,7 +31,7 @@ VIS_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vis_worker"
 
 
 # ==================================================================
-# MISSION STATISTICS -- diagnostics/log only, never read to decide the robot's
+# Mission statistics -- diagnostics/log only, never read to decide the robot's
 # behaviour. Never reset: one mission per process (tests that run more than one
 # in the same process see the counts summed).
 # The veto/slope-source counters live instead on the PRM instance itself
@@ -96,8 +96,8 @@ MISSION_CTX = {
     'log_folder': None,
     'segment_log': None,
     'summary_done': False,
-    # Ground height at MISSION START in the VISION frame. Spot measures heights
-    # relative to where it was POWERED ON: if it is taken to the mission area via
+    # Ground height at mission start in the VISION frame. Spot measures heights
+    # relative to where it was powered on: if it is taken to the mission area via
     # stairs, all heights come out shifted (by metres). x, y and heading
     # are already relative to the mission start (env.set_origin with the starting pose); for
     # the height this value is saved in all the data and maps, and the viewer shows heights
@@ -334,7 +334,7 @@ def _ground_plane_slopes_deg(snap, yaw):
 
 class BodyTiltRecorder:
     """
-    Record the REAL tilt of Spot's body (roll and pitch) while it executes a move,
+    Record the real tilt of Spot's body (roll and pitch) while it executes a move,
     querying the robot state about 5 times per second in a separate thread. Used to
     compare what the planner estimated (terrain slope) with what Spot actually felt: it is
     the data that allows thresholds and weights to be retuned.

@@ -14,7 +14,7 @@ LATERAL_SLOPE_COST_MULTIPLIER = 1.0
 NEAR_THRESHOLD_MARGIN_FRACTION = 0.15
 
 # =========================================================================
-# SLOPE PROFILE OF AN EDGE (see compute_arc_slope_profile)
+# Slope profile of an edge (see compute_arc_slope_profile)
 #   SLOPE_BASELINE_M: HALF base of the height difference. The difference is centred, k cells
 #     ahead and k behind with k = round(0.25 / 0.03) = 8: the drop is measured over ~0.48 m,
 #     about one step. On a shorter base the face of a piece of furniture would give huge
@@ -23,7 +23,7 @@ NEAR_THRESHOLD_MARGIN_FRACTION = 0.15
 #     as wide as the robot (0.50 m) plus margin. Beyond that band it is not roll.
 #   MIN_ARC_SAMPLE_FRACTION: minimum fraction of samples with data for the edge to have a
 #     slope (has_data); below it, the edge is "without data", which does not mean flat.
-#   ARC_BODY_EXTENSION_M: how much the edge is extended at EACH end for the slope "with the
+#   ARC_BODY_EXTENSION_M: how much the edge is extended at each end for the slope "with the
 #     body", used for veto, cost and gait: the robot standing on a node has its legs 0.55 m
 #     ahead and behind, so it feels the terrain beyond the two nodes. The frontier stays on
 #     the edge between the nodes (more permissive than the PRM). 0 = the edge only.
@@ -41,7 +41,7 @@ def _gather_heights(terrain_2d, grid_origin_x, grid_origin_y, cell_size, xs, ys,
     Returns (heights, inside): where there is no data the height is NaN and the sample
     stays in its place (it is not compacted away, which would invent slopes between points
     that are not close). With valid_2d the samples on unreliable cells are NaN like those
-    outside the grid, and `inside` means "inside AND reliable". Uses np.floor and not int(),
+    outside the grid, and `inside` means "inside and reliable". Uses np.floor and not int(),
     which gets the cell wrong for negative coordinates.
     """
     num_rows, num_cols = terrain_2d.shape
@@ -60,7 +60,7 @@ def _gather_heights(terrain_2d, grid_origin_x, grid_origin_y, cell_size, xs, ys,
 
 def p90(values):
     """
-    90th percentile, IDENTICAL to float(np.percentile(values, 90)) (linear interpolation)
+    90th percentile, identical to float(np.percentile(values, 90)) (linear interpolation)
     for finite values, but without the fixed cost of np.percentile, which is called very
     often here.
     """
@@ -154,7 +154,7 @@ def compute_arc_slope_profile(terrain_2d, grid_origin_x, grid_origin_y, cell_siz
     dir_x, dir_y = (x2 - x1) / dist, (y2 - y1) / dist   # along-arc unit vector
     perp_x, perp_y = -dir_y, dir_x                      # across-arc unit vector
 
-    # Reliable AND non-obstacle cells: a single mask for both directions.
+    # Reliable and non-obstacle cells: a single mask for both directions.
     usable_2d = valid_2d
     if obstacle_2d is not None:
         obs = np.asarray(obstacle_2d, dtype=bool)
@@ -201,17 +201,17 @@ def compute_arc_slope_profile(terrain_2d, grid_origin_x, grid_origin_y, cell_siz
 
 
 # =========================================================================
-# SLOPE OF MANY EDGES TOGETHER
+# Slope of many edges together
 #
 # Same computation as compute_arc_slope_profile / _slope_profile_from_sampler / _body_slope,
 # done with matrices: one row per edge. Edges are grouped by number of samples (which
 # depends only on the length: on the lattice there are only a few dozen lengths), and for
 # each group positions, height readings, differences and 90th percentile are done in one
 # go. The operations are the same and in the same order, so the numbers are bit-for-bit
-# IDENTICAL to the edge-by-edge ones: it must stay that way (test_replay.py checks it).
+# Identical to the edge-by-edge ones: it must stay that way (test_replay.py checks it).
 # =========================================================================
 def p90_rows(m):
-    """Row-by-row p90 of a matrix, ignoring NaNs; IDENTICAL to p90 on the finite values of
+    """Row-by-row p90 of a matrix, ignoring NaNs; identical to p90 on the finite values of
     each row. Returns (values, how many finite); 0.0 where the row has no finite values."""
     m = np.asarray(m, dtype=np.float64)
     if m.ndim == 1:
@@ -235,7 +235,7 @@ def p90_rows(m):
 
 
 def _baseline_gradient_rows(h, step, baseline_m):
-    """_baseline_gradient on a group of rows with the SAME k (step: one value per row).
+    """_baseline_gradient on a group of rows with the same k (step: one value per row).
     Returns the slope matrix with NaN where a sample is missing (no compaction: p90_rows
     takes care of it), or None if the row is too short."""
     n = h.shape[-1]
@@ -412,7 +412,7 @@ def _body_slope(gather, base, x1, y1, x2, y2, dir_x, dir_y, perp_x, perp_y,
     only the added pieces, at the same step (ext rounded to a multiple of the step:
     +/- 1.5 cm along the edge, +/- 5 cm for the lateral slices).
 
-    Returns (long, lat, has) already taken as the WORSE between edge and extended edge, so
+    Returns (long, lat, has) already taken as the worse between edge and extended edge, so
     the added stretch cannot dilute a climb that lies inside the edge. If the edge has no
     data, or the extended stretch does not have enough, returns the edge values.
     """
@@ -456,7 +456,7 @@ def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
 
     Same geometry and same base as compute_arc_slope_profile: the two sources must measure
     the same quantity, otherwise an edge would change slope entering or leaving the scanned
-    window (test_replay.py checks it). has_data tells whether there are enough REAL samples.
+    window (test_replay.py checks it). has_data tells whether there are enough real samples.
 
     Returns:
         (longitudinal_slope, lateral_slope, has_data)
@@ -541,7 +541,7 @@ def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
 
 
 # =========================================================================
-# SLOPE FROM A LOCAL PLANE (under test, see tools/slope_check.py)
+# Slope from a local plane (under test, see tools/slope_check.py)
 #
 # Instead of height differences on a base along the edge, the plane that best fits the
 # heights in a window of 2 * PLANE_HALF_WINDOW_M around each cell (least squares, reliable
@@ -676,7 +676,7 @@ def plane_slope_profiles_batch(gx, gy, grid_origin_x, grid_origin_y, cell_size, 
 
 def plane_slope_samples(lookup, cell_size, x1, y1, x2, y2, min_sample_fraction=MIN_ARC_SAMPLE_FRACTION):
     """
-    THE sampling of the plane slope along edges (arrays): one sample per cell from (x1, y1) to
+    The sampling of the plane slope along edges (arrays): one sample per cell from (x1, y1) to
     (x2, y2), the gradient read by lookup(xs, ys) -> (gx, gy) (NaN where none). Returns
     (lon, lat, has): |slope along| and |slope across| per sample (rows = edges, NaN where no
     value or beyond the edge), has = enough samples with a value (min_sample_fraction).

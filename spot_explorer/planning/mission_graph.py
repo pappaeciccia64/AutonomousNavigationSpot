@@ -1,5 +1,5 @@
 """
-mission_graph.py -- the mission graph, built from the MISSION SIZE (rows, columns, cell
+mission_graph.py -- the mission graph, built from the mission size (rows, columns, cell
 side: the same three numbers as SPOT_MISSION_GRID and cells.EnvironmentMap). Nodes are
 generated in two ways (P.MISSION_GRAPH_SAMPLING, in config.py like all the P.* mentioned
 here):
@@ -11,7 +11,7 @@ The nodes, the reasons for the lattice and its limits: graph_nodes.py. The graph
 the mission (PRM construction, edge update, allowed cells): mission/mission_prm.py.
 Comparing graphs from the command line: tools/bench_graph.py.
 
-HOW TO USE IT
+How to use it
       mg = mission_graph.build_mission_graph(env=env)   # ~0.2 s: nodes + adjacency
       mg.into_prm(prm)                                  # the nodes, ids 0..N-1
       gb_sampler = mg.as_sampler()                      # lattice points per cell
@@ -22,7 +22,7 @@ HOW TO USE IT
   weights are computed, which by construction cannot be precomputed: occupancy comes from
   the global map that fills up along the way, the edge slope from the terrain seen at that
   moment.
-  save_npz/load_npz serve to have an IDENTICAL lattice across several missions, not for
+  save_npz/load_npz serve to have an identical lattice across several missions, not for
   speed: with the default mission (3185 nodes) building from scratch costs ~180 ms,
   reloading ~70 ms (python3 tools/bench_graph.py --timings).
 """
@@ -84,13 +84,13 @@ def _special_pairs(prm):
 
 
 # ========================================================================================
-# THE MISSION GRAPH
+# The mission graph
 # ========================================================================================
 
 class MissionGraph:
     """
     The ready graph: nodes, geometric adjacency with the lengths, and the hooks to load it
-    into the PRM. It contains NO weights or vetoes: those depend on the terrain and the PRM
+    into the PRM. It contains no weights or vetoes: those depend on the terrain and the PRM
     computes them on the local data (see add_edges_to_prm).
     """
 
@@ -116,7 +116,7 @@ class MissionGraph:
         self.cell_center_ids = cell_center_ids    # {(row, col): id of the node at the centre}
         self.origin_node_id = origin_node_id      # node under the robot at start-up
         self.n_short_pairs = int(n_short_pairs)
-        # How the nodes were generated (see RANDOM NODES in graph_nodes.py). For random nodes ij is
+        # How the nodes were generated (see random nodes in graph_nodes.py). For random nodes ij is
         # -1 and spacing_m is the mean spacing 1/sqrt(density); the coverage is measured.
         self.sampling = str(sampling)
         self.distribution = distribution
@@ -195,12 +195,12 @@ class MissionGraph:
     def add_edges_to_prm(self, prm, global_map=None, edge_safety_margin=0.0, verbose=True,
                          incremental=False):
         """
-        Evaluate the pairs ALREADY COMPUTED and add the allowed ones with
+        Evaluate the pairs already computed and add the allowed ones with
         PRM._evaluate_and_add_edge: vetoes (blocked edges, occupancy in the global map,
         longitudinal and lateral slope) and weights. The pairs are those of the lattice, no
         geometric pairing is redone.
 
-        incremental: re-evaluate ONLY the pairs near the areas with new data since the last
+        incremental: re-evaluate only the pairs near the areas with new data since the last
         evaluation (prm.dirty_rects, see edge_evaluation.DIRTY_MARGIN_M); the others keep the edge
         and weight they have. The result is the same as the full build: outside those areas
         no data entering the evaluation has changed. It falls back to the full build when it
@@ -271,7 +271,7 @@ class MissionGraph:
                      if use_occ else [None] * len(todo))
         prm._prefill_global_slope_nodata(todo)
         fresh = self._pairs_distinct()
-        # AREA WITHOUT DATA: edges on which no source has information get
+        # Area without data: edges on which no source has information get
         # the fallback cost directly, identical to that of the full path (see
         # PRM._add_edge_without_data). Needs gamma = 0: with roughness in the cost, no.
         fast_ok = fresh and prm.gamma == 0.0
@@ -319,7 +319,7 @@ class MissionGraph:
         build is needed: graph never built, terrain map reloaded from file (updated areas
         unknown), a new fall (mark_hazard does not go through a scan).
 
-        The edges travelled by the robot and those blocked in the attempt are ALWAYS
+        The edges travelled by the robot and those blocked in the attempt are always
         re-evaluated, together with those that were so at the previous update: their outcome
         depends on those sets, not on the new data. They are few.
         """
@@ -534,7 +534,7 @@ class LatticeSampler:
         return [self._points[k] for k in self._by_cell.get((int(row), int(col)), ())]
 
 # ========================================================================================
-# THE FUNCTION TO CALL
+# The function to call
 # ========================================================================================
 
 def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_SETTINGS,
@@ -550,13 +550,13 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
     Build the mission graph.
 
     Args:
-        rows, cols, cell_size_m: the MISSION SIZE. If not passed: those of
+        rows, cols, cell_size_m: the mission size. If not passed: those of
             mission_settings() (MISSION_*, or the DEFAULT_*). Ignored if `env` is passed.
-        spacing_m: SPACING FLAG, in metres; it is rounded to cell_size/n (see
+        spacing_m: Spacing flag, in metres; it is rounded to cell_size/n (see
             align_spacing). It can be below min_edge_length (see SPACING in graph_nodes.py). If not passed:
             the one of mission_settings() (P.MISSION_LATTICE_SPACING_M, or 0.25 m); None =
             suggested_spacing().
-        rings: CONNECTIONS FLAG -- k = all nodes within the diagonal of the k-th ring
+        rings: Connections flag -- k = all nodes within the diagonal of the k-th ring
             (k*spacing*sqrt(2)), with edges >= min_edge_length (see RINGS in graph_nodes.py). None = all those
             within min(connection_radius, max_edge_length).
         origin_xy, origin_yaw: robot pose at start-up in the VISION frame. The lattice is
@@ -568,7 +568,7 @@ def build_mission_graph(rows=None, cols=None, cell_size_m=None, spacing_m=_FROM_
         env: an EnvironmentMap already created and with set_origin() done. If passed, size
             and pose come from it: it is the way to guarantee that graph and cell map cannot
             get out of sync.
-        sampling: 'lattice' or 'random' (see RANDOM NODES in graph_nodes.py); None = P.MISSION_GRAPH_SAMPLING. With
+        sampling: 'lattice' or 'random' (see random nodes in graph_nodes.py); None = P.MISSION_GRAPH_SAMPLING. With
             'random' spacing_m and rings do not count.
         distribution, density_per_m2, seed, poisson_min_dist_m: the parameters of the random
             nodes; None = P.MISSION_RANDOM_DISTRIBUTION, P.MISSION_RANDOM_DENSITY,
@@ -711,7 +711,7 @@ def _build_random_graph(rows, cols, cell_size_m, start_cell, origin_xy, origin_y
                         min_edge_m, reach_m, border_margin_m, verbose,
                         distribution, density_per_m2, seed, poisson_min_dist_m):
     """
-    The graph with random nodes (see RANDOM NODES in graph_nodes.py): first the cell centres, in the order of
+    The graph with random nodes (see random nodes in graph_nodes.py): first the cell centres, in the order of
     rows and columns, then the nodes of the distribution. Same seed, same graph.
     """
     if distribution not in RANDOM_DISTRIBUTIONS:

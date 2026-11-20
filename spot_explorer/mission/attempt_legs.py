@@ -34,7 +34,7 @@ class LegSteps:
         HANDOFF.report("stop-and-go leg")
 
         # --- Execution: one or more LEGS on the polyline already confirmed by the frontier,
-        # without scan, refresh or replan in between (see MULTI-NODE
+        # without scan, refresh or replan in between (see multi-node
         # ADVANCE in decide_next_move). n_legs = 0 is a single partial step.
         n_legs = int(self.decision.get('nodes', 1)) if self.decision['full'] else 0
         if n_legs > 1:
@@ -140,10 +140,10 @@ class LegSteps:
         fresh_vision_tform_body = SimpleNamespace(
             position=SimpleNamespace(x=self.robot_x, y=self.robot_y, z=self.robot_z), rotation=robot_quat)
 
-        # At the intermediate node the robot STOPS and ROTATES towards the next node: the
+        # At the intermediate node the robot stops and rotates towards the next node: the
         # initial decision only checked the rotation of the first leg.
         # Here this one is checked, on the scan snapshot (in world
-        # coordinates, so valid even after the move) -- but only if the WHOLE
+        # coordinates, so valid even after the move) -- but only if the whole
         # swept circle is inside the data: rotation_is_clear ignores the cells
         # outside the window (optimistic), and with a curved path an intermediate node
         # can be near the edge. If it cannot rotate, or it cannot be told,
@@ -190,7 +190,7 @@ class LegSteps:
 
     def _leg_terrain(self, move_x, move_y):
         """Slope and roughness of the leg, gait chosen accordingly."""
-        # --- Measure of the difficulty of THIS segment (for the gait and the CSV).
+        # --- Measure of the difficulty of this segment (for the gait and the CSV).
         segment_long_slope, segment_lat_slope, segment_roughness = self.prm_graph.sample_terrain_between_points(
             self.robot_x, self.robot_y, move_x, move_y,
             node_idx1=self.robot_node_id, node_idx2=self.next_node_id
@@ -274,7 +274,7 @@ class LegSteps:
         tilt_recorder = BodyTiltRecorder(self.robot_state_client)
         tilt_recorder.start()
         try:
-            self.need_refresh = True              # end of a move: see EVENT REFRESH
+            self.need_refresh = True              # end of a move: see event refresh
             navigate = motion.navigate_to_path if motion.PATH_COMMAND_FOR_LEGS else motion.navigate_to
             success_move, distance_traveled, distance_commanded = navigate(
                 move_x, move_y, self.robot_x, self.robot_y, self.robot_state_client, self.command_client,

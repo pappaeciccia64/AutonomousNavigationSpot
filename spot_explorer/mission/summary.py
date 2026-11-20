@@ -26,7 +26,7 @@ from spot_explorer.records import MISSION_STATS, MISSION_CTX
 
 
 # =========================================================================
-# SWITCHES AND SUMMARY -- diagnostics only: no robot decision depends on these
+# Switches and summary -- diagnostics only: no robot decision depends on these
 # functions, and they never raise to the caller (a failing log must not stop or alter
 # a movement). Logs and statistics live in records.py.
 # =========================================================================

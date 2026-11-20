@@ -373,7 +373,7 @@ class GlobalGrid:
     def _get_margin_raster(self, safety_margin):
         """
         Raster of the cells for which is_occupied(x, y, safety_margin) is True: the
-        occupied cells dilated with THE SAME disk as is_occupied (dx^2 + dy^2 <= steps^2,
+        occupied cells dilated with the same disk as is_occupied (dx^2 + dy^2 <= steps^2,
         steps = ceil(margin / resolution)). Returns (raster, gx0, gy0) or None if there is
         no occupied cell. The disk counts are kept up to date cell by cell (_occ_rasters);
         the boolean raster is redone only when the map changes (_occ_version).
@@ -405,7 +405,7 @@ class GlobalGrid:
 
     def occupied_many(self, xs, ys, safety_margin=0.0):
         """
-        is_occupied on many points together, with a result IDENTICAL point by point (same
+        is_occupied on many points together, with a result identical point by point (same
         keys floor(x / resolution), same disk): used for building the graph.
         """
         xs = np.asarray(xs, dtype=np.float64)
@@ -525,7 +525,7 @@ class GlobalTerrainGrid:
         """
         Args:
             pts: (N,3) or (N,2) -- only the x,y columns are used (world position)
-            heights: 1D array of N heights ALREADY corrected (see correct_terrain)
+            heights: 1D array of N heights already corrected (see correct_terrain)
             is_valid: 1D boolean array of N elements, True where the height is to be used
         """
         pts_flat = np.asarray(pts).reshape(-1, pts.shape[-1] if pts.ndim > 1 else 2)
@@ -921,8 +921,8 @@ def fold_scan_into_global_maps(global_map, global_terrain_map, pts, terrain, obs
     start, every turn, final scan) and by test_replay.py, so the replay test checks the
     real code and not a copy of it.
 
-    The terrain map receives THE SAME mask as the live computation (slope_usable_mask:
-    reliable AND non-obstacle): the heights of obstacle cells would turn logs and walls
+    The terrain map receives the same mask as the live computation (slope_usable_mask:
+    reliable and non-obstacle): the heights of obstacle cells would turn logs and walls
     into "slopes" in the global map.
 
     Returns the core mask (cells under the body), needed by the free-space map.
@@ -937,7 +937,7 @@ def update_clearance_map(global_map, pts, snap, is_valid, unwritten, core, robot
     """
     Feed the free-space map with the current scan.
 
-    Uses the FILTERED obstacle_distance (the one the frontier really decides on, median +
+    Uses the filtered obstacle_distance (the one the frontier really decides on, median +
     hysteresis: see safe_frontier), not the raw reading. Only reliable cells learn; under
     the body the value cannot be less than half the width, because the robot stands
     there (same principle as _under_body in the frontier).

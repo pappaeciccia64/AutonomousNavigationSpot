@@ -29,7 +29,7 @@ import numpy as np
 
 
 # =========================================================================================
-# STARTING CELL AND VISITING ORDER
+# Starting cell and visiting order
 # =========================================================================================
 # Named positions of the starting cell: (vertical, horizontal) looking at the grid from
 # above with the robot's forward direction up. Vertical -> column (bottom = column 0, the
@@ -397,7 +397,7 @@ class EnvironmentMap(object):
 
 
 # =========================================================================================
-# FUNCTIONS ON CELLS (they also accept a fake grid with the same interface)
+# Functions on cells (they also accept a fake grid with the same interface)
 # =========================================================================================
 def cell_border_distance(env, row, col, x, y):
     """

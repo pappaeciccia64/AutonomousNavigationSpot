@@ -199,12 +199,12 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
     def _reset_counters(self):
         """Counters and memories of the attempt, before the first turn."""
         # ===================================================================================
-        # NAVIGATION LOOP WITH THE SAFE FRONTIER
+        # Navigation loop with the safe FRONTIER
         #
         # At every turn: fresh scan, update of maps and PRM, replanning if needed,
         # then the FRONTIER: how far the path is confirmed free now. The robot advances
         # up to there (minus half a body and margin), along the path.
-        #   - the nose ALWAYS points at the next point: no sideways walking; if the
+        #   - the nose always points at the next point: no sideways walking; if the
         #     rotation is not possible the cone is tried, then the straight back-off (see
         #     plan_cone_move and plan_straight_retreat);
         #   - the rotation is judged on the cells really swept (geometry.rotation_is_clear),
@@ -213,12 +213,12 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
         #     chosen, instead of waiting and declaring a block (goal_still_reachable).
         # ===================================================================================
         self.replan_counter = 0
-        self.need_refresh = True        # first turn of the attempt: see EVENT REFRESH
+        self.need_refresh = True        # first turn of the attempt: see event refresh
         self.no_progress = 0
         self.block_replans = 0
         self.loop_iter = 0
         self.rotation_fails = {}     # leg -> how many times the rotation towards it was refused
-        self.rotation_discards = 0   # discards for rotation refusal in THIS attempt
+        self.rotation_discards = 0   # discards for rotation refusal in this attempt
         self.best_goal_dist = float('inf')   # to reset the refusals only on PROGRESS
         self.idle_loops = 0          # consecutive turns without moving (see MAX_IDLE_LOOPS)
         self.cruise_stalls = 0       # consecutive cruises that did not walk (MAX_CRUISE_STALLS)
@@ -231,7 +231,7 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
         self.goal_repicks = 0        # how many times the goal point was chosen again
         self.tried_goals = []        # goal points already tried and found unreachable
         self.arrived_near_goal = False   # arrival accepted with the robot just outside the cell
-        self.trap_state = {'n': 0}   # goings back in THIS attempt, never reset (see _trap_backtrack)
+        self.trap_state = {'n': 0}   # goings back in this attempt, never reset (see _trap_backtrack)
 
     def _reachable_from_robot(self):
         """reachable(x, y) for the goal choice: a path from the robot node (one search, see
@@ -339,7 +339,7 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
         At most MAX_BLOCK_REPLANS times per attempt.
         """
         self.goal_repicks += 1
-        self.need_refresh = True          # plan changed: see EVENT REFRESH
+        self.need_refresh = True          # plan changed: see event refresh
         MISSION_STATS['goal_repicks'] += 1
         print(f"[TARGET] {why} I look for another one in the cell "
               f"({self.goal_repicks}/{P.MAX_BLOCK_REPLANS}).")
@@ -348,7 +348,7 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
                      exclusion_reason)
         # Up to GOAL_REPICK_CANDIDATES candidates: the first one may not have a path in the graph.
         # If none has one, goal and path go back to the previous ones (excluded for future
-        # choices, but consistent with the path): before, the NEW goal remained with the OLD
+        # choices, but consistent with the path): before, the new goal remained with the old
         # path, towards the point just excluded.
         old = (self.target_x, self.target_y, self.goal_id)
         new_ids = None
@@ -445,7 +445,7 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
         move, node reached, arrived, wait or confirmed block."""
         self.t_prm = time.perf_counter()
 
-        # 3. SAFE FRONTIER on the scan just made ---------------------------------------
+        # 3. Safe frontier on the scan just made ---------------------------------------
         # The shortcut respects the edges already discarded: see shortcut_index.
         k_short = decisions.shortcut_index((self.robot_x, self.robot_y), self.path_waypoints, self.snap, self.global_map,
                                  prm=self.prm_graph, robot_node_id=self.robot_node_id)

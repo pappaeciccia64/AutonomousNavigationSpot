@@ -24,7 +24,7 @@ from spot_explorer.planning.edge_stats import EdgeStats
 
 # --- Attaching the robot position to the graph ---------------------------------------------
 # The graph does not grow during the mission: add_stop_node attaches the position to the
-# suitable EXISTING node (see anchor_node).
+# suitable existing node (see anchor_node).
 #   ANCHOR_SEARCH_M: radius in which to look for the node (leaves room to discard those behind
 #     an obstacle).
 #   ANCHOR_ON_NODE_M: within this distance the robot is "on" the node: only then does a block or
@@ -35,11 +35,11 @@ ANCHOR_SEARCH_M = 1.0
 ANCHOR_ON_NODE_M = 0.15
 ANCHOR_IGNORE_NEAR_M = 0.30
 
-# Around the node the robot is in NOW, the global obstacle map is not used
+# Around the node the robot is in now, the global obstacle map is not used
 # for the first STOP_NODE_MAP_IGNORE_M of every edge: there the safe frontier judges on the live
-# data. Needed for example by a robot that got up after a fall, which is INSIDE the hazard
+# data. Needed for example by a robot that got up after a fall, which is inside the hazard
 # disk (0.50 m) marked around the spot: without it, every outgoing edge would be discarded.
-# Applies ONLY to the current node (set_robot_node).
+# Applies only to the current node (set_robot_node).
 STOP_NODE_MAP_IGNORE_M = 0.70
 # Path search with A* instead of Dijkstra: the heuristic is alpha x the straight-line distance
 # to the goal, never more than the real cost (an edge costs alpha x its length plus slope terms
@@ -115,7 +115,7 @@ class PRM(EdgeEvaluation, EdgeStats):
         self.max_detour_ratio = None
         self.detour_slack_m = 0.0
 
-        # COST LAYER: what is learned during the mission does not remove edges from the graph,
+        # Cost layer: what is learned during the mission does not remove edges from the graph,
         # it adds a cost (possibly infinite) that Dijkstra adds to the edge weight. Today it is used
         # for the edges of a trap, forbidden for the current attempt only (_ATTEMPT_MARK).
         self.edge_penalty_persistent = {}   # (min,max) -> additional weight (possibly inf)
@@ -131,7 +131,7 @@ class PRM(EdgeEvaluation, EdgeStats):
     def clear_penalties_for_attempt(self):
         """
         End of a cell attempt: the traps applied to that attempt, not to the mission.
-        ONLY those recorded as such are removed.
+        Only those recorded as such are removed.
         """
         for k in [k for k, v in self.edge_penalty_persistent.items() if v == self._ATTEMPT_MARK]:
             del self.edge_penalty_persistent[k]
@@ -273,7 +273,7 @@ class PRM(EdgeEvaluation, EdgeStats):
     def add_stop_node(self, x: float, y: float, global_map=None, edge_safety_margin: float = 0.0,
                       label: str = "stop", is_robot: bool = True) -> int:
         """
-        The EXISTING node to attach the position (x, y) to (see anchor_node): the graph does
+        The existing node to attach the position (x, y) to (see anchor_node): the graph does
         not grow during the mission. If is_robot, it also becomes the robot node.
         """
         nid = self.anchor_node(x, y, global_map, edge_safety_margin,
@@ -291,7 +291,7 @@ class PRM(EdgeEvaluation, EdgeStats):
     def mark_edge_invalid(self, idx1: int, idx2: int):
         """
         Mark an edge as blocked for the rest of the mission: no evaluation puts it back.
-        Called by the main loop after a block confirmed UP CLOSE by the safe frontier or a
+        Called by the main loop after a block confirmed up close by the safe frontier or a
         physical failure of the move.
         """
         key = (min(idx1, idx2), max(idx1, idx2))
@@ -326,7 +326,7 @@ class PRM(EdgeEvaluation, EdgeStats):
             key = (min(a, b), max(a, b))
             if (weight is None and i == 0 and allow_direct_first_hop and a in self.nodes and b in self.nodes
                     and key not in self.tracker_blocked_edges and self.edge_validity.get(key) is not False):
-                # Only for a stretch that has NEVER been discarded: an edge just removed from the
+                # Only for a stretch that has never been discarded: an edge just removed from the
                 # graph (occupancy, slope, hazard, block) must trigger a replan.
                 (xa, ya), (xb, yb) = self.nodes[a], self.nodes[b]
                 weight = self.alpha * float(np.hypot(xb - xa, yb - ya))
@@ -363,7 +363,7 @@ class PRM(EdgeEvaluation, EdgeStats):
 
     def costs_from(self, start_idx, allowed=None, stop=None, ignore_penalties=False, heuristic=None, route=False):
         """
-        THE search on the graph (Dijkstra) from start_idx, on the edges of finite cost: geometric
+        The search on the graph (Dijkstra) from start_idx, on the edges of finite cost: geometric
         weight + cost layer (effective_weight; ignore_penalties: the weight only). allowed(v):
         may node v be entered (None: every node). stop(u): the search ends at the first node
         settled for which it is true. Returns (dist, parents, the node it stopped at or None):
@@ -434,7 +434,7 @@ class PRM(EdgeEvaluation, EdgeStats):
         """
         reachable(x, y) -> bool: has the node (x, y) is attached to (anchor_node) a path from
         start_idx, as find_path_dijkstra(start_idx, node) would answer -- inside allowed_nodes,
-        within the detour cap -- with ONE search for all the points asked (the goal choice asks
+        within the detour cap -- with one search for all the points asked (the goal choice asks
         dozens of points of a cell; with no reachable point, every one cost a whole Dijkstra).
         The path to a node from a search run to the end is the one a search stopped at that
         node finds. A node outside allowed_nodes (the goal is always allowed) gets its own search.
@@ -525,15 +525,15 @@ class PRM(EdgeEvaluation, EdgeStats):
 
 
 # =========================================================================================
-# GRAPH FUNCTIONS used by the navigation loop
+# Graph functions used by the navigation loop
 # =========================================================================================
 def mark_edge_blocked_soft(prm, idx1, idx2):
     """
-    Remove an edge from the graph NOW, without condemning it forever.
+    Remove an edge from the graph now, without condemning it forever.
 
-    PRM.mark_edge_invalid() also puts it in `tracker_blocked_edges`, which is NEVER
+    PRM.mark_edge_invalid() also puts it in `tracker_blocked_edges`, which is never
     recreated -- neither by the refresh nor by the edge rebuild. Right for a block
-    confirmed by three still scans; wrong for [EARLY], which discards after ONE
+    confirmed by three still scans; wrong for [EARLY], which discards after one
     scan: a marginal obstacle seen once would isolate a node for the whole mission.
 
     Here only the edge and its validity are removed: at the next re-evaluation, if the fresh
@@ -542,7 +542,7 @@ def mark_edge_blocked_soft(prm, idx1, idx2):
     """
     key = (min(idx1, idx2), max(idx1, idx2))
     # Discarding an edge changes the plan, so at the next turn the edge refresh must be
-    # done (see EVENT REFRESH in cell_attempt.CellAttempt._scan_and_graph).
+    # done (see event refresh in cell_attempt.CellAttempt._scan_and_graph).
     prm.needs_refresh = True
     prm.edge_validity[key] = False
     prm.traversed_edges.discard(key)
@@ -552,7 +552,7 @@ def mark_edge_blocked_soft(prm, idx1, idx2):
 
 def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=None):
     """
-    Discard from the graph the nodes that fall INSIDE an obstacle.
+    Discard from the graph the nodes that fall inside an obstacle.
 
     The edges crossing occupied cells are vetoed (_occupancy_blocked), but the nodes are
     born from the lattice before the robot has seen anything: a node inside an obstacle
@@ -562,7 +562,7 @@ def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=None):
     does not fit and the frontier will never get there, so the node is useless both as a
     destination and as a waypoint.
 
-    Discarded ONLY where the cell has really been observed: unknown is not occupied (the
+    Discarded only where the cell has really been observed: unknown is not occupied (the
     same rule by which the frontier tells 'end_of_data' from 'obstacle'). A node outside the
     window or never seen stays where it is and will be judged when it is seen.
 

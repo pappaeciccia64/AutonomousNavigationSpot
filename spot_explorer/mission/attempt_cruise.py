@@ -488,7 +488,7 @@ class CruiseSteps:
     def _cruise_from_start(self):
         """The attempt start in the thread: the planner starts with a
         placeholder path at the robot node, its first cycle runs _start_in_thread. Returns as
-        _cruise, or STOP (cell already seen), FAILED (no goal), None (stop-and-go)."""
+        _cruise, or stop (cell already seen), FAILED (no goal), None (stop-and-go)."""
         start = self.prm_graph.robot_node if self.prm_graph.robot_node in self.prm_graph.nodes \
             else next(iter(self.prm_graph.nodes))
         planner = self._new_planner(start, [start], thread_goals=False)
@@ -534,7 +534,7 @@ class CruiseSteps:
               f"({self.target_x:.2f}, {self.target_y:.2f}): {len(ids) - 1} nodes, {path_len:.2f} m, "
               f"{adv:.2f} m confirmed" + (f" (rotation not clear at node {turn_stop})" if turn_stop else "") + ".")
 
-        self.need_refresh = True                  # after the cruise: see EVENT REFRESH
+        self.need_refresh = True                  # after the cruise: see event refresh
         tracker.clear_path()
         # Robot still walking from the previous cell (hand-off): this command replaces that
         # one, turning while walking (_moving_check has let only small turns through).

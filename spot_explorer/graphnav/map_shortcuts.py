@@ -51,7 +51,7 @@ def plan_graphnav_shortcuts(poses, base_edges, start_id, goal_id, global_map,
         base_edges: [(wp_a, wp_b, length_m)] the edges the graph already has.
     Candidates: pairs of waypoints less than max_m apart, without a direct edge, whose
     straight line was SEEN free in the global map with margin_m (segment_seen_free).
-    The shortest path is computed with the graph plus ALL the candidates, and only the
+    The shortest path is computed with the graph plus all the candidates, and only the
     candidates that path uses are returned.
 
     Returns (shortcuts [(a, b, d)], length today, length with the shortcuts); the lengths
@@ -101,17 +101,17 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, loop_cl
     Add shortcuts to the GraphNav graph before a move (see GRAPHNAV_SHORTCUTS).
     Never raises: without shortcuts GraphNav works anyway, along the chain.
 
-    Spot accepts new edges (create_edge) ONLY while recording ("NotRecordingError"),
+    Spot accepts new edges (create_edge) only while recording ("NotRecordingError"),
     while loop closure (process_topology) must be done with recording stopped, and right
     after stopping it may answer "MapModifiedError" until the map has finished processing.
     So:
-      map_edges -- the shortcuts from the global map: call BEFORE stop_recording
+      map_edges -- the shortcuts from the global map: call before stop_recording
                    (skipped automatically if recording is stopped). They need
                    target_wp_id (the destination) and, if the localizer does not say where
                    the robot is, robot_xy; only those on the way are created (see
                    plan_graphnav_shortcuts).
       loop_closure_s -- if > 0, Spot's full loop closure with this limit on Spot's side
-                   (s): call AFTER stop_recording (skipped automatically while
+                   (s): call after stop_recording (skipped automatically while
                    recording), with a second attempt on MapModifiedError. Done only once,
                    at the end of the mission (see GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S).
     """

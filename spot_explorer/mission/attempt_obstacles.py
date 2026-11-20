@@ -23,8 +23,8 @@ class ObstacleSteps:
         """If the decided step requires turning where it cannot: advance in the cone, back up
         straight, recognize the trap or discard the leg."""
         # 4. ROTATION -------------------------------------------------------------------------
-        # The nose ALWAYS points at the point to reach. If the rotation is not possible it does
-        # NOT walk sideways (see ROTATION AND BACK-OFF in config.py). In order:
+        # The nose always points at the point to reach. If the rotation is not possible it does
+        # Not walk sideways (see rotation and back-off in config.py). In order:
         # advance inside the possible rotation cone, back up straight if from there the
         # rotation becomes possible, recognize a trap, discard the leg.
         if self.decision['kind'] == 'move':
@@ -93,7 +93,7 @@ class ObstacleSteps:
     def _advance_in_cone(self, rot):
         """Rotation impossible: advance inside the allowed rotation cone, if it gets closer to
         the path (CONTINUE), otherwise None."""
-        # --- 4a. FIRST OF ALL: can I GO FORWARD inside the rotation cone I am
+        # --- 4a. First of all: can I go forward inside the rotation cone I am
         # allowed? Often going straight, or almost, gets closer to the goal than
         # any back-off (see plan_cone_move).
         cone_goal, _ = safe_frontier.point_along(self.polyline, P.CONE_PATH_LOOKAHEAD_M)
@@ -108,7 +108,7 @@ class ObstacleSteps:
                 self.verification_tracker.clear_path()
             MISSION_STATS['cone_moves'] += 1
             cx, cy = cone['target']
-            self.need_refresh = True      # end of a move: see EVENT REFRESH
+            self.need_refresh = True      # end of a move: see event refresh
             with TrajectoryLog(self.robot_state_client, 'cone', (cx, cy)):
                 ok_c, dist_c, _ = motion.navigate_to(
                     cx, cy, self.robot_x, self.robot_y, self.robot_state_client, self.command_client,
@@ -127,7 +127,7 @@ class ObstacleSteps:
     def _back_up_to_turn(self, rot, edge_key):
         """Rotation impossible: back up straight, if from there the rotation becomes possible
         (CONTINUE), otherwise None."""
-        # --- 4b. Back up, but ONLY if it serves a purpose (see retreat_would_help).
+        # --- 4b. Back up, but only if it serves a purpose (see retreat_would_help).
         back = decisions.plan_straight_retreat((self.robot_x, self.robot_y), self.robot_yaw, self.snap)
         helps, margin_back = (False, None)
         if back is not None:
@@ -150,7 +150,7 @@ class ObstacleSteps:
             if self.verification_tracker is not None:
                 self.verification_tracker.clear_path()
             MISSION_STATS['straight_retreats'] += 1
-            self.need_refresh = True      # end of a move: see EVENT REFRESH
+            self.need_refresh = True      # end of a move: see event refresh
             with TrajectoryLog(self.robot_state_client, 'backoff', (bx, by)):
                 ok_back, dist_back = motion.move_to_world_point_without_turning(
                     bx, by, "vision", self.command_client, self.robot_state_client, **self.mobility_kwargs)
@@ -221,7 +221,7 @@ class ObstacleSteps:
     def _replan_now(self):
         """[EARLY]: at the first blocking cell the leg is discarded and another way is searched,
         without waiting for the confirmation while still. The outcome, or None if it stays waiting."""
-        # REPLAN AT ONCE, at the FIRST blocking cell, instead of staying still for three
+        # Replan at once, at the first blocking cell, instead of staying still for three
         # scans on the same edge. The obstacle_distance noise is already filtered
         # (median + hysteresis in safe_frontier), so a blocking cell is
         # information to use: the edge is discarded and a path passing elsewhere is searched

@@ -1,4 +1,4 @@
-"""Safe frontier: how far the planned path is confirmed free NOW, on the filtered scan; the thread that recomputes it during the move."""
+"""Safe frontier: how far the planned path is confirmed free now, on the filtered scan; the thread that recomputes it during the move."""
 import threading
 import traceback
 import time
@@ -18,7 +18,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 # =========================================================================
-# TEMPORAL FILTER ON obstacle_distance
+# Temporal filter on obstacle_distance
 #
 # obstacle_distance fluctuates by a few centimetres between two scans even with the robot
 # still (1.5 cm on average, 7.3 cm peak), i.e. as much as the air margin it is compared
@@ -185,7 +185,7 @@ def make_grid_snapshot(cells_obstacle_dist, rough_values, is_valid, terrain_vali
       It is not is_valid: is_valid also excludes the cells discarded by the ground height
       filter (walls), which have been seen; obstacle_distance flags the obstacle.
     - unwritten: cells never written by the sensors (correct_terrain with return_unwritten=True):
-      they count as NOT seen, so the frontier stops there with 'end_of_data'.
+      they count as not seen, so the frontier stops there with 'end_of_data'.
     """
     shape = (num_y, num_x)
     rough = np.asarray(rough_values, dtype=np.float64).reshape(shape)
@@ -225,7 +225,7 @@ def _plane_field(snap):
 
 def _under_body(snap, xs, ys):
     """
-    True for the points that lie UNDER THE ROBOT'S BODY now: rectangle
+    True for the points that lie under the ROBOT'S BODY now: rectangle
     +/-ROBOT_HALF_LENGTH_M x +/-ROBOT_HALF_WIDTH_M around the pose, oriented with the
     snapshot's yaw. Without yaw, the inscribed circle (radius half width), which lies under
     the body in any orientation.
@@ -255,7 +255,7 @@ def _cells(snap, xs, ys):
 
 def sample_flags(snap, xs, ys, thr, use_latch=True, nominal_mask=None):
     """
-    THE rule of "can the robot pass here now", point by point, on the scan of this cycle: the
+    The rule of "can the robot pass here now", point by point, on the scan of this cycle: the
     safe frontier applies it along the path, the PRM to the edges of the scan window
     (edge_evaluation.FRONTIER_EDGES), so the graph and the frontier cannot disagree on what
     the scan sees. For samples (xs, ys) and the threshold thr (scalar or per sample) on the
@@ -532,7 +532,7 @@ class ArcVerificationTracker:
         self._robot_state_client = self.robot.ensure_client(RobotStateClient.default_service_name)
         self._local_grid = spot_grid.LocalGrid(self.robot)
         self._lock = threading.Lock()
-        self._waypoints = []          # [(x, y), ...] WITHOUT the robot position
+        self._waypoints = []          # [(x, y), ...] without the robot position
         self._extend_end_m = None
         self._body = None
         self._path_version = 0
@@ -632,7 +632,7 @@ class ArcVerificationTracker:
                 if snap is None:
                     time.sleep(0.2)
                     continue
-                # This frontier is ONLY for the stop halfway through a move: intrusion threshold
+                # This frontier is only for the stop halfway through a move: intrusion threshold
                 # (half width, without air), see geometry.FRONTIER_ABORT_AIR_M.
                 frontier = compute_safe_frontier([(snap.robot_x, snap.robot_y)] + waypoints, snap,
                                                  extend_end_m=extend, body=body,
@@ -687,7 +687,7 @@ class ArcVerificationTracker:
         num_y = main_proto.local_grid.extent.num_cells_y
         cell_size = main_proto.local_grid.extent.cell_size
 
-        # Robot pose AT THE SAME instant as the grid (same snapshot of transforms)
+        # Robot pose at the same instant as the grid (same snapshot of transforms)
         transforms_snapshot = main_proto.local_grid.transforms_snapshot
         vision_tform_body = get_a_tform_b(transforms_snapshot, VISION_FRAME_NAME, BODY_FRAME_NAME)
         robot_x, robot_y = vision_tform_body.position.x, vision_tform_body.position.y
@@ -744,7 +744,7 @@ def verify_arc_safety(x1, y1, x2, y2, pts, obstacle_mask):
 
 
 # =========================================================================================
-# DECISIONS ON THE FRONTIER: what to do now given the safe frontier and the fresh scan.
+# Decisions on the FRONTIER: what to do now given the safe frontier and the fresh scan.
 # Pure functions (no robot, no I/O), tested by the end-to-end test and the replay.
 # =========================================================================================
 def goal_still_reachable(snap, goal_x, goal_y):
@@ -753,7 +753,7 @@ def goal_still_reachable(snap, goal_x, goal_y):
 
     The safe frontier requires the centre line of the path to be at least
     FRONTIER_CLEARANCE_M from an obstacle. A goal point with obstacle_distance below that
-    threshold can NEVER be reached, however many scans are made: the robot would wait and
+    threshold can never be reached, however many scans are made: the robot would wait and
     declare a block. It happens because the point is chosen from afar, when the area is
     still unknown.
 

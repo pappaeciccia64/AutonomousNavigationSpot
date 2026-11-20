@@ -215,7 +215,7 @@ class EdgeEvaluation:
         """
         The scan just made, for the preliminary edge discard (see
         LIVE_PREFILTER_OD_M). 2D arrays (num_y, num_x), row = y. obstacle_dist_2d: in the
-        navigation loop the FILTERED one from the frontier snapshot (median + hysteresis); at
+        navigation loop the filtered one from the frontier snapshot (median + hysteresis); at
         the start of the attempt the raw one. seen_2d: cells seen by the sensor.
         """
         self.live_snap = None             # set_live_snapshot sets it after this call
@@ -241,7 +241,7 @@ class EdgeEvaluation:
         self.live_snap = snap
 
     def _frontier_blocked_xy(self, xy1, xy2, d):
-        """FRONTIER_EDGES: for each edge (ends xy1, xy2, length d) True if THE rule of the
+        """FRONTIER_EDGES: for each edge (ends xy1, xy2, length d) True if the rule of the
         frontier (safe_frontier.sample_flags) finds an obstacle or a roughness veto on its
         samples, taken as the frontier takes them on a segment, from either end."""
         snap = self.live_snap
@@ -1026,11 +1026,11 @@ class EdgeEvaluation:
     def _occupancy_blocked_many(self, pairs, global_map, edge_safety_margin):
         """
         _occupancy_blocked for many edges together: [(idx1, idx2, dist), ...] -> bool array,
-        IDENTICAL edge by edge (same samples, same exemption around the robot node, same
+        Identical edge by edge (same samples, same exemption around the robot node, same
         GlobalGrid test through occupied_many).
         """
         # Preliminary discard on the live scan (LIVE_PREFILTER_OD_M) and global map:
-        # the outcome is the OR of the two.
+        # the outcome is the or of the two.
         live = self._live_blocked_many(pairs)
         self.live_veto_last = int(live.sum())
         out = self._global_occupancy_blocked_many(pairs, global_map, edge_safety_margin)
@@ -1123,7 +1123,7 @@ class EdgeEvaluation:
     def precompute_arc_slopes(self, pairs, skip=None):
         """
         Slope of many pairs in one go, with the matrices of
-        slopes.arc_slope_profiles_batch: numbers IDENTICAL to the edge-by-edge computation.
+        slopes.arc_slope_profiles_batch: numbers identical to the edge-by-edge computation.
 
         pairs: [(idx1, idx2, dist)], in the direction they will be evaluated; skip: mask of
         the pairs not to compute (e.g. already discarded for occupancy).

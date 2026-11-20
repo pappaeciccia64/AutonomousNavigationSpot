@@ -13,7 +13,7 @@ from spot_explorer.graphnav.map_shortcuts import graphnav_add_shortcuts
 
 
 # =========================================================================================
-# GRAPHNAV DURING THE MISSION: moves between cells, going back, return to wp_0; shortcuts
+# Graphnav during the mission: moves between cells, going back, return to wp_0; shortcuts
 # and loop closure; localization, re-anchoring and drift; breadcrumbs.
 # Uses RecordingInterface (map_recording) to talk to GraphNav.
 # =========================================================================================
@@ -47,7 +47,7 @@ _GRAPHNAV_FAIL_STATUSES = {
 
 def graphnav_arrival_heading(recordingInterface, waypoint_id, face_xy, label):
     """
-    HEADING ON ARRIVAL (see P.GRAPHNAV_ARRIVAL_HEADING): the body pose relative to the
+    Heading on arrival (see P.GRAPHNAV_ARRIVAL_HEADING): the body pose relative to the
     waypoint to ask GraphNav for (destination_waypoint_tform_body_goal), to arrive facing
     face_xy (VISION point). The waypoint frame has the yaw the body had when we created it
     (waypoint_poses), so the angle is the difference between the wanted direction and that
@@ -110,7 +110,7 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
     client = recordingInterface._graph_nav_client
     tp = _graph_nav_pb2.TravelParams()
     tp.velocity_limit.CopyFrom(motion._velocity_limit(P.GRAPHNAV_MAX_LINEAR_VEL_MPS, P.GRAPHNAV_MAX_ANGULAR_VEL_RPS))
-    # Permissive loss detector (see GRAPHNAV LOCALIZATION).
+    # Permissive loss detector (see graphnav localization).
     if P.GRAPHNAV_LOST_DETECTOR_STRICTNESS and hasattr(tp, 'lost_detector_strictness'):
         try:
             # from the descriptor: the enum is in lost_detection_pb2, which old SDK versions
@@ -184,7 +184,7 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
             graphnav_log_drift(recordingInterface, robot_state_client, label)
             return True
         if status == _GN.STATUS_LOST and relocs < P.GRAPHNAV_MAX_RELOCALIZATIONS:
-            # Re-anchor on the nearest waypoint (NOT on the destination, and without declaring
+            # Re-anchor on the nearest waypoint (Not on the destination, and without declaring
             # arrival: the command is resent and navigation continues).
             relocs += 1
             print(f"[GRAPHNAV] {label}: GraphNav lost the localization on the way: "
@@ -268,7 +268,7 @@ def graphnav_step_back(env, recordingInterface, robot_state_client, command_clie
 
     Returns (ok, crumb). ok=True only if GraphNav declares it has ARRIVED: in
     _graphnav_navigate_to_inner STATUS_LOST is a failure, localization is not forced on the
-    destination (see GRAPHNAV MOVES).
+    destination (see graphnav moves).
 
     Recording must be STOPPED before navigating and resumed after: GraphNav does not
     navigate while recording. It is the same sequence used for moves between cells.

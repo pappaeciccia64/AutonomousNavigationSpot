@@ -38,7 +38,7 @@ ROUGH_THRESHOLD = 0.15      # local roughness (std-dev of terrain height, m)
 TERRAIN_VALID_MIN = 0.5
 
 # =========================================================================
-# GROUND HEIGHT FILTER (see LocalGrid.correct_terrain)
+# Ground height filter (see LocalGrid.correct_terrain)
 #
 # The `terrain` heights are relative to the reference fixed at power-on. The ground the
 # robot stands on is estimated as the median of the valid cells within GROUND_REF_RADIUS_M;
@@ -56,7 +56,7 @@ GROUND_REF_FALLBACK_RADIUS_M = 1.2   # if there are too few valid cells under th
 GROUND_REF_MIN_CELLS = 50
 
 # -------------------------------------------------------------------------
-# CELLS NEVER WRITTEN (see LocalGrid._cells_never_written)
+# Cells never written (see LocalGrid._cells_never_written)
 # Cells the sensors have never written all stay at the same exact height (a
 # "plateau"). Spot almost always declares them invalid; this rule catches the rest.
 # -------------------------------------------------------------------------
@@ -301,7 +301,7 @@ class LocalGrid:
 
     def _fetch_layers(self, types_of_grid, timeout=None):
         """
-        Download the requested layers with ONE single request (same snapshot for all); if
+        Download the requested layers with one single request (same snapshot for all); if
         that does not work fall back on one request per layer. timeout: of each request, s
         (None: the library default, 30 s); a request that times out raises TimedOutError (no
         fall back: the robot is not answering, asking layer by layer would wait three times).
@@ -507,7 +507,7 @@ class LocalGrid:
 
         grids_data = {}
         # main_proto = the first requested layer (obstacle_distance in all callers):
-        # its origin is the one ALL layers are indexed with.
+        # its origin is the one all layers are indexed with.
         main_proto = next(lg for lg in p if lg.local_grid_type_name == types_of_grid[0])
 
         for lg in p:
@@ -527,7 +527,7 @@ class LocalGrid:
                 pts, vals, color = self.create_vtk_terrain_grid(p, robot_state_client, layer_name=grid_type)
                 grids_data[grid_type] = {'pts': pts, 'values': vals, 'color': color}
                 if grid_type == 'terrain':
-                    # Height quantization step of THIS scan: tolerance for
+                    # Height quantization step of this scan: tolerance for
                     # _cells_never_written. 'raw_zero' only acts as the switch of that
                     # rule (None = off).
                     grids_data[grid_type]['raw_zero'] = float(np.float32(lg.local_grid.cell_value_offset))
@@ -611,7 +611,7 @@ class LocalGrid:
             terrain_corrected: corrected heights, 1D
             is_valid: 1D, True where the ORIGINAL reading was reliable
             unwritten: (only with return_unwritten) 1D, cells never written, to be treated
-                as NOT SEEN (see safe_frontier.make_grid_snapshot)
+                as not seen (see safe_frontier.make_grid_snapshot)
         """
         terrain_2d = terrain_values.reshape((num_cells_y, num_cells_x)).astype(np.float32)
 
@@ -641,7 +641,7 @@ class LocalGrid:
 
     def _cells_never_written(self, terrain_2d, sensor_valid_2d, unwritten_value, unwritten_scale):
         """
-        Cells the sensors have never written: they all stay at the SAME exact height.
+        Cells the sensors have never written: they all stay at the same exact height.
 
         The height cannot be predicted (it depends on the frame and Spot moves the offset at
         every scan): it is DERIVED as the most frequent exact height among the cells Spot
@@ -676,7 +676,7 @@ class LocalGrid:
 
         unwritten = finite & (np.abs(terrain_2d - quota) <= tol)
         # A real plateau is made of cells Spot itself declares unreliable. If
-        # that height coincided with a REAL surface (a table top
+        # that height coincided with a real surface (a table top
         # exactly at that height) the cells would be mostly valid: left untouched.
         if not unwritten.any() or \
                 float(np.mean(~sensor_valid_2d[unwritten])) < UNWRITTEN_MIN_SPOT_INVALID:
@@ -738,7 +738,7 @@ class LocalGrid:
     def compute_gradient_and_roughness(self, terrain_corrected, terrain_valid_values, num_cells_x, num_cells_y, cell_size,
                                        slope_baseline_m=SLOPE_BASELINE_M, is_valid=None):
         """
-        Slope and roughness layers per cell, from a terrain ALREADY corrected (see
+        Slope and roughness layers per cell, from a terrain already corrected (see
         correct_terrain). The cells Spot declares invalid are 0 in the output.
 
         SLOPE: centred difference over a physical base (see SLOPE_BASELINE_M: ~0.48 m,
@@ -803,7 +803,7 @@ class LocalGrid:
         # With fewer than 3 valid cells in the window the standard deviation means nothing.
         roughness_2d[n_valid * window_size * window_size < 3] = 0.0
 
-        # Zero ONLY the truly blind areas in the final output.
+        # Zero only the truly blind areas in the final output.
         # The robot footprint keeps the realistic interpolated estimate instead.
         gradient_2d[sensor_invalid_mask] = 0.0
         roughness_2d[sensor_invalid_mask] = 0.0
@@ -831,8 +831,8 @@ class LocalGrid:
         assert cells_obstacle_dist.shape == rough_values.shape == is_valid.shape, \
             "Error: the environment layers have misaligned sizes!"
 
-        # VETO computation applied ONLY to the areas with valid data
-        # If an area is NOT valid (blind spot or robot footprint), it must not trigger the obstacle veto
+        # VETO computation applied only to the areas with valid data
+        # If an area is not valid (blind spot or robot footprint), it must not trigger the obstacle veto
         v1 = (cells_obstacle_dist <= obstacle_threshold) & is_valid
         v3 = (rough_values > rough_threshold) & is_valid
 
@@ -846,7 +846,7 @@ class LocalGrid:
                                      body_length=1.10, body_width=0.50):
         """
         2D mask of the cells under the robot's body (oriented rectangle, plus margin).
-        It is returned ONLY ONCE per mission, at the first call (at the first scan the
+        It is returned only once per mission, at the first call (at the first scan the
         terrain under the robot has never been seen); afterwards it returns None and Spot's
         terrain_valid applies.
 
@@ -874,16 +874,16 @@ class LocalGrid:
 def slope_usable_mask(is_valid_flat, cells_obstacle_dist, shape):
     """
     Mask of the cells whose HEIGHTS can enter the slope computation of an edge: reliable
-    (is_valid of correct_terrain) AND non-obstacle.
+    (is_valid of correct_terrain) and non-obstacle.
 
     The vertical face of a piece of furniture is not sloping terrain, it is an obstacle --
     and it is already handled as such twice: by the PRM occupancy veto and by the safe
     frontier, which stops FRONTIER_CLEARANCE_M from any cell with low obstacle_distance.
-    Counting it ALSO as slope counts it a third time, with the worst of effects: it does
+    Counting it also as slope counts it a third time, with the worst of effects: it does
     not stop the robot in front of the furniture (the frontier does that), it disconnects
     the PRM graph in the whole room.
 
-    The edges that lose the data do NOT become "free by decree": they become "without
+    The edges that lose the data do not become "free by decree": they become "without
     data", and an edge without data is not vetoed (it enters the graph with a fallback
     cost, see PRM._evaluate_and_add_edge); whoever travels it checks it metre by metre with
     the safe frontier. It is an explicit choice: on those edges safety comes from the

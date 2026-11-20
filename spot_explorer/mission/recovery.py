@@ -14,7 +14,7 @@ from spot_explorer.records import MISSION_STATS, TrajectoryLog
 
 
 # =========================================================================
-# GOING BACK WITH GRAPHNAV, when from where the robot is the graph does not lead
+# Going back with graphnav, when from where the robot is the graph does not lead
 # to the cell
 # =========================================================================
 
@@ -24,12 +24,12 @@ def backtracking_cannot_help(env, prm_graph, goal_id, robot_state_client, max_ho
     """
     Can going back with GraphNav achieve anything?
 
-    escape_by_backtracking goes back to a breadcrumb and ONLY THEN asks the graph for a path
+    escape_by_backtracking goes back to a breadcrumb and only then asks the graph for a path
     from there. But every breadcrumb already has its PRM node: the same question can be asked
     before moving. If the goal is in another component of the graph, no waypoint behind can
     change the answer, and the returns would only be wasted travel.
 
-    Answers True only if EVERY breadcrumb that would be visited has a PRM node connected in
+    Answers True only if every breadcrumb that would be visited has a PRM node connected in
     the graph and there is no path from any of them. If even one cannot be judged (missing
     or isolated node, e.g. discarded inside an obstacle) it answers False and the robot goes
     back: when in doubt, the way out is not taken away.
@@ -109,7 +109,7 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
     Returns a dict: ok (the mission can continue), ids (new path or None), robot_node (new
     robot node or None), how (what happened, for the log).
     """
-    # Only when the robot is NOT trapped (callers "no alternative in the graph"):
+    # Only when the robot is not trapped (callers "no alternative in the graph"):
     # in a trap or after a physical failure going back also serves to free it.
     if skip_if_graph_cannot_help and backtracking_cannot_help(
             env, prm_graph, goal_id, robot_state_client, max_hops):
@@ -138,7 +138,7 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
 
         if not crumb.get('in_place'):
             MISSION_STATS['graphnav_backtracks'] += 1
-        prm_graph.needs_refresh = True       # the robot has moved: see EVENT REFRESH
+        prm_graph.needs_refresh = True       # the robot has moved: see event refresh
         # The scan of the preliminary discard was taken from another point (and the
         # body exclusion would be where the robot was): drop it, until the next scan.
         prm_graph.set_live_obstacles(None, None, 0, 0, 1, 0, 0)
@@ -169,7 +169,7 @@ def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_st
 
 
 # =========================================================================
-# WALKED RETREAT backwards: the last safety net
+# Walked retreat backwards: the last safety net
 # =========================================================================
 
 
@@ -268,13 +268,13 @@ def retreat_along_traveled_path(env, robot_state_client, command_client,
 
 
 # =========================================================================
-# BLOCKED OR DEFERRED CELLS
+# Blocked or deferred cells
 # =========================================================================
 
 
 def cell_has_reachable_target(env, sampler, global_map, row, col, safety_margin=None):
     """
-    Is there STILL a point in the cell where the robot could stand, according to the
+    Is there still a point in the cell where the robot could stand, according to the
     global map accumulated so far? Returns (yes_no, free, unknown, occupied).
 
     Used not to retry a cell whose goal is physically inside an obstacle (for example

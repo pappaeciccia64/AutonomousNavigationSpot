@@ -2,14 +2,14 @@
 from spot_explorer.perception import slopes
 
 # =========================================================================
-# GAIT SELECTION (see motion.select_mobility_params)
+# Gait selection (see motion.select_mobility_params)
 # Three levels from the slope (with the body) and the roughness of the leg ahead; the worse
 # of the two decides. As a net step height (H / 0.48): PLAIN below ~7 cm, HARD from
 # ~12 cm. These are "how careful" thresholds, well below the obstacle ones.
 # =========================================================================
-GAIT_PLAIN_SLOPE_MAX = 0.15     # below this on BOTH -> PLAIN tier (flat ground)
+GAIT_PLAIN_SLOPE_MAX = 0.15     # below this on both -> PLAIN tier (flat ground)
 GAIT_PLAIN_ROUGH_MAX = 0.05
-GAIT_MODERATE_SLOPE_MAX = 0.25  # below this on BOTH -> MODERATE tier; at/above -> HARD tier
+GAIT_MODERATE_SLOPE_MAX = 0.25  # below this on both -> MODERATE tier; at/above -> HARD tier
 GAIT_MODERATE_ROUGH_MAX = 0.10
 # The slope thresholds above are on today's estimate (differences on a base, with the body).
 # With slopes.PLANE_SLOPES the plane reads lower (tools/plane_thresholds.py, 1382 legs of 51

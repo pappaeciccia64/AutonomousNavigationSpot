@@ -174,7 +174,7 @@ def _grid_size(options, verbose=True):
     """Rows, columns and cell side of the mission grid, and where they come from.
 
     Default P.MISSION_GRID_ROWS x P.MISSION_GRID_COLS cells of P.MISSION_CELL_SIZE_M. They
-    can be changed WITHOUT touching the code, in order of precedence:
+    can be changed without touching the code, in order of precedence:
       1. arguments:  python3 run_mission.py --rows 2 --cols 4 --cell 5
       2. variable:   SPOT_MISSION_GRID="rows,cols,cell_side"   e.g. "2,3,3"
     """
@@ -257,7 +257,7 @@ def _close_mission(robot, robot_state_client, command_client, recordingInterface
                                          map_edges=True, target_wp_id=_wp0_id, robot_xy=_xy_end)
     recordingInterface.auto_close_loops(True, False)
     recordingInterface.stop_recording()
-    # Spot's loop closure only once, BEFORE anchoring: its edges, verified on the scans,
+    # Spot's loop closure only once, before anchoring: its edges, verified on the scans,
     # correct the drift of the downloaded map and shorten the return
     # (see GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S).
     map_shortcuts.graphnav_add_shortcuts(recordingInterface, "map closure", map_edges=False,
@@ -360,7 +360,7 @@ def easy_walk(options):
             recordingInterface.clear_map()
             recordingInterface.start_recording()
 
-            # Starting fiducial (see START_FIDUCIAL_ID): searched BEFORE creating wp_0, so that
+            # Starting fiducial (see START_FIDUCIAL_ID): searched before creating wp_0, so that
             # it is in its snapshot and localization on the fiducial has something to find.
             fiducials = apriltags.find_fiducials(robot, robot_state_client,
                                                      wait_s=P.START_FIDUCIAL_WAIT_S,
@@ -383,7 +383,7 @@ def easy_walk(options):
                 recordingInterface.initialize_with_fiducial(robot_state_client, fiducials[0]['id'])
 
             # --- Gait for the whole mission ---
-            # Empty: gait, step height and ground_mu_hint are chosen LEG BY LEG based on the
+            # Empty: gait, step height and ground_mu_hint are chosen leg by leg based on the
             # terrain (see motion.select_mobility_params). To force a fixed profile
             # (for example in a test) a non-empty dict here is enough: CellAttempt uses it for all
             # legs and skips the automatic choice. Example:
@@ -394,7 +394,7 @@ def easy_walk(options):
             #   )
             mobility_kwargs = {}
 
-            # --- Starting pose, BEFORE building the graph: the lattice is relative to it ---
+            # --- Starting pose, before building the graph: the lattice is relative to it ---
             x_boot, y_boot, z_boot, quat_boot = connection.getPosition(robot_state_client)
             yaw_boot = connection.yaw_of(quat_boot)
             env.set_origin(x_boot, y_boot, yaw_boot, start_row=start_row, start_col=start_col)
@@ -429,7 +429,7 @@ def easy_walk(options):
 
             mission.final_scan()
 
-            # MISSION SUMMARY -- diagnostics only, to be read after the run.
+            # Mission summary -- diagnostics only, to be read after the run.
             summary._emit_mission_summary_once()
 
             _close_mission(robot, robot_state_client, command_client, recordingInterface)
@@ -441,7 +441,7 @@ def easy_walk(options):
 
 
 # =========================================================================
-# COMMAND LINE
+# Command line
 # =========================================================================
 
 

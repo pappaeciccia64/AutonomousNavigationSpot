@@ -12,7 +12,7 @@ def decide_next_move(robot_xy, path_waypoints, frontier, no_progress_count, in_t
     tested off the field.
 
     path_waypoints: [(node_id, x, y), ...] -- the nodes still to reach, the first is the
-        next. The robot position is NOT included.
+        next. The robot position is not included.
     frontier: result of safe_frontier.compute_safe_frontier on the path
         [robot] + waypoints.
     no_progress_count: consecutive scans in which no advance was possible.
@@ -28,7 +28,7 @@ def decide_next_move(robot_xy, path_waypoints, frontier, no_progress_count, in_t
                       the arrival tolerance (see FINAL_STEP_MIN_M).
                       'nodes' = how many path nodes lie inside the advance allowed by the
                       frontier: the loop travels them one after the other without
-                      rescanning (see MULTI-NODE ADVANCE). It is 1 or more when 'full',
+                      rescanning (see multi-node advance). It is 1 or more when 'full',
                       and absent when the step is partial.
       'arrived'       no advance is possible, but the final goal is within tolerance and
                       the robot is inside the goal cell
@@ -46,16 +46,16 @@ def decide_next_move(robot_xy, path_waypoints, frontier, no_progress_count, in_t
 
     adv = allowed_advance(frontier)
     if adv >= seg_len - 0.02:
-        # --- MULTI-NODE ADVANCE -------------------------------------------------------
-        # The safe frontier covers the WHOLE planned path, not the first leg:
+        # --- Multi-node advance -------------------------------------------------------
+        # The safe frontier covers the whole planned path, not the first leg:
         # it returns how far it is confirmed free now, often several nodes ahead.
-        # ALL the nodes inside the allowed advance are counted, and the
-        # loop travels them one after the other WITHOUT a scan, refresh or replan
+        # All the nodes inside the allowed advance are counted, and the
+        # loop travels them one after the other without a scan, refresh or replan
         # in between, instead of stopping and rescanning at every node. It always walks on the
-        # polyline, one leg at a time: it does NOT cut the chord between two nodes, which
+        # polyline, one leg at a time: it does not cut the chord between two nodes, which
         # would pass over unverified terrain (that is what shortcut_index does, but only
         # after verifying the chord with the frontier).
-        # The check does NOT become a remembered verdict: during the move the thread
+        # The check does not become a remembered verdict: during the move the thread
         # recomputes the frontier at ~5 Hz on the remaining path and stops the robot if it
         # gets shorter (see _should_abort_move and FRONTIER_ABORT_CONFIRM). What is removed is
         # the STOPS, not the checks.
@@ -68,7 +68,7 @@ def decide_next_move(robot_xy, path_waypoints, frontier, no_progress_count, in_t
             px, py, nodes = wx, wy, nodes + 1
         return {'kind': 'move', 'target': (nx, ny), 'full': True, 'dist': seg_len,
                 'nodes': max(1, nodes)}
-    # FINAL STEP (see FINAL_STEP_MIN_M): even below the minimum step, if after the step
+    # Final step (see FINAL_STEP_MIN_M): even below the minimum step, if after the step
     # the goal is within the arrival tolerance and the robot is in the cell.
     final = (in_target_cell and adv >= P.FINAL_STEP_MIN_M
              and frontier['path_len'] > P.GOAL_REACHED_TOLERANCE_M
@@ -141,12 +141,12 @@ def shortcut_index(robot_xy, path_waypoints, snap, global_map=None, prm=None, ro
     0 = no shortcut. Removes useless turns between PRM nodes.
     The check is the frontier itself on the live data: obstacles, roughness, slope.
 
-    And also the GLOBAL MAP, with the same margin as the PRM: some things are only there --
+    And also the global map, with the same margin as the PRM: some things are only there --
     the spot of a fall, for example, which to the sensors may look like normal terrain
     (that is why the robot fell there). The PRM edges already avoid them; a shortcut
     checked only live could take the robot back over them.
 
-    And the EDGES ALREADY DISCARDED. Without this check the shortcut would re-attach a
+    And the edges already discarded. Without this check the shortcut would re-attach a
     waypoint whose direct link has just been invalidated, and the loop would never get
     out: the leg is discarded, Dijkstra finds a way that still goes through that node via
     the intermediate nodes, and the shortcut points straight at it again. Needs `prm` and
@@ -180,7 +180,7 @@ def shortcut_index(robot_xy, path_waypoints, snap, global_map=None, prm=None, ro
 
 def plan_straight_retreat(robot_xy, robot_yaw, snap, max_dist=P.ROTATION_RETREAT_M):
     """
-    How far the robot can back up IN A STRAIGHT LINE, backwards, without turning.
+    How far the robot can back up in a straight line, backwards, without turning.
 
     It is not oblique walking: moving along its own axis the footprint stays 0.50 m wide
     and the frontier applies the normal FRONTIER_CLEARANCE_M threshold, not the 0.59 of
@@ -212,8 +212,8 @@ def scan_escape_directions(robot_xy, robot_yaw, snap, step_deg=P.ESCAPE_FAN_STEP
       - how much space the safe frontier allows going in a straight line in that direction;
       - whether the robot can turn enough to point its nose there (geometry.rotation_is_clear).
     A direction is USABLE only if both answer yes. The robot does not walk sideways (see
-    ROTATION AND BACK-OFF in config.py), so a wide lane that requires an impossible rotation
-    is NOT a way out, however wide it is.
+    Rotation and back-off in config.py), so a wide lane that requires an impossible rotation
+    is not a way out, however wide it is.
 
     Used to recognize a trap (zero usable directions: robot in a corner, with the lanes
     open behind rotations that cannot be made there) with 24 frontier evaluations, instead
@@ -253,7 +253,7 @@ def describe_escape_fan(dirs, max_rows=4):
 
 def is_trapped(robot_xy, robot_yaw, snap):
     """
-    True if NO direction of the circle is both travelable and reachable by turning: the
+    True if no direction of the circle is both travelable and reachable by turning: the
     condition the user set for going back ("only if it can no longer go forward or
     rotate"), checked in one scan instead of twenty.
     Returns (trapped, dirs) -- dirs is for the log, so the data shows why.
@@ -285,7 +285,7 @@ def arrival_has_exit(snap, arrival_xy, heading, min_advance_m=P.ESCAPE_FAN_MIN_A
         snap.origin_x, snap.origin_y, snap.cell_size, ax, ay,
         timestamp=snap.time, valid=snap.valid, blocked_latch=snap.blocked_latch)
     dirs = scan_escape_directions((ax, ay), float(heading), probe, min_advance_m=min_advance_m)
-    # A turnable direction that stops because THE DATA RUNS OUT counts as an exit: from the
+    # A turnable direction that stops because the data runs out counts as an exit: from the
     # arrival point the robot will see more, and "not seen" does not mean "closed". Without
     # this, in a corridor the forward direction ended at the edge of the scan (0.09 m) and the
     # step was refused; at the third refusal it went anyway, and it was the right step
