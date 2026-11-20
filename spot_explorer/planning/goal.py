@@ -15,7 +15,7 @@ GOAL_CENTRE_FIRST = True
 
 
 # =========================================================================
-# CHOICE OF THE GOAL POINT in a cell
+# Choice of the goal point in a cell
 # =========================================================================
 
 
@@ -29,9 +29,8 @@ def _refused_goals(env, row, col):
 
 def _refuse_goal(env, row, col, x, y, why):
     """
-    Exclude the goal (x, y) of the cell until the end of the mission. On 22-10 16:04
-    node 548 of cell (7,4) was chosen again at every attempt and blocked three times at the
-    same point: the global map gave it free at 0.28 m, the live frontier at 0.24.
+    Exclude the goal (x, y) of the cell until the end of the mission, so the same point is not
+    chosen again at every attempt when the global map and the live frontier disagree on it.
     """
     lst = _refused_goals(env, row, col)
     if any(np.hypot(x - ex, y - ey) < P.RECOVERY_SAME_GOAL_M for ex, ey in lst):
@@ -51,27 +50,25 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
 
     Always discarded (never chosen): the points in `exclude` (already tried in this attempt),
     those occupied in the global map (with safety_margin) and those closer than
-    geometry.PLAN_CLEARANCE_M (0.28) to an obstacle in the live scan or in the learned
+    geometry.PLAN_CLEARANCE_M to an obstacle in the live scan or in the learned
     free space. Among the rest, in order:
       1. not refused by the frontier in this mission (_refuse_goal); refused ones come
          back only if there is nothing else;
-      2. REACHABLE from the robot in the graph (reachable(x, y) -> bool, tried in the order
-         of the following criteria until one answers yes). Falling back on the next ones
-         nearest to the centre when the graph does not get there is not enough: they lie in
-         the same isolated area (on 22-10 16:04 that fallback failed 9 times out of 10). If
+      2. reachable from the robot in the graph (reachable(x, y) -> bool, tried in the order
+         of the following criteria until one answers yes). The points nearest to the centre
+         usually lie in the same isolated area as the centre, so reachability comes first. If
          no point is reachable the best one is chosen anyway, and the attempt fails
          (require_reachable=True: None instead, used by cell_rules to check a cell);
       3. at least TARGET_CELL_BORDER_M from the cell border: border points only after all
-         the others (since 09-11; before, only on a tie in the ring);
+         the others;
       4. nearest to the centre, in rings of 0.25 m (the centre itself, free or unknown, is
          the first): from there the robot sees the whole cell. Within a ring:
-      5. with at least TARGET_CLEARANCE_M (0.38) of free space;
+      5. with at least TARGET_CLEARANCE_M of free space;
       6. seen free before never seen;
       7. nearest to the robot: on a tie, the one on its side of the obstacle.
 
     If no point is left the cell has no valid goal and the function returns
-    (None, None, ...): the caller already treats it as an entry failure and moves on to
-    the logic of the sides not yet tried.
+    (None, None, ...): the caller treats it as a failure of the attempt.
 
     global_map: accumulated global_maps.GlobalGrid, updated with the current scan right
     before this call. If None the centre is used without checks.
@@ -105,8 +102,7 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
 
     # min_clear is the distance edges are planned with (geometry.PLAN_CLEARANCE_M):
     # a goal closer to obstacles would have no edges. The global map declares a cell
-    # occupied only after two observations, so an obstacle just seen is there only
-    # in the live scan (22-10 15:50, cell (0,2)).
+    # occupied only after two observations, so an obstacle just seen is only in the live scan.
     min_clear = geometry.PLAN_CLEARANCE_M
     pref_margin = max(safety_margin, P.TARGET_CLEARANCE_M - geometry.OBSTACLE_THRESHOLD)
     refused = _refused_goals(env, cell_row, cell_col)
@@ -179,17 +175,14 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
         return None, None, [], blocked
 
     step = 0.25
-    # Nearest to the centre first (in rings of `step`): from there the robot sees the whole cell
-    # (04-11 16:10: with the free space first, the goal of (1,2) went 0.94 m from the centre,
-    # against the furniture on the border). The rest only decides within a ring.
-    # A point on the cell border (closer than TARGET_CELL_BORDER_M) comes after all the others,
-    # whatever its ring: the robot stops in front of it, often outside the cell, and the arrival
-    # does not count (ARRIVAL_OUTSIDE_CELL_M assumes a goal at least that far inside). Oct-Nov:
-    # 28% of border goals ended in an arrival against ~40%, and 8 of the 11 goals refused by
-    # the frontier were on the border (09-11 14:53, (0,5): 9 cm from a wall).
+    # Nearest to the centre first (in rings of `step`): from there the robot sees the whole
+    # cell. The rest only decides within a ring. A point on the cell border (closer than
+    # TARGET_CELL_BORDER_M) comes after all the others, whatever its ring: the robot stops in
+    # front of it, often outside the cell, where the arrival does not count
+    # (ARRIVAL_OUTSIDE_CELL_M assumes a goal at least that far inside).
     if GOAL_CENTRE_FIRST:
         rows.sort(key=lambda r: (r['edge'], round(r['dc'] / step), r['tight'], not r['seen'], r['dr']))
-    else:                       # until 04-11: free space, centre, seen, border, then distance
+    else:                       # free space first, then centre, seen, border, distance
         rows.sort(key=lambda r: (r['tight'], not r['center'], not r['seen'], r['edge'],
                                  round(r['dc'] / step), r['dr']))
     fresh = [r for r in rows if not r['refused']]

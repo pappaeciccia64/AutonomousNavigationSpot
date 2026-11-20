@@ -2,14 +2,14 @@
 The planning cycle: scan -> global maps -> edges of the graph -> path -> frontier.
 
 One piece of code for the two ways the robot moves:
-  - the navigation loop of today (CellAttempt, stop-and-go): it runs the steps itself, one
+  - the navigation loop (CellAttempt, stop-and-go): it runs the steps itself, one
     turn at a time, with the robot standing (attempt_scan.py: _fresh_scan, _update_graph,
     _replan);
   - the cruise (continuous motion): CruisePlanner runs the whole cycle in the frontier
     thread (safe_frontier.ArcVerificationTracker.start_planning) at PLAN_PERIOD_S while the
     robot walks, and publishes a plan that the main thread only reads.
 
-While the thread plans, it is the ONLY one touching graph and maps: the main thread sends
+While the thread plans, it is the only one touching graph and maps: the main thread sends
 the motion commands and reads the plans, and takes graph and maps back only after
 stop_planning() (which waits for the cycle running to end).
 """
@@ -33,13 +33,10 @@ from spot_explorer.robot import motion
 from spot_explorer.robot import connection
 
 PLAN_PERIOD_S = 0.4            # one cycle every 0.4 s at most (2.5 Hz)
-# Event-driven planning (switch, off; 19-11, to try on the robot): a cycle starts as soon as
-# the previous one ends (at most every PLAN_EVENT_MIN_PERIOD_S) and a Spot grid already
-# processed is not processed again (the cycle publishes nothing), unless the last one
-# processed is older than PLAN_EVENT_MAX_SKIP_S (plans keep coming if Spot stops renewing).
-# The 0.4 s were ours, not Spot's: the grids came at our request rate, never the same twice
-# (04-11, 09-11). Offline model: plan in force ~0.1 s fresher from the laptop, the same on
-# the CORE (there the cycle is mostly computation). tools/grid_rate_check.py measures how
+# Event-driven planning: a cycle starts as soon as the previous one ends (at most every
+# PLAN_EVENT_MIN_PERIOD_S) and a Spot grid already processed is not processed again (the cycle
+# publishes nothing), unless the last one processed is older than PLAN_EVENT_MAX_SKIP_S, so
+# plans keep coming if Spot stops renewing its grids. tools/grid_rate_check.py measures how
 # often Spot renews them.
 PLAN_EVENT_DRIVEN = False
 PLAN_EVENT_MIN_PERIOD_S = 0.03
@@ -52,8 +49,8 @@ def plan_period():
 # Phases of a cycle, timed for the log: scan download, processing + global maps, edge
 # refresh, Dijkstra, frontier + rotation checks, the rest (bundle, gait terrain).
 PHASES = ('scan', 'maps', 'edges', 'path', 'frontier', 'other')
-# The gait follows the terrain of the first metre of the confirmed stretch, not of all of it
-# (up to 3 m): on 04-11 14:08 it was HARD 48% of the time and changed 239 times in 20 min.
+# The gait follows the terrain of the first metre of the confirmed stretch, the part walked
+# before the next plan, not of all of it (up to 3 m).
 GAIT_LOOKAHEAD_M = 1.0
 PLAN_REPLAN_MARGIN = 0.10      # as in the stop-and-go: the new path must cost 10% less
 CRUISE_BUNDLE_STEP_M = 0.5     # a scan bundle every this many metres walked in cruise
@@ -61,7 +58,7 @@ CRUISE_BUNDLE_REASON_S = 2.0   # and one when the frontier reason changes, at mo
 
 
 # =========================================================================================
-# STEPS SHARED WITH THE NAVIGATION LOOP
+# Steps shared with the navigation loop
 # =========================================================================================
 def scan_into_maps(local_grid, prm, global_map, global_terrain_map, scan, robot_xyyaw,
                    ground_label="scan-step"):
@@ -70,7 +67,7 @@ def scan_into_maps(local_grid, prm, global_map, global_terrain_map, scan, robot_
     the frontier and free-space map. Fills scan (grid_origin_x/y, shape, grad_2d, ...).
     Returns (snapshot, time after the processing, time after the global maps).
 
-    The snapshot must be created ONLY ONCE per scan: make_grid_snapshot also updates the
+    The snapshot must be created only once per scan: make_grid_snapshot also updates the
     temporal obstacle filter.
     """
     robot_x, robot_y, robot_yaw = robot_xyyaw
@@ -218,7 +215,7 @@ class CruisePlanner:
     """
     One call = one planning cycle while the robot walks along path_ids towards goal_id:
 
-      1. fresh scan, robot pose from the SAME snapshot of transforms as the grid;
+      1. fresh scan, robot pose from the same snapshot of transforms as the grid;
       2. global maps, local data into the PRM, snapshot, free-space map (scan_into_maps);
       3. where the robot is along the path: the edge it is walking (prev -> next) is
          committed, the next node becomes the robot node (centre of the refresh);
@@ -270,20 +267,19 @@ class CruisePlanner:
         # (env, row, col) of the target cell: every plan says how much of it the global map
         # has seen ('cell_seen', see cells.cell_seen_fraction). None = not computed.
         self.seen_cell = None
-        # The next cell prepared HERE, in the planning thread (step C, attempt_cruise):
+        # The next cell is prepared here, in the planning thread (see attempt_cruise):
         # the main thread sets switch_job (a callable job(planner, scan, robot) -> dict), the
         # next cycle runs it once on its fresh scan, before planning, and the plan carries its
         # result as 'switch'. The job may change goal_id, path_ids and seen_cell.
         self.switch_job = None
-        # Its result stays in EVERY plan until the main thread has applied it (switch_info,
+        # Its result stays in every plan until the main thread has applied it (switch_info,
         # cleared by the main thread; 'id' to apply it once): the tracker publishes only the
-        # last plan, and on 09-11 14:30 and 14:36 the plan with the switch was overwritten by
-        # the next one before the main thread read it (robot still 17 s, command expired).
+        # last plan, so a plan carrying the switch could be overwritten before it is read.
         self.switch_info = None
         self._switch_seq = 0
         # No path to the goal (attempt_cruise._on_no_path): job(planner, scan, robot, prev, next)
         # -> dict; the thread itself chooses another goal or the next cell, the plan carries it
-        # as 'switch' (as switch_job). None = the main thread handles the 'no_path' as before.
+        # as 'switch' (as switch_job). None = the main thread handles the 'no_path'.
         self.no_path_job = None
         self.target_cell, self.tried_goals, self.repicks = None, [], 0
         # Times of the cycle, for the log: seconds per phase (PHASES) of every cycle, and the
@@ -432,8 +428,8 @@ class CruisePlanner:
         """A bundle like those of the stop-and-go (decision 'cruise', target = end of the
         confirmed stretch), every CRUISE_BUNDLE_STEP_M walked, and when the reason of the
         frontier changes (at most one every CRUISE_BUNDLE_REASON_S): turning on the spot or held
-        by the frontier the robot does not walk, and those were the scans missing in the
-        viewer (04-11 14:08, cell (0,2): 15 s of 'slope' stops, no bundle). Never raises."""
+        by the frontier the robot does not walk, and those scans would be missing. Never
+        raises."""
         if self.bundle is None or not P.SAVE_SCAN_BUNDLES:
             return
         now = time.time()
@@ -510,9 +506,8 @@ class CruisePlanner:
             try:
                 lo, la, ro = self.prm.sample_terrain_between_points(x1, y1, x2, y2, node_idx1=n1, node_idx2=n2)
             except Exception as e:
-                # A stretch whose terrain cannot be read is not flat ground: the most careful
-                # gait (until 17-11 it was skipped, read as flat, and the gait could get lighter
-                # exactly there). Said once per planner, counted every time.
+                # A stretch whose terrain cannot be read is not flat ground: it gets the most
+                # careful gait. Logged once per planner, counted every time.
                 MISSION_STATS['terrain_errors'] = MISSION_STATS.get('terrain_errors', 0) + 1
                 if not getattr(self, '_terrain_error_said', False):
                     self._terrain_error_said = True
@@ -531,20 +526,15 @@ def _pose_of_scan(scan):
     return float(tf.position.x), float(tf.position.y), yaw
 
 
-# WHOLE EDGES (11-11, user's rule, already asked by Marco on 08-10): an edge is walked only
-# if it is confirmed free for its whole length, with its own padding (the clearance of the
-# rule, geometry.FRONTIER_CLEARANCE_M), on the scan of the cycle. The confirmed stretch ends at
-# the last node reached by edges confirmed whole -- the first point not free or not seen along
-# the path is beyond it -- and NOT half a body + margin (0.65 m) before that point: the nose
-# beyond a node is needed only where the robot stops, and it stops for good only at the goal,
-# where the 0.65 m stay. Elsewhere, if it ever stops on a node: the edge keeps 0.30 m around
-# it, a sharp corner is a rotation checked with the whole body (CruisePlanner._turns_within),
-# and Spot's body obstacle avoidance is on. Only the edge the robot is already on may be
-# confirmed in part (an obstacle appearing: the frontier with the nose, as before).
-# Tried first (10-11) with the 0.65 m beyond every node: a whole edge of 1.25 m needed data
-# 1.9 m beyond the node ahead, at the limit of Spot's grid (1.92 m), and in test_cruise the
-# robot stopped at almost every node. Until 11-11 the stretch went as far as the frontier
-# confirmed (safe_frontier.allowed_advance): mission/legacy/__init__.py.
+# Whole edges: an edge is walked only if it is confirmed free for its whole length, with the
+# clearance of the rule (geometry.FRONTIER_CLEARANCE_M), on the scan of the cycle. The confirmed
+# stretch ends at the last node reached by edges confirmed whole (the first point not free or not
+# seen along the path is beyond it), not half a body + margin (0.65 m) before that point: the
+# nose beyond a node matters only where the robot stops for good, at the goal, where the 0.65 m
+# stay. If it stops on a node elsewhere, the edge keeps 0.30 m around it, a sharp corner is a
+# rotation checked with the whole body (CruisePlanner._turns_within) and Spot's body obstacle
+# avoidance is on. Only the edge the robot is already on may be confirmed in part (an obstacle
+# appearing: the frontier with the nose).
 
 
 def walk_advance(polyline, frontier):
