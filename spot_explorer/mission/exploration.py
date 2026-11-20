@@ -13,7 +13,7 @@ from spot_explorer.robot import connection
 
 
 from spot_explorer import config as P
-from spot_explorer.records import HANDOFF, MISSION_STATS, visualize_grid_with_candidates
+from spot_explorer.records import HANDOFF, MISSION_STATS, append_csv, visualize_grid_with_candidates
 from spot_explorer.mission import attempt_common, cell_attempt
 from spot_explorer.mission import cell_rules
 
@@ -30,6 +30,12 @@ from spot_explorer.mission import cell_rules
 # already seen from where the robot stands.
 SEEN_BEFORE_MOVING = True
 
+
+# [COVERAGE] (see Mission._log_coverage): a line every COVERAGE_STEP of the mission area seen;
+# the time left is estimated to COVERAGE_TARGET (the area never fully seen: behind walls, in
+# obstacles).
+COVERAGE_STEP = 0.05
+COVERAGE_TARGET = 0.95
 
 class Mission:
     """The mission cell by cell, after start-up (see run.py): explore() with the cell rules
@@ -68,6 +74,7 @@ class Mission:
         self._attempt_count = 0               # attempts to enter a cell
         self._closed_logged = None
         self._area_points = None
+        self._coverage = []                   # (minutes, area seen) of every [COVERAGE] line
 
     # --- Shared pieces -----------------------------------------------------------------------
 
@@ -98,6 +105,15 @@ class Mission:
                   f"waypoint of its own.")
         HANDOFF.mark("waypoint of the visited cell")
         self.env.mark_cell_visited(row, col)
+        # Cells done while walking: the coverage line without waiting for the end of the
+        # attempt. The map may be in the middle of an update by the planning thread: a failed
+        # reading is skipped, it never touches the move.
+        t0 = getattr(self, '_t0', None)
+        if t0 is not None:
+            try:
+                self._log_coverage(self._seen_area_pct(), (time.time() - t0) / 60.0)
+            except Exception:
+                pass
 
     def explore(self):
         """
@@ -275,9 +291,34 @@ class Mission:
                     pts.append(np.c_[cx + ox.ravel() * c - oy.ravel() * s_,
                                      cy + ox.ravel() * s_ + oy.ravel() * c])
             self._area_points = np.vstack(pts)
-        res = gm.resolution
-        keys = np.floor(self._area_points / res).astype(int)
-        return sum(1 for gx, gy in keys if (gx, gy) in gm.grid) / len(keys)
+        pts = self._area_points
+        return float(np.count_nonzero(gm.known_many(pts[:, 0], pts[:, 1]))) / len(pts)
+
+    def _log_coverage(self, area, minutes, final=False):
+        """[COVERAGE] line and coverage.csv: the area of the mission seen, every time it grows by
+        COVERAGE_STEP and at the end, with the growth since the last line and since the start
+        and the time to COVERAGE_TARGET at the mean rate so far. Does not depend on the cells."""
+        if area is None:
+            return
+        last = self._coverage[-1] if self._coverage else None
+        if not final and last is not None and area - last[1] < COVERAGE_STEP:
+            return
+        first = self._coverage[0] if self._coverage else (minutes, area)
+        self._coverage.append((minutes, area))
+        gain, span = area - first[1], minutes - first[0]
+        rate = gain / span if span > 0 else None                  # fraction per minute
+        parts = []
+        if last is not None:
+            parts.append(f"+{100 * (area - last[1]):.0f} points in {minutes - last[0]:.1f} min")
+        if span > 0:
+            parts.append(f"since the start +{100 * gain:.0f} in {span:.1f} min")
+        if not final and rate and area < COVERAGE_TARGET:
+            parts.append(f"~{(COVERAGE_TARGET - area) / rate:.0f} min to {100 * COVERAGE_TARGET:.0f}%")
+        print(f"[COVERAGE] {'End: ' if final else ''}area seen {100 * area:.0f}%"
+              + (f" ({'; '.join(parts)})" if parts else ""))
+        closed, _v, _b, total = self._cell_counts()
+        append_csv("coverage.csv", ['time', 'minutes', 'seen_pct', 'closed_cells', 'total_cells'],
+                   [(time.time(), minutes, 100 * area, closed, total)])
 
     def _log_progress(self, final=False):
         """
@@ -288,14 +329,15 @@ class Mission:
         (report, mission_summary.json): no decision depends on it.
         """
         closed, visited, blocked, total = self._cell_counts()
-        if not final and closed == self._closed_logged:
-            return
-        self._closed_logged = closed
         try:
             area = self._seen_area_pct()
         except Exception:
             area = None
         minutes = (time.time() - self._t0) / 60.0 if self._t0 is not None else 0.0
+        self._log_coverage(area, minutes, final=final)
+        if not final and closed == self._closed_logged:
+            return
+        self._closed_logged = closed
         done_here = closed - self._closed_at_start
         per_cell = minutes / done_here if done_here > 0 else None
         # The last charge read by the battery monitor (battery.py), without an extra reading.
@@ -319,7 +361,8 @@ class Mission:
             'visited': visited, 'blocked': blocked,
             'seen_area': None if area is None else round(100.0 * area, 1),
             'minutes': round(minutes, 1), 'minutes_per_cell': None if per_cell is None else round(per_cell, 2),
-            'battery': battery, 'final': bool(final)}
+            'battery': battery, 'final': bool(final),
+            'coverage': [(round(m, 2), round(100.0 * a, 1)) for m, a in self._coverage]}
 
     def final_scan(self):
         """The area around the last position, before going back: it goes into the global maps."""

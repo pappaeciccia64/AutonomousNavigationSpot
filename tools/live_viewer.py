@@ -51,7 +51,7 @@ sys.path.insert(0, HERE)                                     # the spot_explorer
 from spot_explorer.legacy import modern, modern_log_line     # noqa: E402
 MOSAIC_RES = 0.10           # side of the mosaic cells, m
 REFRESH_S = 1.0             # how often to re-read, live
-LOG_TAGS = ('[PROGRESS]', '[TARGET]', '[ATTEMPT]', '[VISITED]', '[BLOCKED]', '[BLOCK]',
+LOG_TAGS = ('[PROGRESS]', '[COVERAGE]', '[TARGET]', '[ATTEMPT]', '[VISITED]', '[BLOCKED]', '[BLOCK]',
             '[EARLY]', '[REPLAN]', '[REPLAN FAILED]', '[ARRIVAL]', '[GOAL]', '[STOP]',
             '[GRAPHNAV]', '[BATTERY]', '[END]', '[CELL FRONTIER]', '[STALL]', '[EMERGENCY]',
             '[ALMOST]', '[FINAL STEP]', '[RETURN]', '[MULTINODE]', '[DEFER]', '[PRECHECK]', '[WP0]')
@@ -201,6 +201,8 @@ class LiveState:
         text = modern_log_line(text)          # old missions: Italian tags and phrases
         if text.startswith('[PROGRESS]'):
             s['progress'] = text[len('[PROGRESS] '):]
+        elif text.startswith('[COVERAGE]'):
+            s['coverage'] = text[len('[COVERAGE] '):]
         elif text.lstrip()[:1].isdigit() and 'min elapsed' in text:
             s['time'] = text.strip()
         elif text.startswith('[ATTEMPT]'):
@@ -392,6 +394,8 @@ def draw(fig, ax_map, ax_txt, st, follow, until=None):
     s = st.log_state
     if 'progress' in s:
         lines.append(f"Progress         {s['progress']}")
+    if 'coverage' in s:
+        lines.append(f"Coverage         {s['coverage']}")
     if 'time' in s:
         lines.append(f"                 {s['time']}")
     if 'battery' in s:

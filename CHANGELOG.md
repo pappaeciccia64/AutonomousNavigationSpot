@@ -8,6 +8,13 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-20 (coverage of the mission area: the progress without the cells)
+
+- **`[COVERAGE]` line** (`exploration.Mission._log_coverage`): the mission area seen in the global map, every time it grows by `COVERAGE_STEP` (5 points) and at the end, with the growth since the last line and since the start and the minutes to `COVERAGE_TARGET` (95%) at the mean rate so far. It does not depend on the cells (the frontier mode has no cells to count); also when a cell is done while walking. The `[PROGRESS]` line of the cells is unchanged.
+- **`coverage.csv`** in the mission log folder (time, minutes, % seen, closed cells), and the list in `mission_summary.json` (`mission_stats.progress.coverage`).
+- **The area seen counted on the raster of the global map** (`known_many`) instead of point by point on the dictionary: same fraction (`tests/test_coverage.py`, 5 random maps), a few ms on large grids.
+- `tools/mission_report.py`: a `Coverage:` line (area seen at the end, when it reached 25, 50, 75%), from the summary or from the `[COVERAGE]` lines; `tools/live_viewer.py` shows the last `[COVERAGE]` line.
+
 ## 2026-11-24 afternoon (cruise: the PRM path as usual, from the robot only when the edge walked is closed)
 
 - **From the robot only when needed** (`CruisePlanner.__call__`): Dijkstra from the next

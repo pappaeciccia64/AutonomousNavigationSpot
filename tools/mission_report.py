@@ -612,6 +612,9 @@ def report(name):
         lines = [modern_log_line(l) for l in log.splitlines() if '[PROGRESSO]' in l or '[PROGRESS]' in l]
         if lines:
             print("Progress (last line of the log): " + lines[-1].split('[PROGRESS]', 1)[1].strip())
+    cov = coverage_summary((pr or {}).get('coverage'), log)
+    if cov:
+        print(cov)
     # Mission switches (since 21-10): from the summary, or from the [CONFIG] line of the log.
     sw = (summary or {}).get('switches')
     if sw:
@@ -759,6 +762,30 @@ def one_line(name):
     ret = f"{r['time_s']:4d} s" if r.get('time_s') is not None else "   - "
     return (f"{name}  {dur}  cells {c['visited']:2d} visited {c['blocked']:2d} blocked  "
             f"legs {len(seg):3d}  return {ret}  scans {len(f['scans']):3d}")
+
+
+def coverage_summary(points, log):
+    """'Coverage: ...' -- when the area seen reached 25, 50, 75% and how much in the end, from
+    the progress of the summary ([(minutes, %)]) or from the [COVERAGE] lines of the log
+    (since 20-11). None if neither is there."""
+    if not points:
+        pts, t0 = [], None
+        for line in log.splitlines():
+            m = re.match(r'^(\d\d):(\d\d):(\d\d(?:\.\d+)?) \[COVERAGE\] (?:End: )?area seen (\d+)%', line)
+            if m:
+                t = int(m.group(1)) * 60 + int(m.group(2)) + float(m.group(3)) / 60.0
+                t0 = t if t0 is None else t0
+                pts.append((t - t0, float(m.group(4))))
+        points = pts
+    if not points:
+        return None
+    marks = []
+    for q in (25, 50, 75):
+        hit = next((m for m, a in points if a >= q), None)
+        marks.append(f"{q}% at {hit:.1f} min" if hit is not None else f"{q}% never")
+    m_end, a_end = points[-1]
+    return (f"Coverage: area seen {a_end:.0f}% after {m_end:.1f} min ({', '.join(marks)}; "
+            f"{len(points)} [COVERAGE] lines, coverage.csv)")
 
 
 def main():
