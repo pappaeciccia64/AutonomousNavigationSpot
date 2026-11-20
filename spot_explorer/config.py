@@ -247,7 +247,6 @@ GOAL_REPICK_CANDIDATES = 3
 # Failed replan (the updated graph has no path to the goal): if from the robot the graph still
 # reaches at least REPLAN_FAIL_ROBOT_FREE_NODES nodes, the goal is isolated, not the robot, and
 # another goal with a path is chosen at once (CellAttempt._repick_goal).
-REPICK_ON_REPLAN_FAIL = True
 REPLAN_FAIL_ROBOT_FREE_NODES = 6
 
 # ==================================================================

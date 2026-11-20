@@ -917,7 +917,7 @@ class CruiseSteps:
         row, col = planner.target_cell
         prm.set_robot_node(next_id, 0.0)
         n_free = prm.reachable_count(next_id, P.REPLAN_FAIL_ROBOT_FREE_NODES)
-        if not P.REPICK_ON_REPLAN_FAIL or n_free < P.REPLAN_FAIL_ROBOT_FREE_NODES:
+        if n_free < P.REPLAN_FAIL_ROBOT_FREE_NODES:
             planner.no_path_job = None
             return dict(kind='end', reason=(f"no path from node {next_id}, and from there the graph reaches only "
                                             f"{n_free} nodes: the robot is shut in, not the goal"))

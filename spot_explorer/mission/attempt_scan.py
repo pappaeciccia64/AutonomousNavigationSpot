@@ -270,15 +270,14 @@ class ScanSteps:
     def _replan(self, touched_nodes):
         """Dijkstra from the robot node to the goal on the updated graph; the path changes
         only if the new one costs at least 10% less. Without a path, new goal if the goal is
-        the one isolated (REPICK_ON_REPLAN_FAIL)."""
+        the one isolated."""
         current_plan_ids = [self.robot_node_id] + [w[0] for w in self.path_waypoints]
         chosen_path_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id,
                                                        current_path_ids=current_plan_ids, margin=0.10)
 
         if chosen_path_ids is None:
             n_free = self.prm_graph.reachable_count(self.robot_node_id, P.REPLAN_FAIL_ROBOT_FREE_NODES)
-            if (P.REPICK_ON_REPLAN_FAIL and self.goal_repicks < P.MAX_BLOCK_REPLANS
-                    and n_free >= P.REPLAN_FAIL_ROBOT_FREE_NODES):
+            if self.goal_repicks < P.MAX_BLOCK_REPLANS and n_free >= P.REPLAN_FAIL_ROBOT_FREE_NODES:
                 # From the robot the graph still goes somewhere: it is the goal that has been
                 # left isolated. Another one with a path is searched at once; if there is
                 # none, the previous plan stays as below.
