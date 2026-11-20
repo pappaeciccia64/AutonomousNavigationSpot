@@ -170,7 +170,7 @@ class GridSnapshot:
         self.robot_y = float(robot_y)
         self.time = time.time() if timestamp is None else timestamp
         self.valid = valid      # is_valid 2D (None = all reliable): for the slope profile
-        self.plane_field = None  # slopes.PLANE_SLOPES: computed at the first use (_plane_field)
+        self.plane_field = None  # computed at the first use (_plane_field)
 
 
 def make_grid_snapshot(cells_obstacle_dist, rough_values, is_valid, terrain_valid_raw,
@@ -211,7 +211,7 @@ def make_grid_snapshot(cells_obstacle_dist, rough_values, is_valid, terrain_vali
 
 
 def _plane_field(snap):
-    """Plane gradient field of the snapshot (slopes.PLANE_SLOPES), on the cells usable as
+    """Plane gradient field of the snapshot, on the cells usable as
     terrain (spot_grid.slope_usable_mask, as the PRM), once per snapshot."""
     if snap.plane_field is None:
         t = np.asarray(snap.terrain, dtype=np.float64)
@@ -428,17 +428,12 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
             free_len = min(L, dist - s_start)
             if free_len >= slopes.FRONTIER_SLOPE_MIN_LENGTH_M:
                 f = free_len / L
-                if slopes.PLANE_SLOPES:
-                    # The same estimate as the PRM (the plane reads lower than the height
-                    # differences: with these the frontier would refuse edges the PRM accepted).
-                    gx, gy = _plane_field(snap)
-                    long_s, lat_s, has = slopes.plane_slope_along(
-                        gx, gy, snap.origin_x, snap.origin_y, snap.cell_size,
-                        x1, y1, x1 + f * (x2 - x1), y1 + f * (y2 - y1))
-                else:
-                    long_s, lat_s, has = slopes.compute_arc_slope_profile(
-                        snap.terrain, snap.origin_x, snap.origin_y, snap.cell_size,
-                        x1, y1, x1 + f * (x2 - x1), y1 + f * (y2 - y1), valid_2d=snap.valid)
+                # The same estimate as the PRM (the plane), so the frontier does not refuse edges
+                # the PRM accepted.
+                gx, gy = _plane_field(snap)
+                long_s, lat_s, has = slopes.plane_slope_along(
+                    gx, gy, snap.origin_x, snap.origin_y, snap.cell_size,
+                    x1, y1, x1 + f * (x2 - x1), y1 + f * (y2 - y1))
                 if has and max(long_s, lat_s) > slopes.SLOPE_THRESHOLD:
                     reason, value = 'slope', float(max(long_s, lat_s))
                     dist, stop_xy = s_start, (x1, y1)

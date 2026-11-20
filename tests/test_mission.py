@@ -21,8 +21,7 @@ Everything else is the real code, including RecordingInterface from spot_explore
 
 The worlds have a 3 x 3 grid of 3 m cells, the robot starts in the centre of (0,0) looking
 along +x (columns ahead, rows to the left). In all of them cell (2,2) is closed by walls on
-all sides and (1,1) has an obstacle in the centre, so its goal ends up near the border and
-the robot arrives just outside the cell.
+all sides and (1,1) has an obstacle in the centre.
   A  a wall between column 1 and 2 on row 0: (0,2) is entered from (1,2); the check before
      the GraphNav move triggers.
   B  the longer wall and an obstacle inside (1,2): confirmed blocks and returns with GraphNav.
@@ -60,19 +59,9 @@ from spot_explorer.planning import safe_frontier
 from spot_explorer.perception import low_obstacles   # noqa: E402
 from spot_explorer.perception import slopes   # noqa: E402
 from spot_explorer.mission import mission_prm   # noqa: E402
-# The failures of these worlds are scripted by attempt number ([FAKE] attempt N failed on
-# purpose): a different sequence of attempts moves them onto other cells and the features to
-# check (fall during the GraphNav trip, return after the block) no longer happen. The plane
-# slopes and the shared neighbour cells (04-11) change the sequence: off here, the paths and
-# the slopes are checked by test_e2e_loop and test_cruise.
-slopes.PLANE_SLOPES = False
-mission_prm.PLAN_ALSO_SHARED_NEIGHBOUR_CELLS = False
-# Same for the goal nearest to the centre and the cells seen from outside (04-11 16:10).
 from spot_explorer.planning import goal as goal_choice   # noqa: E402
 from spot_explorer.mission import cell_attempt as _cell_attempt   # noqa: E402
 from spot_explorer.mission import attempt_common   # noqa: E402
-goal_choice.GOAL_CENTRE_FIRST = False
-attempt_common.CELL_SEEN_EXPLORED = False
 from spot_explorer.robot import battery
 from spot_explorer.mission import attempt_cruise, attempt_legs, cell_attempt, exploration
 from spot_explorer.mission import run as mission_run
@@ -505,30 +494,21 @@ def _check_cruise_mission(r):
           "no exception, also in the planning thread")
 
 
-def _check_world(name, r, rules=True):
-    """rules: the general cell rules (cell_rules, 09-11; False: legacy/side_rules.py), where the closed cell
-    (2,2) is unreachable (no way in the graph) or set aside; False: the sides tried, where it
-    ends blocked after every side failed."""
+def _check_world(name, r):
+    """A whole mission in world A or B: every reachable cell visited, the closed cell (2,2)
+    unreachable (no way in the graph) or set aside, GraphNav trips and the start fiducial."""
     log = r['log']
     grid = log.split("--- Cell map ---")[-1].splitlines()[1:ROWS + 1]
     cells = [line.split()[1:] for line in grid]
     visited = sum(v == '1' for row in cells for v in row)
     check(visited == 8, f"all 8 reachable cells visited (visited {visited})")
-    if rules:
-        end = [l for l in log.splitlines() if '[END] Exploration finished' in l]
-        check(cells and cells[2][2] == '0' and end and '(2,2)' in end[0]
-              and ('unreachable' in end[0] or 'set aside' in end[0]),
-              f"the closed cell (2,2) is unreachable or set aside, said in [END] ({end[:1]})")
-        check("[PROGRESS] End of exploration: 8/9 cells closed (89%): 8 visited, 0 blocked" in log,
-              "final progress: 8/9 cells closed, 8 visited")
-    else:
-        check(cells and cells[2][2] == '-1', "the closed cell (2,2) is blocked")
-    check("[GOAL] The robot is outside cell (1,1)" in log,
-          "in (1,1) the arrival counts with the robot just outside the cell")
+    end = [l for l in log.splitlines() if '[END] Exploration finished' in l]
+    check(cells and cells[2][2] == '0' and end and '(2,2)' in end[0]
+          and ('unreachable' in end[0] or 'set aside' in end[0]),
+          f"the closed cell (2,2) is unreachable or set aside, said in [END] ({end[:1]})")
+    check("[PROGRESS] End of exploration: 8/9 cells closed (89%): 8 visited, 0 blocked" in log,
+          "final progress: 8/9 cells closed, 8 visited")
     check(len(r['gn'].trips) >= 2, f"GraphNav moves: {len(r['gn'].trips)}")
-    if not rules:
-        check("[PROGRESS] End of exploration: 9/9 cells closed (100%): 8 visited, 1 blocked" in log,
-              "final progress: 9/9 cells closed, 8 visited and 1 blocked")
     lines = [l for l in log.splitlines() if '[PROGRESS]' in l and 'End' not in l]
     closed = [int(l.split('[PROGRESS] ')[1].split('/')[0]) for l in lines]
     check(closed == sorted(set(closed)), f"one [PROGRESS] line for every additional closed cell: {closed}")
@@ -538,8 +518,6 @@ def _check_world(name, r, rules=True):
           f"GraphNav trips arriving turned towards the cell ({len(r['gn'].headings)})")
     check(len(r['gn'].headings) < len(r['gn'].trips),
           "the return to wp_0 keeps the waypoint heading")
-    if name == 'A' and not rules:
-        check("[PRECHECK]" in log, "the check before the GraphNav move triggers")
     if name == 'A':
         check("[FIDUCIAL] Starting fiducial: tag 7 at 1.00 m, behind" in log,
               "starting fiducial seen behind the robot, any ID")
@@ -557,9 +535,9 @@ def _check_world(name, r, rules=True):
 
 
 def _check_rules_failures(r):
-    """World C with the general cell rules: the forced failures count against the cells with
-    their entry, a cell is set aside after MAX_FAILURES, the fall during the GraphNav trip is a
-    failure, the mission still ends with the summary of the cells left."""
+    """World C: the forced failures count against the cells with their entry, a cell is set
+    aside after MAX_FAILURES, the fall during the GraphNav trip is a failure, the return to wp_0
+    stuck near the start, the mission still ends with the summary of the cells left."""
     from spot_explorer.mission import cell_rules
     log = r['log']
     check("[CELL RULES] Cell (0,1) failed (attempt failed), the robot in the cell: 1 failure" in log,
@@ -569,21 +547,12 @@ def _check_rules_failures(r):
     check("[END] Exploration finished" in log and "[PROGRESS] End of exploration" in log,
           "the end says which cells are left and why")
     check(len(log.split('[CELL RULES] Next:')) < 40, "no endless loop of choices")
-
-
-def _check_failures(r):
-    log = r['log']
     check("return to wp_0: arrived" not in log
           and "Return to wp_0 NOT successful but near: stopped 0.60 m from wp_0 (reason: blocked (STUCK)" in log,
           "return to wp_0 stopped at 0.60 m: NOT successful, but near")
     check("[DRIFT] return to wp_0 (stopped nearby)" in log, "drift measured even when stopped near wp_0")
     check("Return to wp_0 failed: the robot sits down" in log, "the robot sits down where it is")
-    check("[RECOVERY] Found an alternative path" in log, "new attempt right after the recovery")
-    check("[FAIL] The alternative path failed too" in log, "new attempt failed: side marked")
-    check("[SKIP] No valid goal point" in log, "no goal point in the recovery")
-    check("[FALL] Got up after the move with GraphNav" in log, "fall during the trip")
-    check("[PROGRESS] End of exploration: 9/9 cells closed" in log and "SKIP-ROUND" not in log,
-          "no cell lost from the frontier: every deferred cell retried from the other sides")
+    check("[FALL] Got up after the move with GraphNav" in log, "fall during the trip: the robot gets up")
 
 
 def _check_emergency():
@@ -709,43 +678,6 @@ def _check_seen_before_moving():
           "the [SEEN] lines say where the robot is")
 
 
-def _check_cell_choice():
-    """
-    The case of 28-10 13:50, 8 x 7 grid of 2 m: (7,2) was visited with the robot just
-    outside, in (6,3), and (7,1) had already been tried from the side of (6,1). The robot
-    must look for the neighbours from (7,2), and approach (7,1) from (7,2), not again from
-    (6,1) (before: a jump, then the cell dropped out of the frontier).
-    """
-    print("\nCell choice, old rules of the sides (legacy/side_rules.py): the case of 13:50 (cells (7,1) and (7,2))")
-    from spot_explorer.mission import cells
-    from spot_explorer.mission.legacy import side_rules       # the sides tried: adds their bookkeeping
-    env = cells.EnvironmentMap(rows=8, cols=7, cell_size=2.0)
-    with contextlib.redirect_stdout(io.StringIO()):
-        env.set_origin(0.0, 0.0, 0.0)
-        for r_ in range(8):
-            for c_ in range(7):
-                if (r_, c_) not in ((7, 0), (7, 1)):
-                    env.mark_cell_visited(r_, c_)
-        env.mark_cell_side_explored(7, 1, env.get_side_bit_facing_origin(6, 1, 7, 1))
-    wps = {(r_, c_): {'id': f"wp_{r_}_{c_}", 'x': 2.0 * c_, 'y': 2.0 * r_}
-           for r_ in range(8) for c_ in range(7) if env.map[r_][c_] == 1}
-    ri = NS(get_manual_waypoint_by_cell=lambda r_, c_: wps.get((r_, c_)),
-            find_nearest_waypoint_cell_to_target=lambda *a: (6, 1))
-    m = side_rules.SideRulesMission.__new__(side_rules.SideRulesMission)
-    m.env, m.recordingInterface, m.robot_state_client = env, ri, None
-    m._last_visited = (7, 2)
-    T.ROBOT.x, T.ROBOT.y = 4.0, 12.75                 # 0.25 m outside (7,2), in (6,2)
-    with contextlib.redirect_stdout(io.StringIO()):
-        cell = m._robot_cell()
-        start_xy = m._start_cell_for(7, 1, wps)
-    check(cell == (7, 2), f"robot just outside the just visited (7,2): robot cell {cell}")
-    check(start_xy == (7, 2), f"approach to (7,1) from the side not yet tried: from {start_xy}")
-    T.ROBOT.x, T.ROBOT.y = 4.0, 11.5                  # well inside (6,2): the real cell counts
-    with contextlib.redirect_stdout(io.StringIO()):
-        cell = m._robot_cell()
-    check(cell == (6, 2), f"robot far from the visited cell: the one it is in counts ({cell})")
-
-
 def _check_cell_on_the_way():
     """
     cell_rules.EXPLORE_CELL_ON_THE_WAY: 2 x 3 cells of 1 m, the robot in (0,0); (0,0), (1,0),
@@ -824,26 +756,18 @@ def _check_battery(r):
 
 if __name__ == '__main__':
     from spot_explorer.mission import cell_rules
-    from spot_explorer.mission.legacy import side_rules
-    _MISSION = exploration.Mission
-    for rules in (True, False):
-        # The old rules from mission/legacy/side_rules.py, as tools/run_legacy_mission.py does.
-        exploration.Mission = _MISSION if rules else side_rules.SideRulesMission
-        tag = "general cell rules" if rules else "OLD rules (sides tried)"
-        for name, walls in WORLDS.items():
-            print(f"\nWhole mission in world {name}, {tag}, fake robot and GraphNav: 3 x 3 cells of 3 m.")
-            r = run(walls, f"MISSION_{name}" + ("" if rules else "_old"),
-                    fiducial=(7, START[0] - 1.0, START[1]) if name == 'A' else None)
-            _check_common(r)
-            _check_world(name, r, rules)
-            shutil.rmtree(r['root'], ignore_errors=True)
-        print(f"\nWhole mission in world C, {tag}: B with forced failures.")
-        with _with_failures():
-            r = run(WORLDS['B'], "MISSION_C" + ("" if rules else "_old"), stuck_wp0_m=0.6)
-        _check_common(r, return_ok=False)
-        _check_rules_failures(r) if rules else _check_failures(r)
+    for name, walls in WORLDS.items():
+        print(f"\nWhole mission in world {name}, fake robot and GraphNav: 3 x 3 cells of 3 m.")
+        r = run(walls, f"MISSION_{name}", fiducial=(7, START[0] - 1.0, START[1]) if name == 'A' else None)
+        _check_common(r)
+        _check_world(name, r)
         shutil.rmtree(r['root'], ignore_errors=True)
-    exploration.Mission = _MISSION
+    print("\nWhole mission in world C: B with forced failures.")
+    with _with_failures():
+        r = run(WORLDS['B'], "MISSION_C", stuck_wp0_m=0.6)
+    _check_common(r, return_ok=False)
+    _check_rules_failures(r)
+    shutil.rmtree(r['root'], ignore_errors=True)
     print("\nWhole mission in world A IN CRUISE: cell rules, next cell in the planning thread, "
           "first turn from the thread.")
     r = run(WORLDS['A'], "MISSION_A_cruise", cruise=True)
@@ -866,7 +790,6 @@ if __name__ == '__main__':
     shutil.rmtree(r['root'], ignore_errors=True)
     _check_start()
     _check_seen_before_moving()
-    _check_cell_choice()
     _check_cell_on_the_way()
     _check_emergency()
     print("\nWhole mission in world H: open area, the robot starts in the CENTRE of the grid.")

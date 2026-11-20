@@ -6,7 +6,7 @@ import os
 import time
 from spot_explorer.perception.geometry import ROBOT_HALF_WIDTH_M
 from spot_explorer.perception import slopes
-from spot_explorer.perception.slopes import (LATERAL_SLICE_HALF_WIDTH_M, MIN_ARC_SAMPLE_FRACTION, _no_slope_data, _slope_profile_from_sampler, arc_slope_profiles_batch)
+from spot_explorer.perception.slopes import MIN_ARC_SAMPLE_FRACTION
 from spot_explorer.perception.spot_grid import slope_usable_mask
 from spot_explorer.records import MISSION_CTX, timing_add
 
@@ -571,7 +571,7 @@ class GlobalTerrainGrid:
     height_sum = property(lambda self: _counted_view(self._h_r, 'sum', 'n'))
     height_count = property(lambda self: _counted_view(self._h_r, 'n', 'n'))
 
-    # --- Slope with the plane (slopes.PLANE_SLOPES) ---------------------------------------
+    # --- Slope with the plane ---------------------------------------------------------------
     # The same estimate as the live scan (edge_evaluation.compute_arc_slope_profile): the plane
     # fitted in a window of +/-PLANE_EDGE_HALF_WINDOW_M around every cell, here on the mean
     # heights of the map; along the edge the 90th percentile of the slope along and across it.
@@ -648,90 +648,29 @@ class GlobalTerrainGrid:
         return slopes.plane_slope_profiles_lookup(self._plane_lookup, self.resolution, x1, y1, x2, y2)
 
     def compute_arc_slope_profiles_batch(self, x1, y1, x2, y2, perp_sample_spacing_m=0.10, body_ext_m=0.0):
-        """compute_arc_slope_profile of the global map for many edges (arrays), same early
-        exits. See arc_slope_profiles_batch for the result format."""
+        """The plane slope of the global map for many edges (arrays): rows (long, lat, has, long,
+        lat, has), the last three with the body. The spacing and extension arguments are those
+        of slopes.compute_arc_slope_profiles_batch, which this replaces outside the window; the
+        plane field already covers the body."""
         x1 = np.asarray(x1, dtype=np.float64); y1 = np.asarray(y1, dtype=np.float64)
         x2 = np.asarray(x2, dtype=np.float64); y2 = np.asarray(y2, dtype=np.float64)
-        if slopes.PLANE_SLOPES:
-            return self._plane_profiles(x1, y1, x2, y2)
-        out = np.zeros((x1.size, 6))
-        rects = getattr(self, 'update_rects', None)
-        near = np.ones(x1.size, dtype=bool)
-        if rects is not None:
-            if not rects:
-                return out
-            if not hasattr(self, '_seen_bbox') or self._seen_bbox[4] != len(rects):
-                r = np.array(rects)
-                self._seen_bbox = (r[:, 0].min(), r[:, 1].max(), r[:, 2].min(), r[:, 3].max(), len(rects))
-            bxmin, bxmax, bymin, bymax, _ = self._seen_bbox
-            pad = LATERAL_SLICE_HALF_WIDTH_M + 2 * self.resolution
-            near = ~((np.maximum(x1, x2) + pad < bxmin) | (np.minimum(x1, x2) - pad > bxmax)
-                     | (np.maximum(y1, y2) + pad < bymin) | (np.minimum(y1, y2) - pad > bymax))
-        if near.any():
-            def sample(xs, ys):
-                h = self._sample_heights(xs, ys)
-                return h, np.isfinite(h)
-            out[near] = arc_slope_profiles_batch(sample, x1[near], y1[near], x2[near], y2[near],
-                                                 self.resolution, perp_sample_spacing_m,
-                                                 body_ext_m=body_ext_m, sampler_mode=True)
-        return out
+        return self._plane_profiles(x1, y1, x2, y2)
 
     def compute_arc_slope_profile(self, x1, y1, x2, y2, perp_sample_spacing_m=0.10, body_ext_m=0.0):
         """
-        Like slopes.compute_arc_slope_profile, but on the global map: used for the edges
-        outside the current window in areas already seen before (see
-        _slope_profile_from_sampler).
+        Like slopes.compute_arc_slope_profile, but on the global map with the plane: used for
+        the edges outside the current window in areas already seen before.
 
         Returns:
             (longitudinal_slope, lateral_slope, has_data)
         """
-        if slopes.PLANE_SLOPES:
-            r = self._plane_profiles(*(np.array([v], dtype=np.float64) for v in (x1, y1, x2, y2)))[0]
-            r = (float(r[0]), float(r[1]), bool(r[2]), float(r[3]), float(r[4]), bool(r[5]))
-            return r if body_ext_m > 0 else r[:3]
-        rects = getattr(self, 'update_rects', None)
-        if rects is not None:
-            if not rects:
-                return _no_slope_data(body_ext_m)
-            # Quick exit: edge entirely outside the rectangle containing everything that has
-            # been seen -> no sample can have data (same result, without reading).
-            if not hasattr(self, '_seen_bbox') or self._seen_bbox[4] != len(rects):
-                r = np.array(rects)
-                self._seen_bbox = (r[:, 0].min(), r[:, 1].max(), r[:, 2].min(), r[:, 3].max(), len(rects))
-            bxmin, bxmax, bymin, bymax, _ = self._seen_bbox
-            pad = LATERAL_SLICE_HALF_WIDTH_M + 2 * self.resolution
-            if (max(x1, x2) + pad < bxmin or min(x1, x2) - pad > bxmax or
-                    max(y1, y2) + pad < bymin or min(y1, y2) - pad > bymax):
-                return _no_slope_data(body_ext_m)
-        return _slope_profile_from_sampler(
-            self.get_height, x1, y1, x2, y2, self.resolution, perp_sample_spacing_m,
-            sample_array=self._sample_heights, body_ext_m=body_ext_m
-        )
+        r = self._plane_profiles(*(np.array([v], dtype=np.float64) for v in (x1, y1, x2, y2)))[0]
+        r = (float(r[0]), float(r[1]), bool(r[2]), float(r[3]), float(r[4]), bool(r[5]))
+        return r if body_ext_m > 0 else r[:3]
 
     def _height_rasters(self):
         """Sum, count, mean (NaN where never seen) and seen-mask rasters of the heights."""
         return self._h_r
-
-    def _mean_height_raster(self):
-        """Raster of the mean heights (height_sum / height_count, NaN where never seen):
-        (raster, gx0, gy0), or None if nothing was seen. Same division as get_height."""
-        r = self._height_rasters()
-        return (r.a['mean'], r.gx0, r.gy0) if r.a['mean'].size else None
-
-    def _sample_heights(self, xs, ys):
-        """get_height on an array of points (NaN where never seen), same key floor(x / res)."""
-        xs = np.asarray(xs, dtype=np.float64)
-        ys = np.asarray(ys, dtype=np.float64)
-        out = np.full(xs.shape, np.nan)
-        rr = self._mean_height_raster()
-        if rr is None or xs.size == 0:
-            return out
-        raster, gx0, gy0 = rr
-        gx = np.floor(xs / self.resolution).astype(np.int64) - gx0
-        gy = np.floor(ys / self.resolution).astype(np.int64) - gy0
-        ok = (gx >= 0) & (gx < raster.shape[0]) & (gy >= 0) & (gy < raster.shape[1])
-        out[ok] = raster[gx[ok], gy[ok]]
-        return out
 
     def _has_height_raster(self):
         """Boolean raster of the cells with at least one height (height_count > 0)."""
@@ -740,11 +679,9 @@ class GlobalTerrainGrid:
 
     def certainly_no_slope_data(self, x1, y1, x2, y2, min_sample_fraction=MIN_ARC_SAMPLE_FRACTION):
         """
-        For many edges together (arrays): True where compute_arc_slope_profile would
-        certainly answer "no data". Reproduces exactly its early exits (empty map, edge
-        outside the rectangle of what was seen, start/middle/end without data, line
-        coverage below min_sample_fraction) with the same samples. Where it answers False
-        the real function is called: the result is identical, only useless calls are avoided.
+        For many edges together (arrays): True where compute_arc_slope_profile would certainly
+        answer "no data": no seen cell within the plane window around the edge. Where it answers
+        False the real function is called: only useless calls are avoided.
         """
         x1 = np.asarray(x1, dtype=np.float64); y1 = np.asarray(y1, dtype=np.float64)
         x2 = np.asarray(x2, dtype=np.float64); y2 = np.asarray(y2, dtype=np.float64)
@@ -760,48 +697,23 @@ class GlobalTerrainGrid:
             return out
         raster, gx0, gy0 = rr
         res = self.resolution
-        if slopes.PLANE_SLOPES:
-            # Plane: a sample has a value only with seen cells in its window, so an edge whose
-            # rectangle widened by the window has no seen cell certainly has no data (one
-            # lookup per edge in the integral image of the seen cells). Conservative: where it
-            # says False the real computation decides.
-            k = int(round(slopes.PLANE_EDGE_HALF_WINDOW_M / res)) + 2
-            key = (len(rects) if rects is not None else None, raster.shape, gx0, gy0)
-            cached = getattr(self, '_seen_integral', None)
-            if cached is None or cached[0] != key or rects is None:
-                cached = (key, np.pad(raster.astype(np.int64), ((1, 0), (1, 0))).cumsum(0).cumsum(1))
-                self._seen_integral = cached      # one per map update (update_rects grows)
-            c = cached[1]
-            a0 = np.clip(np.floor(np.minimum(x1, x2) / res).astype(np.int64) - gx0 - k, 0, raster.shape[0])
-            a1 = np.clip(np.floor(np.maximum(x1, x2) / res).astype(np.int64) - gx0 + k + 1, 0, raster.shape[0])
-            b0 = np.clip(np.floor(np.minimum(y1, y2) / res).astype(np.int64) - gy0 - k, 0, raster.shape[1])
-            b1 = np.clip(np.floor(np.maximum(y1, y2) / res).astype(np.int64) - gy0 + k + 1, 0, raster.shape[1])
-            seen = c[a1, b1] - c[a0, b1] - c[a1, b0] + c[a0, b0]
-            return seen == 0
-
-        def has(px, py):
-            gx = np.floor(px / res).astype(np.int64) - gx0
-            gy = np.floor(py / res).astype(np.int64) - gy0
-            ok = (gx >= 0) & (gx < raster.shape[0]) & (gy >= 0) & (gy < raster.shape[1])
-            h = np.zeros(px.shape, dtype=bool)
-            h[ok] = raster[gx[ok], gy[ok]]
-            return h
-
-        dist = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
-        three = has(x1, y1) | has(0.5 * (x1 + x2), 0.5 * (y1 + y2)) | has(x2, y2)
-        cand = (dist >= 1e-6) & three
-        if not cand.any():
-            return out
-        idx = np.nonzero(cand)[0]
-        num_along = np.maximum(2, (dist[idx] / res).astype(np.int64) + 1)
-        for m in np.unique(num_along):
-            sel = idx[num_along == m]
-            t = np.linspace(0.0, 1.0, int(m))
-            px = x1[sel, None] + t[None, :] * (x2[sel] - x1[sel])[:, None]
-            py = y1[sel, None] + t[None, :] * (y2[sel] - y1[sel])[:, None]
-            cov = has(px, py).mean(axis=1)
-            out[sel] = cov < min_sample_fraction
-        return out
+        # A sample has a value only with seen cells in its window, so an edge whose rectangle
+        # widened by the window has no seen cell certainly has no data (one lookup per edge in
+        # the integral image of the seen cells). Conservative: where it says False the real
+        # computation decides.
+        k = int(round(slopes.PLANE_EDGE_HALF_WINDOW_M / res)) + 2
+        key = (len(rects) if rects is not None else None, raster.shape, gx0, gy0)
+        cached = getattr(self, '_seen_integral', None)
+        if cached is None or cached[0] != key or rects is None:
+            cached = (key, np.pad(raster.astype(np.int64), ((1, 0), (1, 0))).cumsum(0).cumsum(1))
+            self._seen_integral = cached      # one per map update (update_rects grows)
+        c = cached[1]
+        a0 = np.clip(np.floor(np.minimum(x1, x2) / res).astype(np.int64) - gx0 - k, 0, raster.shape[0])
+        a1 = np.clip(np.floor(np.maximum(x1, x2) / res).astype(np.int64) - gx0 + k + 1, 0, raster.shape[0])
+        b0 = np.clip(np.floor(np.minimum(y1, y2) / res).astype(np.int64) - gy0 - k, 0, raster.shape[1])
+        b1 = np.clip(np.floor(np.maximum(y1, y2) / res).astype(np.int64) - gy0 + k + 1, 0, raster.shape[1])
+        seen = c[a1, b1] - c[a0, b1] - c[a1, b0] + c[a0, b0]
+        return seen == 0
 
     def save_map(self, file_path):
         """Save the global height map to a pickle file."""

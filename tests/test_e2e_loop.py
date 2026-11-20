@@ -640,19 +640,13 @@ if __name__ == '__main__':
     # ([SUBITO], up to 8) until the block, and on these same cases the code of the morning of 28-10
     # failed the cell 7 times out of 24 (seed 9: 143 commands). Random nodes as in the mission.
     obstacle_beyond = [(8.75, 9.15, 2.0, 5.0)]
-    for label, seed, x0, wait in (("final step below the minimum step", 4, 8.85, 'step'),
-                                        ("new goal at the first stop", 9, 8.75, 'wait')):
+    for label, seed, x0, wait in (("final step below the minimum step", 0, 8.85, 'step'),
+                                        ("new goal at the first stop", 1, 8.75, 'wait')):
         GRAPH_KW.clear()
         GRAPH_KW.update(sampling='random', distribution='poisson', density_per_m2=4.0, seed=seed)
-        # The path these seeds give (and so the final step below the minimum) is that of the
-        # height-difference slopes: with the plane the weights change a little and the robot
-        # arrives with a partial step and the tolerance instead.
-        plane_saved, slopes.PLANE_SLOPES = slopes.PLANE_SLOPES, False
-        try:
-            r = run(f"S15. obstacle right beyond the goal: {label}",
-                    [(x0, x0 + 0.4, 2.0, 5.0)], (2.0, 3.0, 0.0), (0, 1))
-        finally:
-            slopes.PLANE_SLOPES = plane_saved
+        # These seeds give the path that ends in the case to check (the graph is random).
+        r = run(f"S15. obstacle right beyond the goal: {label}",
+                [(x0, x0 + 0.4, 2.0, 5.0)], (2.0, 3.0, 0.0), (0, 1))
         check(r['err'] is None and r['ok'] is True, f"{label}: cell reached without exceptions")
         check(r['tags']['[EARLY]'] == 0 and r['tags']['[BLOCK] Confirmed'] == 0,
               f"{label}: no [EARLY] nor block ({r['tags']['[EARLY]']}, "

@@ -554,15 +554,12 @@ def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
 # =========================================================================
 PLANE_HALF_WINDOW_M = 0.25
 PLANE_MIN_VALID_FRACTION = 0.5
-# Slope of the PRM edges on the live scan (edge_evaluation): on = the plane fitted in a square
+# Slope of the PRM edges, of the frontier and of the global map: the plane fitted in a square
 # window as long as the body (PLANE_EDGE_HALF_WINDOW_M = half body length) at every position of
 # the robot centre between the two nodes, 90th percentile of those; the window already covers
-# the body, so the values "with the body" are the same. Off = differences on a base along the
-# edge. The plane is closer to the slope the robot's body and legs measure (tools/slope_check.py).
-# The gait levels have thresholds of their own for the plane (gait.slope_thresholds); the veto
-# stays SLOPE_THRESHOLD (Spot's limit, ~30 deg). The frontier uses the same estimate
-# (safe_frontier._plane_field).
-PLANE_SLOPES = True
+# the body, so the values "with the body" are the same. The plane is closer to the slope the
+# robot's body and legs measure than the height differences on a base (tools/slope_check.py).
+# The veto stays SLOPE_THRESHOLD (Spot's limit, ~30 deg).
 PLANE_EDGE_HALF_WINDOW_M = ROBOT_HALF_LENGTH_M
 
 
@@ -628,7 +625,7 @@ def plane_slope_along(gx, gy, grid_origin_x, grid_origin_y, cell_size, x1, y1, x
 
 def plane_slope_profile(gx, gy, grid_origin_x, grid_origin_y, cell_size, x1, y1, x2, y2,
                         body_ext_m=0.0):
-    """compute_arc_slope_profile on a plane gradient field (PLANE_SLOPES): the robot centre
+    """compute_arc_slope_profile on a plane gradient field: the robot centre
     from node to node, the window already covering the body. Same return format (3 values,
     or 6 with body_ext_m > 0, the body ones equal to the others)."""
     lo, la, has = plane_slope_along(gx, gy, grid_origin_x, grid_origin_y, cell_size, x1, y1, x2, y2)

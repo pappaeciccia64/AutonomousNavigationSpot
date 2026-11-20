@@ -328,22 +328,18 @@ def replay_mission(job):
         global_maps.fold_scan_into_global_maps(           # with the mission's function
             global_maps.GlobalGrid(), single, a['pts'], a['z'].ravel(), a['obstacle_mask'], a['valid'].ravel(),
             a['od_raw'].ravel(), (a['ny'], a['nx']), a['robot'])
-        if slopes.PLANE_SLOPES:
-            # The estimate of the mission (edge_evaluation._live_plane_field): the plane, on the
-            # usable cells of the scan; the global map uses it too since 12-11.
-            u2 = usable.reshape(a['z'].shape)
-            pgx, pgy, _ = slopes.plane_gradient_field(np.where(u2, a['z'], np.nan), u2, a['cs'],
-                                                      half_window_m=slopes.PLANE_EDGE_HALF_WINDOW_M)
+        # The estimate of the mission (edge_evaluation._live_plane_field): the plane, on the
+        # usable cells of the scan; the global map uses it too.
+        u2 = usable.reshape(a['z'].shape)
+        pgx, pgy, _ = slopes.plane_gradient_field(np.where(u2, a['z'], np.nan), u2, a['cs'],
+                                                  half_window_m=slopes.PLANE_EDGE_HALF_WINDOW_M)
         for _ in range(ARCS_PER_SCAN):
             p = np.array([a['ox'], a['oy']]) + rng.uniform(0.3, span - 0.3, 2)
             ang = rng.uniform(0, 2 * math.pi)
             q = p + rng.uniform(0.5, 1.25) * np.array([math.cos(ang), math.sin(ang)])
             if not (a['ox'] + 0.3 < q[0] < a['ox'] + span - 0.3 and a['oy'] + 0.3 < q[1] < a['oy'] + span - 0.3):
                 continue
-            if slopes.PLANE_SLOPES:
-                live = slopes.plane_slope_profile(pgx, pgy, a['ox'], a['oy'], a['cs'], *p, *q)
-            else:
-                live = slopes.compute_arc_slope_profile(a['z'], a['ox'], a['oy'], a['cs'], *p, *q, valid_2d=usable)
+            live = slopes.plane_slope_profile(pgx, pgy, a['ox'], a['oy'], a['cs'], *p, *q)
             if not live[2]:
                 continue
             glob_ = single.compute_arc_slope_profile(*p, *q)

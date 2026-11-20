@@ -9,8 +9,6 @@ from spot_explorer import config as P
 from spot_explorer.records import MISSION_STATS
 from scipy.spatial import cKDTree
 
-# Criterion 3 of find_best_point_in_cell: nearest to the centre before the free space.
-GOAL_CENTRE_FIRST = True
 
 
 
@@ -180,11 +178,7 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
     # TARGET_CELL_BORDER_M) comes after all the others, whatever its ring: the robot stops in
     # front of it, often outside the cell, where the arrival does not count
     # (ARRIVAL_OUTSIDE_CELL_M assumes a goal at least that far inside).
-    if GOAL_CENTRE_FIRST:
-        rows.sort(key=lambda r: (r['edge'], round(r['dc'] / step), r['tight'], not r['seen'], r['dr']))
-    else:                       # free space first, then centre, seen, border, distance
-        rows.sort(key=lambda r: (r['tight'], not r['center'], not r['seen'], r['edge'],
-                                 round(r['dc'] / step), r['dr']))
+    rows.sort(key=lambda r: (r['edge'], round(r['dc'] / step), r['tight'], not r['seen'], r['dr']))
     fresh = [r for r in rows if not r['refused']]
     pool = fresh if fresh else rows
     chosen, reach_note = None, ""

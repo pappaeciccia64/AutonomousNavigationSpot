@@ -7,24 +7,16 @@ from spot_explorer.perception import slopes
 # of the two decides. As a net step height (H / 0.48): PLAIN below ~7 cm, HARD from
 # ~12 cm. These are "how careful" thresholds, well below the obstacle ones.
 # =========================================================================
-GAIT_PLAIN_SLOPE_MAX = 0.15     # below this on both -> PLAIN tier (flat ground)
+# Slope thresholds on the plane estimate (slopes.plane_slope_profile), which reads lower than
+# the height differences on a base; tuned on the measured body pitch (tools/plane_thresholds.py).
+GAIT_PLAIN_SLOPE_MAX = 0.13     # below this on both -> PLAIN tier (flat ground)
 GAIT_PLAIN_ROUGH_MAX = 0.05
-GAIT_MODERATE_SLOPE_MAX = 0.25  # below this on both -> MODERATE tier; at/above -> HARD tier
+GAIT_MODERATE_SLOPE_MAX = 0.20  # below this on both -> MODERATE tier; at/above -> HARD tier
 GAIT_MODERATE_ROUGH_MAX = 0.10
-# The slope thresholds above are on today's estimate (differences on a base, with the body).
-# With slopes.PLANE_SLOPES the plane reads lower (tools/plane_thresholds.py, 1382 legs of 51
-# missions: +4.5 deg against +1.5 deg over the median body pitch on the slopes), so the same
-# thresholds would put fewer legs in CRAWL: 9% HARD instead of 18%. These keep the inclined
-# legs caught as today (measured pitch > 8.5 deg: 99%; > 14 deg: 94% against 95%) with fewer
-# useless MODERATE legs (false alarms 18% against 26%).
-PLANE_GAIT_PLAIN_SLOPE_MAX = 0.13
-PLANE_GAIT_MODERATE_SLOPE_MAX = 0.20
 
 
 def slope_thresholds():
-    """(PLAIN -> MODERATE, MODERATE -> HARD) slope thresholds of the estimate in use."""
-    if slopes.PLANE_SLOPES:
-        return PLANE_GAIT_PLAIN_SLOPE_MAX, PLANE_GAIT_MODERATE_SLOPE_MAX
+    """(PLAIN -> MODERATE, MODERATE -> HARD) slope thresholds."""
     return GAIT_PLAIN_SLOPE_MAX, GAIT_MODERATE_SLOPE_MAX
 
 # ground_mu_hint per level (bosdyn.api.spot.TerrainParams): 0.8 is Spot's default (good

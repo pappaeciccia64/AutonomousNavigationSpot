@@ -5,15 +5,12 @@ import json
 from spot_explorer.robot import motion
 from spot_explorer.mission import attempt_cruise
 from spot_explorer.mission import planning_cycle
-from spot_explorer.mission import mission_prm
 from spot_explorer.mission import cell_attempt
 from spot_explorer.mission import attempt_common
 from spot_explorer.mission import exploration
 from spot_explorer.mission import cell_rules
-from spot_explorer.planning import goal as goal_choice
 from spot_explorer.perception import geometry
 from spot_explorer.perception import slopes
-from spot_explorer.perception import low_obstacles
 from spot_explorer.perception import spot_grid
 
 from spot_explorer.planning import edge_evaluation
@@ -42,7 +39,6 @@ def mission_switches():
         'config.MISSION_GRAPH_SAMPLING': P.MISSION_GRAPH_SAMPLING,
         'mission_graph.BATCH_SLOPES': mission_graph.BATCH_SLOPES,
         'edge_evaluation.REFRESH_BATCH_SLOPES': edge_evaluation.REFRESH_BATCH_SLOPES,
-        'slopes.PLANE_SLOPES': slopes.PLANE_SLOPES,
         'attempt_cruise.CONTINUOUS_MOTION': attempt_cruise.CONTINUOUS_MOTION,
         'attempt_cruise.CRUISE_WAKE_ON_PLAN': attempt_cruise.CRUISE_WAKE_ON_PLAN,
         'attempt_cruise.CRUISE_STATE_CACHE': attempt_cruise.CRUISE_STATE_CACHE,
@@ -55,14 +51,12 @@ def mission_switches():
         'roadmap.ROUTE_LINE_SATURATION_M': roadmap.ROUTE_LINE_SATURATION_M,
         'edge_evaluation.BATCH_ADJACENCY': edge_evaluation.BATCH_ADJACENCY,
         'config.PLAN_ONLY_EXPLORED_CELLS': P.PLAN_ONLY_EXPLORED_CELLS,
-        'mission_prm.PLAN_ALSO_SHARED_NEIGHBOUR_CELLS': mission_prm.PLAN_ALSO_SHARED_NEIGHBOUR_CELLS,
         'attempt_common.CELL_SEEN_EXPLORED': attempt_common.CELL_SEEN_EXPLORED,
         'exploration.SEEN_BEFORE_MOVING': exploration.SEEN_BEFORE_MOVING,
         'exploration.Mission': exploration.Mission.__name__,   # SideRulesMission: the old rules
         'exploration.GOAL_SOURCE': exploration.GOAL_SOURCE,
         'cell_rules.NEAR_PATH_M': cell_rules.NEAR_PATH_M,
         'cell_rules.EXPLORE_CELL_ON_THE_WAY': cell_rules.EXPLORE_CELL_ON_THE_WAY,
-        'goal.GOAL_CENTRE_FIRST': goal_choice.GOAL_CENTRE_FIRST,
         'config.GRAPHNAV_SHORTCUTS': P.GRAPHNAV_SHORTCUTS,
         'config.GRAPHNAV_ARRIVAL_HEADING': P.GRAPHNAV_ARRIVAL_HEADING,
         'config.WP0_FIDUCIAL_CORRECTION': P.WP0_FIDUCIAL_CORRECTION,

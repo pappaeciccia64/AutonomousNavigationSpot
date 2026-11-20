@@ -133,7 +133,7 @@ class EdgeEvaluation:
         self.current_rough_2d = None
         self.current_terrain_2d = None  # corrected heights of the scan, for the edge slope
         self.current_valid_2d = None    # reliable cells: filled heights do not enter the slope
-        self._plane_field = None        # slopes.PLANE_SLOPES, see _live_plane_field
+        self._plane_field = None        # see _live_plane_field
         self.grid_origin_x = None
         self.grid_origin_y = None
         self.cell_size = None
@@ -186,7 +186,7 @@ class EdgeEvaluation:
         # reliable cells (is_valid of correct_terrain): filled heights do not enter
         # the slope profile -- see slopes.compute_arc_slope_profile
         self.current_valid_2d = valid_2d
-        self._plane_field = None          # slopes.PLANE_SLOPES: computed at the first use
+        self._plane_field = None          # computed at the first use
         self.grid_origin_x = grid_origin_x
         self.grid_origin_y = grid_origin_y
         self.cell_size = cell_size
@@ -674,7 +674,7 @@ class EdgeEvaluation:
         update_local_grid_data). Returns (longitudinal slope, lateral, has_data);
         with body=True the edge is extended by half a body on each side.
         """
-        if slopes.PLANE_SLOPES and self._live_plane_field() is not None:
+        if self._live_plane_field() is not None:
             gx, gy = self._plane_field
             return slopes.plane_slope_profile(gx, gy, self.grid_origin_x, self.grid_origin_y, self.cell_size,
                                               x1, y1, x2, y2,
@@ -687,7 +687,7 @@ class EdgeEvaluation:
         )
 
     def _live_plane_field(self):
-        """Plane gradient field of the live scan (slopes.PLANE_SLOPES), once per scan."""
+        """Plane gradient field of the live scan, once per scan."""
         if self._plane_field is None and self.current_terrain_2d is not None and self.cell_size:
             t = np.asarray(self.current_terrain_2d, dtype=np.float64)
             v = (np.ones(t.shape, dtype=bool) if self.current_valid_2d is None
@@ -1051,7 +1051,7 @@ class EdgeEvaluation:
         xy1 = np.array([self.nodes[pairs[i][0]] for i in idx], dtype=np.float64)
         xy2 = np.array([self.nodes[pairs[i][1]] for i in idx], dtype=np.float64)
         ext = slopes.ARC_BODY_EXTENSION_M
-        if slopes.PLANE_SLOPES and self._live_plane_field() is not None:
+        if self._live_plane_field() is not None:
             gx, gy = self._plane_field
             live = slopes.plane_slope_profiles_batch(gx, gy, self.grid_origin_x, self.grid_origin_y,
                                                      self.cell_size, xy1[:, 0], xy1[:, 1], xy2[:, 0], xy2[:, 1])

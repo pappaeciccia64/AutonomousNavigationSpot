@@ -58,8 +58,6 @@ def node_cells(prm, env):
     return cache
 
 
-# The cells next to both the robot's and the goal's are allowed too (see planning_cells).
-PLAN_ALSO_SHARED_NEIGHBOUR_CELLS = True
 
 
 def planning_cells(env, target_row, target_col, from_xy):
@@ -67,16 +65,12 @@ def planning_cells(env, target_row, target_col, from_xy):
     The cells a path to (target_row, target_col) from from_xy may use (PLAN_ONLY_EXPLORED_CELLS):
     the visited ones, the robot's, the goal's, and the cells next to both the robot's and the
     goal's (8-neighbourhood): the way around an obstacle on the border between the two
-    cells. On 04-11 11:38 three cells out of eight were disconnected only by the cells
-    around the border, and the cruise ended eight times in a row on (1,3); the path is
-    checked live by the frontier anyway.
+    cells. The path is checked live by the frontier anyway.
     """
     target = (int(target_row), int(target_col))
     here = tuple(int(v) for v in env.get_cell_from_world(from_xy[0], from_xy[1]))
     cells = {(r, c) for r in range(env.rows) for c in range(env.cols) if env.is_cell_visited(r, c)}
     cells |= {target, here}
-    if not PLAN_ALSO_SHARED_NEIGHBOUR_CELLS:
-        return cells
 
     def around(rc):
         return {(rc[0] + dr, rc[1] + dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1)}

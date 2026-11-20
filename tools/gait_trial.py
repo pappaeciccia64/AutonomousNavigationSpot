@@ -211,8 +211,8 @@ def estimate_track(local_grid, robot_state_client, dist):
         print(f"[ESTIMATE] First {L:.1f} m: slope long {lo:.3f} ({deg(lo):.1f}°), lat {la:.3f} ({deg(la):.1f}°), "
               f"roughness {rough:.3f}, {'with data' if has else 'NOT ENOUGH DATA'} | local plane: long "
               f"{deg(plo):.1f}°, lat {deg(pla):.1f}°{'' if phas else ' (not enough data)'}")
-        # The slope the gait level is chosen on: the estimate of the mission (slopes.PLANE_SLOPES).
-        grad = max(plo, pla) if slopes.PLANE_SLOPES and phas else max(lo, la)
+        # The slope the gait level is chosen on: the estimate of the mission (the plane).
+        grad = max(plo, pla) if phas else max(lo, la)
         return dict(long=float(lo), lat=float(la), rough=rough, has=bool(has), grad=float(grad),
                     plane_long=deg(plo) if phas else np.nan, plane_lat=deg(pla) if phas else np.nan)
     except Exception as e:
