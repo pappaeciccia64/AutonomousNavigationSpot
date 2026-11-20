@@ -44,7 +44,6 @@ def mission_switches():
         'edge_evaluation.REFRESH_BATCH_SLOPES': edge_evaluation.REFRESH_BATCH_SLOPES,
         'edge_evaluation.INCREMENTAL_REFRESH': edge_evaluation.INCREMENTAL_REFRESH,
         'slopes.PLANE_SLOPES': slopes.PLANE_SLOPES,
-        'low_obstacles.LOW_OBSTACLE_FILTER': low_obstacles.LOW_OBSTACLE_FILTER,
         'motion.PATH_COMMAND_FOR_LEGS': motion.PATH_COMMAND_FOR_LEGS,
         'attempt_cruise.CONTINUOUS_MOTION': attempt_cruise.CONTINUOUS_MOTION,
         'attempt_cruise.CRUISE_WAKE_ON_PLAN': attempt_cruise.CRUISE_WAKE_ON_PLAN,

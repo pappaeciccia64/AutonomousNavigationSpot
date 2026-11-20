@@ -29,7 +29,6 @@ import threading
 import numpy as np
 from scipy.ndimage import distance_transform_edt, minimum_filter
 
-LOW_OBSTACLE_FILTER = True
 LOW_OBSTACLE_HEIGHT_M = 0.30
 LOW_OBSTACLE_HISTORY = 10          # observations kept per point (bits)
 LOW_OBSTACLE_MIN_OBS = 4
@@ -80,10 +79,8 @@ def filter_obstacle_distance(od, terrain_raw, terrain_seen, num_x, num_y, origin
     obstacle_distance (flat, as Spot gives it) without the low intermittent obstacle cells,
     same shape and dtype. terrain_raw: the raw heights of the scan (flat); terrain_seen: the
     cells with a reliable raw height (flat bool). Updates the history. Returns the input
-    itself when the switch is off or nothing is dropped.
+    itself when nothing is dropped.
     """
-    if not LOW_OBSTACLE_FILTER:
-        return od
     shape = (int(num_y), int(num_x))
     od_in = od
     od = np.asarray(od, dtype=np.float64).reshape(shape)
