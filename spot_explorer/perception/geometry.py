@@ -156,7 +156,7 @@ def rotation_is_clear(obstacle_dist, origin_x, origin_y, cell_size, robot_x, rob
 
 # Distance from obstacles the planner chooses edges with: the frontier's plus
 # PLAN_CLEARANCE_EXTRA_M. 0: in the scan window the edges and the frontier use the same rule on
-# the same filtered scan, with its hysteresis (edge_evaluation.FRONTIER_EDGES), so the scan noise
+# the same filtered scan, with its hysteresis (edge_evaluation), so the scan noise
 # does not make them disagree.
 PLAN_CLEARANCE_EXTRA_M = 0.0
 PLAN_CLEARANCE_M = FRONTIER_CLEARANCE_M + PLAN_CLEARANCE_EXTRA_M          # = 0.30

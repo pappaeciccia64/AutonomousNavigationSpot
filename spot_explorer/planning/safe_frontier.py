@@ -257,7 +257,7 @@ def sample_flags(snap, xs, ys, thr, use_latch=True, nominal_mask=None):
     """
     The rule of "can the robot pass here now", point by point, on the scan of this cycle: the
     safe frontier applies it along the path, the PRM to the edges of the scan window
-    (edge_evaluation.FRONTIER_EDGES), so the graph and the frontier cannot disagree on what
+    (edge_evaluation, frontier rule for the edges), so the graph and the frontier cannot disagree on what
     the scan sees. For samples (xs, ys) and the threshold thr (scalar or per sample) on the
     distance from the centre line to the nearest obstacle:
         no_data   outside the window, or never seen (except within FRONTIER_ROBOT_RADIUS_M of

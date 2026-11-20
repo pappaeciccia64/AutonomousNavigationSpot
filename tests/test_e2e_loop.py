@@ -662,9 +662,9 @@ if __name__ == '__main__':
         if wait == 'step':
             check('[FINAL STEP]' in r['log'], "the step below 0.40 m that is enough to arrive is taken")
         else:
-            # Since 09-11 (edge_evaluation.FRONTIER_EDGES) the edges towards a goal 0.25 m from
-            # the obstacle leave the graph as soon as the scan sees it: the goal is isolated and
-            # replaced at once; before, the frontier stopped beyond the goal first.
+            # The edges towards a goal 0.25 m from the obstacle leave the graph as soon as the
+            # scan sees it (the frontier rule for the edges): the goal is isolated and replaced
+            # at once, or the frontier stops beyond the goal first.
             check(("[TARGET] The frontier stops" in r['log'] and "beyond the end of the path" in r['log'])
                   or ("it is the goal that is isolated" in r['log'] and "excluded for the rest" in r['log']),
                   "the goal against the obstacle is replaced at once (frontier beyond the goal, or "
@@ -693,7 +693,7 @@ if __name__ == '__main__':
     check(("[TARGET] Block " in r['log'] or "excluded for the rest" in r['log'])
           and "[REPLAN] After the block" not in r['log'],
           "the goal right next to the obstacle is replaced (after the block, or before it because "
-          "isolated in the graph, FRONTIER_EDGES), without replanning towards the excluded one")
+          "isolated in the graph), without replanning towards the excluded one")
     GRAPH_KW.clear()
 
     # S16: the check on the arrival pose (arrival_has_exit). A turnable direction that stops
