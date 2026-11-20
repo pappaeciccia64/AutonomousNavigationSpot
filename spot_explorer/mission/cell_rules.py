@@ -1,6 +1,5 @@
 """
-Which cell next: the general rules of 09-11, instead of the sides tried (mission/legacy/side_rules.py),
-the deferral, SKIP-ROUND, PRECHECK and the cells dropped from the frontier.
+Which cell next.
 
 A cell is
   done            seen for CELL_SEEN_FRACTION, or its goal reached (map value 1);
@@ -14,23 +13,20 @@ choice, so a cell comes back as soon as the graph has a (new) way into it.
 The way into a cell: a path on the graph of now (valid edges: in the scan window the
 frontier's rule, outside the global map), from the robot node to the first node of the cell,
 through the cells the attempt itself may use (mission_prm.planning_cells: visited, the
-robot's, the target and the shared neighbours). Its ENTRY is the cell the way comes from when
-it crosses into the cell (one of the 8 around it; None if the robot is already in it): it
-replaces the four sides. Not the edge itself: a cell is entered by dozens of edges, and on the
-forced failures of test_mission one cell failed 3 times by 3 edges from the same side.
+robot's, the target and the shared neighbours). Its entry is the cell the way comes from when
+it crosses into the cell (one of the 8 around it; None if the robot is already in it). Failures
+are counted per entry, not per edge: a cell is entered by dozens of edges from the same side.
 
 The length of a way: its Dijkstra cost on the graph of now (the same weights of the attempt:
 length, plus the slopes of the edges already seen, plus the penalties), from the robot node to
-the goal the attempt would choose in the cell (has_goal), not metres plus a straight line to the
-centre (until 11-11). With alpha = 1 a cost is metres on flat ground.
+the goal the attempt would choose in the cell (has_goal). With alpha = 1 a cost is metres on
+flat ground.
 
 The choice: among the candidates whose way costs at most NEAR_PATH_M, the first in the
 visiting order, reached in cruise; if none is that near, the first in the visiting order
 among all the candidates, reached with GraphNav (the exception, with a stop). A cell that
 already failed comes after all the others (in the visiting order among the failed ones):
-its second try comes later, from where the robot is then, not at once from the same side
-(04-11 14:08: (0,5) failed in the tall grass, the mission tried it again 17 attempts later
-from another side, and it worked).
+its second try comes later, from where the robot is then, not at once from the same side.
 """
 
 import numpy as np
@@ -47,8 +43,8 @@ NEAR_PATH_M = 4.0          # a way costing at most this (metres on flat ground) 
 MAX_FAILURES = 2           # real failures (the robot went and stopped) before setting aside
 # A near choice whose way to the goal crosses a cell not explored yet (possible only with
 # config.PLAN_ONLY_EXPLORED_CELLS = False: paths also through the cells never visited): that cell
-# first, if it has a goal the attempt would accept within NEAR_PATH_M -- the robot is going
-# through it anyway (user, 11-11). Off: the visiting order alone.
+# first, if it has a goal the attempt would accept within NEAR_PATH_M: the robot is going
+# through it anyway. Off: the visiting order alone.
 EXPLORE_CELL_ON_THE_WAY = False
 
 
@@ -82,7 +78,7 @@ class CellRules:
         self.failures = {}          # (r, c) -> [entry, ...] of the real failures
         self.status = {}            # (r, c) -> why it is not a candidate now (for the log)
         # Cells left because unreachable now (no goal with a path): not failed, skipped at the
-        # next choice only (rule 3: not a candidate NOW; it comes back when the graph changes).
+        # next choice only (not a candidate now; it comes back when the graph changes).
         self.skip_once = set()
 
     # --- the cells to look at ------------------------------------------------------------
@@ -128,11 +124,10 @@ class CellRules:
 
     def has_goal(self, start, from_xy, row, col, cells_of, global_map, sampler):
         """The Dijkstra cost from from_xy (node start) to the goal of the cell the attempt would
-        accept, None if there is none. The SAME choice as the attempt (goal.find_best_point_in_cell,
+        accept, None if there is none. The same choice as the attempt (goal.find_best_point_in_cell,
         on the global map: no live scan here), with "reachable" = in the graph from start through
-        the cells the attempt may use. On 09-11 14:38 the rules saw a way into (1,5) (a node of the
-        cell) and the robot went there with GraphNav (22 s) to find no goal reachable.
-        Without map or sampler: 0.0 (not checked)."""
+        the cells the attempt may use: a way into the cell is not enough if no goal of it can be
+        reached. Without map or sampler: 0.0 (not checked)."""
         if global_map is None or sampler is None:
             return 0.0
         prm, env = self.prm, self.env

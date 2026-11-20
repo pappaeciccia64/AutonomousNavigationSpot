@@ -11,8 +11,8 @@ from spot_explorer.perception.spot_grid import slope_usable_mask
 from spot_explorer.records import MISSION_CTX, timing_add
 
 # =========================================================================
-# GLOBAL OBSTACLE MAP (see GlobalGrid.update)
-#   GLOBAL_OCC_CONFIRM_OBS: a cell becomes occupied after this many CONSECUTIVE obstacle
+# Global obstacle map (see GlobalGrid.update)
+#   GLOBAL_OCC_CONFIRM_OBS: a cell becomes occupied after this many consecutive obstacle
 #     observations: the map remembers obstacles from one attempt to the next and cannot
 #     trust an isolated scan. The first obstacle observation resets the "free" evidence
 #     (fast reaction to a new obstacle).
@@ -27,8 +27,8 @@ GLOBAL_OCC_COARSE_CELLS = 8          # side of the coarse index block (8 x 3 cm 
 GLOBAL_OCC_CONFIRM_WALKED = 4
 
 # =========================================================================
-# FREE-SPACE MAP (see GlobalGrid.update_clearance)
-# For each cell it remembers HOW MUCH space there was (obstacle_distance), not only "obstacle yes/no".
+# Free-space map (see GlobalGrid.update_clearance)
+# For each cell it remembers how much space there was (obstacle_distance), not only "obstacle yes/no".
 # Used by the cell goal choice (goal.find_best_point_in_cell); graph edges and
 # nodes are judged on the binary map. Statistic: mean of the observations taken
 # within CLEARANCE_NEAR_M of the robot; where there are none, mean of all.
@@ -41,7 +41,7 @@ class _GrowRaster:
     Arrays indexed [gx - gx0, gy - gy0] over the cells of a global map, grown (with
     GROW_PAD_CELLS of margin) when a key falls outside: the maps keep their rasters up to
     date cell by cell instead of rebuilding them from the dictionaries over the whole
-    explored area at every change (04-11 14:08: 0.32 s per planning cycle after 20 min).
+    explored area at every change, which grows with the mission.
     layers: {name: (dtype, fill)}.
     """
     GROW_PAD_CELLS = 128
@@ -152,7 +152,7 @@ class GlobalGrid:
         # Cells the robot's BODY passed over: declaring them occupied requires
         # GLOBAL_OCC_CONFIRM_WALKED confirmations instead of GLOBAL_OCC_CONFIRM_OBS.
         self.walked_cells = set()
-        # FREE-SPACE MAP (see CLEARANCE_NEAR_M): mean of the observed obstacle_distance,
+        # Free-space map (see CLEARANCE_NEAR_M): mean of the observed obstacle_distance,
         # kept separately for close-up views and all views (layers cn_* and ca_* of _g;
         # clear_near_sum & co. are dictionary views of them).
         # Version of the occupied cells: grows at every change to/from -1. Used
@@ -216,8 +216,7 @@ class GlobalGrid:
         usable: cells it can learn from (reliable, or under the body).
         near: observations taken within CLEARANCE_NEAR_M of the robot -- they go into a
             separate accumulator, which takes precedence (see clearance()).
-        The sums are made point by point in the order of the scan (np.add.at): the same
-        values as the dictionary version of before 04-11.
+        The sums are made point by point in the order of the scan (np.add.at).
         """
         p = np.asarray(pts).reshape(-1, pts.shape[-1] if np.ndim(pts) > 1 else 2)
         od = np.asarray(obstacle_distance, dtype=np.float64).ravel()
@@ -256,9 +255,9 @@ class GlobalGrid:
         They are remembered (walked_cells) and declaring them occupied requires
         GLOBAL_OCC_CONFIRM_WALKED observations instead of GLOBAL_OCC_CONFIRM_OBS.
         """
-        # The same rule as the cell-by-cell loop of before 04-11, on numpy arrays: a scan
-        # rarely holds the same key twice, and when it does the repeats are applied in
-        # order, one round per occurrence, so the result is the same to the cell.
+        # The per-cell rule on numpy arrays: a scan rarely holds the same key twice, and when
+        # it does the repeats are applied in order, one round per occurrence, as a cell-by-cell
+        # loop would.
         gx, gy = _keys(pts, self.resolution)
         mask_flat = np.asarray(obstacle_mask).ravel()
         g = self._g
@@ -338,7 +337,7 @@ class GlobalGrid:
         return False
 
     # Keys within this many cells of an occupied cell stay inside the rasters (the disks of
-    # the margins up to ~1.9 m); a larger margin is computed by dilation, as before.
+    # the margins up to ~1.9 m); a larger margin is computed by dilation.
     _NEAR_MAX_STEPS = 64
 
     def _occ_rasters(self):
@@ -424,7 +423,7 @@ class GlobalGrid:
 
     def mark_hazard(self, x, y, radius=0.5):
         """
-        Mark as occupied a disk around a dangerous point (today: where the robot FELL).
+        Mark as occupied a disk around a dangerous point (where the robot fell).
         The terrain there may look normal to the sensors (slippery, yielding, a hole
         covered by grass), so no confirmation from the scans is awaited, and later scans
         do not free it: it stays occupied for the whole mission. Returns the number of
@@ -500,7 +499,7 @@ class GlobalGrid:
 
 class GlobalTerrainGrid:
     """
-    Global, persistent map of the terrain HEIGHT (mean of the observations per cell), not
+    Global, persistent map of the terrain height (mean of the observations per cell), not
     of the slope: the slope depends on how an edge is travelled and is recomputed on the
     fly (compute_arc_slope_profile). Same resolution as the local grid; if memory became a
     problem in long missions, the lever is `resolution`.
@@ -509,9 +508,8 @@ class GlobalTerrainGrid:
     mask as the live computation (slope_usable_mask: reliable, non-obstacle cells),
     through fold_scan_into_global_maps.
 
-    Limit: if the odometry (VISION frame) drifted, readings of the "same" cell would come
-    from slightly different points. On the missions of 13-10 the offset between
-    consecutive scans is 0.1 cm in median.
+    Limit: if the odometry (VISION frame) drifts, readings of the "same" cell come from
+    slightly different points; between consecutive scans the offset is around a millimetre.
     """
     def __init__(self, resolution=0.03):
         self.resolution = resolution
@@ -573,18 +571,16 @@ class GlobalTerrainGrid:
     height_sum = property(lambda self: _counted_view(self._h_r, 'sum', 'n'))
     height_count = property(lambda self: _counted_view(self._h_r, 'n', 'n'))
 
-    # --- SLOPE WITH THE PLANE (slopes.PLANE_SLOPES, 12-11) ---------------------------------
+    # --- Slope with the plane (slopes.PLANE_SLOPES) ---------------------------------------
     # The same estimate as the live scan (edge_evaluation.compute_arc_slope_profile): the plane
     # fitted in a window of +/-PLANE_EDGE_HALF_WINDOW_M around every cell, here on the mean
     # heights of the map; along the edge the 90th percentile of the slope along and across it.
-    # Until 12-11 the map used the differences on a 0.48 m base (slopes.compute_arc_slope_
-    # profile, ~2 deg more on average than the plane): an edge changed cost only because it
-    # left the scan window.
-    # The plane field is kept per FIXED TILE of PLANE_TILE_CELLS x PLANE_TILE_CELLS cells
-    # (computed on the tile plus the window margin): a value never depends on which edges were
-    # asked together -- with a patch around the edges asked, the sums of the integral images
-    # grew with the patch and the local graph update differed from the full one by up to 0.002
-    # -- and a tile is recomputed only when a scan changes the map within its window margin.
+    # Using the same estimate keeps an edge's cost from changing just because it left the scan
+    # window.
+    # The plane field is kept per fixed tile of PLANE_TILE_CELLS x PLANE_TILE_CELLS cells
+    # (computed on the tile plus the window margin), so a value never depends on which edges
+    # were asked together and the local graph update matches the full one; a tile is
+    # recomputed only when a scan changes the map within its window margin.
     PLANE_TILE_CELLS = 64
 
     def _plane_tile(self, ti, tj):
@@ -745,7 +741,7 @@ class GlobalTerrainGrid:
     def certainly_no_slope_data(self, x1, y1, x2, y2, min_sample_fraction=MIN_ARC_SAMPLE_FRACTION):
         """
         For many edges together (arrays): True where compute_arc_slope_profile would
-        CERTAINLY answer "no data". Reproduces exactly its early exits (empty map, edge
+        certainly answer "no data". Reproduces exactly its early exits (empty map, edge
         outside the rectangle of what was seen, start/middle/end without data, line
         coverage below min_sample_fraction) with the same samples. Where it answers False
         the real function is called: the result is identical, only useless calls are avoided.
@@ -820,18 +816,18 @@ class GlobalTerrainGrid:
             }, f)
 
 # =========================================================================================
-# FROM THE SCAN TO THE GLOBAL MAPS, and log lines on the state of grids and maps
+# From the scan to the global maps, and log lines on the state of grids and maps
 # =========================================================================================
-# --- Area around the body in the GLOBAL map ---------------------------------------------
-# The cells right next to the robot's flank come out as "obstacle" ONLY when the robot is
+# --- Area around the body in the global map ---------------------------------------------
+# The cells right next to the robot's flank come out as "obstacle" only when the robot is
 # beside them: read from 1-2 m they are free, read with the robot standing next to them
 # they drop below threshold, 0.2-0.45 m from the axis, at the height of the rear legs. Two
 # scans standing still would be enough to confirm them in the global map
-# (GLOBAL_OCC_CONFIRM_OBS = 2), and the PRM would discard the edge the robot JUST travelled.
-#   - CORE (the body rectangle): the robot stands on it, so it is free by
-#     construction -> "seen free" is written.
-#   - RING (up to GLOBAL_MAP_SELF_RING_M beyond the body): from here the reading is not
-#     reliable -> an obstacle is NOT written (no information); free is.
+# (GLOBAL_OCC_CONFIRM_OBS = 2), and the PRM would discard the edge the robot just travelled.
+#   - core (the body rectangle): the robot stands on it, so it is free by construction:
+#     "seen free" is written.
+#   - ring (up to GLOBAL_MAP_SELF_RING_M beyond the body): the reading is not reliable, so an
+#     obstacle is not written (no information); free is.
 # Only for the global map: the safe frontier uses the live scan, whole, so
 # a real obstacle next to the robot still stops it. And a real obstacle is still
 # written in the global map by the scans taken from another point.
@@ -852,7 +848,7 @@ def mask_for_global_map(obstacle_mask, is_valid, pts=None, robot_pose=None,
     pts, robot_pose=(x, y, yaw): if given, applies the area around the body (see
     GLOBAL_MAP_SELF_RING_M): free core, ring without obstacles.
 
-    return_core: also return the CORE mask, i.e. the cells covered by the body now. It
+    return_core: also return the core mask, i.e. the cells covered by the body now. It
     must be passed to GlobalGrid.update as `walked`: they are cells the robot physically
     passed over, and declaring them occupied will require more confirmations (see
     GLOBAL_OCC_CONFIRM_WALKED).
@@ -880,9 +876,8 @@ def mask_for_global_map(obstacle_mask, is_valid, pts=None, robot_pose=None,
 # The global maps on disk (global_occupancy_map.pkl, global_terrain_map.pkl in the mission
 # folder) are read only after the mission (tools/mission_viewer.py): they are saved at most
 # every MAPS_SAVE_EVERY_S at the attempt starts, and always after the final scan and on an
-# interrupted mission. Before, at every attempt start: ~50 ms on the laptop on the maps of
-# 04-11 16:52, several times that on the CORE I/O, growing with the mission; and the data
-# after the last attempt start (last cruise, final scan) were never saved.
+# interrupted mission. Saving costs tens of milliseconds (more on the CORE I/O) and grows with
+# the mission.
 MAPS_SAVE_EVERY_S = 60.0
 _maps_saved_at = [None]
 

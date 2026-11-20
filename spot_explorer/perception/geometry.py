@@ -2,10 +2,10 @@
 import numpy as np
 
 # =========================================================================
-# OBSTACLE, SLOPE AND ROUGHNESS THRESHOLDS
+# Obstacle, slope and roughness thresholds
 #   OBSTACLE_THRESHOLD  a cell is an obstacle if obstacle_distance <= this (m)
 #   SLOPE_THRESHOLD     slope above which an edge is discarded (tangent). The slope is measured
-#                       over a 0.48 m base (see SLOPE_BASELINE_M), so a SHARP STEP of
+#                       over a 0.48 m base (see SLOPE_BASELINE_M), so a sharp step of
 #                       height H counts as H / 0.48: 0.6 corresponds to a step of ~29 cm,
 #                       Spot's limit (~30 cm). That is why no separate step measurement
 #                       is needed.
@@ -15,8 +15,8 @@ import numpy as np
 OBSTACLE_THRESHOLD = 0.15   # obstacle_distance (m): distance <= this -> blocked
 
 # =========================================================================
-# ROBOT FOOTPRINT AND SAFE FRONTIER (see safe_frontier.compute_safe_frontier)
-#   FRONTIER_CLEARANCE_M: minimum distance from an obstacle for the CENTRE LINE of the path:
+# Robot footprint and safe frontier (see safe_frontier.compute_safe_frontier)
+#   FRONTIER_CLEARANCE_M: minimum distance from an obstacle for the centre line of the path:
 #     half width (0.25) + air (ROBOT_CLEARANCE_AIR_M). Read directly from
 #     obstacle_distance. The edge veto comes from here too (PRM_EDGE_SAFETY_MARGIN_M).
 #   ROBOT_CLEARANCE_AIR_M: the air between body and obstacle. 0 = only the body footprint: the
@@ -25,22 +25,20 @@ OBSTACLE_THRESHOLD = 0.15   # obstacle_distance (m): distance <= this -> blocked
 #     sparser the graph can be to find narrow passages (see mission_graph, ALIASING).
 #   FRONTIER_BODY_HALF_LENGTH_M: the nose is 0.55 m ahead of the centre; the centre stops at
 #     half length + FRONTIER_MARGIN_M before the first non-free point.
-#   FRONTIER_MIN_CLEARANCE_M / FRONTIER_ESCAPE_DIST_M: if the robot is ALREADY closer than
+#   FRONTIER_MIN_CLEARANCE_M / FRONTIER_ESCAPE_DIST_M: if the robot is already closer than
 #     FRONTIER_CLEARANCE_M to something (tight space), in the first metre it is enough not
 #     to get any closer, never below FRONTIER_MIN_CLEARANCE_M: that way it can get out.
 #   FRONTIER_ROBOT_RADIUS_M: within this radius "unseen" cells do not stop the frontier
 #     (it is the ground under the robot, covered by the body).
-#   FRONTIER_ABORT_AIR_M: it STARTS with FRONTIER_CLEARANCE_M on the sides; while moving it
-#     stops only below ROBOT_HALF_WIDTH_M + FRONTIER_ABORT_AIR_M (0.25), i.e. if
-#     something really enters the footprint (user's decision: "if it sees it free, go").
+#   FRONTIER_ABORT_AIR_M: a move starts with FRONTIER_CLEARANCE_M on the sides; while moving
+#     it stops only below ROBOT_HALF_WIDTH_M + FRONTIER_ABORT_AIR_M (0.25), i.e. if something
+#     really enters the footprint.
 # =========================================================================
 ROBOT_HALF_LENGTH_M = 0.55          # Spot: 1.10 x 0.50 m
 ROBOT_HALF_WIDTH_M = 0.25
-# Air between body and obstacle: ONE threshold for frontier, edges, filter, nodes and goals
-# (09-11, user's choice): 0.30 m from the centre line, passages of at least 0.60 m. 5 cm
-# cover what was measured: the robot off the line in cruise up to 4.4 cm (04-11 16:52), cells
-# of 3 cm. On the 463 real frontiers of 03-04-11 the confirmed stretch is shorter than with
-# 0.25 in 19% of the cycles, by 7 cm (median). Until 09-11 0.0 (0.25 m), 0.05 before 15-10.
+# Air between body and obstacle: one threshold for frontier, edges, filter, nodes and goals,
+# 0.30 m from the centre line, so passages of at least 0.60 m. The 5 cm cover how far the robot
+# drifts off the line in cruise (a few cm) and the 3 cm cells of the grid.
 ROBOT_CLEARANCE_AIR_M = 0.05
 FRONTIER_CLEARANCE_M = ROBOT_HALF_WIDTH_M + ROBOT_CLEARANCE_AIR_M      # = 0.30
 FRONTIER_MIN_CLEARANCE_M = 0.05
@@ -164,15 +162,10 @@ def rotation_is_clear(obstacle_dist, origin_x, origin_y, cell_size, robot_x, rob
             worst = min(worst, float(window[in_body].min()))
     return worst >= -ROTATION_NOISE_TOLERANCE_M, worst
 
-# Distance from obstacles the PLANNER chooses edges with: the frontier's plus
-# PLAN_CLEARANCE_EXTRA_M. With the same distance as the frontier the paths passed exactly
-# at the limit, and the noise of the live scan (1-2 cm) got them refused: in the test
-# of 22-10 15:24, 18 frontier turns out of 25 stopped by an obstacle at 0.23-0.24 m with a
-# minimum of 0.25, with advances of 0.2-0.5 m. The narrowest passage is always decided by
-# the frontier; the planner leaves a few more centimetres. 0 = same distance as the frontier.
-# Since 09-11 0: the edges of the scan window and the frontier use the same rule on the same
-# filtered scan, with its hysteresis (edge_evaluation.FRONTIER_EDGES), so the noise no
-# longer makes them disagree; one threshold, ROBOT_CLEARANCE_AIR_M.
+# Distance from obstacles the planner chooses edges with: the frontier's plus
+# PLAN_CLEARANCE_EXTRA_M. 0: in the scan window the edges and the frontier use the same rule on
+# the same filtered scan, with its hysteresis (edge_evaluation.FRONTIER_EDGES), so the scan noise
+# does not make them disagree.
 PLAN_CLEARANCE_EXTRA_M = 0.0
 PLAN_CLEARANCE_M = FRONTIER_CLEARANCE_M + PLAN_CLEARANCE_EXTRA_M          # = 0.30
 
