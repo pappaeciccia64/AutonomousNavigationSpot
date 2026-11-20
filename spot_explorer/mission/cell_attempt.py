@@ -41,7 +41,7 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
         swing_height) for all legs, passed down to motion.relative_move through
         navigate_to. Empty = gait chosen leg by leg (select_mobility_params).
 
-    HOW IT IS MADE. The start: the first cycle of the planning thread (attempt_cruise:
+    How it is made. The start: the first cycle of the planning thread (attempt_cruise:
     _start_in_thread -- seen check, _local_data_into_graph, _goal_and_path, _reset_counters),
     then the cruise; in the stop-and-go mode (cruise off) _prepare (legacy/stop_and_go_start.py).
     The stop-and-go loop: _loop_once until a phase decides the outcome:
@@ -119,8 +119,8 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
                     return True if self._seen_only else self._finish()
                 if started is None and not self.path_waypoints:
                     # Not "unreachable now": that is a fact of the graph, this may be a slow or
-                    # stuck computer (09-11 15:32: scan 20 s, graph 31 s). A failure of the
-                    # cell (retried later, set aside after cell_rules.MAX_FAILURES), with its cause.
+                    # stuck computer. A failure of the cell (retried later, set aside after
+                    # cell_rules.MAX_FAILURES), with its cause.
                     self.loop_iter = 0
                     why = getattr(self, 'start_failure_reason', None) or "the planning thread gave no path"
                     self.env._attempt_fail_why = f"start in the planning thread failed: {why}"
@@ -147,8 +147,8 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
             return self._finish()
         finally:
             # A successful hand-off leaves the robot walking (see the hand-off in attempt_cruise), and
-            # so does an attempt that failed before its loop: only computations, no command (on
-            # 03-11 16:02 five of those stopped the robot for nothing, cells beyond the wall).
+            # so does an attempt that failed before its loop: only computations, no command, so
+            # there is no reason to stop the robot.
             if not self._handoff and getattr(self, 'loop_iter', 0) > 0:
                 attempt_cruise.stop_if_moving(self.env, self.command_client, "end of the attempt")
 
@@ -181,10 +181,9 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
         attempt_common.CELL_SEEN_FRACTION of it is already in the global map (seen free or obstacle, after the
         first scan of this attempt). The robot stays where it is (still walking after a
         hand-off: like an attempt that ends before its loop) and the mission marks the cell
-        visited, its GraphNav waypoint where the robot is. Why: on 04-11 16:10 (1,3), (1,0) and
-        the second attempt on (1,4) were 95-100% seen from the corridor before their attempt, and
-        entering them (goal against the furniture) cost back-offs, rotations refused and two
-        returns with GraphNav; the cells ahead of the robot were 5-45% seen.
+        visited, its GraphNav waypoint where the robot is. A cell seen from outside does not need
+        to be entered, and entering it (often towards a goal against furniture) costs back-offs,
+        refused rotations and returns with GraphNav.
         """
         if not attempt_common.CELL_SEEN_EXPLORED or self.global_map is None:
             return False
@@ -467,8 +466,7 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
         in_target_cell = (tuple(int(v) for v in self.env.get_cell_from_world(self.robot_x, self.robot_y))
                           == (int(self.target_row), int(self.target_col)))
         # Just outside the cell counts as inside, for the arrival by tolerance (see
-        # ARRIVAL_OUTSIDE_CELL_M). On 22-10 16:04: "0.06 m to go ... still outside
-        # cell (2,7)", with the robot outside by 0.01 m.
+        # ARRIVAL_OUTSIDE_CELL_M).
         robot_border = cells.cell_border_distance(self.env, self.target_row, self.target_col, self.robot_x, self.robot_y)
         near_goal = (not in_target_cell and robot_border is not None
                      and -robot_border <= P.ARRIVAL_OUTSIDE_CELL_M)

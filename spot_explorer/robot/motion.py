@@ -485,15 +485,14 @@ PATH_TURN_IN_PLACE_DEG = 60.0
 # that a new send in the middle of a turn while walking does not stop the robot.
 PATH_START_IN_PLACE_DEG = 35.0
 PATH_MAX_DEVIATION_M = 0.10
-# During the rotation on the spot at the start Spot moves the body centre by some cm (03-11
-# 15:39: 9.6 cm while turning 90 degrees, then 2 cm): until it ends (+0.5 s) the limit is this.
+# During a rotation on the spot at the start Spot moves the body centre by up to ~10 cm: until
+# it ends (+0.5 s) the deviation limit is this.
 PATH_MAX_DEVIATION_TURN_M = 0.20
 PATH_MIN_POINT_GAP_M = 0.01      # path points closer than this to the previous one are dropped
 # Spot's feedback can say that the final point is blocked (final_goal_status, its own
-# planner and obstacle map). It is advice, not a stop: on 03-11 14:45 it came out in 4 legs
-# out of 19 with the robot still walking towards points it then reached, and stopping on
-# it made two of them count as mechanical failures. It counts as blocked only with the
-# robot also standing (less than PATH_STILL_M and PATH_STILL_DEG in PATH_BLOCKED_STILL_S).
+# planner and obstacle map). It is advice, not a stop: it also comes out with the robot still
+# walking towards points it then reaches. It counts as blocked only with the robot also
+# standing (less than PATH_STILL_M and PATH_STILL_DEG in PATH_BLOCKED_STILL_S).
 PATH_BLOCKED_STILL_S = 1.5
 PATH_STILL_M = 0.03
 PATH_STILL_DEG = 3.0              # turning on the spot is moving too
@@ -561,7 +560,7 @@ def path_trajectory(path_xy, start_xy, start_yaw, max_linear_vel, max_angular_ve
         ds = float(np.hypot(qx - px, qy - py))
         dh = abs(_angle_diff(qh, ph))
         # Walking and turning happen together: the longer of the two times, not their sum
-        # (with the sum, on 03-11 14:48 a 41-degree turn while walking went at 0.06-0.2 m/s).
+        # (with the sum a turn while walking would crawl).
         out.append((qx, qy, _wrap(qh), out[-1][3] + time_factor * max(ds / v, dh / w)))
     return out
 
@@ -681,8 +680,7 @@ class PathCommand:
                              and abs(sx * ux + sy * uy) / (ns * nu) < np.cos(np.radians(45)))
         # The projection stays: the robot goes back onto the line that was checked (with a
         # short sideways step, see path_trajectory) instead of heading straight for the next
-        # point along a line nobody checked. Dropping it, the robot passed 0.24 m from a wall
-        # corner in the smoke run of 03-11 (the path had changed while it walked).
+        # point along a line nobody checked, which can cut a corner close to a wall.
         if self._last is None:
             self._last = (x, y, yaw)
         v = max_linear_vel if max_linear_vel is not None else DEFAULT_MAX_LINEAR_VEL_MPS
@@ -839,10 +837,9 @@ def select_mobility_params(gradient, roughness):
                       max_angular_vel=gait.GAIT_ANG_PLAIN)
     elif gradient < moderate_max and roughness < gait.GAIT_MODERATE_ROUGH_MAX:
         tier = "MODERATE"
-        # Normal gait: the care is in speed, friction and step. With CRAWL here (until 04-11)
-        # the gait went AUTO <-> CRAWL at every PLAIN/MODERATE change, and at each change while
-        # walking Spot made a side step of 10-15 cm (04-11 14:08); the ground under MODERATE
-        # was 5 deg median, 14 at most, and Spot walks up to 30 deg in AUTO.
+        # Normal gait (AUTO): the care is in speed, friction and step. Switching to CRAWL
+        # here would change the hint at every PLAIN/MODERATE change, and Spot makes a side
+        # step of 10-15 cm at each hint change while walking; AUTO handles slopes up to 30 deg.
         params = dict(locomotion_hint=spot_command_pb2.HINT_AUTO,
                       swing_height=spot_command_pb2.SWING_HEIGHT_HIGH,
                       ground_mu_hint=gait.GAIT_MU_MODERATE,
