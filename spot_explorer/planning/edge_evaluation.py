@@ -1,7 +1,7 @@
 """
 Edge evaluation of the mission PRM (see roadmap.py): occupancy (live scan and global map),
-slope with the body (live scan, global height map, node fallback), weight; the refresh
-around the robot during the move. The vetoes are counted in edge_stats.py.
+slope with the body (live scan, global height map), weight; the refresh around the robot
+during the move. The vetoes are counted in edge_stats.py.
 """
 
 import numpy as np
@@ -11,89 +11,63 @@ from spot_explorer.perception import slopes
 from spot_explorer.planning import safe_frontier
 
 
-# Samples per metre with which occupancy is checked along an edge (minimum 5), the same
-# everywhere. Every sample checks a disk of radius geometry.PRM_EDGE_SAFETY_MARGIN_M
-# (0.13): with a sample every 10 cm, halfway between two samples the disk still covers 0.12 m,
-# i.e. the edge line stays ~0.27 m from obstacles (geometry.PLAN_CLEARANCE_M = 0.28;
-# the frontier requires 0.25).
+# Samples per metre with which occupancy is checked along an edge (at least 5). Every sample
+# checks a disk of radius geometry.PRM_EDGE_SAFETY_MARGIN_M on the occupied cells (which are
+# already within OBSTACLE_THRESHOLD of an obstacle): halfway between two samples, 10 cm apart,
+# the disk still covers the line within a centimetre or two of geometry.PLAN_CLEARANCE_M.
 OCCUPANCY_SAMPLES_PER_M = 10
 OCCUPANCY_SAMPLES_MIN = 5
 
-# --- PRELIMINARY DISCARD ON THE LIVE SCAN -----------------------------------------------
-# The global map declares a cell occupied only after 2 confirmations, so at the first
-# scan of a place it knows nothing yet. Before anything else, an edge is discarded if
-# one of its samples (every 10 cm) falls on a cell SEEN in the current scan with
-# obstacle_distance below LIVE_PREFILTER_OD_M and not under the robot's body.
-#   - The threshold is the frontier distance (geometry.FRONTIER_CLEARANCE_M, 0.25 m): it removes
-#     the edges the frontier would refuse. With a threshold below the frontier (0.20 m) the
-#     planner chose edges at 0.20-0.25 m that the frontier then refused.
-#   - NOT the planning distance (0.28, that of the global map): from a tight
-#     spot the exit edges necessarily pass near obstacles, and the frontier
-#     allows them (in the first metre it is enough not to get closer, see FRONTIER_ESCAPE_DIST_M). At 0.28
-#     the replay of mission 13-10 11:22 lost the path from the last cell start.
-#   - It is a vectorized read, costs very little, and comes before the slope.
-#   - It is not permanent: it is redone at every refresh with the new scan.
+# --- Preliminary discard on the live scan ---------------------------------------------------
+# The global map declares a cell occupied only after 2 confirmations, so at the first scan of a
+# place it knows nothing yet. An edge is discarded first if one of its samples (every 10 cm)
+# falls on a cell seen in the current scan with obstacle_distance below LIVE_PREFILTER_OD_M and
+# not under the robot's body.
+#   - The threshold is the frontier distance: it removes the edges the frontier would refuse.
+#   - From a tight spot the exit edges pass near obstacles; the frontier allows them (in the
+#     first metre it is enough not to get closer, see FRONTIER_ESCAPE_DIST_M), so the threshold
+#     must not be higher than the frontier's.
+#   - It is a vectorized read, cheap, made before the slope, and redone at every refresh.
 # None = disabled.
-LIVE_PREFILTER_OD_M = geometry.FRONTIER_CLEARANCE_M     # = 0.25
+LIVE_PREFILTER_OD_M = geometry.FRONTIER_CLEARANCE_M
 
-# Radius within which refresh_local_edge_weights re-evaluates the edges during the move. The
-# robot travels a few nearby edges in the next step; outside here the edges keep the
-# weights of the last evaluation (safety stays with the frontier, on the live data). 1.25 m is
-# the maximum edge length: the edge the robot is about to travel always falls
-# entirely in the re-evaluated area. None = no limit.
-# Since 09-11 None (user's rule: the edges updated are all those the robot sees, the whole
-# scan window): the incremental refresh keeps the profile of the edges already evaluated, so
-# the work is the new edges entering the window. Measured with tools/bench_edges.py on the
-# 392 cruise cycles of 04-11 and 09-11 14:36, laptop: 36.4 -> 53.8 ms median per cycle (p90
-# 47 -> 72), mostly the slopes of the edges entering at the border; on the CORE I/O ~6 times.
-# 1.25 m before (the maximum edge length).
+# Radius within which refresh_local_edge_weights re-evaluates the edges during the move; outside
+# it the edges keep the weights of the last evaluation. None = the whole scan window: every edge
+# the robot sees is updated, and the incremental refresh keeps the profiles already computed,
+# so the work is mostly the edges entering the window.
 REFRESH_RADIUS_M = None
 
-# Slopes of the refresh pairs computed in batch with matrices (see
-# precompute_arc_slopes), as at cell start (mission_graph.BATCH_SLOPES).
-# False = edge by edge; the result is identical.
+# Slopes of the refresh pairs computed in batch with matrices (see precompute_arc_slopes), as at
+# the attempt start (mission_graph.BATCH_SLOPES). False = edge by edge; same result.
 REFRESH_BATCH_SLOPES = True
 
-# INCREMENTAL REFRESH: an edge already evaluated on the live scan keeps its slope profile
-# until the scan sees it better: centre-line coverage (edge extended by half a body)
-# up by REFRESH_COVERAGE_GAIN, or robot REFRESH_CLOSER_M closer to the edge middle than at
-# the last evaluation (the heights read from close by are the reliable ones). Occupancy and
-# the live discard are redone at every refresh anyway: they are cheap and something can
-# enter the edge after it was evaluated. If the edge is as the evaluation left it (validity
-# and weight), it is not touched at all. False = every edge of the radius from scratch.
-# 03-11, end-to-end test: the slopes were 34% of the 190 ms of a refresh.
+# Incremental refresh: an edge already evaluated on the live scan keeps its slope profile until
+# the scan sees it better: centre-line coverage (edge extended by half a body) up by
+# REFRESH_COVERAGE_GAIN, or the robot REFRESH_CLOSER_M closer to the edge middle than at the last
+# evaluation (heights read from close by are the reliable ones). Occupancy and the live discard
+# are redone at every refresh anyway: they are cheap and something can enter the edge later. An
+# edge left as the evaluation found it (validity and weight) is not touched.
 INCREMENTAL_REFRESH = True
 
-# ONE RULE FOR GRAPH AND FRONTIER (09-11): in the scan window an edge is discarded by the
-# live scan with THE rule of the safe frontier (safe_frontier.sample_flags: obstacle with the
-# hysteresis of the filter, roughness veto, the exemptions under the body and next to the
-# robot), on the same samples (one per cell, FRONTIER_SAMPLE_STEP_M, from both ends), so the
-# planner cannot propose in the seen area a stretch the frontier then refuses. Before: only
-# obstacle_distance below LIVE_PREFILTER_OD_M every 10 cm, without hysteresis and roughness.
-# Where the scan sees, the global map (memory of the past scans, margin PLAN_CLEARANCE_M)
-# no longer decides: on 04-11 it held out 14 of the 279 edges the frontier confirmed free
-# (the cruise then ended with "the edge being walked is out of the graph", 16:52).
-# What the scan has not seen does not discard the edge (the frontier stops there,
-# 'end_of_data', and the robot looks again). Needs the snapshot (set_live_snapshot); with the
-# raw arrays only (attempt start) the old check. False = the old check everywhere.
+# One rule for graph and frontier: in the scan window an edge is discarded by the live scan with
+# the rule of the safe frontier (safe_frontier.sample_flags: obstacle with the filter hysteresis,
+# roughness veto, the exemptions under the body and next to the robot), on the same samples (one
+# per cell, FRONTIER_SAMPLE_STEP_M, from both ends), so the planner cannot propose a stretch the
+# frontier then refuses. Where the scan sees, the global map does not decide. What the scan has
+# not seen does not discard the edge: the frontier stops there ('end_of_data') and the robot
+# looks again. Needs the snapshot (set_live_snapshot); with only the raw arrays (attempt start)
+# the preliminary discard above is used.
 FRONTIER_EDGES = True
-# The threshold of the rule for the edges: the same as the frontier (geometry.FRONTIER_CLEARANCE_M,
-# 0.30). Tried first: 0.28 for the graph and 0.25 for the frontier (3 cm for the tracking;
-# with 0.25 for both, test_cruise "box appears" had the robot centre 0.24 m from the box);
-# the user chose one threshold, with the margin in the threshold itself.
+# The threshold of that rule: the same as the frontier, one threshold with the margin inside it.
 FRONTIER_EDGES_CLEARANCE_M = geometry.FRONTIER_CLEARANCE_M
 _EXEMPT_R_M = max(geometry.FRONTIER_ROBOT_RADIUS_M,
                   float(np.hypot(geometry.ROBOT_HALF_LENGTH_M, geometry.ROBOT_HALF_WIDTH_M))) + 0.01
 
-# FAST REFRESH (06-11): the same refresh with the fixed costs cut (see tools/bench_edges.py,
-# which checks the result identical to the bit on the real scans). False = the code before.
+# The refresh with its fixed costs cut (tools/bench_edges.py checks the result is identical on
+# real scans).
 FAST_REFRESH = True
-# The adjacency lists of the refresh rebuilt once per node at the end instead of at every edge
-# (switch, off; 19-11, to try): _refresh_edge rewrote both neighbour lists of every edge, so a
-# node with k refreshed edges had its list rebuilt k times (~2600 edges per cycle in
-# test_cruise; with _edge_weight's linear scans ~10% of the cycle, tools/profile_cycle.py).
-# Same lists, same order: the untouched neighbours as before, then the refreshed valid ones
-# in refresh order (tests/test_batch_adjacency.py).
+# Rebuild the adjacency lists of the refresh once per node at the end instead of at every edge.
+# Same lists in the same order (tests/test_batch_adjacency.py).
 BATCH_ADJACENCY = False
 REFRESH_COVERAGE_GAIN = 0.15
 REFRESH_CLOSER_M = 0.5
@@ -112,8 +86,8 @@ def body_slope(prof):
     return prof[0], prof[1], prof[2]
 
 
-# LOCAL GRAPH UPDATE (see mission_graph.MissionGraph.add_edges_to_prm). At cell
-# start only the edges near the areas with new data since the last evaluation are re-evaluated
+# Local graph update (see mission_graph.MissionGraph.add_edges_to_prm). At the attempt start
+# only the edges near the areas with new data since the last evaluation are re-evaluated
 # (dirty_rects: the scan windows, the only place where the maps change).
 # DIRTY_MARGIN_M is how far the evaluation of an edge reads data beyond its rectangle:
 # half a body beyond the ends, lateral slope slice, occupancy margin, plus
@@ -363,9 +337,9 @@ class EdgeEvaluation:
 
     def live_prune_valid_edges(self, skip_keys=()):
         """
-        Preliminary discard on the edges ALREADY valid that the refresh does not re-evaluate
-        (outside REFRESH_RADIUS_M but inside the scan window): an edge 1.3-1.9 m from the robot
-        crossing an obstacle just seen does not stay valid until the robot gets closer.
+        Preliminary discard on the edges already valid that the refresh does not re-evaluate
+        (outside REFRESH_RADIUS_M but inside the scan window): an edge crossing an obstacle just
+        seen does not stay valid until the robot gets closer.
         They are only removed from the graph (validity False): at the next full evaluation they
         come back if the data says so. Returns how many edges it removed.
         """
@@ -450,7 +424,7 @@ class EdgeEvaluation:
     def refresh_local_edge_weights(self, global_map=None, edge_safety_margin: float = 0.05):
         """
         Re-evaluate from scratch (occupancy, slope, weight) the edges within REFRESH_RADIUS_M of
-        the robot that have at least ONE end in the scan window, including those discarded
+        the robot that have at least one end in the scan window, including those discarded
         before: an edge removed for a noisy reading becomes valid again as soon as the data
         says so, and an edge crossing a wall just seen towards a distant node is re-examined
         at once. The edges travelled by the robot (traversed_edges) are not touched. Returns
@@ -810,7 +784,7 @@ class EdgeEvaluation:
         from the best to the coarsest:
           1. the current scan (self.current_terrain_2d);
           2. the global height map, for a stretch already seen but now outside the window;
-          3. none (11-11): an edge never seen costs its length only.
+          3. none: an edge never seen costs its length only.
         precomputed_slope: profile already computed by the caller (3 or 6 values), so it is not redone.
 
         Roughness: 90th percentile of the per-cell field along the stretch (OCCUPANCY_SAMPLES_PER_M
@@ -857,9 +831,7 @@ class EdgeEvaluation:
                 source = 'global_map'
 
         if not has_slope_data:
-            # No data from any source: the edge costs its length only. (Until 11-11 the mean
-            # slope of the two nodes: values read only at the attempt start, at the node point,
-            # meaningless for the stretch in between that nobody has seen.)
+            # No data from any source: the edge costs its length only.
             longitudinal_slope, lateral_slope = 0.0, 0.0
             source = 'fallback_nodes'
 
@@ -972,8 +944,8 @@ class EdgeEvaluation:
             self._gs_index_of = cache
             self._gs_keys, self._gs_box, self._gs_alive = [], np.empty((0, 4)), np.empty(0, dtype=bool)
             cache.cleared = False
-        # The keys added since the last look: into the index (those whose nodes are no longer
-        # in the graph out of the cache, as in the old code).
+        # The keys added since the last look go into the index; those whose nodes are no
+        # longer in the graph leave the cache.
         if cache.new_keys:
             add = []
             for k in cache.new_keys:
@@ -1011,7 +983,7 @@ class EdgeEvaluation:
     def _traversed_edge_ok(self, a, b, global_map) -> bool:
         """
         An edge travelled by the robot stays in the graph without checks (it is free by
-        construction), EXCEPT if it was blocked afterwards (confirmed block or physical failure)
+        construction), except if it was blocked afterwards (confirmed block or physical failure)
         or if it now passes over the spot of a fall: an edge travelled on the way out and then
         blocked must not come back into the graph at the next rebuild.
         """
@@ -1222,7 +1194,7 @@ class EdgeEvaluation:
 
     def _add_edge_without_data(self, idx1: int, idx2: int, dist: float) -> bool:
         """
-        AREA WITHOUT DATA: edge on which no source has information (outside the scan, global
+        Area without data: edge on which no source has information (outside the scan, global
         terrain map certainly without data, occupancy free, not blocked, gamma = 0). Cost: its
         length only, as _evaluate_and_add_edge would give, same counters. Only for adjacencies
         just cleared (fresh).
@@ -1243,7 +1215,7 @@ class EdgeEvaluation:
         Decide whether edge idx1-idx2 is allowed and, if so, add it with its weight.
         Checks in order: edge blocked, occupancy, slope with the body; then the weight.
 
-        force=True skips the vetoes and adds the edge anyway: ONLY for the stretch the robot
+        force=True skips the vetoes and adds the edge anyway: only for the stretch the robot
         has just travelled on its own legs, free by construction.
         occ_blocked: outcome already computed by _occupancy_blocked_many (None = computed here).
         fresh=True: the adjacencies have just been cleared, there is no old edge to remove.
