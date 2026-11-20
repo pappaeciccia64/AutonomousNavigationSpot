@@ -8,6 +8,25 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-20 (frontier goal beyond the edge; test plan for the simulator)
+
+- `frontier.FRONTIER_BEYOND_M` (default 0 = off): the goal is the node up to that far beyond
+  the frontier node, into the unseen, furthest along robot -> frontier (through valid edges,
+  not near a refused goal). Fake missions (`tools/compare_route_line.py --variants frontier
+  --frontier-beyond B`, worlds A, B and 3 random):
+
+  | B | goals | failed | walked | off line | seen | time |
+  |---|---|---|---|---|---|---|
+  | 0 | 151 | 0 | 220 m | 0.27 m | 98% | 690 s |
+  | 1.0 | 92 | 0 | 231 m | 0.32 m | 98% | 688 s |
+  | 1.5 | 91 | 25 | 208 m | 0.40 m | 97% | 709 s |
+
+  1 m: 40% fewer goals, same time and area; 1.5 m: goals in obstacles refused. The fake
+  robot does not slow down at the end of a command, so the gain in time (if any) is for the
+  simulator or the robot: to try there with 1.0.
+- SIMULATOR.md: test plan for the first days (bring-up, baseline in cells, timing switches,
+  cells against frontier, terrain).
+
 ## 2026-11-20 (coverage of the mission area: the progress without the cells)
 
 - **`[COVERAGE]` line** (`exploration.Mission._log_coverage`): the mission area seen in the global map, every time it grows by `COVERAGE_STEP` (5 points) and at the end, with the growth since the last line and since the start and the minutes to `COVERAGE_TARGET` (95%) at the mean rate so far. It does not depend on the cells (the frontier mode has no cells to count); also when a cell is done while walking. The `[PROGRESS]` line of the cells is unchanged.

@@ -79,6 +79,53 @@ and stays the same.
 area seen, time. In a simulator the same comparison, and `tools/cruise_timing.py` on the
 mission logs for the timing switches (FIELD_TEST.md, "Timing of the cruise").
 
+## Test plan for the first days in the simulator
+
+Each run: note scene, seed, variant and switches (the `[CONFIG] SWITCHES` line has them),
+keep the mission folder. Tools: `tools/mission_report.py` (outcome, `Coverage:`),
+`tools/cruise_timing.py` (timing of the cruise), `tools/mission_viewer.py` (maps, scans, path),
+`coverage.csv` (area seen over time). Switches are set with `--set module.NAME=value` of the
+runner (after the cleanup of 20-11 the alternatives live in `varianti/`: launch them from
+there).
+
+**0. Before anything** -- the colleague's bridge (office PC, 20-11, not on GitHub yet): push it,
+read how it gives the four points of the table above, compare with `sim/spot_adapter.py`.
+
+**1. Bring-up (an hour).** In order, each a short check:
+   - grids: an object of known size and place in the scene; in the mission viewer it must be
+     where it is, `obstacle_distance` zero on its border, `terrain` the right height on a slope;
+     no strip of never-written cells where the sensor does see (`[GROUND-FILTER]` lines);
+   - path: one `PathCommand` to a point 2 m ahead -- `arrived` in about the commanded time,
+     `blocked` before a wall; then the same while the next one replaces it (cruise);
+   - robot state: body pitch / roll on a slope match the scene, `gpe` under the feet;
+   - a 2 x 2 cells mission on flat ground, cells mode: it ends, returns to wp_0.
+
+**2. Baseline, cells mode** (the behaviour of the robot today), three scenes: open ground
+with a few boxes, a hill or a slope of 10-15 degrees, a corridor with obstacles on one side.
+Measure: cells closed, area seen and its growth (`coverage.csv`), metres, minutes, cruise speed
+and stops (`[CRUISE] End`), plans read (`cruise_timing.py`). Expected from the fake missions:
+all reachable cells, 98-100% seen, cruise 0.3-0.35 m/s.
+
+**3. Timing switches** (FIELD_TEST.md, "Timing of the cruise"), one at a time on the open scene:
+`CRUISE_STATE_CACHE`, `CRUISE_WAKE_ON_PLAN`, `PLAN_EVENT_DRIVEN`, `GROUND_FROM_GRID` (only if
+the bridge puts `gpe` in the grid snapshot). Look at: plan read delay (off ~100-200 ms, with the
+wake-up a few ms), plans read of those published (off 67-94%), main thread turn. The network
+latency of a simulator is not the robot's: the order of the gains counts, not the absolute
+numbers.
+
+**4. Where the goal comes from**: cells against frontier (`exploration.GOAL_SOURCE='frontier'`,
+with and without `frontier.FRONTIER_BEYOND_M`, the goal beyond the edge), same scenes and
+seeds. Expected with Spot's 3.84 m grid: as good as the cells in the open, slower among walls
+(goals ~1 m apart). If the simulator can give a wider grid (a simulated lidar: more cells, the
+code reads the size from the protos), run the frontier with it: there it should pull ahead.
+
+**5. Terrain and gait** on the slope and on a step of 10-20 cm: gait levels chosen
+(`[GAIT]`), edge slopes against the ground under the feet (`tools/slope_check.py`), no stop
+in front of a step Spot can take.
+
+**6. Write down** a table per run (scene, variant, cells, % seen, metres, minutes, cruise
+speed, stops, failures) -- the comparison of 4 and 3 decides what to try next on the robot.
+
 ## What a simulator will not tell
 
 Spot's own internals: how it builds and filters its grids (noise, grass seen as obstacle or
