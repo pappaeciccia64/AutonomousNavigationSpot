@@ -19,6 +19,47 @@ Everything else is the real code: global maps, PRM graph, Dijkstra, safe frontie
 thread, cruise, cell or frontier exploration, logs and saved data (`MissionLogs/`,
 `MissionMap/`) readable with `tools/mission_viewer.py` and the other tools.
 
+## What is ready (sim/, 20-11)
+
+The bridge is written and runs against a reference backend without physics:
+
+| File | What |
+|---|---|
+| `sim/backend.py` | `SimBackend`: the methods a simulator must implement (clock, pose, follow a path, path status, teleport, ground height, obstacles, what is seen) |
+| `sim/kinematic_world.py` | `KinematicWorld`: complete example backend -- boxes, ground made of planes / hills / steps; the robot follows the path exactly, stops before obstacles and slopes above 30 degrees, body roll and pitch follow the ground |
+| `sim/spot_adapter.py` | from a backend, what the mission expects from Spot: the local grids as real `LocalGridResponse` protos (decoded by the mission's own `spot_grid`), `SimSpot` (commands, feedback, robot state with body, gpe, power, battery), `MemoryGraphNav`, `SimRobot` (`ensure_client` by service name) |
+| `sim/worlds.py` | scenes: `open`, `hill` (as 28-10), `slope` (13 degrees, as 29-10), `step`, `walls` (as the room of 03-11) |
+| `tools/run_sim_mission.py` | the unchanged mission (`mission/run.py`) against a backend: `--world`, `--set module.NAME=value`, arguments of run_mission.py after `--`; data under `--out` |
+| `tests/test_sim_bridge.py` | grids decoded by the real code, path command on the simulated robot, a whole mission |
+
+    python3 tools/run_sim_mission.py --world hill
+    python3 tools/run_sim_mission.py --world walls --set "exploration.GOAL_SOURCE='frontier'"
+
+## Writing the backend of a real simulator
+
+One class, `SimBackend`, in a new file (e.g. `sim/isaac_backend.py`), then in
+`tools/run_sim_mission.py` the backend built from it instead of `worlds.scene(...)`:
+
+- `now()` / `step_to(t)`: the simulator clock in seconds. The mission runs in real time and
+  calls `step_to` with the wall clock: a simulator stepping on its own only has to be at least
+  that far (or be stepped there).
+- `pose()`: body position and yaw, roll, pitch (from the base link of the robot model).
+- `follow_path(points, max_linear, max_angular)`: points `(x, y, yaw, t)`. First version:
+  the kinematic way of `KinematicWorld._step` (set the base pose along the path). With a
+  walking policy: a path follower (target point at time `now()` on the path, velocity command
+  towards it, capped) feeding the policy.
+- `path_status()`: `moving`, `near_goal`, `at_goal`, `blocked`, `stopped`; `blocked` when the
+  robot makes no progress towards the target for a while (it is what Spot reports).
+- `teleport(x, y, yaw)`: for the in-memory GraphNav.
+- `terrain(xs, ys)` / `obstacles(xs, ys)` / `seen(xs, ys, robot_xy)`: the world around the
+  robot at the cell centres of the grid. From a simulator: rays down from above on the grid
+  points for the ground height; obstacle where the hit is more than ~0.25 m above the ground
+  under the robot's feet or on a collision body tagged as obstacle; `seen` from rays from the
+  robot's camera height (occlusions) or simply within range.
+
+Everything else -- grids as protos, commands, robot state, GraphNav -- is `sim/spot_adapter.py`
+and stays the same.
+
 ## Steps
 
 1. **Kinematic first**: robot moved by the bridge exactly along the commanded trajectory

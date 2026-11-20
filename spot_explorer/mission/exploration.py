@@ -313,7 +313,9 @@ class Mission:
         if span > 0:
             parts.append(f"since the start +{100 * gain:.0f} in {span:.1f} min")
         if not final and rate and area < COVERAGE_TARGET:
-            parts.append(f"~{(COVERAGE_TARGET - area) / rate:.0f} min to {100 * COVERAGE_TARGET:.0f}%")
+            eta = (COVERAGE_TARGET - area) / rate
+            parts.append(f"~{eta:.1f} min to {100 * COVERAGE_TARGET:.0f}%" if eta < 10
+                         else f"~{eta:.0f} min to {100 * COVERAGE_TARGET:.0f}%")
         print(f"[COVERAGE] {'End: ' if final else ''}area seen {100 * area:.0f}%"
               + (f" ({'; '.join(parts)})" if parts else ""))
         closed, _v, _b, total = self._cell_counts()
