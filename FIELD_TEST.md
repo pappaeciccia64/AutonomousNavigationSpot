@@ -24,12 +24,12 @@ feedback, pose, pose again and the command at every send). The 0.4 s of the plan
 | `BATCH_ADJACENCY` | `spot_explorer/planning/edge_evaluation.py` | the neighbour lists of the edge refresh rebuilt once per node: identical graph, refresh ~18% shorter (`tests/test_batch_adjacency.py`) |
 | `GROUND_FROM_GRID` | `spot_explorer/perception/spot_grid.py` | the ground height of a scan from the grid's own `gpe` frame (if `grid_rate_check.py` shows it there) instead of a robot state request |
 
-Without editing the files: `python3 tools/run_legacy_mission.py --set attempt_cruise.CRUISE_STATE_CACHE=True [arguments of run_mission.py]` (any `module.NAME=value`; the `[CONFIG] SWITCHES` line says what ran).
+Without editing the files: `python3 varianti/tools/run_legacy_mission.py --set attempt_cruise.CRUISE_STATE_CACHE=True [arguments of run_mission.py]` (any `module.NAME=value`; the `[CONFIG] SWITCHES` line says what ran).
 
 **Order:**
 1. Robot standing, before the missions (1 minute, read only): `python3 tools/grid_rate_check.py` from the laptop and, if the CORE is used, from the CORE (`--hostname 192.168.50.3`). It says how often Spot renews the grids (if at period 0 almost all are new, `PLAN_EVENT_DRIVEN` is worth trying), the cost of a grid and of a robot state request, and whether the grid carries the ground plane frame (`gpe`).
 2. Reference mission, all off. Then `CRUISE_STATE_CACHE`, then `CRUISE_WAKE_ON_PLAN`, then `PLAN_EVENT_DRIVEN` (and `GROUND_FROM_GRID` if the grid carries `gpe`), each in its own mission.
-3. After each: `python3 tools/cruise_timing.py <missions>`.
+3. After each: `python3 varianti/tools/cruise_timing.py <missions>`.
 
 | What | Log | Expected | Off |
 |---|---|---|---|

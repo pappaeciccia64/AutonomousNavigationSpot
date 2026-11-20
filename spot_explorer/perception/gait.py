@@ -8,7 +8,7 @@ from spot_explorer.perception import slopes
 # ~12 cm. These are "how careful" thresholds, well below the obstacle ones.
 # =========================================================================
 # Slope thresholds on the plane estimate (slopes.plane_slope_profile), which reads lower than
-# the height differences on a base; tuned on the measured body pitch (tools/plane_thresholds.py).
+# the height differences on a base; tuned on the body pitch measured on the slopes walked.
 GAIT_PLAIN_SLOPE_MAX = 0.13     # below this on both -> PLAIN tier (flat ground)
 GAIT_PLAIN_ROUGH_MAX = 0.05
 GAIT_MODERATE_SLOPE_MAX = 0.20  # below this on both -> MODERATE tier; at/above -> HARD tier

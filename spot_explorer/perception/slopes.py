@@ -541,7 +541,7 @@ def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
 
 
 # =========================================================================
-# Slope from a local plane (under test, see tools/slope_check.py)
+# Slope from a local plane
 #
 # Instead of height differences on a base along the edge, the plane that best fits the
 # heights in a window of 2 * PLANE_HALF_WINDOW_M around each cell (least squares, reliable
@@ -558,7 +558,7 @@ PLANE_MIN_VALID_FRACTION = 0.5
 # window as long as the body (PLANE_EDGE_HALF_WINDOW_M = half body length) at every position of
 # the robot centre between the two nodes, 90th percentile of those; the window already covers
 # the body, so the values "with the body" are the same. The plane is closer to the slope the
-# robot's body and legs measure than the height differences on a base (tools/slope_check.py).
+# robot's body and legs measure than the height differences on a base.
 # The veto stays SLOPE_THRESHOLD (Spot's limit, ~30 deg).
 PLANE_EDGE_HALF_WINDOW_M = ROBOT_HALF_LENGTH_M
 
@@ -677,8 +677,7 @@ def plane_slope_samples(lookup, cell_size, x1, y1, x2, y2, min_sample_fraction=M
     (x2, y2), the gradient read by lookup(xs, ys) -> (gx, gy) (NaN where none). Returns
     (lon, lat, has): |slope along| and |slope across| per sample (rows = edges, NaN where no
     value or beyond the edge), has = enough samples with a value (min_sample_fraction).
-    Summarized by plane_slope_profiles_lookup (90th percentile); tools/slope_percentile_check.py
-    compares other summaries on the same samples.
+    Summarized by plane_slope_profiles_lookup (90th percentile).
     """
     x1, y1, x2, y2 = (np.asarray(v, dtype=np.float64) for v in (x1, y1, x2, y2))
     dx, dy = x2 - x1, y2 - y1
