@@ -37,6 +37,7 @@ from spot_explorer.records import (MISSION_STATS, MISSION_CTX, SegmentLog, insta
 from spot_explorer.mission import attempt_common
 from spot_explorer.mission import attempt_scan
 from spot_explorer.mission import exploration
+from spot_explorer.mission import frontier
 from spot_explorer.mission import summary
 import argparse
 import traceback
@@ -412,7 +413,8 @@ def easy_walk(options):
 
             recordingInterface.set_download_filepath(graph_folder)
 
-            mission = exploration.Mission(robot_state_client, command_client, recordingInterface, local_grid,
+            mission_cls = frontier.FrontierMission if exploration.GOAL_SOURCE == 'frontier' else exploration.Mission
+            mission = mission_cls(robot_state_client, command_client, recordingInterface, local_grid,
                                 global_grid, env, prm, gb_sampler, verification_tracker,
                                 mission_folder, mobility_kwargs)
             mission.explore()

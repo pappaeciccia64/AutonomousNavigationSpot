@@ -30,6 +30,10 @@ from spot_explorer.mission import cell_rules
 # and in (1,0), went with GraphNav to a neighbouring waypoint (9 s and 4 s) and only there
 # found the cells 93% and 100% seen: the check was made only at the start of the attempt.
 SEEN_BEFORE_MOVING = True
+# Where the goal comes from (19-11): 'cells' (this module, the cell rules) or 'frontier'
+# (mission/frontier.py: the first frontier node of a Dijkstra search with the distance from
+# the route of the visit; an experiment, for the fake missions and a future lidar).
+GOAL_SOURCE = 'cells'
 
 
 class Mission:
@@ -62,6 +66,9 @@ class Mission:
               f"(from {P.MISSION_VISIT_ORDER}), first cells "
               + " ".join(f"({r},{c})" for r, c in self.path[:8])
               + (" ..." if len(self.path) > 8 else ""))
+        # The route of the visit for the path search (roadmap.ROUTE_LINE_PENALTY, off): the
+        # cell centres in visiting order.
+        prm.set_route_line([env.get_world_position_from_cell(r, c) for r, c in self.path])
         self.visualization_counter = 0   # running number of the saved images
         # Progress (see _log_progress): start instant, closed cells at the start and
         # at the last printed line, points of the mission rectangle for the seen area.

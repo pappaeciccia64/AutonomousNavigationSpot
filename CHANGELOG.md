@@ -8,6 +8,18 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-19 evening (the route of the visit in the path; exploration by frontier; simulator plan)
+
+All off by default, to compare on fake missions and in a simulator (the robot was out of order).
+
+- **`roadmap.ROUTE_LINE_PENALTY`** (`ROUTE_LINE_WEIGHT` 1.0, `ROUTE_LINE_SATURATION_M` 1.0): every node entered by the PATH search costs its distance from the route of the visit (polyline through the cell centres in visiting order, `PRM.set_route_line`, set by `exploration.Mission`), saturated so that going round a big obstacle stays possible. Only the path search and its stability check (`compute_path_cost`) use it (`costs_from(..., route=True)`), not the cell rules nor the reachability searches. `tests/test_route_line.py`.
+- **Exploration by frontier** (`exploration.GOAL_SOURCE = 'frontier'`, `mission/frontier.py`, new): the goal is the first frontier node (seen, free, with a valid edge towards a node never seen) settled by one Dijkstra search from the robot with the route penalty. `FrontierRules` has the `choose()` of `cell_rules.CellRules`: in cruise the next frontier goal is prepared by the planning thread as the next cell is, and the robot goes on without stopping. The goal is forced on the node through `env._forced_goal` (`goal.find_best_point_in_cell`); the cell rules are off in this mode (cell done when seen, cells closed before moving, paths limited to explored cells) and restored at the end; the first scan by an attempt on the robot's own cell. End: no frontier reachable or 97% of the area seen. `tests/test_frontier.py` (world A of test_mission, in cruise: 94% seen, 28 goals, 25 reached while walking).
+- **`tools/compare_route_line.py`** (new): the fake mission of test_mission in cruise, per world and per variant (`cells`, `route`, `frontier`): cells, metres walked, distance of the track from the route, area seen, time.
+- Results (`tools/compare_route_line.py`, worlds A and B of test_mission and 4 random of 4 x 5 cells of 2 m, in cruise):
+  - *Route penalty*: little effect. Between two cell centres the shortest way is already almost on the line; the distance comes from going round obstacles. Weight 1: off line 0.20 against 0.22 m on the random worlds, 217 m against 207 walked; weight 2: longer detours (world B 45 m against 38). Kept off.
+  - *Frontier*: works end to end. With Spot's 3.84 m grid the frontier is ~1 m ahead: goals every 0.5-1 m (22-34 per mission), most of them reached while walking. On the open random worlds it does as well as the cells (204 m against 207, 552 s against 577, area seen 99% against 100%, off line 0.18 against 0.22 m); in the walled worlds of test_mission it is slower (A: 113 s against 75, B: 182 s against 107) for 2-3% more area seen. Meant for a wider sensing (a lidar), to try in a simulator.
+- **`SIMULATOR.md`** (new): the four points where a simulator plugs in (local grids, commands and robot state, GraphNav in memory, start-up), as the test fakes do today; steps and what to compare.
+
 ## 2026-11-19 (timing of the cruise: switches prepared without the robot, all off)
 
 The robot was out of order: everything here is behind a switch, off, checked offline, to try in the field (FIELD_TEST.md, "Timing of the cruise").

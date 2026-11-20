@@ -47,6 +47,16 @@ STOP_NODE_MAP_IGNORE_M = 0.70
 # none below its length), so the path is the same (up to equal-cost ties) with fewer nodes
 # explored. The search was ~15% of the planning cycle (tools/profile_cycle.py).
 A_STAR_PATH = False
+# Path kept on the route of the visit (switch, off; 19-11, an experiment): every node entered by
+# the PATH search costs ROUTE_LINE_WEIGHT x its distance from the route line (the polyline
+# through the cell centres in visiting order, set by the mission: set_route_line), saturated at
+# ROUTE_LINE_SATURATION_M so that going round a big obstacle stays possible. With the
+# continuous motion the robot sees while it walks: on the line it sweeps the strip of the
+# visit in order. Only the path search and its stability check use it, not the cell rules nor
+# the reachability searches. Compared on fake missions by tools/compare_route_line.py.
+ROUTE_LINE_PENALTY = False
+ROUTE_LINE_WEIGHT = 1.0
+ROUTE_LINE_SATURATION_M = 1.0
 
 
 class PRM(EdgeEvaluation, EdgeStats):
@@ -114,6 +124,8 @@ class PRM(EdgeEvaluation, EdgeStats):
         self.edge_penalty_transient = {}
         self.node_penalty_persistent = {}   # idx -> additional weight (possibly inf)
         self.node_penalty_transient = {}
+        self.route_line = None               # (K, 2) polyline of the visit, see ROUTE_LINE_PENALTY
+        self._route_dist = {}                # idx -> distance from route_line (nodes never move)
 
         self._init_edge_evaluation()   # live data, global height map, caches (edge_evaluation.py)
         self._init_stats()             # veto statistics (edge_stats.py)
@@ -143,9 +155,33 @@ class PRM(EdgeEvaluation, EdgeStats):
         return (self.edge_penalty_persistent.get(key, 0.0)
                 + self.edge_penalty_transient.get(key, 0.0))
 
-    def effective_weight(self, idx1: int, idx2: int, weight: float) -> float:
-        """Geometric cost + edge penalty + arrival node penalty."""
-        return weight + self.edge_penalty(idx1, idx2) + self.node_penalty(idx2)
+    def effective_weight(self, idx1: int, idx2: int, weight: float, route: bool = False) -> float:
+        """Geometric cost + edge penalty + arrival node penalty (+ the distance from the route
+        line of the arrival node, for the path search: ROUTE_LINE_PENALTY)."""
+        w = weight + self.edge_penalty(idx1, idx2) + self.node_penalty(idx2)
+        if route and ROUTE_LINE_PENALTY and self.route_line is not None:
+            w += ROUTE_LINE_WEIGHT * min(self.route_distance(idx2), ROUTE_LINE_SATURATION_M)
+        return w
+
+    def set_route_line(self, points):
+        """The route of the visit (list of (x, y), e.g. the cell centres in visiting order),
+        for ROUTE_LINE_PENALTY."""
+        pts = np.asarray([p for p in points if p is not None], dtype=np.float64).reshape(-1, 2)
+        self.route_line = pts if len(pts) >= 2 else None
+        self._route_dist = {}
+
+    def route_distance(self, idx: int) -> float:
+        """Distance of node idx from the route line (inf without a line), cached."""
+        d = self._route_dist.get(idx)
+        if d is None:
+            if self.route_line is None or idx not in self.nodes:
+                return float('inf')
+            a, b = self.route_line[:-1], self.route_line[1:]
+            p = np.asarray(self.nodes[idx], dtype=np.float64)
+            ab = b - a
+            t = np.clip(np.einsum('ij,ij->i', p - a, ab) / np.maximum(np.einsum('ij,ij->i', ab, ab), 1e-12), 0.0, 1.0)
+            d = self._route_dist[idx] = float(np.min(np.hypot(*(a + t[:, None] * ab - p).T)))
+        return d
 
     def add_node(self, point_idx: int, x: float, y: float, gradient: float = 0.0, roughness: float = 0.0):
         """Add a node with its mean slope and roughness (used only as a last resort)."""
@@ -301,7 +337,7 @@ class PRM(EdgeEvaluation, EdgeStats):
                 return float('inf')  # edge no longer exists (e.g. invalidated)
             # Same costs used by find_path_dijkstra: otherwise the stability check
             # would compare a penalized plan with an unpenalized one.
-            total += self.effective_weight(a, b, weight)
+            total += self.effective_weight(a, b, weight, route=True)
         return total
 
     def find_path_dijkstra(self, start_idx: int, goal_idx: int,
@@ -328,7 +364,7 @@ class PRM(EdgeEvaluation, EdgeStats):
             return new_path
         return self._stable_plan(current_path_ids, new_path, margin)
 
-    def costs_from(self, start_idx, allowed=None, stop=None, ignore_penalties=False, heuristic=None):
+    def costs_from(self, start_idx, allowed=None, stop=None, ignore_penalties=False, heuristic=None, route=False):
         """
         THE search on the graph (Dijkstra) from start_idx, on the edges of finite cost: geometric
         weight + cost layer (effective_weight; ignore_penalties: the weight only). allowed(v):
@@ -337,7 +373,8 @@ class PRM(EdgeEvaluation, EdgeStats):
         dist has every node reached (settled or not), parents the way back.
         Used by the path (find_path_dijkstra), by reachable_count and by the cell rules.
         heuristic(v): A* (A_STAR_PATH), a lower bound of the cost from v to the target; the
-        queue is ordered by cost + heuristic, dist stays the real cost.
+        queue is ordered by cost + heuristic, dist stays the real cost. route: add the distance
+        from the route line (ROUTE_LINE_PENALTY; the path search only).
         """
         dist, parents = {start_idx: 0.0}, {start_idx: None}
         h = heuristic if heuristic is not None else (lambda _v: 0.0)
@@ -355,7 +392,7 @@ class PRM(EdgeEvaluation, EdgeStats):
                     continue
                 # Cost = geometric + cost layer: an impassable edge or node has infinite
                 # penalty and the search does not cross it.
-                w = weight if ignore_penalties else self.effective_weight(u, v, weight)
+                w = weight if ignore_penalties else self.effective_weight(u, v, weight, route)
                 if not np.isfinite(w):
                     continue
                 nd = d + w
@@ -434,7 +471,7 @@ class PRM(EdgeEvaluation, EdgeStats):
             heuristic = lambda v: a * float(np.hypot(nodes[v][0] - gx, nodes[v][1] - gy))
         _dist, parents, end = self.costs_from(
             start_idx, allowed=None if allowed is None else (lambda v: v in allowed or v == goal_idx),
-            stop=lambda u: u == goal_idx, ignore_penalties=ignore_penalties, heuristic=heuristic)
+            stop=lambda u: u == goal_idx, ignore_penalties=ignore_penalties, heuristic=heuristic, route=True)
         return None if end is None else self.path_to(parents, end)
 
     def _within_caps(self, path, max_edges):
