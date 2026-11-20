@@ -60,19 +60,16 @@ ROTATION_CLEARANCE_AIR_M = 0.0
 ROTATION_CLEARANCE_M = float(np.hypot(ROBOT_HALF_LENGTH_M, ROBOT_HALF_WIDTH_M)) + ROTATION_CLEARANCE_AIR_M  # ~0.604
 ROTATION_CHECK_MIN_DYAW_DEG = 10.0
 
-# Penetration tolerated in the rotation, against WALLS (see ROTATION_CHECK_PENETRATION for
-# thin obstacles). 0.15 m: absorbs the grid registration error (5-10 cm) and the
-# obstacle_distance noise; with less, in 6 scans out of 46 of a mission the robot found
-# no direction to turn in, while GraphNav rotated and passed at those points.
-# If tests show walls being grazed during rotations, set it back to 0.10.
+# Penetration tolerated in the rotation check (see rotation_is_clear). 0.15 m absorbs the grid
+# registration error (5-10 cm) and the obstacle_distance noise; with less, the robot often finds
+# no direction to turn in where it could. If walls get grazed during rotations, try 0.10.
 ROTATION_NOISE_TOLERANCE_M = 0.15
 
-# Metric of the rotation check: PENETRATION = depth of the cell inside the body
-# minus obstacle_distance. The minimum of obstacle_distance alone is not enough: inside a thin
-# obstacle it does not go below half its thickness (a 10 cm pole does not go below -0.05), and
-# with the tolerance at 0.15 a pole entering the body would be approved. For a wall the two
-# metrics coincide. The cells under the body now are excluded: the robot is standing on them.
-ROTATION_CHECK_PENETRATION = True
+# Metric of the rotation check: penetration = depth of the cell inside the body minus
+# obstacle_distance. The minimum of obstacle_distance alone is not enough: inside a thin obstacle
+# it does not go below half its thickness (a 10 cm pole does not go below -0.05), and with the
+# tolerance at 0.15 a pole entering the body would be approved. For a wall the two metrics
+# coincide. The cells under the body now are excluded: the robot is standing on them.
 
 
 def body_extents(heading, motion_dir):
@@ -141,25 +138,20 @@ def rotation_is_clear(obstacle_dist, origin_x, origin_y, cell_size, robot_x, rob
 
     num_steps = max(2, int(abs(np.degrees(dyaw)) / step_deg) + 2)
     worst = float('inf')
-    if ROTATION_CHECK_PENETRATION:
-        # Cells under the body now: the robot stands on them, they are free by definition.
-        c_now, s_now = np.cos(robot_yaw), np.sin(robot_yaw)
-        under_now = ((np.abs(dx * c_now + dy * s_now) <= half_along) &
-                     (np.abs(-dx * s_now + dy * c_now) <= half_across))
+    # Cells under the body now: the robot stands on them, they are free by definition.
+    c_now, s_now = np.cos(robot_yaw), np.sin(robot_yaw)
+    under_now = ((np.abs(dx * c_now + dy * s_now) <= half_along) &
+                 (np.abs(-dx * s_now + dy * c_now) <= half_across))
     for t in np.linspace(0.0, float(dyaw), num_steps):
         a = robot_yaw + t
         ca, sa = np.cos(a), np.sin(a)
         along = np.abs(dx * ca + dy * sa)
         across = np.abs(-dx * sa + dy * ca)
         in_body = (along <= half_along + air) & (across <= half_across + air)
-        if ROTATION_CHECK_PENETRATION:
-            in_body &= ~under_now
-            if in_body.any():
-                # PENETRATION = depth of the cell inside the body - obstacle_distance.
-                depth = np.minimum(half_along + air - along, half_across + air - across)[in_body]
-                worst = min(worst, float((window[in_body] - depth).min()))
-        elif in_body.any():
-            worst = min(worst, float(window[in_body].min()))
+        in_body &= ~under_now
+        if in_body.any():
+            depth = np.minimum(half_along + air - along, half_across + air - across)[in_body]
+            worst = min(worst, float((window[in_body] - depth).min()))
     return worst >= -ROTATION_NOISE_TOLERANCE_M, worst
 
 # Distance from obstacles the planner chooses edges with: the frontier's plus
