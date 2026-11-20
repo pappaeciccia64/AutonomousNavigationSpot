@@ -13,6 +13,7 @@ While the thread plans, it is the only one touching graph and maps: the main thr
 the motion commands and reads the plans, and takes graph and maps back only after
 stop_planning() (which waits for the cycle running to end).
 """
+import itertools
 import os
 import time
 
@@ -52,6 +53,9 @@ PHASES = ('scan', 'maps', 'edges', 'path', 'frontier', 'other')
 # The gait follows the terrain of the first metre of the confirmed stretch, the part walked
 # before the next plan, not of all of it (up to 3 m).
 GAIT_LOOKAHEAD_M = 1.0
+# Ids of the switches (CruisePlanner.switch_info), unique for the whole mission: the cruise
+# applies a switch once by its id, so an id must never come back, whichever planner made it.
+_SWITCH_IDS = itertools.count(1)
 PLAN_REPLAN_MARGIN = 0.10      # as in the stop-and-go: the new path must cost 10% less
 CRUISE_BUNDLE_STEP_M = 0.5     # a scan bundle every this many metres walked in cruise
 CRUISE_BUNDLE_REASON_S = 2.0   # and one when the frontier reason changes, at most this often
@@ -224,6 +228,9 @@ class CruisePlanner:
       5. Dijkstra from the next node to the goal, with the stability margin of the
          stop-and-go: the path changes only if the new one costs 10% less;
       6. safe frontier on [robot] + path and the stretch confirmed free (allowed_advance).
+         An edge after the one being walked on which the frontier closes the path (obstacle,
+         roughness, slope; not within GOAL_REACHED_TOLERANCE_M of the goal) goes out for the
+         attempt and 5-6 run again (closed_edge): graph and frontier say the same.
 
     Returns the plan (dict):
       status      'ok'; 'edge_blocked' (the edge being walked is out of the graph now);
@@ -276,7 +283,6 @@ class CruisePlanner:
         # cleared by the main thread; 'id' to apply it once): the tracker publishes only the
         # last plan, so a plan carrying the switch could be overwritten before it is read.
         self.switch_info = None
-        self._switch_seq = 0
         # No path to the goal (attempt_cruise._on_no_path): job(planner, scan, robot, prev, next)
         # -> dict; the thread itself chooses another goal or the next cell, the plan carries it
         # as 'switch' (as switch_job). None = the main thread handles the 'no_path'.
@@ -313,6 +319,30 @@ class CruisePlanner:
                            if not _edge_in_graph(self.prm, a, b)}
         self._seg = 0                      # edge of path_ids being walked
 
+    def _path(self, scan, robot, prev_id, next_id, k, status, remainder):
+        """Dijkstra from the next node to the goal (stability margin PLAN_REPLAN_MARGIN); no
+        path: no_path_job, if set, chooses another goal. Returns (status, remainder,
+        replanned, switched): switched = this call set switch_info."""
+        if next_id == self.goal_id:
+            return status, remainder, False, False
+        new_ids = self.prm.find_path_dijkstra(next_id, self.goal_id, current_path_ids=remainder,
+                                              margin=PLAN_REPLAN_MARGIN)
+        if new_ids is None and self.no_path_job is not None and status == 'ok':
+            self.switch_info = dict(self.no_path_job(self, scan, robot, prev_id, next_id), id=next(_SWITCH_IDS))
+            if self.switch_info.get('ids'):
+                return status, list(self.switch_info['ids']), True, True
+            return 'no_path', remainder, False, True
+        if new_ids is None:
+            return ('no_path' if status == 'ok' else status), remainder, False, False
+        if new_ids == remainder:
+            return status, remainder, False, False
+        self.path_ids = self.path_ids[:k + 1] + list(new_ids)
+        self.replans += 1
+        MISSION_STATS['replan_count'] += 1
+        print(f"[CRUISE] Replan from node {next_id}: {len(new_ids)} nodes to the goal "
+              f"(cycle {self.cycles}).")
+        return status, list(new_ids), True, False
+
     def robot_edge(self, robot):
         """(seg, prev, next): the edge of the path the robot (x, y, ...) is walking."""
         coords = [self.prm.get_node_position(n) for n in self.path_ids]
@@ -344,8 +374,7 @@ class CruisePlanner:
         self.cycles += 1
         if self.switch_job is not None:
             job, self.switch_job = self.switch_job, None
-            self._switch_seq += 1
-            self.switch_info = dict(job(self, scan, robot), id=self._switch_seq)
+            self.switch_info = dict(job(self, scan, robot), id=next(_SWITCH_IDS))
             t1 = time.perf_counter(); ph['switch'] = t1 - t; t = t1
         switch = self.switch_info
 
@@ -363,32 +392,29 @@ class CruisePlanner:
                 and not _edge_in_graph(self.prm, prev_id, next_id)):
             status = 'edge_blocked'
         remainder = self.path_ids[k + 1:]
-        if next_id != self.goal_id:
-            new_ids = self.prm.find_path_dijkstra(next_id, self.goal_id, current_path_ids=remainder,
-                                                  margin=PLAN_REPLAN_MARGIN)
-            if new_ids is None and self.no_path_job is not None and status == 'ok':
-                self._switch_seq += 1
-                self.switch_info = dict(self.no_path_job(self, scan, robot, prev_id, next_id), id=self._switch_seq)
-                switch = self.switch_info
-                if self.switch_info.get('ids'):
-                    remainder = list(self.switch_info['ids'])
-                    replanned = True
-                else:
-                    status = 'no_path'
-            elif new_ids is None:
-                status = 'no_path' if status == 'ok' else status
-            elif new_ids != remainder:
-                self.path_ids = self.path_ids[:k + 1] + list(new_ids)
-                remainder = list(new_ids)
-                replanned = True
-                self.replans += 1
-                MISSION_STATS['replan_count'] += 1
-                print(f"[CRUISE] Replan from node {next_id}: {len(remainder)} nodes to the goal "
-                      f"(cycle {self.cycles}).")
+        # One rule graph/frontier: an edge on which the frontier closes the path (obstacle,
+        # roughness, slope) is closed in the graph too, and Dijkstra looks again in the same
+        # cycle. Each round takes one edge out (finite): it ends with an open path or no path.
+        dropped = []
+        while True:
+            switched = self._path(scan, robot, prev_id, next_id, k, status, remainder)
+            status, remainder, replanned = switched[0], switched[1], replanned or switched[2]
+            switch = self.switch_info
+            polyline = [(robot[0], robot[1])] + [self.prm.get_node_position(n) for n in remainder]
+            frontier = safe_frontier.compute_safe_frontier(polyline, snap, allow_escape=False)
+            edge = closed_edge(polyline, remainder, frontier)
+            if edge is None or status != 'ok' or switched[3] or edge in dropped or next_id == self.goal_id:
+                break
+            dropped.append(edge)
+            # Out for the attempt: the refresh may put the edge back, its penalty keeps it out
+            # of the paths (as cell_attempt._drop_edge 'attempt').
+            roadmap.mark_edge_blocked_soft(self.prm, *edge)
+            self.prm.edge_penalty_persistent[(min(edge), max(edge))] = self.prm._ATTEMPT_MARK
+            MISSION_STATS['cruise_edge_drops'] = MISSION_STATS.get('cruise_edge_drops', 0) + 1
+            print(f"[CRUISE] Path closed by {frontier['reason']} on edge {edge[0]}->{edge[1]}: "
+                  f"out for the attempt, another way (cycle {self.cycles}).")
 
         t1 = time.perf_counter(); ph['path'] = t1 - t; t = t1
-        polyline = [(robot[0], robot[1])] + [self.prm.get_node_position(n) for n in remainder]
-        frontier = safe_frontier.compute_safe_frontier(polyline, snap, allow_escape=False)
         advance = walk_advance(polyline, frontier)
         advance, turn_stop = self._turns_within(polyline, remainder, advance, snap)
         confirmed = _cut_polyline(polyline, advance)
@@ -535,6 +561,21 @@ def _pose_of_scan(scan):
 # rotation checked with the whole body (CruisePlanner._turns_within) and Spot's body obstacle
 # avoidance is on. Only the edge the robot is already on may be confirmed in part (an obstacle
 # appearing: the frontier with the nose).
+
+
+def closed_edge(polyline, ids, frontier):
+    """The graph edge (a, b) of ids on which the frontier closes polyline (robot, then the
+    positions of ids) for an obstacle, roughness or slope; None if it closes on the edge being
+    walked (the robot is on it), within GOAL_REACHED_TOLERANCE_M of the goal (that is the
+    arrival) or for another reason (missing data, end of the path)."""
+    if frontier['reason'] not in ('obstacle', 'roughness', 'slope') or len(polyline) < 3:
+        return None
+    if frontier['dist'] >= frontier['path_len'] - P.GOAL_REACHED_TOLERANCE_M:
+        return None
+    _pt, k = safe_frontier.point_along(polyline, frontier['dist'])
+    if k < 1 or k > len(ids) - 1:
+        return None
+    return (ids[k - 1], ids[k])
 
 
 def walk_advance(polyline, frontier):

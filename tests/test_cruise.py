@@ -220,10 +220,26 @@ def check_cell_switch():
           and not sw.pending, "cell done, the next one prepared: applied, the cruise goes on")
 
 
+def check_closed_edge():
+    """planning_cycle.closed_edge: the edge closed in the graph when the frontier closes the path."""
+    print("\n== The path closed by the frontier: which edge goes out of the graph ==")
+    poly = [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (3.0, 0.0), (4.0, 0.0)]   # robot, then nodes 10..13
+    ids = [10, 11, 12, 13]
+
+    def f(dist, reason='obstacle'):
+        return planning_cycle.closed_edge(poly, ids, {'dist': dist, 'reason': reason, 'path_len': 4.0})
+    check(f(0.5) is None, "closed on the edge being walked: none (the robot is on it)")
+    check(f(1.5) == (10, 11), f"closed on the second edge: 10->11 ({f(1.5)})")
+    check(f(2.5, 'slope') == (11, 12), "closed by slope on the third edge: 11->12")
+    check(f(3.5) is None, "closed within the arrival tolerance of the goal: none, it is the arrival")
+    check(f(1.5, 'end_of_data') is None and f(4.0, 'end_of_path') is None, "missing data, end of path: none")
+
+
 def main():
     t_all = time.time()
     clear_min = geometry.FRONTIER_CLEARANCE_M - 0.01
     check_cell_switch()
+    check_closed_edge()
 
     r = run("open field", [], (2.0, 2.0, 0.785), [(0, 1)])
     check(r['oks'] == [True], "entered the cell")

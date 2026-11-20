@@ -702,14 +702,18 @@ class CruiseSteps:
                            f"{to_go:.2f} m from the goal")
                     where = ""
                     MISSION_STATS['cruise_seen_handoffs'] = MISSION_STATS.get('cruise_seen_handoffs', 0) + 1
-                elif self.env.is_point_in_cell(rx, ry, self.target_row, self.target_col):
-                    where = "in the cell, "
+                else:
+                    # The arrival is the distance from the goal, inside the target cell or not: a
+                    # goal on the cell border with an obstacle just beyond it leaves the robot
+                    # outside the cell for good (09-11 14:54, two minutes back and forth).
+                    where = "in the cell, " if self.env.is_point_in_cell(rx, ry, self.target_row, self.target_col) else ""
                     if plan['to_goal'] and to_go <= CRUISE_HANDOFF_M:
                         why = f"{to_go:.2f} m from the goal"
-                    elif (not plan['to_goal'] and f['reason'] in ('obstacle', 'roughness', 'slope')
-                          and plan['turn_stop'] is None and to_go <= P.GOAL_REACHED_TOLERANCE_M):
+                    elif (not plan['to_goal'] and to_go <= P.GOAL_REACHED_TOLERANCE_M
+                          and (f['reason'] in ('obstacle', 'roughness', 'slope') or ahead < CRUISE_MIN_AHEAD_M)):
                         why = (f"{to_go:.2f} m from the goal, the last stretch closed by "
-                               f"{f['reason']}: within the arrival tolerance of {P.GOAL_REACHED_TOLERANCE_M:.2f} m")
+                               + (f"rotation not clear at node {plan['turn_stop']}" if plan['turn_stop'] else f['reason'])
+                               + f": within the arrival tolerance of {P.GOAL_REACHED_TOLERANCE_M:.2f} m")
                 if why is not None:
                     # The last send covers the whole confirmed stretch (dead man of the
                     # trajectory time, as a leg): the robot walks it while the next cell is
@@ -727,10 +731,10 @@ class CruiseSteps:
                     if plan['to_goal']:
                         reason, arrived = "arrived at the goal", True
                         self._cruise_finish_command(pc)
-                    else:
-                        reason = (f"the confirmed stretch ends {max(ahead, 0.0):.2f} m ahead ("
-                                  + (f"rotation not clear at node {plan['turn_stop']}" if plan['turn_stop']
-                                     else f['reason']) + ")")
+                        break
+                    reason = (f"the confirmed stretch ends {max(ahead, 0.0):.2f} m ahead ("
+                              + (f"rotation not clear at node {plan['turn_stop']}" if plan['turn_stop']
+                                 else f['reason']) + ")")
                     break
                 to_goal = plan['to_goal']
                 t_send = time.time()
