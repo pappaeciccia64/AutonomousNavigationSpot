@@ -36,6 +36,7 @@ the robot arrives just outside the cell.
 In world A there is also a fiducial (ID 7) behind the starting point.
 What nobody exercises: traps and falls inside an attempt (test_e2e_loop.py tests them).
 """
+import atexit
 import contextlib
 import glob
 import io
@@ -100,6 +101,12 @@ WALLS = WORLDS['A']
 FIDUCIAL_TAG = None
 FAILS = []
 
+
+
+# Every fake mission writes its data under one temporary folder, removed when the test ends
+# (each mission is ~35 MB).
+RUN_DIR = tempfile.mkdtemp(prefix="test_mission_")
+atexit.register(shutil.rmtree, RUN_DIR, ignore_errors=True)
 
 def check(cond, msg):
     print(f"  [{'OK ' if cond else 'FAIL'}] {msg}")
@@ -448,7 +455,7 @@ def run(walls=None, name='MISSION', fiducial=None, stuck_wp0_m=None, wp0_offset_
     attempt_legs.BodyTiltRecorder = records.BodyTiltRecorder = _NoTilt
     config.MISSION_GRAPH_SAMPLING = 'lattice'
 
-    root = tempfile.mkdtemp(prefix="fake_mission_")
+    root = tempfile.mkdtemp(prefix="fake_mission_", dir=RUN_DIR)
     mission_run.DATA_ROOT = root                                    # data folders here
     argv = sys.argv
     sys.argv = ["run_mission.py", "--rows", str(ROWS), "--cols", str(COLS), "--cell", str(CELL),
@@ -602,7 +609,7 @@ def _check_emergency():
         finally:
             cell_attempt.attempt_enter_cell_from_position = real
         if r is None:      # Ctrl+C: the log is in the mission folder
-            logs = sorted(glob.glob(os.path.join(tempfile.gettempdir(), "fake_mission_*", "MissionLogs",
+            logs = sorted(glob.glob(os.path.join(RUN_DIR, "fake_mission_*", "MissionLogs",
                                                  "*", "mission_log.txt")), key=os.path.getmtime)
             log = open(logs[-1]).read() if logs else ""
         else:

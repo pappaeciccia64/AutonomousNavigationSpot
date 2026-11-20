@@ -11,9 +11,11 @@ corner); a box appearing in front of the robot during the cruise; goal isolated 
 (new goal while walking); obstacle right beyond the goal (hand-off within the arrival
 tolerance); three cells in a row (hand-offs, big turns without stopping); a fall halfway.
 """
+import atexit
 import contextlib
 import io
 import os
+import shutil
 import sys
 import tempfile
 import threading
@@ -42,6 +44,13 @@ attempt_cruise.BodyTiltRecorder = e2e._NoTilt
 FAILS = []
 TRACK = []          # (x, y, t) of the fake Spot while it commands the robot
 
+
+
+# Every run writes its log and scan bundles under one temporary folder, removed when the test
+# ends unless KEEP_TEST_DATA is set (each run is ~5 MB, and the test makes dozens).
+RUN_DIR = tempfile.mkdtemp(prefix="test_cruise_")
+if not os.environ.get('KEEP_TEST_DATA'):
+    atexit.register(shutil.rmtree, RUN_DIR, ignore_errors=True)
 
 def check(cond, msg):
     print(f"  [{'OK ' if cond else 'FAIL'}] {msg}")
@@ -140,7 +149,7 @@ def run(name, rects, start, cells_seq, on_step=None, env=None):
     spot, tracker = RTSpot(on_step), PlanTracker()
     gg = NS(global_occupancy_map=None, global_terrain_map=None)
     env = e2e.FakeEnv() if env is None else env
-    folder = tempfile.mkdtemp(prefix="cruise_")
+    folder = tempfile.mkdtemp(prefix="cruise_", dir=RUN_DIR)
     os.makedirs(os.path.join(folder, 'scans'))
     out, oks, err, t0 = io.StringIO(), [], None, time.time()
     with contextlib.redirect_stdout(out):
