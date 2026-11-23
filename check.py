@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Do the variants still fit the main code? Every variant is turned on and off (its hooks must
-still exist), then its test in tests/ runs, if it has one.
+still exist), then its test in variant_tests/ runs, if it has one.
 
     python3 varianti/check.py              # all
     python3 varianti/check.py a_star       # some
@@ -26,7 +26,7 @@ def main():
             print(f"  [FAIL] {n}: {e}")
             bad.append(n)
             hooked = False
-        test = os.path.join(HERE, 'tests', f'test_{n}.py')
+        test = os.path.join(HERE, 'variant_tests', f'test_{n}.py')
         if hooked and os.path.exists(test):
             ok = subprocess.run([sys.executable, test], cwd=os.path.dirname(HERE),
                                 capture_output=True, text=True)
