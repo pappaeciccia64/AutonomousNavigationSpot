@@ -43,7 +43,6 @@ def mission_switches():
         'attempt_cruise.CRUISE_STATE_CACHE': attempt_cruise.CRUISE_STATE_CACHE,
         'planning_cycle.PLAN_EVENT_DRIVEN': planning_cycle.PLAN_EVENT_DRIVEN,
         'planning_cycle.PLAN_PERIOD_S': planning_cycle.PLAN_PERIOD_S,
-        'spot_grid.GROUND_FROM_GRID': spot_grid.GROUND_FROM_GRID,
         'roadmap.ROUTE_LINE_PENALTY': roadmap.ROUTE_LINE_PENALTY,
         'roadmap.ROUTE_LINE_WEIGHT': roadmap.ROUTE_LINE_WEIGHT,
         'roadmap.ROUTE_LINE_SATURATION_M': roadmap.ROUTE_LINE_SATURATION_M,

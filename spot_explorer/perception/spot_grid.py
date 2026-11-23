@@ -25,12 +25,6 @@ from spot_explorer.robot import connection
 # default (30 s) a stuck request would hold the cycle, and the main thread waiting for it, that
 # long.
 SCAN_TIMEOUT_S = 2.0
-# Ground height of the obstacle layer from the ground plane frame ('gpe') carried by the grid
-# itself, when there, instead of a robot state request (tools/grid_rate_check.py says whether
-# the grid carries it). Saves the second network round trip of every scan and takes the ground
-# at the instant of the grid. Without the frame: the robot state request (ground_from_grid
-# counts which one).
-GROUND_FROM_GRID = False
 ROUGH_THRESHOLD = 0.15      # local roughness (std-dev of terrain height, m)
 
 # Spot's `terrain_valid` layer contains 0 and 1, but after scale and offset 0 becomes
@@ -175,7 +169,7 @@ class LocalGrid:
 
         # Use ground-plane height for the z coordinate.
         transforms_snapshot = local_grid_proto.local_grid.transforms_snapshot
-        z_ground_in_vision_frame = self._ground_z_of_grid(transforms_snapshot) if GROUND_FROM_GRID else None
+        z_ground_in_vision_frame = self._ground_z_of_grid(transforms_snapshot)
         if z_ground_in_vision_frame is None:
             z_ground_in_vision_frame = self.compute_ground_height_in_vision_frame(robot_state_client, timeout)
         cell_count = local_grid_proto.local_grid.extent.num_cells_x * local_grid_proto.local_grid.extent.num_cells_y
@@ -203,16 +197,9 @@ class LocalGrid:
 
 
     def _ground_z_of_grid(self, transforms_snapshot):
-        """Height of the ground plane in VISION from the grid's own snapshot (GROUND_FROM_GRID),
-        or None if the grid does not carry the frame. Counted in self.ground_from_grid."""
-        counts = self.__dict__.setdefault('ground_from_grid', {'grid': 0, 'robot_state': 0})
-        try:
-            z = get_a_tform_b(transforms_snapshot, VISION_FRAME_NAME, GROUND_PLANE_FRAME_NAME).position.z
-        except Exception:
-            counts['robot_state'] += 1
-            return None
-        counts['grid'] += 1
-        return float(z)
+        """Height of the ground plane in VISION taken from the grid itself; None = ask the robot
+        state (compute_ground_height_in_vision_frame)."""
+        return None
 
     def compute_ground_height_in_vision_frame(self, robot_state_client, timeout=None):
         """Get the z-height of the ground plane in vision frame from the current robot state.
