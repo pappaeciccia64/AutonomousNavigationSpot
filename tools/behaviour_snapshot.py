@@ -126,14 +126,15 @@ def work_replay(mission, data):
 
 _NORMALISE = [
     (re.compile(r'\d{2}:\d{2}:\d{2}(\.\d+)?'), 'HH:MM:SS'),
-    (re.compile(r'/tmp/fake_mission_\w+'), '<tmp>'),
+    (re.compile(r'/tmp/(test_mission_\w+/)?fake_mission_\w+'), '<tmp>'),
     (re.compile(r'(Mission|Graph)_\d{2}-\d{2}-\d{4}_\d{2}-\d{2}-\d{2}'), r'\1_<date>'),
     (re.compile(r'\(\d+ failed readings\)'), '(<n> failed readings)'),   # the battery is read on a timer
     (re.compile(r'\b\d+(\.\d+)? ?(s|ms|min)\b'), '<t>'),
     (re.compile(r'\b\d+(\.\d+)? ?(m/s)\b'), '<v>'),
 ]
 # Timing lines, and the time profile of the summary ("  motion   <t>  ( 39.1%)").
-_DROP = re.compile(r'\[TIMING\]|seconds|duration|elapsed|took|\bin <t>|<t> +\( *[\d.]+%\)', re.I)
+# The [CONFIG] SWITCHES line lists the switches: it changes whenever one is removed.
+_DROP = re.compile(r'\[CONFIG\] SWITCHES|\[TIMING\]|seconds|duration|elapsed|took|\bin <t>|<t> +\( *[\d.]+%\)', re.I)
 
 
 # Rows of a timing table, sorted by time ("  sit and power off     <t>"): their order moves.
@@ -264,8 +265,9 @@ def compare(a, b):
                     ks = [k for k in set(x['summary']) | set(y['summary']) if x['summary'].get(k) != y['summary'].get(k)]
                     out.append(f"replay {key}: summary differs in {', '.join(sorted(ks))}")
             else:
-                if x['lines'] != y['lines'] or x['ok'] != y['ok']:
-                    d = [l for l in difflib.unified_diff(x['lines'], y['lines'], 'before', 'after', n=1, lineterm='')]
+                xl, yl = normalise('\n'.join(x['lines'])), normalise('\n'.join(y['lines']))   # rules of today
+                if xl != yl or x['ok'] != y['ok']:
+                    d = [l for l in difflib.unified_diff(xl, yl, 'before', 'after', n=1, lineterm='')]
                     changed = sum(1 for l in d if l[:1] in '+-' and not l.startswith(('+++', '---')))
                     out.append(f"missions world {key}: {changed} log lines differ")
                     out += ['    ' + l[:160] for l in d[2:30]]
