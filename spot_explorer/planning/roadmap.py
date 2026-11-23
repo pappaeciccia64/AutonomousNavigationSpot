@@ -41,10 +41,6 @@ ANCHOR_IGNORE_NEAR_M = 0.30
 # disk (0.50 m) marked around the spot: without it, every outgoing edge would be discarded.
 # Applies only to the current node (set_robot_node).
 STOP_NODE_MAP_IGNORE_M = 0.70
-# Path search with A* instead of Dijkstra: the heuristic is alpha x the straight-line distance
-# to the goal, never more than the real cost (an edge costs alpha x its length plus slope terms
-# >= 0), so the path is the same (up to equal-cost ties) with fewer nodes explored.
-A_STAR_PATH = False
 # Path kept on the route of the visit: every node entered by
 # the PATH search costs ROUTE_LINE_WEIGHT x its distance from the route line (the polyline
 # through the cell centres in visiting order, set by the mission: set_route_line), saturated at
@@ -369,8 +365,8 @@ class PRM(EdgeEvaluation, EdgeStats):
         settled for which it is true. Returns (dist, parents, the node it stopped at or None):
         dist has every node reached (settled or not), parents the way back.
         Used by the path (find_path_dijkstra), by reachable_count and by the cell rules.
-        heuristic(v): A* (A_STAR_PATH), a lower bound of the cost from v to the target; the
-        queue is ordered by cost + heuristic, dist stays the real cost. route: add the distance
+        heuristic(v): a lower bound of the cost from v to the target (A*); the queue is ordered
+        by cost + heuristic, dist stays the real cost. route: add the distance
         from the route line (ROUTE_LINE_PENALTY; the path search only).
         """
         dist, parents = {start_idx: 0.0}, {start_idx: None}
@@ -460,16 +456,16 @@ class PRM(EdgeEvaluation, EdgeStats):
         """Minimum-cost path start -> goal (list of ids), None if there is none. Inside
         allowed_nodes (see set_allowed_nodes); the goal is always allowed."""
         allowed = self.allowed_nodes
-        heuristic = None
-        if A_STAR_PATH:
-            gx, gy = self.nodes[goal_idx]
-            a = min(float(self.alpha), 1.0) if self.alpha > 0 else 0.0
-            nodes = self.nodes
-            heuristic = lambda v: a * float(np.hypot(nodes[v][0] - gx, nodes[v][1] - gy))
         _dist, parents, end = self.costs_from(
             start_idx, allowed=None if allowed is None else (lambda v: v in allowed or v == goal_idx),
-            stop=lambda u: u == goal_idx, ignore_penalties=ignore_penalties, heuristic=heuristic, route=True)
+            stop=lambda u: u == goal_idx, ignore_penalties=ignore_penalties,
+            heuristic=self._path_heuristic(goal_idx), route=True)
         return None if end is None else self.path_to(parents, end)
+
+    def _path_heuristic(self, goal_idx):
+        """Lower bound of the cost from a node to goal_idx for the path search; None = none
+        (Dijkstra)."""
+        return None
 
     def _within_caps(self, path, max_edges):
         """

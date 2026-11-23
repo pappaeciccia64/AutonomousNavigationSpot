@@ -44,7 +44,6 @@ def mission_switches():
         'planning_cycle.PLAN_EVENT_DRIVEN': planning_cycle.PLAN_EVENT_DRIVEN,
         'planning_cycle.PLAN_PERIOD_S': planning_cycle.PLAN_PERIOD_S,
         'spot_grid.GROUND_FROM_GRID': spot_grid.GROUND_FROM_GRID,
-        'roadmap.A_STAR_PATH': roadmap.A_STAR_PATH,
         'roadmap.ROUTE_LINE_PENALTY': roadmap.ROUTE_LINE_PENALTY,
         'roadmap.ROUTE_LINE_WEIGHT': roadmap.ROUTE_LINE_WEIGHT,
         'roadmap.ROUTE_LINE_SATURATION_M': roadmap.ROUTE_LINE_SATURATION_M,
