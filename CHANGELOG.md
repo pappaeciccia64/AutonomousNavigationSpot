@@ -8,6 +8,18 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-23 (behaviour snapshot, for the cleanup)
+
+- `tools/behaviour_snapshot.py record|check|compare`: a snapshot of what the code decides --
+  real saved scans through the real decoding and processing (`tools/saved_scan.py` packs them
+  back into Spot's messages), the replay of 4 missions (every graph update, every path), 5
+  stop-and-go fake missions (the log without times). Deterministic: two runs of the same code
+  give the same snapshot (checked). Sensitive: OBSTACLE_THRESHOLD 0.15 -> 0.16 shows in every
+  part. ~1.5 min with 7 processes. The cruise is not in it (real time, two threads).
+- Found while building it: some mission counters (MISSION_STATS, the last gait) are module
+  globals not reset between two missions in the same process -- harmless with one mission per
+  process, as on the robot; every fake mission of the snapshot runs in its own process.
+
 ## 2026-11-20 (frontier goal beyond the edge; test plan for the simulator)
 
 - `frontier.FRONTIER_BEYOND_M` (default 0 = off): the goal is the node up to that far beyond
