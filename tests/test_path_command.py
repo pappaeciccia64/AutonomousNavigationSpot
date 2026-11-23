@@ -44,7 +44,7 @@ def dist_to_polyline(p, poly):
     return best
 
 
-def follow(spot, pc, max_s, resend=None, path=None):
+def follow(spot, pc, max_s, resend=None, path=None, backward=None):
     """Poll every DT until a final status; resend=(period, hold) sends the path again."""
     statuses, last_send = [], spot.now
     while spot.now < max_s:
@@ -54,7 +54,7 @@ def follow(spot, pc, max_s, resend=None, path=None):
         if r['status'] not in ('moving', 'near_goal', 'comm_error'):
             return r, statuses
         if resend and spot.now - last_send >= resend[0] - 1e-9:
-            pc.send(path, hold_s=resend[1])
+            pc.send(path, hold_s=resend[1], backward=backward)
             last_send = spot.now
     return r, statuses
 
@@ -120,6 +120,30 @@ def test_trajectory_points():
     square = [(1, 0), (1, 1), (0, 1), (0, 0)]
     ahead, k = motion.path_ahead(square, 0.0, 0.0)
     check(len(ahead) == 4 and k == 0, "closed path starting where the robot is: not cut (searched from the start)")
+
+
+def test_backward():
+    print("\n== Edges walked backwards (heading rule of the cruise) ==")
+    # Dead end: in along x, out along the same edge tail first: no rotation at the tip.
+    pts = motion.path_trajectory([(1.0, 0.0), (0.0, 0.0)], (0.0, 0.0), 0.0, 0.5, 0.6, backward=[False, True])
+    check(max(abs(p[2]) for p in pts) < 1e-6, "dead end left backwards: nose always along +x, no rotation")
+    back = [(a_, b_) for a_, b_ in zip(pts, pts[1:]) if b_[0] < a_[0] - 1e-9]
+    ok_t = all(abs((b_[3] - a_[3]) - motion.PATH_TIME_FACTOR * abs(b_[0] - a_[0])
+                   / motion.RETREAT_MAX_LINEAR_VEL_MPS) < 1e-9 for a_, b_ in back)
+    check(back and ok_t, f"backwards at most {motion.RETREAT_MAX_LINEAR_VEL_MPS} m/s")
+    pts = motion.path_trajectory([(1.0, 0.0)], (0.0, 0.0), np.pi, 0.5, 0.6, backward=[True])
+    check(len(pts) > 2 and all(abs(abs(p[2]) - np.pi) < 1e-6 for p in pts), "nose against the edge: no rotation at the start")
+    # Sent and sent again while walking: the flags follow the part ahead.
+    spot = FakeSpot(0.0, 0.0)
+    spot.yaw = np.pi
+    pc = motion.PathCommand(spot, spot)
+    path, flags = [(1.0, 0.0), (1.0, 1.0)], [True, False]
+    pc.send(path, hold_s=1.0, backward=flags)
+    r, statuses = follow(spot, pc, 40.0, resend=(0.5, 1.0), path=path, backward=flags)
+    check(r['status'] == 'arrived', f"arrived ({r['status']})")
+    dev = max(dist_to_polyline(p, [(0, 0)] + path) for p in spot.track)
+    check(dev < 0.05, f"track on the edges ({100 * dev:.1f} cm at most)")
+    check(abs(np.degrees(spot.yaw) - 90) < 5.0, f"first edge backwards, then nose along the second ({np.degrees(spot.yaw):.0f} deg)")
 
 
 def test_proto():
@@ -334,6 +358,7 @@ def test_network_errors():
 
 if __name__ == '__main__':
     test_trajectory_points()
+    test_backward()
     test_proto()
     test_corner_without_stopping()
     test_sharp_corner()

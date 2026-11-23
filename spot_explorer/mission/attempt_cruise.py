@@ -31,11 +31,12 @@ PATH_HOLD_S, so the main thread has that long):
     GOAL_REACHED_TOLERANCE_M with the last stretch closed by an obstacle), the attempt
     ends successfully with the robot still walking towards the goal (env._moving_pc, last
     command over the whole confirmed stretch, not PATH_HOLD_S): the
-    mission marks the cell and the next attempt starts while the robot walks. Its first turn
-    goes on in cruise if the rotation is clear: within PATH_START_IN_PLACE_DEG of the nose it
-    turns while walking, beyond it on the spot inside the new command if the swept area is
-    clear with CHAIN_TURN_EXTRA_AIR_M more air (_moving_check); otherwise, and for any other
-    decision, the robot is stopped first and the turn is made standing as today. An attempt
+    mission marks the cell and the next attempt starts while the robot walks. A cruise start
+    goes on from its first plan (the rotation at the start, forward or backward, is in the
+    plan); a stop-and-go turn goes on if the rotation is clear: within
+    PATH_START_IN_PLACE_DEG of the nose it turns while walking, beyond it on the spot inside
+    the new command if the swept area is clear with CHAIN_TURN_EXTRA_AIR_M more air
+    (_moving_check); otherwise the robot is stopped first and the turn is made standing. An attempt
     that fails before its loop (no valid goal, cell not reachable in the graph: only
     computations) leaves the robot walking, and the mission goes on to the next cell.
     stop_if_moving stops it before GraphNav and at the end of the exploration.
@@ -104,10 +105,9 @@ CRUISE_HANDOFF_M = 0.5
 # the cruise ends with the hand-off. The main thread waits at most CRUISE_SWITCH_WAIT_S for it.
 CRUISE_SWITCH_WAIT_S = 3.0
 # The first command of a cruise comes from the first plan of the planning thread (the same
-# cycle as every other). The checks of a stop-and-go turn are applied to that plan: a confirmed
-# stretch of at least CRUISE_MIN_AHEAD_M and a clear rotation towards the first node
-# (decisions.rotation_plan; with CHAIN_TURN_EXTRA_AIR_M more air while walking). If the plan
-# does not allow to start, the thread stops and the stop-and-go takes the turn.
+# cycle as every other): it starts if the plan confirms at least CRUISE_MIN_AHEAD_M (the
+# rotation at the start, forward or backward, is in the plan: CruisePlanner._turns_within).
+# If the plan does not allow to start, the thread stops and the stop-and-go takes the turn.
 FIRST_PLAN_WAIT_S = 3.0
 # The attempt start (scan, seen check, local data into the graph, goal, path) is the first cycle
 # of the planning thread (_start_in_thread), so the first plan can take this long. Without a path
@@ -121,10 +121,10 @@ GAIT_DOWN_HOLD_S = 2.0
 # The locomotion_hint (AUTO <-> CRAWL) changes only after this long of plans asking for it, both
 # ways: Spot makes a side step of 10-15 cm at every hint change while walking.
 GAIT_HINT_HOLD_S = 3.0
-# A turn larger than PATH_START_IN_PLACE_DEG with the robot still walking is made on the spot
-# inside the new command, without stopping first, if the swept area is clear with this much more
-# air. The check uses the pose of the scan, and the robot walks a few cm more before the command
-# arrives.
+# A turn larger than PATH_START_IN_PLACE_DEG with the robot still walking (stop-and-go decision,
+# _moving_check) is made on the spot inside the new command, without stopping first, if the swept
+# area is clear with this much more air. The check uses the pose of the scan, and the robot walks
+# a few cm more before the command arrives.
 CHAIN_TURN_EXTRA_AIR_M = 0.15
 # After a path change while walking, the new line starts where the robot was at the scan and the
 # robot has moved on meanwhile: it rejoins the line with a short step if it is closer than this,
@@ -447,20 +447,14 @@ class CruiseSteps:
                 f = plan['frontier']
                 why = (f"first plan: {plan['advance']:.2f} m confirmed ("
                        + (f"rotation not clear at node {plan['turn_stop']}" if plan['turn_stop'] else f['reason']) + ")")
-            if why is None and len(plan['polyline']) > 1:
-                rot = decisions.rotation_plan(self.robot_yaw, (self.robot_x, self.robot_y), plan['polyline'][1],
-                                              self.frontier['od_robot'], snap=self.snap)
-                limit = motion.PATH_START_IN_PLACE_DEG if moving else motion.LEG_START_IN_PLACE_DEG
-                if not rot['turn']:
-                    why = f"first plan: rotation of {rot['dyaw_deg']:+.0f} deg towards the first node not clear"
-                elif moving and abs(rot['dyaw_deg']) > limit:
-                    if self._turn_clear_while_moving(rot['dyaw_deg']):
-                        print(f"[CRUISE] {rot['dyaw_deg']:+.0f} deg to turn towards the next cell: on the spot "
-                              f"inside the new command, without stopping first (swept area clear with "
-                              f"{100 * CHAIN_TURN_EXTRA_AIR_M:.0f} cm more air).")
-                    else:
-                        why = (f"first plan: {rot['dyaw_deg']:+.0f} deg to turn while walking, swept area not "
-                               f"clear with {100 * CHAIN_TURN_EXTRA_AIR_M:.0f} cm more air")
+        if why is None and moving and len(plan['confirmed']) > 1:
+            (ax, ay), (bx, by) = plan['confirmed'][:2]
+            back = bool(plan['backward'] and plan['backward'][0])
+            dyaw = np.degrees(motion._angle_diff(np.arctan2(by - ay, bx - ax) + (np.pi if back else 0.0),
+                                                 self.robot_yaw))
+            if abs(dyaw) > motion.PATH_START_IN_PLACE_DEG:
+                print(f"[CRUISE] {dyaw:+.0f} deg to turn towards the next cell: on the spot inside the new "
+                      f"command, without stopping first" + (" (then tail first)" if back else "") + ".")
         if why is None:
             MISSION_STATS['thread_first_turns'] = MISSION_STATS.get('thread_first_turns', 0) + 1
             return plan
@@ -518,14 +512,16 @@ class CruiseSteps:
                 return None
             ids = [planner.path_ids[0]] + list(plan0['ids'])
             adv, turn_stop = plan0['advance'], plan0['turn_stop']
-            confirmed = plan0['confirmed']
+            confirmed, backward = plan0['confirmed'], plan0['backward']
             kwargs = self._cruise_gait(plan0['terrain'])
         else:
             # First stretch: the one confirmed by the frontier of this turn, with the same corner
             # check the planner will make.
-            adv, turn_stop = planner._turns_within(self.polyline, ids[1:],
-                                                   planning_cycle.walk_advance(self.polyline, self.frontier), self.snap)
+            adv, turn_stop, backward = planner._turns_within(
+                self.polyline, ids[1:], planning_cycle.walk_advance(self.polyline, self.frontier), self.snap,
+                self.robot_yaw)
             confirmed = planning_cycle._cut_polyline(self.polyline, adv)
+            backward = backward[:max(len(confirmed) - 1, 0)]
             kwargs = self._cruise_gait(planner._terrain(confirmed, ids[1:]))
         path_len = float(sum(np.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(self.polyline, self.polyline[1:])))
         to_goal = turn_stop is None and adv >= path_len - 0.01
@@ -563,7 +559,7 @@ class CruiseSteps:
         last_crumb_t, last_battery_t, last_fall_t = t0, t0, t0
         crumb = None
         try:
-            pc.send(confirmed[1:], start_in_place_deg=start_in_place, **kwargs)
+            pc.send(confirmed[1:], start_in_place_deg=start_in_place, backward=backward, **kwargs)
             HANDOFF.report("first send")
             n_sends += 1
             self._visit_after_send()
@@ -647,7 +643,8 @@ class CruiseSteps:
                     if plan['status'] == 'ok' and len(plan.get('confirmed', [])) > 1:
                         # The stretch sent follows the confirmed one of every plan (it may get
                         # shorter), whole (no dead man: the robot walks it while waiting).
-                        pc.send(plan['confirmed'][1:], hold_s=None, **self._cruise_gait(plan['terrain']))
+                        pc.send(plan['confirmed'][1:], hold_s=None, backward=plan['backward'],
+                                **self._cruise_gait(plan['terrain']))
                         n_sends += 1
                         self._log_plan(plan, r, "waiting for the next cell")
                     reason = switch.late(now)
@@ -718,7 +715,8 @@ class CruiseSteps:
                     # The last send covers the whole confirmed stretch (dead man of the
                     # trajectory time, as a leg): the robot walks it while the next cell is
                     # prepared (in the planning thread, or by the next attempt).
-                    pc.send(plan['confirmed'][1:], hold_s=None, **self._cruise_gait(plan['terrain']))
+                    pc.send(plan['confirmed'][1:], hold_s=None, backward=plan['backward'],
+                            **self._cruise_gait(plan['terrain']))
                     n_sends += 1
                     self.env._handoff_t = time.time()
                     if self._can_switch():
@@ -738,7 +736,7 @@ class CruiseSteps:
                     break
                 to_goal = plan['to_goal']
                 t_send = time.time()
-                pc.send(plan['confirmed'][1:], **self._cruise_gait(plan['terrain']))
+                pc.send(plan['confirmed'][1:], backward=plan['backward'], **self._cruise_gait(plan['terrain']))
                 send_s.append(time.time() - t_send)
                 n_sends += 1
                 if switch.report:

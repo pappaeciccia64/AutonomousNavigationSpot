@@ -456,7 +456,9 @@ def move_to_world_point_without_turning(target_x, target_y, frame_name,
 # the area that the rotation in place at the node sweeps today). A corner sharper than
 # PATH_TURN_IN_PLACE_DEG, and the start if the nose is that far from the first edge, is a
 # rotation on the spot at the node inside the same trajectory (at the start the threshold
-# is PATH_START_IN_PLACE_DEG).
+# is PATH_START_IN_PLACE_DEG). An edge marked backward is walked tail first (heading = edge
+# direction + 180 degrees, at most RETREAT_MAX_LINEAR_VEL_MPS): the corners are measured on
+# the headings, so a dead end left backwards has no rotation at its tip.
 #
 # send() returns at once and sends only the part of the path ahead of the robot
 # (path_ahead); poll() reads the feedback without waiting. Whoever drives sends a new path
@@ -509,18 +511,23 @@ def _wrap(a):
 
 def path_trajectory(path_xy, start_xy, start_yaw, max_linear_vel, max_angular_vel,
                     time_factor=PATH_TIME_FACTOR, start_in_place_deg=PATH_START_IN_PLACE_DEG,
-                    first_is_step=False):
+                    first_is_step=False, backward=None):
     """
     Points (x, y, heading, t) of the trajectory from the start pose (t=0) along the path,
-    as described above (Path command). t in seconds from the start.
+    as described above (Path command). t in seconds from the start. backward: one bool per
+    point of path_xy, for the segment that ends there (None = all forward).
     """
-    pts = [(float(start_xy[0]), float(start_xy[1]))]
-    for x, y in path_xy:
+    pts, back = [(float(start_xy[0]), float(start_xy[1]))], []
+    flags = list(backward) if backward is not None else [False] * len(path_xy)
+    for (x, y), b in zip(path_xy, flags):
         if np.hypot(x - pts[-1][0], y - pts[-1][1]) > PATH_MIN_POINT_GAP_M:
             pts.append((float(x), float(y)))
+            back.append(bool(b))
     if len(pts) < 2:
         return [(pts[0][0], pts[0][1], float(start_yaw), 0.0)]
-    seg = [float(np.arctan2(b[1] - a[1], b[0] - a[0])) for a, b in zip(pts, pts[1:])]
+    # Heading of the body on each segment: its direction, or the opposite one backwards.
+    seg = [_wrap(float(np.arctan2(b[1] - a[1], b[0] - a[0])) + (np.pi if r else 0.0))
+           for a, b, r in zip(pts, pts[1:], back)]
     lengths = [float(np.hypot(b[0] - a[0], b[1] - a[1])) for a, b in zip(pts, pts[1:])]
     # first_is_step: the first segment is the step back onto the line (projection of the robot
     # beside it, see PathCommand.send): sideways, with the nose already on the segment after it.
@@ -555,13 +562,16 @@ def path_trajectory(path_xy, start_xy, start_yaw, max_linear_vel, max_angular_ve
             poses.append((bx, by, _wrap(seg[k] + 0.5 * _angle_diff(seg[k + 1], seg[k]))))
 
     v, w = abs(float(max_linear_vel)) or 0.1, abs(float(max_angular_vel)) or 0.1
+    vb = min(v, RETREAT_MAX_LINEAR_VEL_MPS)
     out = [(poses[0][0], poses[0][1], _wrap(poses[0][2]), 0.0)]
     for (px, py, ph), (qx, qy, qh) in zip(poses, poses[1:]):
         ds = float(np.hypot(qx - px, qy - py))
         dh = abs(_angle_diff(qh, ph))
+        # Backwards: the step goes against the heading it ends with.
+        tail = ds > 1e-9 and np.cos(np.arctan2(qy - py, qx - px) - qh) < 0
         # Walking and turning happen together: the longer of the two times, not their sum
         # (with the sum a turn while walking would crawl).
-        out.append((qx, qy, _wrap(qh), out[-1][3] + time_factor * max(ds / v, dh / w)))
+        out.append((qx, qy, _wrap(qh), out[-1][3] + time_factor * max(ds / (vb if tail else v), dh / w)))
     return out
 
 
@@ -661,13 +671,22 @@ class PathCommand:
 
     def send(self, path_xy, hold_s=PATH_HOLD_S, locomotion_hint=None, ground_mu_hint=None,
              swing_height=None, disable_foot_obstacle_avoidance=None,
-             max_linear_vel=None, max_angular_vel=None, start_in_place_deg=PATH_START_IN_PLACE_DEG):
+             max_linear_vel=None, max_angular_vel=None, start_in_place_deg=PATH_START_IN_PLACE_DEG,
+             backward=None):
         """Send the path from the current pose, only the part ahead of the robot (path_ahead).
+        backward: one bool per point, for the segment that ends there (see path_trajectory).
         Returns the seconds of the trajectory."""
         x, y, yaw = self.pose()
         path = [(float(px), float(py)) for px, py in path_xy]
+        flags = [bool(b) for b in backward] if backward is not None else [False] * len(path)
         from_seg = self._seg if path == self._path else 0
         path_xy, self._seg = path_ahead(path, x, y, from_seg)
+        if len(path) > 1:
+            # The projection on segment k: on its start point the segment ending there, past it
+            # segment k itself (the one ending at point k + 1).
+            k = self._seg
+            on_start = np.hypot(path_xy[0][0] - path[k][0], path_xy[0][1] - path[k][1]) < 1e-9
+            flags = [flags[k] if on_start else flags[k + 1]] + flags[k + 1:]
         self._path = path
         # Robot beside the line: the first point is its projection, reached sideways (more than
         # 45 degrees between the step and the segment it lands on).
@@ -686,7 +705,7 @@ class PathCommand:
         v = max_linear_vel if max_linear_vel is not None else DEFAULT_MAX_LINEAR_VEL_MPS
         w = max_angular_vel if max_angular_vel is not None else DEFAULT_MAX_ANGULAR_VEL_RPS
         self.points = path_trajectory(path_xy, (x, y), yaw, v, w, start_in_place_deg=start_in_place_deg,
-                                      first_is_step=first_is_step)
+                                      first_is_step=first_is_step, backward=flags)
         duration = self.points[-1][3]
         params = _build_mobility_params(
             locomotion_hint=locomotion_hint, ground_mu_hint=ground_mu_hint,

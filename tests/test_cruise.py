@@ -220,6 +220,33 @@ def check_cell_switch():
           and not sw.pending, "cell done, the next one prepared: applied, the cruise goes on")
 
 
+def check_heading_rule():
+    """CruisePlanner._turns_within: forward if the rotation is clear, otherwise backward."""
+    print("\n== Heading rule: forward if the rotation is clear, otherwise backward ==")
+    cs, ox, oy = 0.05, -4.0, -2.0
+    xs = ox + cs * (np.arange(120) + 0.5)
+    ys = oy + cs * (np.arange(80) + 0.5)
+    X, Y = np.meshgrid(xs, ys)
+    free = NS(obstacle_dist=np.full(X.shape, 5.0), origin_x=ox, origin_y=oy, cell_size=cs)
+    # Dead-end corridor along x, 0.7 m wide, closed at x = 1.0: Spot cannot turn round in it.
+    od = np.where(np.abs(Y) < 0.35, np.minimum(0.35 - np.abs(Y), np.maximum(1.0 - X, 0.0)), 0.0)
+    corridor = NS(obstacle_dist=od, origin_x=ox, origin_y=oy, cell_size=cs)
+    f = planning_cycle.CruisePlanner._turns_within
+    back_out = [(0.3, 0.0), (-1.0, 0.0), (-2.5, 0.0)]          # robot nose to the dead end, path out
+    adv, stop, back = f(back_out, [1, 2], 2.8, free, 0.0)
+    check(stop is None and back == [False, False], f"open field: turns round and walks forward ({back})")
+    adv, stop, back = f(back_out, [1, 2], 2.8, corridor, 0.0)
+    check(stop is None and adv == 2.8 and back == [True, True], f"dead end: out backwards, no rotation ({back})")
+    adv, stop, back = f([(0.3, 0.0), (0.3, 0.25)], [1], 0.25, corridor, 0.0)
+    check(stop == 'start' and adv == 0.0, f"node beside the robot in the corridor: 90 deg neither way, the stretch stops ({stop})")
+    # Corridor opening into the open at x < -1.5: out backwards, round at the first node outside.
+    od2 = np.where(X < -1.5, 5.0, od)
+    opening = NS(obstacle_dist=od2, origin_x=ox, origin_y=oy, cell_size=cs)
+    path = [(0.3, 0.0), (-2.5, 0.0), (-2.5, 1.5)]
+    adv, stop, back = f(path, [1, 2], 4.3, opening, 0.0)
+    check(stop is None and back == [True, False], f"backwards out of the corridor, forward once it can turn ({back})")
+
+
 def check_closed_edge():
     """planning_cycle.closed_edge: the edge closed in the graph when the frontier closes the path."""
     print("\n== The path closed by the frontier: which edge goes out of the graph ==")
@@ -240,6 +267,7 @@ def main():
     clear_min = geometry.FRONTIER_CLEARANCE_M - 0.01
     check_cell_switch()
     check_closed_edge()
+    check_heading_rule()
 
     r = run("open field", [], (2.0, 2.0, 0.785), [(0, 1)])
     check(r['oks'] == [True], "entered the cell")

@@ -245,7 +245,8 @@ class CruisePlanner:
                   shortened to the first corner where the rotation on the spot is not clear
       confirmed   polyline cut at advance: the points to give to motion.PathCommand
       turn_stop   node where the confirmed stretch stops because the rotation there is not
-                  clear (None otherwise): the stop-and-go takes over there
+                  clear, forward or backward ('start' at the robot; None otherwise)
+      backward    one bool per edge of confirmed: walked backwards (see _turns_within)
       terrain     (slope, roughness): the worst over the edges of the confirmed stretch, for
                   the gait (motion.select_mobility_params)
       to_goal     True if the confirmed stretch reaches the goal
@@ -416,8 +417,9 @@ class CruisePlanner:
 
         t1 = time.perf_counter(); ph['path'] = t1 - t; t = t1
         advance = walk_advance(polyline, frontier)
-        advance, turn_stop = self._turns_within(polyline, remainder, advance, snap)
+        advance, turn_stop, backward = self._turns_within(polyline, remainder, advance, snap, robot[2])
         confirmed = _cut_polyline(polyline, advance)
+        backward = backward[:max(len(confirmed) - 1, 0)]
         t1 = time.perf_counter(); ph['frontier'] = t1 - t; t = t1
         path_len = float(sum(np.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(polyline, polyline[1:])))
         self._save_bundle(scan, snap, robot, polyline, remainder, next_id, frontier, advance, confirmed)
@@ -429,7 +431,7 @@ class CruisePlanner:
             self.phase_s.setdefault(k, []).append(v)
         return dict(status=status, robot=robot, ids=list(remainder), polyline=polyline,
                     frontier=frontier, advance=advance, confirmed=confirmed, replanned=replanned,
-                    turn_stop=turn_stop, terrain=terrain,
+                    turn_stop=turn_stop, backward=backward, terrain=terrain,
                     to_goal=(turn_stop is None and advance >= path_len - 0.01),
                     edges=getattr(self.prm, 'cycle_counts', None), cell_seen=cell_seen, switch=switch,
                     phases=ph, grid_dt=grid_dt, cycle_s=time.perf_counter() - t0)
@@ -491,29 +493,49 @@ class CruisePlanner:
             print(f"[CRUISE] Scan bundle not saved: {e}")
 
     @staticmethod
-    def _turns_within(polyline, ids, advance, snap):
+    def _turns_within(polyline, ids, advance, snap, yaw):
         """
-        The corners inside the confirmed stretch sharper than motion.PATH_TURN_IN_PLACE_DEG are
-        a rotation on the spot at the node: the swept area is checked as the stop-and-go does
-        (geometry.rotation_is_clear). The confirmed stretch stops at the first corner that
-        is not clear. Returns (advance, node of that corner or None).
+        The heading of the body on every edge of the confirmed stretch, one rule: forward
+        (nose along the edge) if the rotation to get there is clear, otherwise backward (tail
+        along the edge), otherwise the confirmed stretch stops there. A rotation is checked
+        (geometry.rotation_is_clear, swept area) when it is made on the spot: at the start
+        beyond geometry.ROTATION_CHECK_MIN_DYAW_DEG, at a node beyond
+        motion.PATH_TURN_IN_PLACE_DEG; a smaller one is made while walking. The same air
+        everywhere: a corner approved ahead is not refused when the robot reaches it and it
+        becomes the start. So a dead end is left walking backwards and the robot turns round
+        as soon as it can. Returns (advance,
+        where the stretch stops for a rotation: node id, 'start' or None, backward: one bool
+        per edge of polyline).
         """
-        s = 0.0
-        for i in range(1, len(polyline) - 1):
-            s += float(np.hypot(polyline[i][0] - polyline[i - 1][0], polyline[i][1] - polyline[i - 1][1]))
+        n = len(polyline) - 1
+        backward = [False] * max(n, 0)
+        h, s = float(yaw), 0.0
+        for i in range(n):
+            (ax, ay), (bx, by) = polyline[i], polyline[i + 1]
+            L = float(np.hypot(bx - ax, by - ay))
+            if L < 1e-6:
+                backward[i] = backward[i - 1] if i else False
+                continue
+            d = float(np.arctan2(by - ay, bx - ax))
+            start = i == 0
+            limit = np.radians(geometry.ROTATION_CHECK_MIN_DYAW_DEG if start else motion.PATH_TURN_IN_PLACE_DEG)
+            def clear(target):
+                dyaw = float(np.arctan2(np.sin(target - h), np.cos(target - h)))
+                if abs(dyaw) <= limit:
+                    return True
+                ok, _margin = geometry.rotation_is_clear(snap.obstacle_dist, snap.origin_x, snap.origin_y,
+                                                         snap.cell_size, ax, ay, h, dyaw)
+                return bool(ok)
+            if clear(d):
+                h = d
+            elif clear(d + np.pi):
+                h, backward[i] = float(np.arctan2(np.sin(d + np.pi), np.cos(d + np.pi))), True
+            else:
+                return s, ('start' if start else ids[i - 1]), backward
+            s += L
             if s > advance:
                 break
-            h_in = np.arctan2(polyline[i][1] - polyline[i - 1][1], polyline[i][0] - polyline[i - 1][0])
-            h_out = np.arctan2(polyline[i + 1][1] - polyline[i][1], polyline[i + 1][0] - polyline[i][0])
-            dyaw = float(np.arctan2(np.sin(h_out - h_in), np.cos(h_out - h_in)))
-            if abs(np.degrees(dyaw)) <= motion.PATH_TURN_IN_PLACE_DEG:
-                continue
-            clear, _margin = geometry.rotation_is_clear(snap.obstacle_dist, snap.origin_x, snap.origin_y,
-                                                        snap.cell_size, polyline[i][0], polyline[i][1],
-                                                        float(h_in), dyaw)
-            if not clear:
-                return s, ids[i - 1]
-        return advance, None
+        return advance, None, backward
 
     def _terrain(self, confirmed, ids):
         """Worst slope and roughness over the first GAIT_LOOKAHEAD_M of the confirmed polyline
