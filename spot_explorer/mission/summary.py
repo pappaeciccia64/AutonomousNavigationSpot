@@ -12,9 +12,7 @@ from spot_explorer.perception import geometry
 from spot_explorer.perception import slopes
 from spot_explorer.perception import spot_grid
 
-from spot_explorer.planning import edge_evaluation
 from spot_explorer.planning import roadmap
-from spot_explorer.planning import mission_graph                   # mission node lattice
 
 from spot_explorer import config as P
 from spot_explorer.records import MISSION_STATS, MISSION_CTX
@@ -36,8 +34,6 @@ def mission_switches():
     """
     return {
         'config.MISSION_GRAPH_SAMPLING': P.MISSION_GRAPH_SAMPLING,
-        'mission_graph.BATCH_SLOPES': mission_graph.BATCH_SLOPES,
-        'edge_evaluation.REFRESH_BATCH_SLOPES': edge_evaluation.REFRESH_BATCH_SLOPES,
         'attempt_cruise.CONTINUOUS_MOTION': attempt_cruise.CONTINUOUS_MOTION,
         'attempt_cruise.CRUISE_WAKE_ON_PLAN': attempt_cruise.CRUISE_WAKE_ON_PLAN,
         'attempt_cruise.CRUISE_STATE_CACHE': attempt_cruise.CRUISE_STATE_CACHE,
@@ -46,7 +42,6 @@ def mission_switches():
         'roadmap.ROUTE_LINE_PENALTY': roadmap.ROUTE_LINE_PENALTY,
         'roadmap.ROUTE_LINE_WEIGHT': roadmap.ROUTE_LINE_WEIGHT,
         'roadmap.ROUTE_LINE_SATURATION_M': roadmap.ROUTE_LINE_SATURATION_M,
-        'edge_evaluation.BATCH_ADJACENCY': edge_evaluation.BATCH_ADJACENCY,
         'config.PLAN_ONLY_EXPLORED_CELLS': P.PLAN_ONLY_EXPLORED_CELLS,
         'attempt_common.CELL_SEEN_EXPLORED': attempt_common.CELL_SEEN_EXPLORED,
         'exploration.SEEN_BEFORE_MOVING': exploration.SEEN_BEFORE_MOVING,

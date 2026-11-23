@@ -71,11 +71,6 @@ def mission_settings(rows=None, cols=None, cell_size_m=None, spacing_m=None):
 _FROM_SETTINGS = "settings"
 
 
-# Slopes of the pairs computed in batch with matrices (see PRM.precompute_arc_slopes).
-# False = edge by edge; the result is identical.
-BATCH_SLOPES = True
-
-
 def _special_pairs(prm):
     """Edges travelled by the robot and edges blocked in the attempt, as (min, max) pairs."""
     out = {(min(a, b), max(a, b)) for a, b in getattr(prm, 'traversed_edges', ())}
@@ -281,10 +276,7 @@ class MissionGraph:
         # Slopes of all the pairs to evaluate in one go (matrices), live and,
         # where there is no live data, from the global map. Same numbers as the edge-by-edge
         # computation, about 13 times faster (see PRM.precompute_arc_slopes).
-        live_profs = [None] * len(todo)
-        if BATCH_SLOPES:
-            skip = np.array([bool(o) for o in occ_flags], dtype=bool)
-            live_profs = prm.precompute_arc_slopes(todo, skip=skip)
+        live_profs = prm.precompute_arc_slopes(todo, skip=np.array([bool(o) for o in occ_flags], dtype=bool))
         added, n_fast = 0, 0
         for i, ((a, b, d), occ) in enumerate(zip(todo, occ_flags)):
             if fast_ok and live_nd[i] and not occ:

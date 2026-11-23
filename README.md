@@ -115,27 +115,22 @@ It gets here when the frontier is empty, or earlier if the battery drops below t
 
 ---
 
-## Switches
+## Mission options
 
-Each one allows an on/off comparison in the field; the log reports them in the `[CONFIG] SWITCHES` line and `mission_summary.json` in the `switches` entry.
+The options that change how a mission runs. The log reports them in the `[CONFIG] SWITCHES`
+line and `mission_summary.json` in the `switches` entry. Alternatives still being tried are not
+in this repository: they live in a local folder and replace functions of this code at start-up.
 
-| Switch | Default | What it does |
+| Option | Default | What it does |
 |---|---|---|
 | `config.MISSION_GRAPH_SAMPLING` | `random` | How the nodes are generated: `lattice` or `random` (see *Mission graph*) |
-| `mission_graph.BATCH_SLOPES` | `True` | Slopes at cell start computed in batch (same result, faster) |
-| `edge_evaluation.REFRESH_BATCH_SLOPES` | `True` | Slopes of the refresh computed in batch (same result, faster) |
-| `edge_evaluation.INCREMENTAL_REFRESH` | `True` | The refresh recomputes the slope of an edge only when the scan sees it better (coverage +15%, or robot 0.5 m closer); occupancy and live discard at every refresh anyway |
-| `motion.PATH_COMMAND_FOR_LEGS` | `True` | Every leg of the mission with the path command (`motion.navigate_to_path`): rotation on the spot and walk in one trajectory, without waiting for the body to settle between the two; frontier, stop halfway and time limit as with `navigate_to`. A `[PATH]` line per leg with the distance from the line |
-| `attempt_cruise.CONTINUOUS_MOTION` | `True` | Continuous motion: when the stop-and-go decides a move of at least one whole leg, the robot walks along the path without stopping at the nodes while the frontier thread re-plans every 0.4 s (scan, maps, edges, Dijkstra, frontier) and the stretch confirmed free of each plan is sent to `motion.PathCommand`; back to the stop-and-go at the goal, when the confirmed stretch ends, at a corner where the rotation is not clear, with no path, low battery. `[CRUISE]` lines in the log. Better with `INCREMENTAL_REFRESH` on |
-| `attempt_cruise.CHAIN_CELLS` | `True` | With the cruise: no stop at the cell goals (within 0.6 m of the goal, inside the cell, the next attempt starts while the robot walks; stop only for turns above 35 deg, GraphNav or the stop-and-go cases). The new goal when the goal turns out isolated is chosen while walking anyway |
-| `geometry.ROBOT_CLEARANCE_AIR_M` | `0.0` | Air between body and obstacles: the path line stays 0.25 m + this value from the obstacles (frontier and edge veto). 0.05 = with margin |
-| `geometry.PLAN_CLEARANCE_EXTRA_M` | `0.03` | On the global map and in the goal choice, the planner keeps the edges at (frontier distance + this value) from obstacles, so the scan noise does not make the frontier refuse the legs just chosen. 0 = same distance as the frontier |
-| `config.PLAN_ONLY_EXPLORED_CELLS` | `True` | Paths only go through the cells already visited |
+| `attempt_cruise.CONTINUOUS_MOTION` | `True` | Continuous motion: when the stop-and-go decides a move of at least one whole leg, the robot walks along the path without stopping at the nodes while the planning thread re-plans every 0.4 s (scan, maps, edges, Dijkstra, frontier) and the stretch confirmed free of each plan is sent to `motion.PathCommand`; the next cell is prepared while walking. `[CRUISE]` lines in the log |
+| `geometry.ROBOT_CLEARANCE_AIR_M` | `0.05` | Air between body and obstacles: the path line stays 0.25 m + this value (0.30 m) from the obstacles, one threshold for frontier, edges, nodes and goals |
+| `config.PLAN_ONLY_EXPLORED_CELLS` | `True` | Paths only go through the cells already visited (and the cells shared by the robot's and the goal's) |
 | `config.GRAPHNAV_ARRIVAL_HEADING` | `toward_goal` | Heading on arrival of the GraphNav trips between cells and of the returns: facing the cell to attempt (or the goal of the attempt); `waypoint` = the waypoint's, `free` = no final rotation. The return to wp_0 always keeps the starting heading |
 | `config.WP0_FIDUCIAL_CORRECTION` | `True` | At the end of the mission, if the starting tag says the robot is more than `WP0_FIDUCIAL_TOLERANCE_M` (0.30 m) from the start, relocalization on the tag and a new return to wp_0 (at most twice) |
 | `config.GRAPHNAV_RETURN_NEAR_M` | `1.0` | Return to wp_0 stopped within this distance: it stays unsuccessful, but fiducial and drift are measured anyway |
-| `config.MOVE_NEAR_GOAL_M` | `0.10` | A leg whose command does not complete (timeout) with the robot within this distance of the point counts as successful instead of as a physical failure (0 = off) |
-| `config.GRAPHNAV_PRECHECK` | `True` | Before going with GraphNav to the waypoint from which to attempt a cell, check on the graph that the cell can be reached from there; if not, mark the side as tried without moving |
+| `config.MOVE_NEAR_GOAL_M` | `0.10` | A leg whose command does not complete (timeout) with the robot within this distance of the point counts as done instead of as a physical failure (0 = off) |
 | `config.GRAPHNAV_SHORTCUTS` | `True` | Shortcuts in the GraphNav graph before every move |
 | `config.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S` | `45.0` | Full loop closure at the end of the mission, before anchoring (0 = off) |
 | `config.BATTERY_RETURN_PCT` | `30.0` | Below this charge (2 readings in a row) the mission closes and goes back to `wp_0` (0 = return off, the charge is measured anyway) |
