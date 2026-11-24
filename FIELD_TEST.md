@@ -42,7 +42,7 @@ Launch: `python3 varianti/run.py --with cruise_state_cache -- [arguments of run_
 | **Ground height from the grid** | `[CRUISE] Cycle times …: … ground height from the grid N, from a robot state request M` | All from the grid if the frame is there; `scan` phase shorter by one robot state request (the time `grid_rate_check.py` prints). Points of the scans at the same height as before (viewer). | without the variant |
 | **Event-driven planning** | `[CRUISE] Cycle times …: Spot grid every X s, N read twice (K not processed)` | Grids closer than 0.4 s; "not processed" only if Spot renews more slowly than the cycle. CPU of the CORE: watch `top` (the planning thread now never sleeps). | without the variant |
 
-Offline (`tests/test_state_cache.py`, `test_cruise` with fake network latencies, a timing model on the 09-11 cycles): plan in force ~0.1 s fresher with the wake-up, another ~0.1 s with the event-driven planning from the laptop, nothing more on the CORE (there the cycle is computation: `python3 tools/profile_cycle.py` says where).
+Offline (the `cruise_state_cache` variant's test, `test_cruise` with fake network latencies, a timing model on the 09-11 cycles): plan in force ~0.1 s fresher with the wake-up, another ~0.1 s with the event-driven planning from the laptop, nothing more on the CORE (there the cycle is computation: `python3 tools/profile_cycle.py` says where).
 
 ---
 
@@ -50,16 +50,7 @@ Offline (`tests/test_state_cache.py`, `test_cruise` with fake network latencies,
 
 Validated indoors on 03-11 in five missions (room of about 10 x 3 m, always gait PLAIN). Never tried: grass, gait changes in the middle of a cruise (MODERATE / HARD, CRAWL), cruises longer than ~3 m.
 
-**Switches** (all on in the code):
-
-| Switch | File | Off = |
-|---|---|---|
-| `CONTINUOUS_MOTION` | `spot_explorer/mission/attempt_cruise.py` | stop-and-go as on 03-11 morning (the whole cruise off) |
-| `CHAIN_CELLS` | same file | the robot stops at every cell goal |
-| `PATH_COMMAND_FOR_LEGS` | `spot_explorer/robot/motion.py` | the legs of the stop-and-go with rotation + walk as before |
-| `INCREMENTAL_REFRESH` | `spot_explorer/planning/edge_evaluation.py` | full edge refresh |
-
-To go back at once to the morning's behaviour: `CONTINUOUS_MOTION = False` (and `PATH_COMMAND_FOR_LEGS = False`). The `[CONFIG] SWITCHES` line of the log says which ones were on.
+**Switch:** `CONTINUOUS_MOTION` in `spot_explorer/mission/attempt_cruise.py` (on); off = stop-and-go, the whole cruise off. The `[CONFIG] SWITCHES` line of the log says how it was.
 
 **Plan:** two missions on the same lawn, same grid and start: one with `CONTINUOUS_MOTION = False` as reference, one with it on. Tablet in hand; the first minutes in an open area.
 
@@ -72,11 +63,11 @@ To go back at once to the morning's behaviour: `CONTINUOUS_MOTION = False` (and 
 
 **Stop the robot:** Ctrl+C or the tablet. If the program hangs the command expires and the robot stops by itself within 2 s.
 
-**After:** `python3 tools/mission_report.py` (line `Cruise (continuous motion)` and the next one: hand-offs, new goals, path changes, distance from the line, reasons of the ends) and `python3 tools/mission_viewer.py` (the scans of the cruise every 0.5 m, decision `cruise`; light blue contour = area really seen by the cameras). Slopes: `python3 tools/slope_check.py <mission>` (estimates against the body tilt and the ground plane of the legs, `gpe`, recorded from 04-11).
+**After:** `python3 tools/mission_report.py` (line `Cruise (continuous motion)` and the next one: hand-offs, new goals, path changes, distance from the line, reasons of the ends) and `python3 tools/mission_viewer.py` (the scans of the cruise every 0.5 m, decision `cruise`; light blue contour = area really seen by the cameras). Slopes: `python3 varianti/tools/slope_check.py <mission>` (estimates against the body tilt and the ground plane of the legs, `gpe`, recorded from 04-11).
 
 **Hand-off times (from 06-11, above all on the CORE I/O):** `grep "TIMING\] hand-off\|TIMING\] attempt start" mission_log.txt`: every wait between two moves split into its steps (scan download, global maps, graph update, goal choice, planning turn, ...); the sums per step are in `mission_summary.json`, `handoff_steps_s`. On 04-11 16:52 the hand-offs on the CORE were 4.1-4.7 s, with ~1 s explained by no line.
 
-**Slopes from the local plane** (`PLANE_SLOPES` in `spot_explorer/perception/slopes.py`, on from 04-11 after the outdoor mission 14:08, see CHANGELOG): gait thresholds 0.13 / 0.20, edge veto 0.6, the frontier with the same estimate. To check on the next missions: `[GAIT] Terrain level` lines much rarer than on 14:08 (239 in 20 min), HARD only on the real slopes, frontier stops for `slope` rare. Against the legs: `python3 tools/plane_thresholds.py --since 2026-11-04` and `python3 tools/slope_check.py <mission>`. Off again: `PLANE_SLOPES = False` (everything goes back as before, thresholds included).
+**Slopes from the local plane** (`spot_explorer/perception/slopes.py`, from 04-11 after the outdoor mission 14:08, see CHANGELOG): gait thresholds 0.13 / 0.20, edge veto 0.6, the frontier with the same estimate. To check on the next missions: `[GAIT] Terrain level` lines much rarer than on 14:08 (239 in 20 min), HARD only on the real slopes, frontier stops for `slope` rare. Against the legs: `python3 varianti/tools/plane_thresholds.py --since 2026-11-04` and `python3 varianti/tools/slope_check.py <mission>`.
 
 ---
 
@@ -98,7 +89,7 @@ All the mission switches and numbers are changed in **`spot_explorer/config.py`*
 2. **Photos at the stop.** Same move: `[PHOTO] graphnav_…: 5 photos in X s` and in `MissionMap/<mission>/photos/` five JPEGs plus a `.json`. Also at a confirmed block (`[DATA SAVE] Block data saved in …BLOCKED_n.npz` followed by `[PHOTO]`). Look at one photo: it must show what was in front of the robot.
 3. **Spot's own margin.** We send `obstacle_avoidance_padding` = 0, i.e. Spot's default, unknown. With a GraphNav move passing next to a box, note by eye (or tape measure) how close the body passes and whether Spot goes around it by itself.
 4. **`tools/capture_scene.py`** once, in front of the box: it must print the layers (5), 5 photos and the obstacle cells with their height above the ground (the box: median close to its real height).
-5. **A mission as on 03-11**, everything as it is: `[CRUISE]` lines, `next cell while walking`, `New goal ... chosen while walking`; `trajectory.csv` has the `gpe_long_deg` and `gpe_lat_deg` columns filled (the ground plane of the legs). Then `python3 tools/mission_report.py` and `python3 tools/slope_check.py <mission>` (on the flat floor every estimate and gpe close to 0).
+5. **A mission as on 03-11**, everything as it is: `[CRUISE]` lines, `next cell while walking`, `New goal ... chosen while walking`; `trajectory.csv` has the `gpe_long_deg` and `gpe_lat_deg` columns filled (the ground plane of the legs). Then `python3 tools/mission_report.py` and `python3 varianti/tools/slope_check.py <mission>` (on the flat floor every estimate and gpe close to 0).
 6. **Someone steps in front of the robot during a cruise**, 1-1.5 m ahead. Expected: the `[CRUISE] Plan` lines show the confirmed stretch getting shorter (`(obstacle)`) or `PATH CHANGED`, and the robot goes around or stops before; never closer than the frontier allows. Then a **low box** (15-20 cm) on the path: the same. In the offline test (`test_cruise.py`) a 0.4 m box appearing 1.2 m ahead is passed with the centre 0.30 m from it.
 7. **Bigger cells** (`MISSION_GRID_*` in `config.py`, e.g. 3 m): longer cruises; compare the report with the 2 m one.
 8. **Gait trial**, standing and on 2 m: `python3 tools/gait_trial.py --terrain floor --true-slope 0 --estimate-only --repetitions 5`, then `--config auto_mu08 --dist 2 --repetitions 1 --backwards --protected-feet` (section "Gait calibration" below).
@@ -125,7 +116,7 @@ Two tools: **`tools/calibration.py`** (at the computer: reads the `segments.csv`
 **What the logs already say** (`calibration.py --since 2026-10-22`: 904 stop-and-go legs from 22 missions):
 - **Cost weights**: with the gait level separated, the longitudinal slope is worth ~1.8 m of path per unit (today beta = 2: fine); counting also the CRAWL it triggers, ~4.4. The lateral slope only ~0.7 in time (today 2: a safety margin, not a time cost). Roughness: on a rough edge (0.03) about a quarter of a metre: gamma = 0 changes little.
 - **Failures**: 80 of the 155 are legs with 0 m travelled (refusals, blocks), which do not depend on the terrain. Those with the robot moving (8.3%) grow only above slope 0.3 (13% against 8%) and roughness 0.02 (11% against 8%).
-- **Thresholds**: the roughness thresholds (0.05 and 0.10) almost never trigger (95th percentile 0.028). The HARD threshold at 0.25 catches 61% of the legs with peak pitch above 12 deg; at 0.20, 84%. NB these slopes are today's estimate, which reads ~2 deg too much on slopes (`tools/slope_check.py`).
+- **Thresholds**: the roughness thresholds (0.05 and 0.10) almost never trigger (95th percentile 0.028). The HARD threshold at 0.25 catches 61% of the legs with peak pitch above 12 deg; at 0.20, 84%. NB these slopes are today's estimate, which reads ~2 deg too much on slopes (`varianti/tools/slope_check.py`).
 - **Speeds**: real 0.18 / 0.12 / 0.11 m/s against limits 0.5 / 0.35 / 0.25: the limits slow down nothing.
 
 **Indoors, before going out.** In `gait_trial.py` there is no safe frontier and Spot's foot collision avoidance is off as in the mission: indoors always `--protected-feet`. Space: track + 0.5 m beyond the end and at the sides; for `--back-turn` an area of ~1.6 x 1.6 m free at the start and at the end, otherwise `--backwards`. Before the first pass, check that Ctrl+C in the terminal makes the robot sit.
@@ -166,7 +157,7 @@ Two tools: **`tools/calibration.py`** (at the computer: reads the `segments.csv`
 | **Check on the arrival pose** (28-10 afternoon: the area not yet seen does not count as a wall) | `[ARRIVAL] The step of … no exits` | Very rare, and never three times in a row on the same step (on 22-10 there were 10, on 26-10 5, indoors at 12:16 6). | Note cell and time: look at the arrival point with the viewer. |
 | **Goal right next to an obstacle** (28-10: new goal at the first frontier stop near or beyond the goal; final step below 0.40 m if it is enough to arrive; new goal after a block near the goal) | `[TARGET] The frontier stops … it is the goal that does not work`, `[FINAL STEP]`, `[TARGET] Block …` | Far fewer `[EARLY]` (on 22-10 there were 58, 45 with the obstacle right next to the goal; on 26-10 22, 18 next to it) and fewer blocks; never `[REPLAN] After the block` right after `excluded for the rest of the mission`. | Note cell and time. To go back: `FINAL_STEP_MIN_M = 1.0` (no final step); the goal rule has no switch. |
 | **GraphNav arrival facing the cell** (28-10 evening, `GRAPHNAV_ARRIVAL_HEADING`) | `[GRAPHNAV] …: arrival facing (x, y), yaw N deg`; in the report "Rotation after the GraphNav arrivals" | Mean rotation after arrival well below the 79 degrees of 26-10 (expected ~20–30; 29-10 10:57: 4 degrees on 1 arrival), less than the 38 s in place. No trip failed because of the requested pose. | `GRAPHNAV_ARRIVAL_HEADING = 'waypoint'` in `config.py`. |
-| **Failed replan: new goal at once** (28-10 evening, `REPICK_ON_REPLAN_FAIL`) | `[TARGET] Replan failed: no path from N to the goal … it is the goal that is isolated. I look for another one`, then `[REPLAN] To the new goal` | Far fewer `[REPLAN FAILED] … I keep the previous path` (on 28-10 14:23 there were 20) and fewer confirmed blocks with many free directions ("Usable directions from here: 21/24" followed by "No alternative"). The robot must not give up cells it used to reach (29-10 10:57: triggered once, worked). | `REPICK_ON_REPLAN_FAIL = False` in `config.py`. |
+| **Failed replan: new goal at once** (28-10 evening) | `[TARGET] Replan failed: no path from N to the goal … it is the goal that is isolated. I look for another one`, then `[REPLAN] To the new goal` | Far fewer `[REPLAN FAILED] … I keep the previous path` (on 28-10 14:23 there were 20) and fewer confirmed blocks with many free directions ("Usable directions from here: 21/24" followed by "No alternative"). The robot must not give up cells it used to reach (29-10 10:57: triggered once, worked). | `REPICK_ON_REPLAN_FAIL = False` in `config.py`. |
 | **Leg not completed but arrived** (28-10 evening, `MOVE_NEAR_GOAL_M = 0.10`) | `[ALMOST] Command towards (x, y) not completed, but the robot is D m from the point` | Rare, mostly uphill or in HARD; afterwards the robot carries on from the node without going back. Note if after an `[ALMOST]` the next leg starts badly (a sign that 10 cm is too much). | `MOVE_NEAR_GOAL_M = 0` in `config.py`. |
 | **Return to wp_0 stopped nearby** (28-10 evening, `GRAPHNAV_RETURN_NEAR_M = 1.0`) | `Return to wp_0 NOT successful but near: stopped D m from wp_0 (reason: …)` | Only if GraphNav gets stuck next to the start: fiducial and drift measured anyway, return marked as unsuccessful anyway. | — |
 | **Check before GraphNav** (22-10 evening, `GRAPHNAV_PRECHECK`) | `[PRECHECK] Cell (r,c): from the waypoint …` | No GraphNav move followed by an immediate failure with "GRAPH DISCONNECTED". | `GRAPHNAV_PRECHECK = False` in `config.py`. |

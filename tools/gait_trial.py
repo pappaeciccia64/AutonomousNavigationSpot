@@ -21,7 +21,7 @@ avoidance stays off as in the mission, unless --protected-feet; the body one sta
 For every pass, a row in GaitTrials/trials.csv:
   - terrain, direction (out/back), configuration, slope measured with the inclinometer;
   - slope and roughness ESTIMATED from the scan before starting: with the PRM computation (with
-    the body, 90th percentile) and with the local plane (slopes.PLANE_SLOPES), and the level the
+    the body, 90th percentile) and with the local plane (slopes.py), and the level the
     mission would have chosen;
   - success, time, commanded and travelled distance, speed;
   - pitch and roll: mean, peak, and RMS around the mean (the oscillation: on a ramp the mean

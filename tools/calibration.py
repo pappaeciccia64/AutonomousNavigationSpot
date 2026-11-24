@@ -327,7 +327,7 @@ def section_trials(path):
             m = lambda k: np.nanmean(a[:, k]) if np.isfinite(a[:, k]).any() else float('nan')
             print(f"{ter[:22]:22s} {m(0):5.1f}° {m(1):6.1f}° {m(2):6.1f}° {m(3):5.1f}° {m(4):10.1f}°")
         print("edges = today's estimate of the PRM (with the body, 90th percentile, usually a bit above "
-              "the mean slope); plane = local plane on a body-long window (slopes.PLANE_SLOPES). A "
+              "the mean slope); plane = local plane on a body-long window (slopes.py). A "
               "few degrees move the chosen level a lot (0.15 = 8.5°, 0.25 = 14°).")
 
 

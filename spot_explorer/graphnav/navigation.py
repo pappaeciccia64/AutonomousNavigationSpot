@@ -87,7 +87,7 @@ def graphnav_navigate_to(recordingInterface, waypoint_id, robot_state_client, co
     # longest phases of the mission (the return to wp_0 alone can take minutes).
     _t_gn = time.perf_counter()
     try:
-        # 2026-10-26: GraphNav legs end up in trajectory.csv too (see _TRAJECTORY_COLUMNS).
+        # GraphNav legs end up in trajectory.csv too (see _TRAJECTORY_COLUMNS).
         with TrajectoryLog(robot_state_client, move):
             return _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_client,
                                                command_client, label, timeout_s, face_xy)

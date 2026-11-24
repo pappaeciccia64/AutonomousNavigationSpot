@@ -5,7 +5,6 @@ import json
 from spot_explorer.robot import motion
 from spot_explorer.mission import attempt_cruise
 from spot_explorer.mission import planning_cycle
-from spot_explorer.mission import attempt_common
 from spot_explorer.mission import exploration
 from spot_explorer.mission import cell_rules
 from spot_explorer.perception import geometry
@@ -71,7 +70,7 @@ def _emit_mission_summary_once():
             pct = (100.0 * count / total_gait) if total_gait > 0 else 0.0
             print(f"  {tier:10s}: {count:6d}  ({pct:5.1f}%)")
         print(f"Total replans: {MISSION_STATS['replan_count']}")
-        # --- The continuous motion and the cells (the mission as in the field since 11-11) ---
+        # --- The continuous motion and the cells ---
         g = MISSION_STATS.get
         print(f"Cruises: {g('cruises', 0)}, {g('cruise_m', 0.0):.1f} m in {g('cruise_s', 0.0):.0f} s"
               + (f" ({g('cruise_m', 0.0) / g('cruise_s', 1.0):.2f} m/s)" if g('cruise_s') else "")

@@ -2,8 +2,7 @@
 Photos from Spot's body cameras at the moments worth looking at (confirmed block, GraphNav
 stopped), and for the standing captures of tools/capture_scene.py.
 
-Why: on 28-10 grass was seen as a wall, and the only ground truth was what we remembered.
-With a photo taken by the robot itself at the moment it stops, and the camera pose in the
+Why: to know afterwards what a block really was. With a photo taken by the robot itself at the moment it stops, and the camera pose in the
 VISION frame next to it, the obstacle cells of the scan can be projected onto the image
 afterwards: grass, bush or solid object, without guessing.
 

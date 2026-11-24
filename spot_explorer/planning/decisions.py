@@ -286,10 +286,9 @@ def arrival_has_exit(snap, arrival_xy, heading, min_advance_m=P.ESCAPE_FAN_MIN_A
         timestamp=snap.time, valid=snap.valid, blocked_latch=snap.blocked_latch)
     dirs = scan_escape_directions((ax, ay), float(heading), probe, min_advance_m=min_advance_m)
     # A turnable direction that stops because the data runs out counts as an exit: from the
-    # arrival point the robot will see more, and "not seen" does not mean "closed". Without
-    # this, in a corridor the forward direction ended at the edge of the scan (0.09 m) and the
-    # step was refused; at the third refusal it went anyway, and it was the right step
-    # (28-10 12:16, and scenario S16 of test_e2e_loop.py).
+    # arrival point the robot will see more, and "not seen" does not mean "closed" (in a
+    # corridor the forward direction ends at the edge of the scan; scenario S16 of
+    # test_e2e_loop.py).
     return any(d['usable'] or (d['rotatable'] and d['reason'] == 'end_of_data') for d in dirs), dirs
 
 

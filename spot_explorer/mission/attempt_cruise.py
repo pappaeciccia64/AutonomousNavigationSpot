@@ -672,7 +672,7 @@ class CruiseSteps:
                 else:
                     # The arrival is the distance from the goal, inside the target cell or not: a
                     # goal on the cell border with an obstacle just beyond it leaves the robot
-                    # outside the cell for good (09-11 14:54, two minutes back and forth).
+                    # outside the cell for good.
                     where = "in the cell, " if self.env.is_point_in_cell(rx, ry, self.target_row, self.target_col) else ""
                     if plan['to_goal'] and to_go <= CRUISE_HANDOFF_M:
                         why = f"{to_go:.2f} m from the goal"
