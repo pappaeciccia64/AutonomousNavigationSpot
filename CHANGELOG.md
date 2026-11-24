@@ -8,6 +8,82 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-24 (cruise: Dijkstra from the robot, the plan starts where the robot will be)
+
+User's goal: exploration all in cruise. Dead ends, turning and backing up are normal motion,
+not exceptions, and they come from general rules, not per-scenario code. Before, a cruise
+ended when the edge being walked went out of the graph. In the logs of 03, 04 and 09-11
+there were 16 such ends: the robot stopped and the stop-and-go took over.
+
+- **The robot as a temporary node** (`edge_evaluation.PRM.connect_point` / `remove_point`,
+  `TEMP_NODE`). At every cycle the robot is linked to the nodes within edge reach. Each
+  link gets the same checks and cost as a graph edge in the refresh:
+  `_occupancy_blocked_many` (live scan + global map), `precompute_arc_slopes`,
+  `_refresh_edge`. Nothing is taken as free just because it was walked. The node is
+  removed at the end of the cycle; the graph and its statistics keep no trace of it.
+- **Dijkstra from the robot** (`CruisePlanner._path`), with the stability margin as
+  before: the way on can be the next node, the previous one or another. The graph/frontier
+  rule (`closed_edge`) closes the robot's link too, for that cycle only. The end "the edge
+  being walked is out of the graph" is removed, together with `CellSwitch.blocked` and the
+  `edge_blocked` status.
+- **The plan starts where the robot will be** (`CruisePlanner.lead_point`). A plan takes
+  about one cycle (0.3-0.5 s), and the robot keeps walking meanwhile. A path that turned
+  away from the scan pose was already 20-30 cm off the robot, and the cruise ended with
+  "the new path passes 24 cm from the robot" (test_cruise, cell without a reachable goal:
+  then the stop-and-go took the centre to 0.27 m from the box). Now the plan starts on
+  the stretch being walked, which is already checked, ahead of the robot by what it walked
+  between the last two scans. The plan sent is robot -> that point -> the new nodes.
+- **A plan still far from the robot is skipped** (`attempt_cruise._cruise`, stat
+  `cruise_stale_plans`): the robot keeps walking the stretch sent, which is safe up to its
+  frontier, and the next plan starts from where it is. This was already the rule for a
+  plan carrying the next cell; now it holds for every plan. Before, the cruise ended.
+- Results:
+  - test_cruise, wall with a 1.2 m gap, 3 runs: one cruise each, standing 1.4-2.0 s,
+    centre at 0.34-0.35 m from the wall. Before: 1-2 cruises, standing up to 4.9 s.
+  - The 16 real "out of the graph" ends, replayed (`tools/replay_cruise_ends.py`, new):
+    16/16 find a path from the robot, with no edge closed by the frontier. The first node
+    is ahead in 12 cases (in 3 the node the robot was heading for) and to the side in 4
+    (51-105 deg). The confirmed stretch is 0.25-1.83 m. Never backwards.
+  - test_cruise, box appearing 0.8 m ahead (the fake robot has no body obstacle avoidance
+    and walks into it): the cruise ends with "rotation not clear" instead of "out of the
+    graph", and the stop-and-go sometimes brushes the box with its cone move. User,
+    24-11: a scenario impossible in reality, no code for it.
+- **`tools/replay_cruise_ends.py`** (new): the cruise ends of the real logs whose reason
+  matches `--reason`, planned again with today's code on the mission's scans. Limit: the
+  scan used is the last cruise scan saved before the end (up to a few seconds before).
+
+## 2026-11-23 (cruise: one heading rule, forward or backward)
+
+- **`CruisePlanner._turns_within`** decides the heading on every edge of the confirmed
+  stretch. Forward if the rotation to get there is clear (`geometry.rotation_is_clear`,
+  swept area); otherwise backward; otherwise the stretch stops there. The start is checked
+  too, with the same air as the corners: before, a corner approved ahead was refused once
+  it became the start, the cruise stopped and the stop-and-go took over at 0.26 m from the
+  box (test_cruise, 1 run in 5).
+- The plan carries `backward`, one flag per edge. `PathCommand.send` / `path_trajectory`
+  walk those edges tail first (heading + 180 deg, at most `RETREAT_MAX_LINEAR_VEL_MPS`),
+  so a dead end is left backwards with no rotation at its tip. `_first_plan` no longer
+  checks the start rotation on its own: the check is in the plan.
+- `test_cruise.check_heading_rule`: open field, dead end, corridor (0.7 m), node beside
+  the robot in the corridor. `test_path_command.test_backward`.
+
+## 2026-11-20 (cruise: arrival by distance from the goal; one rule graph/frontier for closed edges)
+
+- **Arrival in cruise**: the robot has arrived when it is within `GOAL_REACHED_TOLERANCE_M`
+  (0.65 m, half the body plus a margin; user's choice) of the goal with the stretch ahead
+  closed, inside the target cell or not. 09-11 14:54: two minutes back and forth, with the
+  goal 0.56 m away but the robot outside the cell. In the cruises of 03-09-11, 78 of the
+  89 ends on a short stretch were within 0.65 m of the goal.
+- **One rule graph/frontier** (`planning_cycle.closed_edge`): an edge after the one being
+  walked on which the frontier closes the path (obstacle, roughness or slope, not within
+  the arrival tolerance) is closed in the graph for the attempt, and Dijkstra runs again
+  in the same cycle until there is an open path or none. No counters or waits (user: "alla
+  fine non fa tutto dijkstra da solo?"). On the real scans, 20 of 533 cruise scans would
+  close an edge.
+- Switch ids unique over the mission (`_SWITCH_IDS`): a new planner cannot reuse one.
+- Not done: the stop-and-go (`cell_attempt`) still refuses an arrival outside the cell
+  beyond `ARRIVAL_OUTSIDE_CELL_M`.
+
 ## 2026-11-20 (cleanup: comments, switches, one-off tools)
 
 The code says what it does; the history is here. Behaviour unchanged except where said: every
