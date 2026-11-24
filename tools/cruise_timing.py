@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Timing of the cruise from the logs of real missions: to compare the planning switches on and
-off (planning_cycle.PLAN_EVENT_DRIVEN, attempt_cruise.CRUISE_WAKE_ON_PLAN and
-CRUISE_STATE_CACHE, 19-11) mission against mission.
+Timing of the cruise from the logs of real missions: to compare the timing variants
+(event_driven_planning, wake_on_plan, cruise_state_cache; before 24-11 the switches
+planning_cycle.PLAN_EVENT_DRIVEN, attempt_cruise.CRUISE_WAKE_ON_PLAN and CRUISE_STATE_CACHE)
+mission against mission.
 
-    python3 tools/cruise_timing.py 09-11-2026_14-53-46 09-11-2026_15-42-07 ...
-    python3 tools/cruise_timing.py 09-11-2026_*            # a shell pattern on MissionLogs/
+    python3 varianti/tools/cruise_timing.py 09-11-2026_14-53-46 09-11-2026_15-42-07 ...
+    python3 varianti/tools/cruise_timing.py 09-11-2026_*      # a shell pattern on MissionLogs/
 
-Per mission: the switches it ran with ([CONFIG] SWITCHES), plans per second while cruising,
+Per mission: the variants (or the old switches) it ran with ([CONFIG] SWITCHES), plans per second while cruising,
 cycle and phases (median, p90), interval between Spot grids, grids read twice / not
 processed, how long a plan waited before the main thread read it ("read after", logged from
 19-11), the turn of the main thread and the cost of its requests ([CRUISE] Main thread, from
@@ -24,7 +25,7 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-SWITCH_KEYS = ('planning_cycle.PLAN_EVENT_DRIVEN', 'attempt_cruise.CRUISE_WAKE_ON_PLAN',
+SWITCH_KEYS = ('variants', 'planning_cycle.PLAN_EVENT_DRIVEN', 'attempt_cruise.CRUISE_WAKE_ON_PLAN',
                'attempt_cruise.CRUISE_STATE_CACHE', 'planning_cycle.PLAN_PERIOD_S')
 PLAN_RE = re.compile(r'^(\d\d):(\d\d):(\d\d\.\d+) \[CRUISE\] Plan (\d+).*?\| cycle ([\d.]+) s(?: \(([^)]*)\))?')
 
@@ -47,7 +48,7 @@ def report(log):
             for k in SWITCH_KEYS:
                 m = re.search(re.escape(k) + r'=(\S+)', line)
                 if m:
-                    switches[k.split('.')[1]] = m.group(1)
+                    switches[k.split('.')[-1]] = m.group(1)
         m = PLAN_RE.match(line)
         if m:
             times.append(_secs(*m.groups()[:3]))
