@@ -35,12 +35,9 @@ def mission_switches():
         'config.MISSION_GRAPH_SAMPLING': P.MISSION_GRAPH_SAMPLING,
         'attempt_cruise.CONTINUOUS_MOTION': attempt_cruise.CONTINUOUS_MOTION,
         'planning_cycle.PLAN_PERIOD_S': planning_cycle.PLAN_PERIOD_S,
-        'config.PLAN_ONLY_EXPLORED_CELLS': P.PLAN_ONLY_EXPLORED_CELLS,
         'attempt_common.CELL_SEEN_EXPLORED': attempt_common.CELL_SEEN_EXPLORED,
-        'exploration.SEEN_BEFORE_MOVING': exploration.SEEN_BEFORE_MOVING,
         'exploration.Mission': exploration.Mission.__name__,   # a variant may replace it
         'cell_rules.NEAR_PATH_M': cell_rules.NEAR_PATH_M,
-        'cell_rules.EXPLORE_CELL_ON_THE_WAY': cell_rules.EXPLORE_CELL_ON_THE_WAY,
         'config.GRAPHNAV_SHORTCUTS': P.GRAPHNAV_SHORTCUTS,
         'config.GRAPHNAV_ARRIVAL_HEADING': P.GRAPHNAV_ARRIVAL_HEADING,
         'config.WP0_FIDUCIAL_CORRECTION': P.WP0_FIDUCIAL_CORRECTION,
@@ -90,8 +87,8 @@ def _emit_mission_summary_once():
               f"(waits at the goal {g('cruise_switch_waits_at_goal', 0)}, next cell late beyond the wait "
               f"{g('cruise_switch_timeouts', 0)}), hand-offs to the next attempt {g('cruise_handoffs', 0)}; "
               f"closed because seen: in cruise {g('cruise_seen_handoffs', 0)}, at the attempt start "
-              f"{g('cells_seen_only', 0)}, before moving {g('cells_seen_before_moving', 0)}; on the way "
-              f"{g('cells_on_the_way', 0)}")
+              f"{g('cells_seen_only', 0)}, before moving {g('cells_seen_before_moving', 0)}"
+              + (f"; on the way {g('cells_on_the_way')}" if g('cells_on_the_way') else ""))
         print(f"Attempt starts from the planning thread: {g('thread_first_turns', 0)}, stop-and-go instead "
               f"{g('thread_first_turn_fallbacks', 0)}, failed {len(g('start_failures', []))}; cell failures "
               f"{g('cell_failures', 0)}, cruises that did not walk {g('cruise_stalls', 0)}; goals chosen again "

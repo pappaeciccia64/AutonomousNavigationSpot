@@ -377,7 +377,7 @@ class PRM(EdgeEvaluation, EdgeStats):
 
     def why_no_path(self, start_idx, goal_idx):
         """Why find_path_dijkstra(start_idx, goal_idx) is None, for the log: the path exists only
-        through nodes outside allowed_nodes (cells not explored, config.PLAN_ONLY_EXPLORED_CELLS),
+        through nodes outside allowed_nodes (cells not explored, mission_prm.planning_cells),
         or is beyond the detour cap, or the graph is really split (every connecting edge out:
         occupancy, slope, live scan, blocked)."""
         if start_idx not in self.nodes or goal_idx not in self.nodes:
@@ -394,7 +394,7 @@ class PRM(EdgeEvaluation, EdgeStats):
                 self.allowed_nodes = allowed
             if free is not None:
                 return (f"a path exists only through cells not explored ({len(free) - 1} edges, "
-                        f"{self.path_length(free):.1f} m; config.PLAN_ONLY_EXPLORED_CELLS)")
+                        f"{self.path_length(free):.1f} m)")
         return ("the graph is split between the two: every connecting edge is out (occupancy, slope, "
                 "live scan or blocked)")
 

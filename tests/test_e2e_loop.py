@@ -464,7 +464,7 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
 
 if __name__ == '__main__':
     print("Fake robot, real code. Goal cell (0,1): centre (8.5, 3.5).")
-    print("NB: the goal cell must be ADJACENT to a visited one -- since 2026-10-08\n    planning is limited to the explored cells (PLAN_ONLY_EXPLORED_CELLS).")
+    print("NB: the goal cell must be ADJACENT to a visited one -- since 2026-10-08\n    planning is limited to the explored cells (mission_prm.planning_cells).")
 
     r = run("S1. open field, ghost cells in the corners of every window (2026-10-05)",
             [], (2.0, 2.0, 0.785), (0, 1))

@@ -22,14 +22,6 @@ from spot_explorer.mission import cell_rules
 # The mission: the cell-by-cell loop, start-up and closure
 # =========================================================================
 
-# Before moving towards a cell (GraphNav trip or attempt), the frontier cells already seen
-# for at least attempt_common.CELL_SEEN_FRACTION in the global map are marked visited where
-# they are (only with attempt_common.CELL_SEEN_EXPLORED). The GraphNav waypoint of the cell is
-# made only if the robot is in it (or just outside, ARRIVAL_OUTSIDE_CELL_M), as after an
-# attempt; a cell seen from afar gets none. This saves GraphNav trips towards cells that are
-# already seen from where the robot stands.
-SEEN_BEFORE_MOVING = True
-
 
 # [COVERAGE] (see Mission._log_coverage): a line every COVERAGE_STEP of the mission area seen;
 # the time left is estimated to COVERAGE_TARGET (the area never fully seen: behind walls, in
@@ -228,10 +220,15 @@ class Mission:
         return 'ok' if ok else 'fail'
 
     def _close_seen_cells(self, candidates):
-        """SEEN_BEFORE_MOVING: the candidate cells (candidates(): the open cells, in visiting
-        order) already seen enough become visited without moving; the cells they open are
-        checked too (candidates() asked again after every one). Returns how many."""
-        if not (SEEN_BEFORE_MOVING and attempt_common.CELL_SEEN_EXPLORED):
+        """Before moving towards a cell (GraphNav trip or attempt): the candidate cells
+        (candidates(): the open cells, in visiting order) already seen for at least
+        attempt_common.CELL_SEEN_FRACTION in the global map become visited where they are; the
+        cells they open are checked too (candidates() asked again after every one). The GraphNav
+        waypoint of a cell is made only if the robot is in it (or just outside,
+        ARRIVAL_OUTSIDE_CELL_M), as after an attempt; a cell seen from afar gets none. This
+        saves GraphNav trips towards cells already seen from where the robot stands. Returns
+        how many."""
+        if not attempt_common.CELL_SEEN_EXPLORED:
             return 0
         gmap = self.global_grid.global_occupancy_map
         if gmap is None:

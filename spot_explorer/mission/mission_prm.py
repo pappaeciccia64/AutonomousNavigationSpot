@@ -62,10 +62,11 @@ def node_cells(prm, env):
 
 def planning_cells(env, target_row, target_col, from_xy):
     """
-    The cells a path to (target_row, target_col) from from_xy may use (PLAN_ONLY_EXPLORED_CELLS):
-    the visited ones, the robot's, the goal's, and the cells next to both the robot's and the
-    goal's (8-neighbourhood): the way around an obstacle on the border between the two
-    cells. The path is checked live by the frontier anyway.
+    The cells a path to (target_row, target_col) from from_xy may use: the visited ones, the
+    robot's, the goal's, and the cells next to both the robot's and the goal's
+    (8-neighbourhood): the way around an obstacle on the border between the two cells. Cells
+    never explored are not crossed: if the only way goes through one, the attempt fails and the
+    cell rules try the cell again later. None = every cell.
     """
     target = (int(target_row), int(target_col))
     here = tuple(int(v) for v in env.get_cell_from_world(from_xy[0], from_xy[1]))
@@ -82,13 +83,13 @@ def planning_cells(env, target_row, target_col, from_xy):
 def restrict_planning_to_explored_cells(prm, env, target_row, target_col, robot_xy):
     """
     Limit the path search to the nodes of the visited cells, of the robot's cell and of the
-    goal cell (see PLAN_ONLY_EXPLORED_CELLS). To be called before every cell attempt: the
-    visited cells change from one attempt to the next.
+    goal cell (see planning_cells). To be called before every cell attempt: the visited cells
+    change from one attempt to the next.
     """
-    if not P.PLAN_ONLY_EXPLORED_CELLS:
+    cells = planning_cells(env, target_row, target_col, robot_xy)
+    if cells is None:
         prm.set_allowed_nodes(None)
         return
-    cells = planning_cells(env, target_row, target_col, robot_xy)
     allowed = [nid for nid, cell in node_cells(prm, env).items() if cell in cells]
     prm.set_allowed_nodes(allowed)
     print(f"[PLAN] Paths allowed only in cells {sorted(cells)}: {len(allowed)} nodes out of "

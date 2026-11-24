@@ -635,7 +635,7 @@ def _check_seen_before_moving():
     """
     The case of 04-11 16:52: the robot stands in (1,3), which is already 93% in the global
     map, and the mission would take it with GraphNav to the waypoint of (0,3) to find that
-    out. With SEEN_BEFORE_MOVING the cell is visited where it is (waypoint there, since the
+    out. Now the cell is visited where it is (waypoint there, since the
     robot is in it); a cell seen from afar is visited without a waypoint of its own; a cell
     seen less than the threshold stays in the frontier.
     """
@@ -676,61 +676,6 @@ def _check_seen_before_moving():
     check(made == [(1, 1)], f"GraphNav waypoint only for the cell the robot is in: {made}")
     check("the robot is in it" in log and "no GraphNav waypoint of its own" in log,
           "the [SEEN] lines say where the robot is")
-
-
-def _check_cell_on_the_way():
-    """
-    cell_rules.EXPLORE_CELL_ON_THE_WAY: 2 x 3 cells of 1 m, the robot in (0,0); (0,0), (1,0),
-    (1,1) visited, so (0,1) and (0,2) are both open; the visiting order (0,2) before (0,1), the
-    graph only along row 0: the way to (0,2) crosses (0,1). On: (0,1) first; off: (0,2), the visiting order. The goal of a cell: its node
-    nearest to the centre (has_goal without map and sampler would not give the way).
-    """
-    print("\nCell choice: the cell on the way first (EXPLORE_CELL_ON_THE_WAY)")
-    from spot_explorer.mission import cells, cell_rules
-    from spot_explorer.planning import roadmap
-    env = cells.EnvironmentMap(rows=2, cols=3, cell_size=1.0)
-    with contextlib.redirect_stdout(io.StringIO()):
-        env.set_origin(0.0, 0.0, 0.0)
-        for rc in ((0, 0), (1, 0), (1, 1)):
-            env.mark_cell_visited(*rc)
-    prm = roadmap.PRM()
-    x0, y0 = env.get_world_position_from_cell(0, 0)
-    x2, y2 = env.get_world_position_from_cell(0, 2)
-    pts = [(x0 + t * (x2 - x0), y0 + t * (y2 - y0)) for t in np.linspace(0.0, 1.0, 9)]
-    for i, (x, y) in enumerate(pts):
-        prm.add_node(i, x, y)
-    for i in range(len(pts) - 1):
-        w = float(np.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]))
-        prm.edges[i].append((i + 1, w))
-        prm.edges[i + 1].append((i, w))
-
-    class Rules(cell_rules.CellRules):
-        def has_goal(self, start, from_xy, row, col, cells_of, global_map, sampler):
-            cx, cy = self.env.get_world_position_from_cell(row, col)
-            goal_n = min(self.prm.nodes, key=lambda n: np.hypot(self.prm.nodes[n][0] - cx, self.prm.nodes[n][1] - cy))
-            dist, pred, _u = self._costs(start, row, col, from_xy, cells_of)
-            if goal_n not in dist:
-                return None
-            path, u = [], goal_n
-            while u is not None:
-                path.append(u)
-                u = pred[u]
-            self.last_goal_path = path[::-1]
-            return float(dist[goal_n])
-
-    # Paths through the cells not explored: the rule matters only then (with the paths only
-    # through the explored cells (0,2) has no way at all, (0,1) is chosen by the order).
-    config.PLAN_ONLY_EXPLORED_CELLS = False
-    try:
-        for on, expected in ((True, (0, 1)), (False, (0, 2))):
-            cell_rules.EXPLORE_CELL_ON_THE_WAY = on
-            rules = Rules(env, prm, [(0, 0), (1, 0), (1, 1), (0, 2), (0, 1), (1, 2)])
-            with contextlib.redirect_stdout(io.StringIO()):
-                ch = rules.choose(pts[0], None, sampler=None)
-            got = None if ch is None else (ch.row, ch.col)
-            check(got == expected, f"rule {'on' if on else 'off'}: next cell {got} (expected {expected})")
-    finally:
-        config.PLAN_ONLY_EXPLORED_CELLS, cell_rules.EXPLORE_CELL_ON_THE_WAY = True, False
 
 
 def _check_battery(r):
@@ -774,23 +719,8 @@ if __name__ == '__main__':
     _check_common(r)
     _check_cruise_mission(r)
     shutil.rmtree(r['root'], ignore_errors=True)
-    print("\nWhole mission in world A IN CRUISE, paths also through the cells not explored "
-          "(config.PLAN_ONLY_EXPLORED_CELLS off) and the cell on the way first "
-          "(cell_rules.EXPLORE_CELL_ON_THE_WAY).")
-    from spot_explorer import config as _P
-    _P.PLAN_ONLY_EXPLORED_CELLS, cell_rules.EXPLORE_CELL_ON_THE_WAY = False, True
-    try:
-        r = run(WORLDS['A'], "MISSION_A_cruise_through", cruise=True)
-    finally:
-        _P.PLAN_ONLY_EXPLORED_CELLS, cell_rules.EXPLORE_CELL_ON_THE_WAY = True, False
-    _check_common(r)
-    _check_cruise_mission(r)
-    n_way = r['log'].count("on the way to")
-    print(f"  (cells chosen because on the way: {n_way})")
-    shutil.rmtree(r['root'], ignore_errors=True)
     _check_start()
     _check_seen_before_moving()
-    _check_cell_on_the_way()
     _check_emergency()
     print("\nWhole mission in world H: open area, the robot starts in the CENTRE of the grid.")
     r = run([], "MISSION_H", extra_args=["--start", "centre"])

@@ -69,11 +69,6 @@ PRM_MIN_EDGE_M = 0.5
 PRM_MAX_EDGE_M = 1.25
 PRM_CONNECTION_RADIUS_M = 3.0
 
-# --- Where the planner may pass -----------------------------------------------------------
-# A path into a cell may use only the cells already visited, the cell the robot is in and the
-# goal cell: cells never explored are not crossed. If the only way goes through an unvisited
-# cell the attempt fails and the cell rules try the cell again later.
-PLAN_ONLY_EXPLORED_CELLS = True
 # Detour cap: a path longer than RATIO * straight line + SLACK counts as "no path" (see
 # PRM.set_detour_limit). None = no cap.
 PLAN_MAX_DETOUR_RATIO = 2.0

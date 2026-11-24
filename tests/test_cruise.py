@@ -334,7 +334,7 @@ def main():
 
     # The wall ends 0.5 m before the border between the cells. With its end ON the border
     # (x = 6.0, the first version of this scenario) going around it with 0.30 m of clearance
-    # enters cell (1,1), forbidden by PLAN_ONLY_EXPLORED_CELLS: whether a way inside the allowed
+    # enters cell (1,1), forbidden by mission_prm.planning_cells: whether a way inside the allowed
     # cells exists depended on a few cm of the robot pose (1 run out of 6 failed; from a
     # standing robot under the wall end 0/6 with the restriction, 6/6 without, stop-and-go only).
     r = run("three cells in a row: hand-offs and big turns", [(1.0, 5.5, 5.9, 6.1)], (2.0, 2.0, 0.785),

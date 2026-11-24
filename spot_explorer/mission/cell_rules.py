@@ -31,7 +31,6 @@ its second try comes later, from where the robot is then, not at once from the s
 
 import numpy as np
 
-from spot_explorer import config as P
 from spot_explorer.mission import mission_prm
 from spot_explorer.mission import recovery
 from spot_explorer.perception import geometry
@@ -41,11 +40,6 @@ from spot_explorer.records import MISSION_STATS
 
 NEAR_PATH_M = 4.0          # a way costing at most this (metres on flat ground) is walked in cruise; more, GraphNav
 MAX_FAILURES = 2           # real failures (the robot went and stopped) before setting aside
-# A near choice whose way to the goal crosses a cell not explored yet (possible only with
-# config.PLAN_ONLY_EXPLORED_CELLS = False: paths also through the cells never visited): that cell
-# first, if it has a goal the attempt would accept within NEAR_PATH_M: the robot is going
-# through it anyway. Off: the visiting order alone.
-EXPLORE_CELL_ON_THE_WAY = False
 
 
 class Choice:
@@ -104,8 +98,7 @@ class CellRules:
         start, through the cells the attempt may use. target = a cell: stops at the first node
         in it. (dist, pred, node reached)."""
         prm, env = self.prm, self.env
-        allowed = (mission_prm.planning_cells(env, row, col, from_xy)
-                   if P.PLAN_ONLY_EXPLORED_CELLS else None)
+        allowed = mission_prm.planning_cells(env, row, col, from_xy)
         stop = None
         if target is not None:
             def stop(u):
@@ -153,34 +146,11 @@ class CellRules:
         while u is not None:
             path.append(u)
             u = pred[u]
-        self.last_goal_path = path[::-1]     # start -> goal node, for _on_the_way
+        self.last_goal_path = path[::-1]     # start -> goal node of the last has_goal
         return float(dist[nid])
 
-    def _on_the_way(self, ch, start, robot_xy, robot_cell, cells_of, global_map, sampler, excluded):
-        """EXPLORE_CELL_ON_THE_WAY: the first cell crossed by the way to the goal of ch that is
-        not explored yet (not done, not blocked, not excluded or set aside) and has a goal the
-        attempt would accept within NEAR_PATH_M: chosen instead of ch. ch otherwise."""
-        target = (ch.row, ch.col)
-        crossed = []
-        for n in self.last_goal_path:
-            rc = cells_of.get(n)
-            if rc is None or rc in (target, robot_cell) or rc in crossed:
-                continue
-            crossed.append(rc)
-        for (r, c) in crossed:
-            if (self.env.map[r][c] != 0 or (r, c) in excluded
-                    or len(self.failures.get((r, c), [])) >= MAX_FAILURES):
-                continue
-            way = self.way_into(start, robot_xy, r, c, cells_of)
-            cost = self.has_goal(start, robot_xy, r, c, cells_of, global_map, sampler) if way else None
-            if cost is None or max(way[0], cost) > NEAR_PATH_M:
-                continue
-            x = Choice(r, c, self.rank.get((r, c), 10 ** 6), max(way[0], cost), way[1], way[2], way[3],
-                       self.prm.nodes[way[3]])
-            print(f"[CELL RULES] Cell ({r},{c}) is on the way to ({ch.row},{ch.col}) and not explored yet: "
-                  f"that one first.")
-            MISSION_STATS['cells_on_the_way'] = MISSION_STATS.get('cells_on_the_way', 0) + 1
-            return x
+    def _near_choice(self, ch, start, robot_xy, robot_cell, cells_of, global_map, sampler, excluded):
+        """The near candidate ch, first in the visiting order, is the choice."""
         return ch
 
     # --- the choice ----------------------------------------------------------------------
@@ -263,9 +233,7 @@ class CellRules:
                     far_failed = ch
                 continue
             if ch.near:
-                if EXPLORE_CELL_ON_THE_WAY:
-                    ch = self._on_the_way(ch, start, robot_xy, robot_cell, cells_of, global_map, sampler, excluded)
-                return ch
+                return self._near_choice(ch, start, robot_xy, robot_cell, cells_of, global_map, sampler, excluded)
             if far is None:
                 far = ch
         return far if far is not None else far_failed

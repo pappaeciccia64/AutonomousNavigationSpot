@@ -107,7 +107,7 @@ class ScanSteps:
         save_path = os.path.join(self.mission_folder,
                                  f"iteration_{self.iteration}_cell_{self.target_row}_{self.target_col}.png") if self.mission_folder else None
 
-        # Only visited cells + robot cell + goal cell (see PLAN_ONLY_EXPLORED_CELLS).
+        # Only visited cells + robot cell + goal cell (see mission_prm.planning_cells).
         mission_prm.restrict_planning_to_explored_cells(self.prm_graph, self.env, self.target_row, self.target_col,
                                              (self.robot_x, self.robot_y))
         HANDOFF.mark("allowed cells")
