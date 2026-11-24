@@ -76,7 +76,7 @@ and stays the same.
 
 `varianti/tools/compare_route_line.py` runs the same mission in each world once per variant
 (`cells`, `route`, `frontier`) and prints cells, metres walked, distance from the route,
-area seen, time. In a simulator the same comparison, and `tools/cruise_timing.py` on the
+area seen, time. In a simulator the same comparison, and `varianti/tools/cruise_timing.py` on the
 mission logs for the timing switches (FIELD_TEST.md, "Timing of the cruise").
 
 ## Test plan for the first days in the simulator
@@ -123,7 +123,7 @@ seeds. Expected with Spot's 3.84 m grid: as good as the cells in the open, slowe
 code reads the size from the protos), run the frontier with it: there it should pull ahead.
 
 **5. Terrain and gait** on the slope and on a step of 10-20 cm: gait levels chosen
-(`[GAIT]`), edge slopes against the ground under the feet (`tools/slope_check.py`), no stop
+(`[GAIT]`), edge slopes against the ground under the feet (`varianti/tools/slope_check.py`), no stop
 in front of a step Spot can take.
 
 **6. Write down** a table per run (scene, variant, cells, % seen, metres, minutes, cruise
