@@ -12,8 +12,8 @@ confirmed free of every new plan (motion.PathCommand).
                 confirmed by the last plan
     back to the stop-and-go (a turn with a fresh scan, as after a move) when:
         arrived at the goal; the confirmed stretch ahead of the robot ends (obstacle, edge
-        of the data, corner where the rotation is not clear); the edge being walked is out
-        of the graph; no path; the command ends badly (stopped, off the path, Spot
+        of the data, corner where the rotation is not clear); no path, not even from where
+        the robot is; the command ends badly (stopped, off the path, Spot
         reports it blocked); no new plan for CRUISE_PLAN_STALE_S; fall (checked every
         CRUISE_FALL_CHECK_S); low battery; CRUISE_MAX_S.
 
@@ -118,9 +118,9 @@ GAIT_HINT_HOLD_S = 3.0
 # area is clear with this much more air. The check uses the pose of the scan, and the robot walks
 # a few cm more before the command arrives.
 CHAIN_TURN_EXTRA_AIR_M = 0.15
-# After a path change while walking, the new line starts where the robot was at the scan and the
-# robot has moved on meanwhile: it rejoins the line with a short step if it is closer than this,
-# otherwise the cruise stops and the stop-and-go takes over.
+# A plan starts where the robot was when the plan was made, and the robot walks on until it is
+# read: it rejoins the new line with a short step if it is closer than this, otherwise the plan
+# is skipped (the robot keeps walking the stretch sent) and the next plan starts from where it is.
 CRUISE_REJOIN_MAX_M = 0.20
 
 
@@ -721,7 +721,7 @@ class CruiseSteps:
                 pc.stop(f"end of the cruise: {reason}")
                 self._cruise_settle(pc)
                 # Photos of what the robot had in front when the cruise stopped on the terrain.
-                if reason and re.search(r'obstacle|slope|roughness|out of the graph', reason):
+                if reason and re.search(r'obstacle|slope|roughness', reason):
                     photos.capture(f"cruise_it{self.iteration:03d}_cell{self.target_row}_{self.target_col}_"
                                    f"{self.loop_iter:03d}_{time.strftime('%H-%M-%S')}",
                                    extra={'reason': reason})
