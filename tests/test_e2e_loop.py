@@ -40,8 +40,12 @@ from spot_explorer.planning import decisions
 from spot_explorer.planning import safe_frontier
 from spot_explorer.perception import low_obstacles   # noqa: E402
 # The fake sensor sees through the obstacles: from the next cell a cell is "all seen" at once,
-# and these scenarios are about entering it (see attempt_common.CELL_SEEN_EXPLORED).
-attempt_common.CELL_SEEN_EXPLORED = False
+# and these scenarios are about entering it. In the fake world no cell counts as seen
+# (attempt_common.CELL_SEEN_FRACTION); a scenario about that rule sets REAL_CELL_SEEN_FRACTION
+# back for itself and restores the fake in a finally.
+from spot_explorer.mission import cells as _cells     # noqa: E402
+REAL_CELL_SEEN_FRACTION = _cells.cell_seen_fraction
+_cells.cell_seen_fraction = lambda *a, **k: None
 from spot_explorer.planning import roadmap
 from spot_explorer.robot import motion
 from spot_explorer.robot import connection

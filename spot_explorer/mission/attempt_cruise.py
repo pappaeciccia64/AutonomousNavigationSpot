@@ -968,10 +968,7 @@ class CruiseSteps:
             HANDOFF.mark("waypoint of the cell done, while walking")
 
     def _seen_cell(self):
-        """(env, row, col) of the target cell for the planner's 'cell_seen', None if the seen
-        rule is off."""
-        if not attempt_common.CELL_SEEN_EXPLORED:
-            return None
+        """(env, row, col) of the target cell for the planner's 'cell_seen'."""
         return (self.env, self.target_row, self.target_col)
 
     def _moving_check(self):

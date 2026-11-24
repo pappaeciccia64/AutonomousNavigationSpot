@@ -31,7 +31,7 @@ sys.path[:0] = [os.path.dirname(HERE), HERE]
 import test_e2e_loop as e2e                                                    # noqa: E402
 from fake_spot import FakeSpot                                                 # noqa: E402
 from spot_explorer import config, records                                      # noqa: E402
-from spot_explorer.mission import attempt_common, attempt_cruise, cell_attempt, planning_cycle  # noqa: E402
+from spot_explorer.mission import attempt_common, attempt_cruise, cell_attempt, cells, planning_cycle  # noqa: E402
 from spot_explorer.perception import geometry                                  # noqa: E402
 from spot_explorer.planning import edge_evaluation, mission_graph, roadmap, safe_frontier   # noqa: E402
 from spot_explorer.perception import low_obstacles   # noqa: E402
@@ -349,12 +349,12 @@ def main():
     # robot is (06-11): open field, two cells in a row. The cells
     # here are 5 m and the scan window 3.84 m: before arriving the robot sees ~55% of the cell,
     # so the threshold is 50% here (90% in the mission, cells of 2 m).
-    attempt_common.CELL_SEEN_EXPLORED, frac0 = True, attempt_common.CELL_SEEN_FRACTION
-    attempt_common.CELL_SEEN_FRACTION = 0.50
+    fake_seen, frac0 = cells.cell_seen_fraction, attempt_common.CELL_SEEN_FRACTION
+    cells.cell_seen_fraction, attempt_common.CELL_SEEN_FRACTION = e2e.REAL_CELL_SEEN_FRACTION, 0.50
     try:
         r = run("open field, two cells: the cell is done when seen", [], (2.0, 2.0, 0.785), [(0, 1), (1, 1)])
     finally:
-        attempt_common.CELL_SEEN_EXPLORED, attempt_common.CELL_SEEN_FRACTION = False, frac0
+        cells.cell_seen_fraction, attempt_common.CELL_SEEN_FRACTION = fake_seen, frac0
     seen_ends = [e for e in r['ends'] if e.startswith('cell seen')]
     check(r['oks'] == [True, True], f"two cells done ({r['oks']})")
     check(len(seen_ends) >= 1, f"hand-off because the cell is seen ({r['ends']})")

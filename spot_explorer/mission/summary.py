@@ -35,7 +35,6 @@ def mission_switches():
         'config.MISSION_GRAPH_SAMPLING': P.MISSION_GRAPH_SAMPLING,
         'attempt_cruise.CONTINUOUS_MOTION': attempt_cruise.CONTINUOUS_MOTION,
         'planning_cycle.PLAN_PERIOD_S': planning_cycle.PLAN_PERIOD_S,
-        'attempt_common.CELL_SEEN_EXPLORED': attempt_common.CELL_SEEN_EXPLORED,
         'exploration.Mission': exploration.Mission.__name__,   # a variant may replace it
         'cell_rules.NEAR_PATH_M': cell_rules.NEAR_PATH_M,
         'config.GRAPHNAV_SHORTCUTS': P.GRAPHNAV_SHORTCUTS,

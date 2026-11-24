@@ -177,7 +177,7 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
 
     def _cell_already_seen(self):
         """
-        attempt_common.CELL_SEEN_EXPLORED: the cell counts as explored without entering it when at least
+        The cell counts as explored without entering it when at least
         attempt_common.CELL_SEEN_FRACTION of it is already in the global map (seen free or obstacle, after the
         first scan of this attempt). The robot stays where it is (still walking after a
         hand-off: like an attempt that ends before its loop) and the mission marks the cell
@@ -185,7 +185,7 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
         to be entered, and entering it (often towards a goal against furniture) costs back-offs,
         refused rotations and returns with GraphNav.
         """
-        if not attempt_common.CELL_SEEN_EXPLORED or self.global_map is None:
+        if self.global_map is None:
             return False
         frac = cells.cell_seen_fraction(self.env, self.global_map, self.target_row, self.target_col)
         if frac is None or frac < attempt_common.CELL_SEEN_FRACTION:

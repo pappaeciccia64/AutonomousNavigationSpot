@@ -662,14 +662,14 @@ def _check_seen_before_moving():
     rank = {cell: i for i, cell in enumerate(m.path)}
     open_cells = sorted([(1, 1), (0, 3), (1, 0)], key=lambda rc: rank[rc])
     T.ROBOT = T.Robot(2.3, 1.7, 0.0)              # inside (1,1), 0.3 m from its border
-    was = attempt_common.CELL_SEEN_EXPLORED
-    attempt_common.CELL_SEEN_EXPLORED = True
+    fake_seen = cells.cell_seen_fraction
+    cells.cell_seen_fraction = T.REAL_CELL_SEEN_FRACTION
     try:
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             n = m._close_seen_cells(lambda: [rc for rc in open_cells if env.map[rc[0]][rc[1]] == 0])
     finally:
-        attempt_common.CELL_SEEN_EXPLORED = was
+        cells.cell_seen_fraction = fake_seen
     log = out.getvalue()
     check(n == 2 and env.map[1][1] == 1 and env.map[0][3] == 1 and env.map[1][0] == 0,
           f"(1,1) and (0,3) visited without moving, (1,0) half seen still to do (closed {n})")

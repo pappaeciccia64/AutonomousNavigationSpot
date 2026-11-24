@@ -8,6 +8,40 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-24 evening (cleanup: the alternatives out of the main code, the last switches)
+
+Continues the cleanup of 20-11. The main code has no on/off switches for alternatives any more:
+each alternative still worth trying is a local variant on this PC (folder `varianti/`, its own
+git, ignored here), which replaces one function of the main code at start-up
+(`python3 varianti/run.py --with <variant> -- <arguments of run_mission.py>`; the
+`[CONFIG] SWITCHES` line and `mission_summary.json` say which variants ran). Every step checked
+with the tests and with `tools/behaviour_snapshot.py` (same decisions as before).
+
+- **Alternatives moved to variants**, with the function of the main code they replace:
+  `roadmap.A_STAR_PATH` (`PRM._path_heuristic`, None = Dijkstra); `spot_grid.GROUND_FROM_GRID`
+  (`LocalGrid._ground_z_of_grid`); `edge_evaluation.BATCH_ADJACENCY` and the edge-by-edge slopes
+  (`EdgeEvaluation._set_edge`); `attempt_cruise.CRUISE_STATE_CACHE` with `robot/state_cache.py`,
+  `planning_cycle.PLAN_EVENT_DRIVEN` (`CruiseSteps._cruise_state_client`, `CruisePlanner._skip_grid`,
+  `plan_period`); the old 0.2 s sleep of the main thread, for comparison with the wake-up on a new
+  plan that is now the normal behaviour (`CruiseSteps._wait_for_plan`); `exploration.GOAL_SOURCE =
+  'frontier'` with `mission/frontier.py` (including `FRONTIER_BEYOND_M`) and the route line
+  `roadmap.ROUTE_LINE_*` (`PRM._route_cost`, 0 in the main code); `cell_rules.EXPLORE_CELL_ON_THE_WAY`
+  (`CellRules._near_choice`); the old cell rules, `mission/legacy/side_rules.py` (they replace
+  `exploration.Mission`). Their tests and the one-off tools that used them (`compare_route_line`)
+  went with them.
+- **Switches removed, the robot's value kept**: `config.PLAN_ONLY_EXPLORED_CELLS`
+  (`mission_prm.planning_cells` is the one place that says which cells a path may use; None =
+  every cell), `exploration.SEEN_BEFORE_MOVING`, `attempt_common.CELL_SEEN_EXPLORED`. The tests'
+  fake sensor sees through walls, so in the fake world no cell counts as seen
+  (`test_e2e_loop` replaces `cells.cell_seen_fraction` when it is imported, as it does for the
+  robot pose); the scenarios about the seen rule put the real function back for themselves.
+- **Summary**: the Cruises line prints `cruise_from_robot`, `cruise_edge_drops`,
+  `cruise_stale_plans`; the Cells line prints the cells on the way only when the variant ran.
+- **Docs**: README options table without the removed switches; FIELD_TEST.md timing section
+  with the variants instead of the switches.
+- Known: with the `event_driven_planning` variant, `test_cruise` fails "the attempt ends cleanly"
+  in the box-at-0.8 m scenario (3 runs out of 3; it passes with the main code).
+
 ## 2026-11-24 afternoon (cruise: the PRM path as usual, from the robot only when the edge walked is closed)
 
 - **From the robot only when needed** (`CruisePlanner.__call__`): Dijkstra from the next

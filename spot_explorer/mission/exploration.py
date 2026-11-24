@@ -228,8 +228,6 @@ class Mission:
         ARRIVAL_OUTSIDE_CELL_M), as after an attempt; a cell seen from afar gets none. This
         saves GraphNav trips towards cells already seen from where the robot stands. Returns
         how many."""
-        if not attempt_common.CELL_SEEN_EXPLORED:
-            return 0
         gmap = self.global_grid.global_occupancy_map
         if gmap is None:
             return 0
