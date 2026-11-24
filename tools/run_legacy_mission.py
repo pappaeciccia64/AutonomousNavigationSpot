@@ -65,9 +65,10 @@ def main():
         _set(a)
     if args.side_rules:
         from spot_explorer.mission import exploration
-        from spot_explorer.mission.legacy import side_rules
-        exploration.Mission = side_rules.SideRulesMission
-        print("[LEGACY] Cell choice: the rules of the sides tried (legacy/side_rules.py).")
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        import side_rules
+        side_rules.apply()
+        print("[LEGACY] Cell choice: the rules of the sides tried (the side_rules variant).")
     if args.stop_and_go:
         from spot_explorer.mission import attempt_cruise
         attempt_cruise.CONTINUOUS_MOTION = False
