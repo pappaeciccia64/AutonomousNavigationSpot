@@ -38,7 +38,7 @@ def mission_switches():
         'config.PLAN_ONLY_EXPLORED_CELLS': P.PLAN_ONLY_EXPLORED_CELLS,
         'attempt_common.CELL_SEEN_EXPLORED': attempt_common.CELL_SEEN_EXPLORED,
         'exploration.SEEN_BEFORE_MOVING': exploration.SEEN_BEFORE_MOVING,
-        'exploration.Mission': exploration.Mission.__name__,   # SideRulesMission: the old rules
+        'exploration.Mission': exploration.Mission.__name__,   # a variant may replace it
         'cell_rules.NEAR_PATH_M': cell_rules.NEAR_PATH_M,
         'cell_rules.EXPLORE_CELL_ON_THE_WAY': cell_rules.EXPLORE_CELL_ON_THE_WAY,
         'config.GRAPHNAV_SHORTCUTS': P.GRAPHNAV_SHORTCUTS,
