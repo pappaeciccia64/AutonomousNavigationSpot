@@ -8,44 +8,6 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
-## 2026-11-23 (behaviour snapshot, for the cleanup)
-
-- `tools/behaviour_snapshot.py record|check|compare`: a snapshot of what the code decides --
-  real saved scans through the real decoding and processing (`tools/saved_scan.py` packs them
-  back into Spot's messages), the replay of 4 missions (every graph update, every path), 5
-  stop-and-go fake missions (the log without times). Deterministic: two runs of the same code
-  give the same snapshot (checked). Sensitive: OBSTACLE_THRESHOLD 0.15 -> 0.16 shows in every
-  part. ~1.5 min with 7 processes. The cruise is not in it (real time, two threads).
-- Found while building it: some mission counters (MISSION_STATS, the last gait) are module
-  globals not reset between two missions in the same process -- harmless with one mission per
-  process, as on the robot; every fake mission of the snapshot runs in its own process.
-
-## 2026-11-20 (frontier goal beyond the edge; test plan for the simulator)
-
-- `frontier.FRONTIER_BEYOND_M` (default 0 = off): the goal is the node up to that far beyond
-  the frontier node, into the unseen, furthest along robot -> frontier (through valid edges,
-  not near a refused goal). Fake missions (`tools/compare_route_line.py --variants frontier
-  --frontier-beyond B`, worlds A, B and 3 random):
-
-  | B | goals | failed | walked | off line | seen | time |
-  |---|---|---|---|---|---|---|
-  | 0 | 151 | 0 | 220 m | 0.27 m | 98% | 690 s |
-  | 1.0 | 92 | 0 | 231 m | 0.32 m | 98% | 688 s |
-  | 1.5 | 91 | 25 | 208 m | 0.40 m | 97% | 709 s |
-
-  1 m: 40% fewer goals, same time and area; 1.5 m: goals in obstacles refused. The fake
-  robot does not slow down at the end of a command, so the gain in time (if any) is for the
-  simulator or the robot: to try there with 1.0.
-- SIMULATOR.md: test plan for the first days (bring-up, baseline in cells, timing switches,
-  cells against frontier, terrain).
-
-## 2026-11-20 (coverage of the mission area: the progress without the cells)
-
-- **`[COVERAGE]` line** (`exploration.Mission._log_coverage`): the mission area seen in the global map, every time it grows by `COVERAGE_STEP` (5 points) and at the end, with the growth since the last line and since the start and the minutes to `COVERAGE_TARGET` (95%) at the mean rate so far. It does not depend on the cells (the frontier mode has no cells to count); also when a cell is done while walking. The `[PROGRESS]` line of the cells is unchanged.
-- **`coverage.csv`** in the mission log folder (time, minutes, % seen, closed cells), and the list in `mission_summary.json` (`mission_stats.progress.coverage`).
-- **The area seen counted on the raster of the global map** (`known_many`) instead of point by point on the dictionary: same fraction (`tests/test_coverage.py`, 5 random maps), a few ms on large grids.
-- `tools/mission_report.py`: a `Coverage:` line (area seen at the end, when it reached 25, 50, 75%), from the summary or from the `[COVERAGE]` lines; `tools/live_viewer.py` shows the last `[COVERAGE]` line.
-
 ## 2026-11-24 afternoon (cruise: the PRM path as usual, from the robot only when the edge walked is closed)
 
 - **From the robot only when needed** (`CruisePlanner.__call__`): Dijkstra from the next
@@ -112,6 +74,18 @@ there were 16 such ends: the robot stopped and the stop-and-go took over.
   matches `--reason`, planned again with today's code on the mission's scans. Limit: the
   scan used is the last cruise scan saved before the end (up to a few seconds before).
 
+## 2026-11-23 (behaviour snapshot, for the cleanup)
+
+- `tools/behaviour_snapshot.py record|check|compare`: a snapshot of what the code decides --
+  real saved scans through the real decoding and processing (`tools/saved_scan.py` packs them
+  back into Spot's messages), the replay of 4 missions (every graph update, every path), 5
+  stop-and-go fake missions (the log without times). Deterministic: two runs of the same code
+  give the same snapshot (checked). Sensitive: OBSTACLE_THRESHOLD 0.15 -> 0.16 shows in every
+  part. ~1.5 min with 7 processes. The cruise is not in it (real time, two threads).
+- Found while building it: some mission counters (MISSION_STATS, the last gait) are module
+  globals not reset between two missions in the same process -- harmless with one mission per
+  process, as on the robot; every fake mission of the snapshot runs in its own process.
+
 ## 2026-11-23 (cruise: one heading rule, forward or backward)
 
 - **`CruisePlanner._turns_within`** decides the heading on every edge of the confirmed
@@ -126,6 +100,32 @@ there were 16 such ends: the robot stopped and the stop-and-go took over.
   checks the start rotation on its own: the check is in the plan.
 - `test_cruise.check_heading_rule`: open field, dead end, corridor (0.7 m), node beside
   the robot in the corridor. `test_path_command.test_backward`.
+
+## 2026-11-20 (frontier goal beyond the edge; test plan for the simulator)
+
+- `frontier.FRONTIER_BEYOND_M` (default 0 = off): the goal is the node up to that far beyond
+  the frontier node, into the unseen, furthest along robot -> frontier (through valid edges,
+  not near a refused goal). Fake missions (`tools/compare_route_line.py --variants frontier
+  --frontier-beyond B`, worlds A, B and 3 random):
+
+  | B | goals | failed | walked | off line | seen | time |
+  |---|---|---|---|---|---|---|
+  | 0 | 151 | 0 | 220 m | 0.27 m | 98% | 690 s |
+  | 1.0 | 92 | 0 | 231 m | 0.32 m | 98% | 688 s |
+  | 1.5 | 91 | 25 | 208 m | 0.40 m | 97% | 709 s |
+
+  1 m: 40% fewer goals, same time and area; 1.5 m: goals in obstacles refused. The fake
+  robot does not slow down at the end of a command, so the gain in time (if any) is for the
+  simulator or the robot: to try there with 1.0.
+- SIMULATOR.md: test plan for the first days (bring-up, baseline in cells, timing switches,
+  cells against frontier, terrain).
+
+## 2026-11-20 (coverage of the mission area: the progress without the cells)
+
+- **`[COVERAGE]` line** (`exploration.Mission._log_coverage`): the mission area seen in the global map, every time it grows by `COVERAGE_STEP` (5 points) and at the end, with the growth since the last line and since the start and the minutes to `COVERAGE_TARGET` (95%) at the mean rate so far. It does not depend on the cells (the frontier mode has no cells to count); also when a cell is done while walking. The `[PROGRESS]` line of the cells is unchanged.
+- **`coverage.csv`** in the mission log folder (time, minutes, % seen, closed cells), and the list in `mission_summary.json` (`mission_stats.progress.coverage`).
+- **The area seen counted on the raster of the global map** (`known_many`) instead of point by point on the dictionary: same fraction (`tests/test_coverage.py`, 5 random maps), a few ms on large grids.
+- `tools/mission_report.py`: a `Coverage:` line (area seen at the end, when it reached 25, 50, 75%), from the summary or from the `[COVERAGE]` lines; `tools/live_viewer.py` shows the last `[COVERAGE]` line.
 
 ## 2026-11-20 (cruise: arrival by distance from the goal; one rule graph/frontier for closed edges)
 
