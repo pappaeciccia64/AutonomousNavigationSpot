@@ -53,7 +53,12 @@ sys.path[:0] = [REPO, HERE, os.path.join(REPO, 'tests')]
 
 MISSIONS = ['13-10-2026_12-14-30', '13-10-2026_12-40-38', '26-10-2026_15-11-21', '28-10-2026_13-50-46']
 WORLDS = ['A', 'B', 'rand1', 'rand2', 'rand3']
-PARTS = ('perception', 'replay', 'missions')
+PARTS = ('perception', 'replay', 'missions', 'cruise')
+DEFAULT_PARTS = ('perception', 'replay', 'missions')
+# cruise: not deterministic (real time, two threads): each world run REPEAT times, the
+# reference is the range of each number; a new run passes if inside it, within these margins.
+REPEAT = 3
+CRUISE_MARGIN = dict(seen=3.0, walked_frac=0.15, clearance=0.03)
 MARK = '@@SNAPSHOT@@'
 
 
@@ -178,7 +183,86 @@ def work_missions(world, data):
     return dict(ok=bool(r['ok'] in (None, True)), lines=normalise(r['log']))
 
 
-WORKERS = dict(perception=work_perception, replay=work_replay, missions=work_missions)
+def _clearance(track, rects):
+    """Smallest distance of the robot centre from the boxes along the track, m."""
+    import numpy as np
+    if len(track) == 0 or not rects:
+        return None
+    t = np.asarray(track, dtype=float)
+    best = np.inf
+    for x0, x1, y0, y1 in rects:
+        dx = np.maximum(np.maximum(x0 - t[:, 0], 0), t[:, 0] - x1)
+        dy = np.maximum(np.maximum(y0 - t[:, 1], 0), t[:, 1] - y1)
+        best = min(best, float(np.min(np.hypot(dx, dy))))
+    return round(best, 3)
+
+
+def work_cruise(item, data):
+    """One fake mission in cruise (item 'world#k'): the numbers that must hold when the code
+    changes -- cells, area seen, metres, clearance from the boxes, cruise ends."""
+    import numpy as np
+    import test_e2e_loop as T
+    import test_mission as M
+    world = item.split('#')[0]
+    if world.startswith('rand'):
+        M.ROWS, M.COLS, M.CELL, M.START = 4, 5, 2.0, (1.0, 1.0, 0.0)
+        walls = random_world(int(world[4:]), 4, 5, 2.0)
+    else:
+        walls = M.WORLDS[world]
+    r = M.run(walls=walls, name='snapshot_cruise', cruise=True)
+    log = r['log']
+    track = np.array(T.ROBOT.track, dtype=float).reshape(-1, 2)
+    seen = re.findall(r'\[COVERAGE\] End: area seen (\d+)%', log) or re.findall(r'area seen (\d+)%', log)
+    sg = re.findall(r'stop-and-go instead (\d+)', log)
+    return dict(visited=sorted(set(re.findall(r'\[VISITED\] Cell \((\d+,\d+)\)', log))),
+                blocked=sorted(set(re.findall(r'\[BLOCKED\] Cell \((\d+,\d+)\)', log))),
+                seen=int(seen[-1]) if seen else None,
+                walked=round(float(np.sum(np.hypot(*np.diff(track, axis=0).T))) if len(track) > 1 else 0.0, 2),
+                clearance=_clearance(track, walls),
+                cruise_ends=len(re.findall(r'\[CRUISE\] End', log)),
+                stop_and_go=int(sg[-1]) if sg else None,
+                traceback='Traceback' in log, ok=bool(r['ok'] in (None, True)))
+
+
+def compare_cruise(key, runs_a, runs_b):
+    """Ranges of the reference runs against the new runs of one world; lines if outside."""
+    out = []
+    a = [r for r in runs_a if r]
+    b = [r for r in runs_b if r]
+    if not a or not b:
+        return [f"cruise {key}: no runs to compare"]
+    rng = lambda runs, k: (min(r[k] for r in runs if r[k] is not None), max(r[k] for r in runs if r[k] is not None))
+    m = CRUISE_MARGIN
+    if any(r['traceback'] or not r['ok'] for r in b):
+        out.append(f"cruise {key}: a run ended with an error")
+    lo, _ = rng(a, 'seen')
+    if min(r['seen'] for r in b) < lo - m['seen']:
+        out.append(f"cruise {key}: area seen {[r['seen'] for r in b]}% against {[r['seen'] for r in a]}%")
+    if min(len(r['visited']) for r in b) < min(len(r['visited']) for r in a):
+        out.append(f"cruise {key}: cells visited {[len(r['visited']) for r in b]} against {[len(r['visited']) for r in a]}")
+    lo, hi = rng(a, 'walked')
+    wb = [r['walked'] for r in b]
+    if not (lo * (1 - m['walked_frac']) <= sum(wb) / len(wb) <= hi * (1 + m['walked_frac'])):
+        out.append(f"cruise {key}: metres walked {wb} against {[r['walked'] for r in a]}")
+    if all(r['clearance'] is not None for r in a + b):
+        lo, _ = rng(a, 'clearance')
+        if min(r['clearance'] for r in b) < lo - m['clearance']:
+            out.append(f"cruise {key}: closest to a box {[r['clearance'] for r in b]} m against {[r['clearance'] for r in a]} m")
+    return out
+
+
+def cruise_table(snap):
+    lines = []
+    for key, runs in sorted(snap.get('cruise', {}).items()):
+        runs = [r for r in runs if r]
+        if runs:
+            lines.append(f"  {key:6s} cells {[len(r['visited']) for r in runs]}  seen {[r['seen'] for r in runs]}%  "
+                         f"walked {[r['walked'] for r in runs]} m  closest {[r['clearance'] for r in runs]} m  "
+                         f"cruise ends {[r['cruise_ends'] for r in runs]}  stop-and-go {[r['stop_and_go'] for r in runs]}")
+    return lines
+
+
+WORKERS = dict(perception=work_perception, replay=work_replay, missions=work_missions, cruise=work_cruise)
 
 
 def worker_main(part, item, data):
@@ -210,8 +294,8 @@ def _git_state():
         return '?'
 
 
-def record(path, parts, missions, worlds, data, jobs):
-    jobs_list = [(p, m) for p in parts if p != 'missions' for m in missions] + \
+def record(path, parts, missions, worlds, data, jobs, repeat=REPEAT):
+    jobs_list = [(p, m) for p in parts if p not in ('missions', 'cruise') for m in missions] + \
                 ([('missions', w) for w in worlds] if 'missions' in parts else [])
     snap = dict(meta=dict(date=datetime.datetime.now().isoformat(timespec='seconds'), code=_git_state(),
                           repo=REPO, data=data, parts=list(parts)),
@@ -232,6 +316,17 @@ def record(path, parts, missions, worlds, data, jobs):
             n = len(res) if p == 'perception' else len(res['graphs']) if p == 'replay' else len(res['lines'])
             what = 'scans' if p == 'perception' else 'graph updates' if p == 'replay' else 'log lines'
             print(f"  {p:10s} {m:22s} {n:5d} {what}")
+    if 'cruise' in parts:
+        # Real time: one at a time, nothing else running (the other parts are done).
+        print(f"Cruise: {len(worlds)} worlds x {repeat} runs, one at a time...")
+        for w in worlds:
+            snap['cruise'][w] = []
+            for k in range(repeat):
+                res, err = _run_worker('cruise', f"{w}#{k}", data)
+                if err and res is None:
+                    print(f"  [ERROR] cruise {w}#{k}:\n{err}")
+                snap['cruise'][w].append(res)
+        print('\n'.join(cruise_table(snap)))
     with open(path, 'w') as fh:
         json.dump(snap, fh)
     print(f"Snapshot: {path} (code {snap['meta']['code']})")
@@ -253,6 +348,9 @@ def compare(a, b):
             if x is None or y is None:
                 if (x is None) != (y is None):
                     out.append(f"{part} {key}: present in only one snapshot")
+                continue
+            if part == 'cruise':
+                out += compare_cruise(key, x, y)
                 continue
             if part == 'perception':
                 if len(x) != len(y):
@@ -300,29 +398,34 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__.split('\n\n', 2)[2])
     ap.add_argument('cmd', choices=['record', 'check', 'compare'])
     ap.add_argument('files', nargs='+', help='record: output; check: the snapshot to check against; compare: two snapshots')
-    ap.add_argument('--parts', nargs='+', choices=PARTS, default=list(PARTS))
+    ap.add_argument('--parts', nargs='+', choices=PARTS, default=None,
+                    help='default: perception replay missions; cruise (slow, ~%d min per world) only if named' % (REPEAT * 2))
+    ap.add_argument('--repeat', type=int, default=REPEAT, help='cruise runs per world')
     ap.add_argument('--missions', nargs='+', default=MISSIONS, help='saved missions for perception and replay')
     ap.add_argument('--worlds', nargs='+', default=WORLDS, help='fake mission worlds: A, B, rand<seed>')
     ap.add_argument('--data', default=REPO, help='folder with MissionMap/, MissionLogs/, graph/')
     ap.add_argument('-j', '--jobs', type=int, default=max(1, (os.cpu_count() or 2) - 1))
     a = ap.parse_args()
     data = os.path.abspath(a.data)
-    if a.cmd in ('record', 'check') and not os.path.isdir(os.path.join(data, 'MissionMap')) and a.parts != ['missions']:
+    if a.cmd in ('record', 'check') and not os.path.isdir(os.path.join(data, 'MissionMap')) \
+            and not set(a.parts or DEFAULT_PARTS) <= {'missions', 'cruise'}:
         sys.exit(f"No MissionMap/ in {data}: give the folder of the mission data with --data")
     if a.cmd == 'record':
-        record(a.files[0], a.parts, a.missions, a.worlds, data, a.jobs)
+        record(a.files[0], a.parts or list(DEFAULT_PARTS), a.missions, a.worlds, data, a.jobs, a.repeat)
         return 0
     if a.cmd == 'compare':
         old, new = (json.load(open(f)) for f in a.files[:2])
     else:
         old = json.load(open(a.files[0]))
-        parts = [p for p in old['meta']['parts'] if p in a.parts]
+        parts = [p for p in old['meta']['parts'] if a.parts is None or p in a.parts]
         missions = sorted({m for p in ('perception', 'replay') if p in old for m in old[p]}) or a.missions
-        worlds = sorted(old.get('missions', {})) or a.worlds
         tmp = os.path.join(tempfile.gettempdir(), 'behaviour_snapshot_now.json')
-        new = record(tmp, parts, missions, worlds, data, a.jobs)
+        worlds = sorted(old.get('missions', {}) or old.get('cruise', {})) or a.worlds
+        new = record(tmp, parts, missions, worlds, data, a.jobs, a.repeat)
     print(f"\nBefore: {old['meta']['date']}, code {old['meta']['code']}")
     print(f"After:  {new['meta']['date']}, code {new['meta']['code']}\n")
+    if 'cruise' in old and 'cruise' in new:
+        print("Cruise, before:\n" + '\n'.join(cruise_table(old)) + "\nCruise, after:\n" + '\n'.join(cruise_table(new)) + "\n")
     diffs = compare(old, new)
     if not diffs:
         print("SAME BEHAVIOUR: no difference in any part.")
