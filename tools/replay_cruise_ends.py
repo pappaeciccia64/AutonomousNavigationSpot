@@ -4,7 +4,8 @@ The cruise ends of real missions, planned again with today's code (no robot): fo
 "[CRUISE] End:" line of the mission logs whose reason matches --reason, the graph and the
 global maps are rebuilt from the mission's saved scans up to the last cruise scan before the
 end (tests/test_replay.py), and one planning cycle runs on that scan as the planning thread
-would: the robot as a temporary node (PRM.connect_point), Dijkstra from it to the goal, the
+would when the edge being walked is closed: the robot as a temporary node
+(PRM.connect_point), Dijkstra from it to the goal, the
 graph/frontier rule (planning_cycle.closed_edge, edges out until an open path or none), the
 confirmed stretch (walk_advance) and the heading rule (CruisePlanner._turns_within).
 

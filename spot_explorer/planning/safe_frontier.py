@@ -171,6 +171,16 @@ class GridSnapshot:
         self.valid = valid      # is_valid 2D (None = all reliable): for the slope profile
         self.plane_field = None  # computed at the first use (_plane_field)
 
+    def at(self, x, y, yaw):
+        """The same scan with the robot at (x, y, yaw): the cells under the body and around it
+        (the exemptions of sample_flags) are those of where the robot is now."""
+        other = GridSnapshot.__new__(GridSnapshot)
+        for k in self.__slots__:
+            setattr(other, k, getattr(self, k))
+        other.robot_x, other.robot_y = float(x), float(y)
+        other.robot_yaw = None if yaw is None else float(yaw)
+        return other
+
 
 def make_grid_snapshot(cells_obstacle_dist, rough_values, is_valid, terrain_valid_raw,
                        terrain_corrected, num_x, num_y, origin_x, origin_y, cell_size,

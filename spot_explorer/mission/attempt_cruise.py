@@ -644,8 +644,8 @@ class CruiseSteps:
                 f = plan['frontier']
                 self._log_plan(plan, r)
                 # The new stretch must start where the robot is. Every plan starts where the robot
-                # was expected to be when the plan reaches it (planning_cycle.lead_point): if it
-                # is still far from the new path, the plan is a moment old -- the robot keeps
+                # was when the plan was made (planning_cycle.CruisePlanner.pose_now): if it is
+                # still far from the new path, the plan is a moment old -- the robot keeps
                 # walking the stretch sent (safe up to its frontier) and the next plan starts
                 # from where it is.
                 off = motion.distance_from_polyline(rx, ry, plan['confirmed'])
@@ -763,9 +763,9 @@ class CruiseSteps:
         return self.robot_state_client
 
     def _wait_for_plan(self, tracker, last_version):
-        """Between two turns of the cruise loop: CRUISE_POLL_S (the feedback is read at every
-        turn, and the latest plan taken)."""
-        time.sleep(CRUISE_POLL_S)
+        """Between two turns of the cruise loop: until a new plan is published, at most
+        CRUISE_POLL_S (the feedback is read at every turn, and the latest plan taken)."""
+        tracker.wait_plan(last_version, CRUISE_POLL_S)
 
     def _log_plan(self, plan, r, note=None):
         """The [CRUISE] Plan line of a plan: confirmed stretch ahead and why it ends, path,

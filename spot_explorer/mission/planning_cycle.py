@@ -18,7 +18,7 @@ import os
 import time
 
 import numpy as np
-from bosdyn.client.frame_helpers import BODY_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b
+from bosdyn.client.frame_helpers import BODY_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b, get_se2_a_tform_b
 
 from spot_explorer import config as P
 from spot_explorer.mission import cells
@@ -217,10 +217,11 @@ class CruisePlanner:
          node (centre of the refresh);
       4. edges refreshed at every cycle (the window moves with the robot), nodes in
          obstacles out (refresh_graph);
-      5. Dijkstra from the robot (a temporary node linked to the nodes around it with the
-         checks and the cost of every edge, edge_evaluation.connect_point) to the goal, with
-         the stability margin of the stop-and-go: the path changes only if the new one costs
-         10% less;
+      5. Dijkstra from the next node to the goal, with the stability margin of the
+         stop-and-go: the path changes only if the new one costs 10% less. If the edge being
+         walked is closed (out of the graph, or closed by the frontier), from the robot
+         instead: a temporary node linked to the nodes around it with the checks and the
+         cost of every edge (edge_evaluation.connect_point);
       6. safe frontier on [robot] + path and the stretch confirmed free (allowed_advance).
          An edge on which the frontier closes the path (obstacle, roughness, slope; not within
          GOAL_REACHED_TOLERANCE_M of the goal) goes out (a link of the robot for the cycle,
@@ -291,8 +292,6 @@ class CruisePlanner:
         self._grid_t = None
         self.skipped = 0                   # cycles not processed (see _skip_grid)
         self._processed_t = None           # time.time() of the last cycle processed
-        self._prev_robot = None            # robot pose of the previous scan (lead_point)
-        self._sent = None                  # confirmed stretch of the last plan (lead_point)
 
     def _grid_time(self, scan):
         try:
@@ -313,15 +312,21 @@ class CruisePlanner:
         self.path_ids = list(path_ids)
         self._seg = 0                      # edge of path_ids being walked
 
-    def _path(self, scan, robot, prev_id, next_id, k, status, remainder):
-        """Dijkstra from the robot (its temporary node, see __call__) to the goal, stability
-        margin PLAN_REPLAN_MARGIN; no path: no_path_job, if set, chooses another goal.
-        Returns (status, remainder, replanned, switched): switched = this call set
-        switch_info."""
+    def _path(self, scan, robot, prev_id, next_id, k, status, remainder, from_robot):
+        """Dijkstra to the goal, stability margin PLAN_REPLAN_MARGIN: from the next node, or
+        from_robot from the robot's temporary node (see __call__). No path: no_path_job, if
+        set, chooses another goal. Returns (status, remainder, replanned, switched): switched
+        = this call set switch_info."""
         tmp = edge_evaluation.TEMP_NODE
-        found = self.prm.find_path_dijkstra(tmp, self.goal_id, current_path_ids=[tmp] + remainder,
-                                            margin=PLAN_REPLAN_MARGIN)
-        new_ids = None if found is None else found[1:]
+        if not from_robot and next_id == self.goal_id:
+            return status, remainder, False, False
+        if from_robot:
+            found = self.prm.find_path_dijkstra(tmp, self.goal_id, current_path_ids=[tmp] + remainder,
+                                                margin=PLAN_REPLAN_MARGIN)
+            new_ids = None if found is None else found[1:]
+        else:
+            new_ids = self.prm.find_path_dijkstra(next_id, self.goal_id, current_path_ids=remainder,
+                                                  margin=PLAN_REPLAN_MARGIN)
         if new_ids is None:
             self.prm.remove_point()             # the jobs choose goals among the real nodes
         if new_ids is None and self.no_path_job is not None and status == 'ok':
@@ -344,24 +349,22 @@ class CruisePlanner:
         self.replans += 1
         MISSION_STATS['replan_count'] += 1
         nx, ny = self.prm.get_node_position(new_ids[0])
+        if not from_robot:
+            print(f"[CRUISE] Replan from node {next_id}: {len(new_ids)} nodes to the goal (cycle {self.cycles}).")
+            return status, list(new_ids), True, False
         print(f"[CRUISE] Replan from the robot at ({robot[0]:.2f}, {robot[1]:.2f}) via node {new_ids[0]} "
               f"({nx:.2f}, {ny:.2f}): {len(new_ids)} nodes to the goal (cycle {self.cycles}).")
         return status, list(new_ids), True, False
 
-    def lead_point(self, robot):
-        """Where the robot will be when this plan reaches it: on the stretch it is walking (the
-        last confirmed one, checked), ahead of it by what it walked between the previous scan
-        and this one -- a plan takes about a cycle, like the interval between two scans. Turning
-        on the spot or standing it walks nothing: the robot itself. (x, y)."""
-        prev, self._prev_robot = self._prev_robot, robot
-        if prev is None or self._sent is None or len(self._sent) < 2:
-            return robot[0], robot[1]
-        step = float(np.hypot(robot[0] - prev[0], robot[1] - prev[1]))
-        ahead, _seg = motion.path_ahead(self._sent, robot[0], robot[1], n_seg=len(self._sent))
-        if step < edge_evaluation.TEMP_ON_NODE_M or len(ahead) < 2:
-            return robot[0], robot[1]
-        pt, _k = safe_frontier.point_along(ahead, step)
-        return float(pt[0]), float(pt[1])
+    def pose_now(self, fallback):
+        """(x, y, yaw) of the body in VISION now, from the robot state; fallback (the pose of
+        the scan) if it cannot be read."""
+        try:
+            tf = get_se2_a_tform_b(self.robot_state_client.get_robot_state().kinematic_state.transforms_snapshot,
+                                   VISION_FRAME_NAME, BODY_FRAME_NAME)
+            return float(tf.x), float(tf.y), float(tf.angle)
+        except Exception:
+            return fallback
 
     def robot_edge(self, robot):
         """(seg, prev, next): the edge of the path the robot (x, y, ...) is walking."""
@@ -402,41 +405,54 @@ class CruisePlanner:
             t1 = time.perf_counter(); ph['switch'] = t1 - t; t = t1
         switch = self.switch_info
 
-        # Where the robot is along the path (the nodes passed, the next one), at the point where
-        # the plan will reach it (lead_point): the plan starts there, the robot walks to it on
-        # its stretch.
-        start = self.lead_point(robot)
-        lead = [start] if np.hypot(start[0] - robot[0], start[1] - robot[1]) >= edge_evaluation.TEMP_ON_NODE_M else []
-        self._seg, prev_id, next_id = self.robot_edge(start)
-        k = min(self._seg, len(self.path_ids) - 2) if len(self.path_ids) > 1 else 0
+        # Where the robot is along the path (the nodes passed, the next one) on the scan.
+        self._seg, prev_id, next_id = self.robot_edge(robot)
         self.prm.set_robot_node(next_id, 0.0)
 
         refresh_graph(self.prm, snap, self.global_map, robot, refresh=True, quiet=True)
         t1 = time.perf_counter(); ph['edges'] = t1 - t; t = t1
 
+        # The heavy part (maps, edges) is done on the scan; the plan starts where the robot is
+        # now (it walked on meanwhile, still inside the scan), and it is published at once.
+        # The checks of the plan (links of the robot, frontier) see the body where it is now.
+        robot = self.pose_now(robot)
+        snap = snap.at(*robot)
+        self.prm.set_live_snapshot(snap)
+        self._seg, prev_id, next_id = self.robot_edge(robot)
+        k = min(self._seg, len(self.path_ids) - 2) if len(self.path_ids) > 1 else 0
+
         status, replanned = 'ok', False
         remainder = self.path_ids[k + 1:]
-        # Dijkstra starts from where the robot is: a temporary node linked to the nodes around
-        # it with the checks and the cost of every edge (connect_point), so the way on can be
-        # the next node, the one it came from or another. One rule graph/frontier: an edge on
-        # which the frontier closes the path (obstacle, roughness, slope) is closed in the
-        # graph too, and Dijkstra looks again in the same cycle. Each round takes one edge out
-        # (finite): it ends with an open path or no path.
-        self.prm.connect_point(start[0], start[1], self.global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M)
+        # Dijkstra from the next node, the path of the graph. If the edge being walked is closed
+        # -- out of the graph, or closed by the frontier -- from where the robot is: a temporary
+        # node linked to the nodes around it with the checks and the cost of every edge
+        # (connect_point), so the way on can be the next node, the one it came from or another.
+        # One rule graph/frontier: an edge on which the frontier closes the path (obstacle,
+        # roughness, slope) is closed in the graph too, and Dijkstra looks again in the same
+        # cycle. Each round takes one edge out (finite): it ends with an open path or no path.
         tmp = edge_evaluation.TEMP_NODE
+        from_robot = prev_id != next_id and not _edge_in_graph(self.prm, prev_id, next_id)
         dropped = []
         try:
             while True:
-                switched = self._path(scan, robot, prev_id, next_id, k, status, remainder)
+                if from_robot and tmp not in self.prm.nodes:
+                    self.prm.connect_point(robot[0], robot[1], self.global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M)
+                switched = self._path(scan, robot, prev_id, next_id, k, status, remainder, from_robot)
                 status, remainder, replanned = switched[0], switched[1], replanned or switched[2]
                 switch = self.switch_info
-                polyline = [(robot[0], robot[1])] + lead + [self.prm.get_node_position(n) for n in remainder]
+                polyline = [(robot[0], robot[1])] + [self.prm.get_node_position(n) for n in remainder]
                 frontier = safe_frontier.compute_safe_frontier(polyline, snap, allow_escape=False)
-                edge = closed_edge(polyline, [tmp] * (1 + len(lead)) + remainder, frontier)
-                # (tmp, tmp): closed on the stretch being walked, before the plan's start: the
-                # confirmed stretch stops there, no other way changes that.
-                if edge is None or edge[0] == edge[1] or status != 'ok' or switched[3] or edge in dropped:
+                first = tmp if from_robot else prev_id
+                edge = closed_edge(polyline, [first] + remainder, frontier)
+                if edge is None or status != 'ok' or switched[3] or edge in dropped:
                     break
+                if not from_robot and edge[0] == first:
+                    # The edge being walked is closed: the way on from where the robot is.
+                    from_robot = True
+                    MISSION_STATS['cruise_from_robot'] = MISSION_STATS.get('cruise_from_robot', 0) + 1
+                    print(f"[CRUISE] Edge being walked {edge[0]}->{edge[1]} closed by {frontier['reason']}: "
+                          f"path from the robot (cycle {self.cycles}).")
+                    continue
                 dropped.append(edge)
                 if tmp in edge:
                     # The link from the robot: out for this cycle (the next one links it again).
@@ -455,15 +471,13 @@ class CruisePlanner:
 
         t1 = time.perf_counter(); ph['path'] = t1 - t; t = t1
         advance = walk_advance(polyline, frontier)
-        advance, turn_stop, backward = self._turns_within(polyline, ['plan start'] * len(lead) + remainder,
-                                                          advance, snap, robot[2])
+        advance, turn_stop, backward = self._turns_within(polyline, remainder, advance, snap, robot[2])
         confirmed = _cut_polyline(polyline, advance)
         backward = backward[:max(len(confirmed) - 1, 0)]
         t1 = time.perf_counter(); ph['frontier'] = t1 - t; t = t1
         path_len = float(sum(np.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(polyline, polyline[1:])))
         self._save_bundle(scan, snap, robot, polyline, remainder, next_id, frontier, advance, confirmed)
-        terrain = self._terrain(confirmed, [None] * len(lead) + remainder)
-        self._sent = confirmed
+        terrain = self._terrain(confirmed, remainder)
         cell_seen = (cells.cell_seen_fraction(self.seen_cell[0], self.global_map, *self.seen_cell[1:])
                      if self.seen_cell is not None and self.global_map is not None else None)
         ph['other'] = time.perf_counter() - t
