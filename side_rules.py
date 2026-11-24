@@ -425,8 +425,6 @@ class SideRulesMission(exploration.Mission):
         """The frontier cells already seen enough become visited without
         moving, in rank order; the neighbours they add to the frontier are checked too.
         Returns how many."""
-        if not attempt_common.CELL_SEEN_EXPLORED:
-            return 0
         gmap = self.global_grid.global_occupancy_map
         if gmap is None or not self.frontier:
             return 0

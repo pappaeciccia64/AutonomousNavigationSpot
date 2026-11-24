@@ -22,7 +22,7 @@ sys.path[:0] = [os.path.dirname(os.path.dirname(HERE)), os.path.dirname(HERE),
                os.path.join(os.path.dirname(os.path.dirname(HERE)), 'tests')]
 
 import numpy as np                                                   # noqa: E402
-from spot_explorer.mission import attempt_common, exploration, mission_prm   # noqa: E402
+from spot_explorer.mission import cells, exploration, mission_prm   # noqa: E402
 from spot_explorer.planning import roadmap                           # noqa: E402
 import frontier                                                      # noqa: E402
 
@@ -104,7 +104,7 @@ def frontier_mission():
     print("== the whole fake mission, world A, in cruise ==")
     import test_mission as M
     import test_e2e_loop as T
-    saved = (attempt_common.CELL_SEEN_EXPLORED, mission_prm.planning_cells)
+    saved = (cells.cell_seen_fraction, mission_prm.planning_cells)
     off = frontier.apply()
     try:
         with contextlib.redirect_stdout(io.StringIO()):
@@ -123,7 +123,7 @@ def frontier_mission():
     check(goals >= 10, f"frontier goals {goals}")
     check(chained >= 5, f"goals reached while walking, the next prepared in the planning thread ({chained})")
     check(len(track) > 1 and float(np.sum(np.hypot(*np.diff(track, axis=0).T))) > 10.0, "the robot walked")
-    check((attempt_common.CELL_SEEN_EXPLORED, mission_prm.planning_cells) == saved,
+    check((cells.cell_seen_fraction, mission_prm.planning_cells) == saved,
           "the switches of the cell mode back as they were")
     check(exploration.Mission.__name__ == 'Mission', "variant off: exploration.Mission again")
 
