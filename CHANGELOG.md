@@ -8,6 +8,28 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-24 afternoon (cruise: the PRM path as usual, from the robot only when the edge walked is closed)
+
+- **From the robot only when needed** (`CruisePlanner.__call__`): Dijkstra from the next
+  node, the path of the graph, as before. The robot becomes a temporary node only when the
+  edge being walked is closed: out of the graph, or closed by the frontier (log "Edge being
+  walked ... closed ...: path from the robot", stat `cruise_from_robot`). The morning
+  version planned from the robot at every cycle: 64 path changes in 137 plans, and links
+  from the robot cut a box corner inside the under-body exemption of `sample_flags`
+  (test_cruise, cell without a reachable goal: 0.26 m from the box with the CPU free).
+  User: the plan is the normal PRM one; the temporary node is for blocks.
+- **The plan starts from the real pose, not a prediction** (`pose_now` replaces
+  `lead_point`): the heavy part of the cycle (maps, edges) runs on the scan; then the robot
+  state is read and the plan starts there. The frontier and the robot's links see the body
+  at that pose (`GridSnapshot.at`). User: no prediction of where the robot will be.
+- **The main thread wakes on a new plan** (`CruiseSteps._wait_for_plan` ->
+  `tracker.wait_plan`, at most `CRUISE_POLL_S`): plan read ~1 ms after it is published,
+  instead of up to 0.2 s. It was the `CRUISE_WAKE_ON_PLAN` switch, off since 19-11; now
+  the normal behaviour.
+- Results: test_cruise, test_mission, test_path_command, test_e2e_loop all OK (shared test
+  queue). Cell without a reachable goal: 0.30 m from the box in 3 runs. Wall gap: one
+  cruise in 3 runs, 0.32-0.35 m.
+
 ## 2026-11-24 (cruise: Dijkstra from the robot, the plan starts where the robot will be)
 
 User's goal: exploration all in cruise. Dead ends, turning and backing up are normal motion,
