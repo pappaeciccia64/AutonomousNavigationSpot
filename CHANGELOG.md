@@ -103,7 +103,7 @@ there were 16 such ends: the robot stopped and the stop-and-go took over.
 
 ## 2026-11-20 (frontier goal beyond the edge; test plan for the simulator)
 
-- `frontier.FRONTIER_BEYOND_M` (default 0 = off): the goal is the node up to that far beyond
+- `frontier.FRONTIER_BEYOND_M` (default 0 = off; since 24-11 in the `frontier` variant, `varianti/frontier.py`): the goal is the node up to that far beyond
   the frontier node, into the unseen, furthest along robot -> frontier (through valid edges,
   not near a refused goal). Fake missions (`tools/compare_route_line.py --variants frontier
   --frontier-beyond B`, worlds A, B and 3 random):

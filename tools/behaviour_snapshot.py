@@ -24,7 +24,7 @@ Three parts, all deterministic (same code -> same snapshot, checked by running i
 
 The cruise (continuous motion) is NOT in the snapshot: it runs in real time with two threads,
 two runs of the same code already differ. Check it with tests/test_cruise.py and
-tools/compare_route_line.py.
+varianti/tools/compare_route_line.py.
 
 check / compare print what differs (first scans, first edges, first log lines) and exit 1
 if anything does. A difference is not necessarily a bug: if the step was meant to change
@@ -151,10 +151,25 @@ def normalise(log):
     return lines
 
 
+def random_world(seed, rows, cols, cell):
+    """Random boxes, the start corner kept free (the worlds of compare_route_line, now in
+    varianti/tools: the same seeds give the same worlds)."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    w, h = cols * cell, rows * cell
+    boxes = []
+    while len(boxes) < rng.integers(6, 10):
+        sx, sy = rng.uniform(0.4, 1.2, 2)
+        x0, y0 = rng.uniform(0, w - sx), rng.uniform(0, h - sy)
+        if x0 < 2.2 and y0 < 2.2:
+            continue
+        boxes.append((float(x0), float(x0 + sx), float(y0), float(y0 + sy)))
+    return boxes
+
+
 def work_missions(world, data):
     import test_mission as M
     if world.startswith('rand'):
-        from compare_route_line import random_world
         M.ROWS, M.COLS, M.CELL, M.START = 4, 5, 2.0, (1.0, 1.0, 0.0)
         walls = random_world(int(world[4:]), 4, 5, 2.0)
     else:

@@ -3,7 +3,7 @@
 The whole mission (mission/run.py, unchanged) against a simulated robot (sim/, SIMULATOR.md).
 
     python3 tools/run_sim_mission.py --world hill
-    python3 tools/run_sim_mission.py --world walls --set exploration.GOAL_SOURCE='frontier'
+    python3 tools/run_sim_mission.py --world walls --with frontier      # a variant of varianti/
     python3 tools/run_sim_mission.py --world slope --out /tmp/sim_slope -- --rows 3 --cols 4
 
 The robot is sim/kinematic_world.KinematicWorld (no physics: it follows the commanded path
@@ -51,6 +51,23 @@ def _set(assignment):
     print(f"[SIM] {module.__name__}.{attr} = {value}")
 
 
+def _variants(folder, names):
+    """Turn on variants of the local varianti/ folder (its run.apply), as varianti/run.py does."""
+    import importlib.util
+    path = os.path.join(folder, 'run.py')
+    if not os.path.exists(path):
+        sys.exit(f"no varianti/run.py in {folder}: give the folder with --variants-dir")
+    sys.path.insert(0, folder)
+    spec = importlib.util.spec_from_file_location('varianti_run', path)
+    v = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(v)
+    unknown = [n for n in names if n not in v.available()]
+    if unknown:
+        sys.exit(f"unknown variants {unknown}; known: {', '.join(v.available())}")
+    v.apply(names)
+    print(f"[SIM] Variants on: {', '.join(names)}")
+
+
 def plug(robot, out):
     """The mission start-up on the simulated robot: login, E-Stop, lease and the stand are
     skipped; the data go under out."""
@@ -68,10 +85,16 @@ def main():
     ap.add_argument('--seed', type=int, default=1, help='seed of the boxes of the scene')
     ap.add_argument('--out', default=None, help='data folder (default /tmp/sim_missions/<world>_<time>)')
     ap.add_argument('--set', action='append', default=[], metavar='MODULE.NAME=VALUE')
+    ap.add_argument('--with', dest='variants', default='',
+                    help='variants of the local varianti/ folder to turn on, comma-separated (varianti/run.py --list)')
+    ap.add_argument('--variants-dir', default=os.path.join(os.path.dirname(HERE), 'varianti'),
+                    help='the varianti/ folder (default: next to tools/)')
     a, rest = ap.parse_known_args()
     rest = [r for r in rest if r != '--']
     out = a.out or os.path.join('/tmp/sim_missions', f"{a.world}_{time.strftime('%d-%m_%H-%M-%S')}")
     os.makedirs(out, exist_ok=True)
+    if a.variants:
+        _variants(a.variants_dir, [n.strip() for n in a.variants.split(',') if n.strip()])
     for s in a.set:
         _set(s)
     world, rows, cols, cell = worlds.scene(a.world, a.seed)

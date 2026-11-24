@@ -29,11 +29,11 @@ The bridge is written and runs against a reference backend without physics:
 | `sim/kinematic_world.py` | `KinematicWorld`: complete example backend -- boxes, ground made of planes / hills / steps; the robot follows the path exactly, stops before obstacles and slopes above 30 degrees, body roll and pitch follow the ground |
 | `sim/spot_adapter.py` | from a backend, what the mission expects from Spot: the local grids as real `LocalGridResponse` protos (decoded by the mission's own `spot_grid`), `SimSpot` (commands, feedback, robot state with body, gpe, power, battery), `MemoryGraphNav`, `SimRobot` (`ensure_client` by service name) |
 | `sim/worlds.py` | scenes: `open`, `hill` (as 28-10), `slope` (13 degrees, as 29-10), `step`, `walls` (as the room of 03-11) |
-| `tools/run_sim_mission.py` | the unchanged mission (`mission/run.py`) against a backend: `--world`, `--set module.NAME=value`, arguments of run_mission.py after `--`; data under `--out` |
+| `tools/run_sim_mission.py` | the unchanged mission (`mission/run.py`) against a backend: `--world`, `--with` variants of `varianti/`, `--set module.NAME=value`, arguments of run_mission.py after `--`; data under `--out` |
 | `tests/test_sim_bridge.py` | grids decoded by the real code, path command on the simulated robot, a whole mission |
 
     python3 tools/run_sim_mission.py --world hill
-    python3 tools/run_sim_mission.py --world walls --set "exploration.GOAL_SOURCE='frontier'"
+    python3 tools/run_sim_mission.py --world walls --with frontier   # a variant of varianti/
 
 ## Writing the backend of a real simulator
 
@@ -70,11 +70,11 @@ and stays the same.
 3. **Terrain**: slopes, steps, rough ground -- the gait choice and the slope costs get
    exercised, which the rectangle worlds of the tests cannot do.
 4. **Wider sensing** (a simulated lidar): the same three layers on a larger window; the
-   exploration by frontier (`exploration.GOAL_SOURCE = 'frontier'`) is meant for it.
+   exploration by frontier (the `frontier` variant, `varianti/frontier.py`) is meant for it.
 
 ## What to compare there
 
-`tools/compare_route_line.py` runs the same mission in each world once per variant
+`varianti/tools/compare_route_line.py` runs the same mission in each world once per variant
 (`cells`, `route`, `frontier`) and prints cells, metres walked, distance from the route,
 area seen, time. In a simulator the same comparison, and `tools/cruise_timing.py` on the
 mission logs for the timing switches (FIELD_TEST.md, "Timing of the cruise").
@@ -83,10 +83,11 @@ mission logs for the timing switches (FIELD_TEST.md, "Timing of the cruise").
 
 Each run: note scene, seed, variant and switches (the `[CONFIG] SWITCHES` line has them),
 keep the mission folder. Tools: `tools/mission_report.py` (outcome, `Coverage:`),
-`tools/cruise_timing.py` (timing of the cruise), `tools/mission_viewer.py` (maps, scans, path),
-`coverage.csv` (area seen over time). Switches are set with `--set module.NAME=value` of the
-runner (after the cleanup of 20-11 the alternatives live in `varianti/`: launch them from
-there).
+`varianti/tools/cruise_timing.py` (timing of the cruise), `tools/mission_viewer.py` (maps,
+scans, path), `coverage.csv` (area seen over time). The alternatives live in the local
+`varianti/` folder since the cleanup of 20-24/11: turn them on with `--with name,name` of
+the runner (`python3 varianti/run.py --list` lists them); parameters with
+`--set module.NAME=value`.
 
 **0. Before anything** -- the colleague's bridge (office PC, 20-11, not on GitHub yet): push it,
 read how it gives the four points of the table above, compare with `sim/spot_adapter.py`.
@@ -106,15 +107,17 @@ Measure: cells closed, area seen and its growth (`coverage.csv`), metres, minute
 and stops (`[CRUISE] End`), plans read (`cruise_timing.py`). Expected from the fake missions:
 all reachable cells, 98-100% seen, cruise 0.3-0.35 m/s.
 
-**3. Timing switches** (FIELD_TEST.md, "Timing of the cruise"), one at a time on the open scene:
-`CRUISE_STATE_CACHE`, `CRUISE_WAKE_ON_PLAN`, `PLAN_EVENT_DRIVEN`, `GROUND_FROM_GRID` (only if
-the bridge puts `gpe` in the grid snapshot). Look at: plan read delay (off ~100-200 ms, with the
-wake-up a few ms), plans read of those published (off 67-94%), main thread turn. The network
+**3. Timing variants** (FIELD_TEST.md, "Timing of the cruise"), one at a time on the open
+scene: `cruise_state_cache`, `event_driven_planning`, `ground_from_grid` (only if the bridge
+puts `gpe` in the grid snapshot), and `sleep_between_turns` (the old fixed sleep: the waking
+on a new plan is in the main code since 24-11). Look at: plan read delay, plans read of those
+published, main thread turn. The network
 latency of a simulator is not the robot's: the order of the gains counts, not the absolute
 numbers.
 
-**4. Where the goal comes from**: cells against frontier (`exploration.GOAL_SOURCE='frontier'`,
-with and without `frontier.FRONTIER_BEYOND_M`, the goal beyond the edge), same scenes and
+**4. Where the goal comes from**: cells against frontier (variant `frontier`: `--with frontier`
+of the runner, or `python3 varianti/run.py --with frontier -- <run_mission args>`; with
+`FRONTIER_BEYOND_M` of `varianti/frontier.py` at 0 and at 1.0, the goal beyond the edge), same scenes and
 seeds. Expected with Spot's 3.84 m grid: as good as the cells in the open, slower among walls
 (goals ~1 m apart). If the simulator can give a wider grid (a simulated lidar: more cells, the
 code reads the size from the protos), run the frontier with it: there it should pull ahead.
