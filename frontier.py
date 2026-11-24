@@ -29,7 +29,7 @@ import time
 import numpy as np
 
 from spot_explorer import config as P
-from spot_explorer.mission import attempt_common, attempt_cruise, cell_rules, exploration
+from spot_explorer.mission import attempt_common, attempt_cruise, cell_rules, exploration, mission_prm
 from spot_explorer.perception import geometry
 from spot_explorer.planning import goal, roadmap
 from spot_explorer.records import MISSION_STATS
@@ -167,11 +167,9 @@ class FrontierMission(exploration.Mission):
     """exploration.Mission with the goal from the frontier (see the module docstring)."""
 
     def explore(self):
-        saved = (attempt_common.CELL_SEEN_EXPLORED, exploration.SEEN_BEFORE_MOVING,
-                 P.PLAN_ONLY_EXPLORED_CELLS)
+        saved = attempt_common.CELL_SEEN_EXPLORED
         attempt_common.CELL_SEEN_EXPLORED = False
-        exploration.SEEN_BEFORE_MOVING = False
-        P.PLAN_ONLY_EXPLORED_CELLS = False
+        everywhere = replace(mission_prm, 'planning_cells', lambda *a, **k: None)
         print(f"[FRONTIER] Exploration by frontier: goal = the first frontier node of a Dijkstra search "
               f"from the robot with the distance from the route (weight {route_line.WEIGHT}, "
               f"saturated at {route_line.SATURATION_M} m); end at {100 * FRONTIER_END_SEEN:.0f}% "
@@ -179,8 +177,8 @@ class FrontierMission(exploration.Mission):
         try:
             self._explore_frontier()
         finally:
-            (attempt_common.CELL_SEEN_EXPLORED, exploration.SEEN_BEFORE_MOVING,
-             P.PLAN_ONLY_EXPLORED_CELLS) = saved
+            attempt_common.CELL_SEEN_EXPLORED = saved
+            everywhere()
             self.env._forced_goal = None
 
     def _explore_frontier(self):

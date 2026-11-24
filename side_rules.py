@@ -351,7 +351,7 @@ def _reach_from(prm, env, from_xy, row, col, global_map):
     if start is None:
         return None
     cells = mission_prm.node_cells(prm, env)
-    ok_cells = mission_prm.planning_cells(env, row, col, from_xy) if P.PLAN_ONLY_EXPLORED_CELLS else None
+    ok_cells = mission_prm.planning_cells(env, row, col, from_xy)
     seen, queue = {start}, [start]
     while queue:
         u = queue.pop()
@@ -386,8 +386,7 @@ def unreached_cell_reason(prm, env, from_xy, row, col, global_map=None):
 def graph_reaches_cell(prm, env, from_xy, row, col, global_map=None):
     """
     From the point from_xy (the waypoint the cell would be attempted from) does the graph
-    reach at least one node of cell (row, col)? Same rules as the attempt: with
-    PLAN_ONLY_EXPLORED_CELLS it passes only through the visited cells, the starting cell and
+    reach at least one node of cell (row, col)? Same rules as the attempt: it passes only through the visited cells, the starting cell and
     the goal cell; edges and nodes as they are now (a node with infinite penalty does not
     count). It is a NECESSARY condition: if False the attempt would surely fail with "GRAPH
     DISCONNECTED"; if True the attempt decides (goal point, detour cap, frontier).
@@ -423,10 +422,10 @@ class SideRulesMission(exploration.Mission):
         self.frontier.extend(find_new_borders(self.env, row, col, self.path, self.frontier))
 
     def _close_seen_cells(self):
-        """SEEN_BEFORE_MOVING: the frontier cells already seen enough become visited without
+        """The frontier cells already seen enough become visited without
         moving, in rank order; the neighbours they add to the frontier are checked too.
         Returns how many."""
-        if not (exploration.SEEN_BEFORE_MOVING and attempt_common.CELL_SEEN_EXPLORED):
+        if not attempt_common.CELL_SEEN_EXPLORED:
             return 0
         gmap = self.global_grid.global_occupancy_map
         if gmap is None or not self.frontier:
