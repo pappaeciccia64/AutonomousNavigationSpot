@@ -566,7 +566,7 @@ class ArcVerificationTracker:
     def start_planning(self, job, period_s=0.4):
         """Planning mode: run job() every period_s at most and publish its result (get_plan);
         a cycle longer than period_s is followed at once by the next. job() returning None
-        publishes nothing (planning_cycle.PLAN_EVENT_DRIVEN: the same Spot grid again)."""
+        publishes nothing."""
         with self._lock:
             self._job, self._job_period_s = job, float(period_s)
             self._plan = None
@@ -585,8 +585,7 @@ class ArcVerificationTracker:
 
     def wait_plan(self, after_version, timeout):
         """Wait until a plan newer than after_version is published, at most timeout s. Returns
-        that plan, or None at the timeout (the main thread wakes at once on a new plan instead
-        of sleeping a fixed time, see attempt_cruise.CRUISE_WAKE_ON_PLAN)."""
+        that plan, or None at the timeout."""
         with self._plan_cond:
             self._plan_cond.wait_for(lambda: self._plan is not None and self._plan['version'] > after_version,
                                      timeout=timeout)

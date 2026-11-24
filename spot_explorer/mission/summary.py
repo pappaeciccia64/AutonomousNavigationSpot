@@ -35,9 +35,6 @@ def mission_switches():
     return {
         'config.MISSION_GRAPH_SAMPLING': P.MISSION_GRAPH_SAMPLING,
         'attempt_cruise.CONTINUOUS_MOTION': attempt_cruise.CONTINUOUS_MOTION,
-        'attempt_cruise.CRUISE_WAKE_ON_PLAN': attempt_cruise.CRUISE_WAKE_ON_PLAN,
-        'attempt_cruise.CRUISE_STATE_CACHE': attempt_cruise.CRUISE_STATE_CACHE,
-        'planning_cycle.PLAN_EVENT_DRIVEN': planning_cycle.PLAN_EVENT_DRIVEN,
         'planning_cycle.PLAN_PERIOD_S': planning_cycle.PLAN_PERIOD_S,
         'roadmap.ROUTE_LINE_PENALTY': roadmap.ROUTE_LINE_PENALTY,
         'roadmap.ROUTE_LINE_WEIGHT': roadmap.ROUTE_LINE_WEIGHT,

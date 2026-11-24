@@ -64,18 +64,10 @@ from spot_explorer.records import HANDOFF, MISSION_STATS, BodyTiltRecorder, appe
 from spot_explorer.robot import connection
 from spot_explorer.robot import motion
 from spot_explorer.robot import photos
-from spot_explorer.robot import state_cache
 
 CONTINUOUS_MOTION = True
 CRUISE_POLL_S = 0.2             # main thread: one feedback reading every 0.2 s
 CRUISE_PLAN_STALE_S = 1.2       # no new plan for this long: stop
-# Wake the main thread as soon as a plan is published instead of sleeping CRUISE_POLL_S. The
-# feedback is still read at least every CRUISE_POLL_S.
-CRUISE_WAKE_ON_PLAN = False
-# One thread reads the robot state for the cruise and the other readers (command feedback,
-# paths sent, tilt recorder, fall check, ground height of the planning thread) take its last
-# reading, at most state_cache.MAX_AGE_S old, instead of a network request each.
-CRUISE_STATE_CACHE = False
 CRUISE_MIN_AHEAD_M = 0.10       # confirmed stretch ahead of the robot below this: stop
 CRUISE_BAD_PLANS = 3            # consecutive plans without scan or with an error: stop
 CRUISE_MAX_S = 180.0
@@ -558,10 +550,7 @@ class CruiseSteps:
             else:
                 tracker.start_planning(planner, planning_cycle.plan_period())
             while reason is None:
-                if CRUISE_WAKE_ON_PLAN:
-                    tracker.wait_plan(last_version, CRUISE_POLL_S)
-                else:
-                    time.sleep(CRUISE_POLL_S)
+                self._wait_for_plan(tracker, last_version)
                 now = time.time()
                 turn_t.append(now)
                 r = pc.poll()
@@ -738,7 +727,7 @@ class CruiseSteps:
                                    extra={'reason': reason})
             tracker.stop_planning()
             print(_main_timing(turn_t, poll_s, send_s))
-            if CRUISE_STATE_CACHE:
+            if hasattr(state_client, 'summary'):
                 print(f"[CRUISE] {state_client.summary()}")
             if crumb is not None:
                 crumb.join(timeout=5.0)
@@ -770,11 +759,13 @@ class CruiseSteps:
         return outcome
 
     def _cruise_state_client(self):
-        """The robot state client of the cruise: the shared cache (CRUISE_STATE_CACHE) or the
-        client itself."""
-        if CRUISE_STATE_CACHE:
-            return state_cache.shared(self.robot_state_client)
+        """The robot state client the cruise reads the pose and the feedback with."""
         return self.robot_state_client
+
+    def _wait_for_plan(self, tracker, last_version):
+        """Between two turns of the cruise loop: CRUISE_POLL_S (the feedback is read at every
+        turn, and the latest plan taken)."""
+        time.sleep(CRUISE_POLL_S)
 
     def _log_plan(self, plan, r, note=None):
         """The [CRUISE] Plan line of a plan: confirmed stretch ahead and why it ends, path,
@@ -792,7 +783,7 @@ class CruiseSteps:
               + (" (" + " ".join(f"{k} {v:.2f}" for k, v in plan['phases'].items()) + ")"
                  if plan.get('phases') else "")
               + (f", Spot grid +{plan['grid_dt']:.2f} s" if plan.get('grid_dt') is not None else "")
-              # how long the plan waited before the main thread read it (CRUISE_WAKE_ON_PLAN)
+              # how long the plan waited before the main thread read it
               + (f", read after {1000 * (time.time() - plan['time']):.0f} ms" if plan.get('time') else "")
               + f", robot at {100 * r['deviation']:.0f} cm from the line"
               + (f", cell seen {100 * plan['cell_seen']:.0f}%" if plan.get('cell_seen') is not None else "")

@@ -34,19 +34,11 @@ from spot_explorer.robot import motion
 from spot_explorer.robot import connection
 
 PLAN_PERIOD_S = 0.4            # one cycle every 0.4 s at most (2.5 Hz)
-# Event-driven planning: a cycle starts as soon as the previous one ends (at most every
-# PLAN_EVENT_MIN_PERIOD_S) and a Spot grid already processed is not processed again (the cycle
-# publishes nothing), unless the last one processed is older than PLAN_EVENT_MAX_SKIP_S, so
-# plans keep coming if Spot stops renewing its grids. tools/grid_rate_check.py measures how
-# often Spot renews them.
-PLAN_EVENT_DRIVEN = False
-PLAN_EVENT_MIN_PERIOD_S = 0.03
-PLAN_EVENT_MAX_SKIP_S = 0.6
 
 
 def plan_period():
-    """The period passed to the planning thread (see PLAN_EVENT_DRIVEN)."""
-    return PLAN_EVENT_MIN_PERIOD_S if PLAN_EVENT_DRIVEN else PLAN_PERIOD_S
+    """The period passed to the planning thread."""
+    return PLAN_PERIOD_S
 # Phases of a cycle, timed for the log: scan download, processing + global maps, edge
 # refresh, Dijkstra, frontier + rotation checks, the rest (bundle, gait terrain).
 PHASES = ('scan', 'maps', 'edges', 'path', 'frontier', 'other')
@@ -297,7 +289,7 @@ class CruisePlanner:
         self.phase_s = {k: [] for k in PHASES}
         self.grid_dt = []
         self._grid_t = None
-        self.skipped = 0                   # cycles not processed: same grid (PLAN_EVENT_DRIVEN)
+        self.skipped = 0                   # cycles not processed (see _skip_grid)
         self._processed_t = None           # time.time() of the last cycle processed
         self._prev_robot = None            # robot pose of the previous scan (lead_point)
         self._sent = None                  # confirmed stretch of the last plan (lead_point)
@@ -379,6 +371,11 @@ class CruisePlanner:
         nxt = self.path_ids[k + 1] if len(self.path_ids) > 1 else self.path_ids[0]
         return seg, self.path_ids[k], nxt
 
+    def _skip_grid(self, grid_dt, now):
+        """True to publish nothing for this cycle (grid_dt: seconds since the previous Spot
+        grid, 0 = the same grid). Every grid is processed."""
+        return False
+
     def __call__(self):
         t0 = time.perf_counter()
         ph = {}
@@ -389,8 +386,7 @@ class CruisePlanner:
         t = time.perf_counter(); ph['scan'] = t - t0
         grid_dt = self._grid_time(scan)
         now = time.time()
-        if (PLAN_EVENT_DRIVEN and grid_dt is not None and grid_dt <= 1e-6 and self._processed_t is not None
-                and now - self._processed_t < PLAN_EVENT_MAX_SKIP_S):
+        if self._skip_grid(grid_dt, now):
             self.skipped += 1
             return None
         self._processed_t = now
