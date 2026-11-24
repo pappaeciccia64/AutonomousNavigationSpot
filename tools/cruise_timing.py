@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Timing of the cruise from the logs of real missions: to compare the timing variants
-(event_driven_planning, wake_on_plan, cruise_state_cache; before 24-11 the switches
+(event_driven_planning, sleep_between_turns, cruise_state_cache; before 24-11 the switches
 planning_cycle.PLAN_EVENT_DRIVEN, attempt_cruise.CRUISE_WAKE_ON_PLAN and CRUISE_STATE_CACHE)
 mission against mission.
 
