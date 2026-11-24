@@ -199,10 +199,7 @@ def check_cell_switch():
           "no switch, or the attempt start: nothing to apply")
     sw.ask("seen 90%", "")
     check(sw.pending and planner.switch_job is not None, "cell done: the next cell asked to the thread")
-    check(sw.blocked({'status': 'edge_blocked'}) is not None and planner.switch_job is None,
-          "waiting: the edge out of the graph ends the cruise, the request withdrawn")
-    sw.ask("seen 90%", "")
-    check(sw.blocked({'status': 'ok'}) is None and sw.late(sw.t0 + 1.0) is None, "waiting: a plan ok, in time")
+    check(sw.late(sw.t0 + 1.0) is None, "waiting: in time")
     check(sw.late(sw.t0 + attempt_cruise.CRUISE_SWITCH_WAIT_S + 0.1) is not None and planner.switch_job is None,
           "waiting: beyond the wait, the hand-off")
     end = sw.apply({'kind': 'end', 'id': 2, 'reason': 'no goal', 'left': (0, 1)})
@@ -251,11 +248,12 @@ def check_closed_edge():
     """planning_cycle.closed_edge: the edge closed in the graph when the frontier closes the path."""
     print("\n== The path closed by the frontier: which edge goes out of the graph ==")
     poly = [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (3.0, 0.0), (4.0, 0.0)]   # robot, then nodes 10..13
-    ids = [10, 11, 12, 13]
+    robot = edge_evaluation.TEMP_NODE
+    ids = [robot, 10, 11, 12, 13]
 
     def f(dist, reason='obstacle'):
         return planning_cycle.closed_edge(poly, ids, {'dist': dist, 'reason': reason, 'path_len': 4.0})
-    check(f(0.5) is None, "closed on the edge being walked: none (the robot is on it)")
+    check(f(0.5) == (robot, 10), f"closed on the stretch the robot is walking: the robot's link ({f(0.5)})")
     check(f(1.5) == (10, 11), f"closed on the second edge: 10->11 ({f(1.5)})")
     check(f(2.5, 'slope') == (11, 12), "closed by slope on the third edge: 11->12")
     check(f(3.5) is None, "closed within the arrival tolerance of the goal: none, it is the arrival")
@@ -312,7 +310,7 @@ def main():
             check(r['clear'] >= geometry.ROBOT_HALF_WIDTH_M, f"never closer to the box than half the body "
                                                              f"({r['clear']:.2f} m, limit {geometry.ROBOT_HALF_WIDTH_M})")
         else:
-            check(any('out of the graph' in e or 'obstacle' in e for e in r['ends']),
+            check(any('confirmed stretch ends' in e for e in r['ends']),
                   f"the cruise stops for the box ({r['ends']})")
             check(r['clear'] > 0.0, f"the centre never inside the box ({r['clear']:.2f} m; the body is "
                                     f"Spot's obstacle avoidance)")

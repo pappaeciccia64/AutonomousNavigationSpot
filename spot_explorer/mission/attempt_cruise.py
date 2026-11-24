@@ -207,8 +207,6 @@ class CellSwitch:
 
         ask(why, where)     the cell is done: the thread is asked for the next one (pending)
         take(plan)          the switch of the plan not applied yet, or None
-        blocked(plan)       a plan while pending still counts: the edge out of the graph stops
-                            the robot (the stretch sent follows the plan, see _cruise)
         late(now)           beyond CRUISE_SWITCH_WAIT_S: the hand-off
         at_goal(now)        the robot reached the goal of the cell done while pending: said once
         apply(sw)           the switch: new goal or cell for the attempt, or the end of the cruise
@@ -243,14 +241,6 @@ class CellSwitch:
             MISSION_STATS['cruise_switch_waits_at_goal'] = MISSION_STATS.get('cruise_switch_waits_at_goal', 0) + 1
             print(f"[CRUISE] At the goal of the cell done, {now - self.t0:.1f} s after asking the next "
                   f"cell: standing until it is prepared (at most {CRUISE_SWITCH_WAIT_S:.0f} s).")
-
-    def blocked(self, plan):
-        """A plan while the next cell is prepared: it still goes towards the cell done, and it
-        still counts. The reason to end the cruise if the edge being walked is out, else None."""
-        if plan['status'] == 'edge_blocked':
-            self.planner.switch_job = None
-            return "the edge being walked is out of the graph (while the next cell was prepared)"
-        return None
 
     def late(self, now):
         """The reason of the hand-off if the next cell is not prepared within CRUISE_SWITCH_WAIT_S,
@@ -637,9 +627,6 @@ class CruiseSteps:
                 bad, last_plan_t = 0, now
                 sw = switch.take(plan)
                 if switch.pending and sw is None:
-                    reason = switch.blocked(plan)
-                    if reason is not None:
-                        break
                     if plan['status'] == 'ok' and len(plan.get('confirmed', [])) > 1:
                         # The stretch sent follows the confirmed one of every plan (it may get
                         # shorter), whole (no dead man: the robot walks it while waiting).
@@ -658,9 +645,6 @@ class CruiseSteps:
                         reason, handoff, no_path_end = end
                         break
                     to_goal = False
-                if plan['status'] == 'edge_blocked':
-                    reason = "the edge being walked is out of the graph"
-                    break
                 if plan['status'] == 'no_path':
                     if planner.no_path_job is not None:
                         continue      # the thread is choosing another goal or cell: the robot walks the stretch
@@ -670,18 +654,15 @@ class CruiseSteps:
                 ahead = plan['advance'] - _along(plan['polyline'], rx, ry)
                 f = plan['frontier']
                 self._log_plan(plan, r)
-                # The new stretch must start where the robot is: after a path change while
-                # walking the line can pass beside it (see PathCommand.send).
+                # The new stretch must start where the robot is. Every plan starts where the robot
+                # was expected to be when the plan reaches it (planning_cycle.lead_point): if it
+                # is still far from the new path, the plan is a moment old -- the robot keeps
+                # walking the stretch sent (safe up to its frontier) and the next plan starts
+                # from where it is.
                 off = motion.distance_from_polyline(rx, ry, plan['confirmed'])
-                if off > CRUISE_REJOIN_MAX_M and switch.report:
-                    # The plan with the next cell was computed on a scan a moment old and the
-                    # robot, walking the stretch sent, has moved on: the next plan starts from
-                    # where it is.
-                    continue
                 if off > CRUISE_REJOIN_MAX_M:
-                    reason = (f"the new path passes {100 * off:.0f} cm from the robot "
-                              f"(limit {100 * CRUISE_REJOIN_MAX_M:.0f} cm)")
-                    break
+                    MISSION_STATS['cruise_stale_plans'] = MISSION_STATS.get('cruise_stale_plans', 0) + 1
+                    continue
                 # Hand-off to the next cell, robot inside the target cell: goal
                 # confirmed and within CRUISE_HANDOFF_M; or the frontier stops for an obstacle
                 # (roughness, slope) with the goal within GOAL_REACHED_TOLERANCE_M along the

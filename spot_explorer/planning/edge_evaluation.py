@@ -4,6 +4,8 @@ slope with the body (live scan, global height map), weight; the refresh around t
 during the move. The vetoes are counted in edge_stats.py.
 """
 
+import copy
+
 import numpy as np
 from typing import Tuple, Optional
 from spot_explorer.perception import geometry
@@ -83,6 +85,15 @@ def body_slope(prof):
 # (test_replay.py checks it).
 DIRTY_MARGIN_M = (slopes.ARC_BODY_EXTENSION_M + slopes.LATERAL_SLICE_HALF_WIDTH_M
                   + geometry.PRM_EDGE_SAFETY_MARGIN_M + 0.10)
+
+
+# The robot as a temporary node of the graph (connect_point): an id no real node has.
+TEMP_NODE = -1
+TEMP_ON_NODE_M = 0.02          # closer than this to a node, the robot is on it
+# What connect_point leaves as it was (edge_stats and the refresh's log counts).
+_GRAPH_STATS = ('live_veto_last', 'veto_count_occupancy', 'veto_count_longitudinal', 'veto_count_lateral',
+                'vetoed_arcs_longitudinal', 'vetoed_arcs_lateral', 'vetoed_arcs_occupancy', 'max_slope_seen',
+                'slope_flip_count', '_slope_log_pending', 'slope_source_counts', 'last_slope_source')
 
 
 class _LiveEval:
@@ -426,6 +437,56 @@ class EdgeEvaluation:
         self.flush_slope_log("refresh")
 
         return set(local_nodes)
+
+    def connect_point(self, x: float, y: float, global_map=None, edge_safety_margin: float = 0.05):
+        """
+        The robot at (x, y) as the temporary node TEMP_NODE, linked to every node within edge
+        reach (as _refresh_pairs, without the minimum length: the robot may be next to a node)
+        with the checks and the cost of the refresh (_occupancy_blocked_many,
+        precompute_arc_slopes, _refresh_edge): the search can start from where the robot is,
+        halfway along an edge or beside it. A node under the robot (closer than
+        TEMP_ON_NODE_M) is linked at no cost. Until remove_point; the graph keeps no trace.
+        """
+        self.remove_point()
+        ids, xy, _nb = self._node_arrays()
+        reach = min(self.connection_radius, self.max_edge_length)
+        d = np.hypot(xy[:, 0] - x, xy[:, 1] - y) if len(ids) else np.empty(0)
+        js = np.nonzero(d <= reach)[0]
+        on = [ids[j] for j in js if d[j] < TEMP_ON_NODE_M]
+        pairs = [(TEMP_NODE, ids[j], float(d[j])) for j in js if d[j] >= TEMP_ON_NODE_M]
+        self.nodes[TEMP_NODE] = (float(x), float(y))
+        self.node_gradients[TEMP_NODE] = self.node_roughness[TEMP_NODE] = 0.0
+        self.edges[TEMP_NODE] = []
+        self._temp_links = [p[1] for p in pairs] + on
+        for n in on:
+            self._set_edge(TEMP_NODE, n, 0.0)
+        if not pairs:
+            return
+        # The links are not graph edges: the graph statistics stay as the refresh left them.
+        kept = {k: copy.copy(getattr(self, k)) for k in _GRAPH_STATS if hasattr(self, k)}
+        use_occ = global_map is not None and edge_safety_margin > 0.0
+        occ = (self._occupancy_blocked_many(pairs, global_map, edge_safety_margin) if use_occ
+               else self._live_blocked_many(pairs))
+        profs = self.precompute_arc_slopes(pairs, skip=occ)
+        for (a, b, dist), o, prof in zip(pairs, occ, profs):
+            self._refresh_edge(a, b, dist, global_map, o, prof)
+        for k, v in kept.items():
+            setattr(self, k, v)
+
+    def remove_point(self):
+        """Take the temporary node of connect_point out of the graph, with its edges."""
+        if TEMP_NODE not in self.nodes:
+            return
+        for n in getattr(self, '_temp_links', ()):
+            if n in self.edges:
+                self.edges[n] = [(m, w) for m, w in self.edges[n] if m != TEMP_NODE]
+            key = (min(TEMP_NODE, n), max(TEMP_NODE, n))
+            for dct in (self.edge_validity, self.edge_slope_info, self._gslope_cache, self._live_eval):
+                if key in dct:
+                    dict.__delitem__(dct, key)
+        for dct in (self.nodes, self.edges, self.node_gradients, self.node_roughness):
+            dct.pop(TEMP_NODE, None)
+        self._temp_links = []
 
     def _refresh_pairs_loop(self, pairs, occ_flags, live_profs, reuse, cov, mid_d, global_map):
         """The edge by edge part of refresh_local_edge_weights."""
