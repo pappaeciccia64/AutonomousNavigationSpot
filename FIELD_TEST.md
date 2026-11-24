@@ -14,30 +14,33 @@ main thread reads one every ~0.47 s (median interval of the `[CRUISE] Plan` line
 feedback, pose, pose again and the command at every send). The 0.4 s of the planning are ours
 (`PLAN_PERIOD_S`), not Spot's: the grids came at our request rate and never the same twice.
 
-**Switches** (all OFF; one at a time, same place and grid, a reference mission first). `roadmap.A_STAR_PATH` is in the code too but NOT to try for now (TODO.md, idea 4):
+Since 24-11 the main thread wakes as soon as a plan is published (no switch): the "read after"
+of the `[CRUISE] Plan` lines is a few ms by default.
 
-| Switch | File | On = |
-|---|---|---|
-| `CRUISE_STATE_CACHE` | `spot_explorer/mission/attempt_cruise.py` | one thread reads the robot state at 20 Hz for the cruise (feedback pose, sends, tilt recorder, fall check, ground height of the scans); see `robot/state_cache.py` |
-| `CRUISE_WAKE_ON_PLAN` | same file | the main thread is woken by a new plan instead of sleeping 0.2 s |
-| `PLAN_EVENT_DRIVEN` | `spot_explorer/mission/planning_cycle.py` | a cycle as soon as the previous one ends; a grid already processed is skipped (at most 0.6 s) |
-| `BATCH_ADJACENCY` | `spot_explorer/planning/edge_evaluation.py` | the neighbour lists of the edge refresh rebuilt once per node: identical graph, refresh ~18% shorter (`tests/test_batch_adjacency.py`) |
-| `GROUND_FROM_GRID` | `spot_explorer/perception/spot_grid.py` | the ground height of a scan from the grid's own `gpe` frame (if `grid_rate_check.py` shows it there) instead of a robot state request |
+**Variants** (local, in `varianti/`, not in this repository; one at a time, same place and grid, a reference mission first). `a_star` is there too but NOT to try for now (TODO.md, idea 4):
 
-Without editing the files: `python3 varianti/tools/run_legacy_mission.py --set attempt_cruise.CRUISE_STATE_CACHE=True [arguments of run_mission.py]` (any `module.NAME=value`; the `[CONFIG] SWITCHES` line says what ran).
+| Variant | On = |
+|---|---|
+| `cruise_state_cache` | one thread reads the robot state at 20 Hz for the cruise (feedback pose, sends, tilt recorder, fall check, ground height of the scans) |
+| `event_driven_planning` | a cycle as soon as the previous one ends; a grid already processed is skipped (at most 0.6 s) |
+| `batch_adjacency` | the neighbour lists of the edge refresh rebuilt once per node: identical graph, refresh ~18% shorter |
+| `ground_from_grid` | the ground height of a scan from the grid's own `gpe` frame (if `grid_rate_check.py` shows it there) instead of a robot state request |
+| `sleep_between_turns` | the old timing, for comparison: the main thread sleeps 0.2 s between turns instead of waking on a new plan |
+
+Launch: `python3 varianti/run.py --with cruise_state_cache -- [arguments of run_mission.py]` (`--list` lists them; the `[CONFIG] SWITCHES` line says which variants ran).
 
 **Order:**
-1. Robot standing, before the missions (1 minute, read only): `python3 tools/grid_rate_check.py` from the laptop and, if the CORE is used, from the CORE (`--hostname 192.168.50.3`). It says how often Spot renews the grids (if at period 0 almost all are new, `PLAN_EVENT_DRIVEN` is worth trying), the cost of a grid and of a robot state request, and whether the grid carries the ground plane frame (`gpe`).
-2. Reference mission, all off. Then `CRUISE_STATE_CACHE`, then `CRUISE_WAKE_ON_PLAN`, then `PLAN_EVENT_DRIVEN` (and `GROUND_FROM_GRID` if the grid carries `gpe`), each in its own mission.
+1. Robot standing, before the missions (1 minute, read only): `python3 tools/grid_rate_check.py` from the laptop and, if the CORE is used, from the CORE (`--hostname 192.168.50.3`). It says how often Spot renews the grids (if at period 0 almost all are new, `event_driven_planning` is worth trying), the cost of a grid and of a robot state request, and whether the grid carries the ground plane frame (`gpe`).
+2. Reference mission, no variant. Then `cruise_state_cache`, then `event_driven_planning` (and `ground_from_grid` if the grid carries `gpe`), each in its own mission.
 3. After each: `python3 varianti/tools/cruise_timing.py <missions>`.
 
 | What | Log | Expected | Off |
 |---|---|---|---|
-| **Plan read delay** (19-11) | `[CRUISE] Plan N: … read after X ms` | Off: ~100-200 ms. With `CRUISE_WAKE_ON_PLAN`: a few ms. | — |
-| **Plans read** | `[CRUISE] End: … N plans (M cycles …)`; `cruise_timing.py` "plans read … of … published" | Off: 67-94%. With the cache and the wake-up: close to 100%, Plan lines ~0.4 s apart (or faster with `PLAN_EVENT_DRIVEN`). | — |
-| **Robot state cache** | `[CRUISE] robot state: N readings, M requests served (… from the cache …), age … p50/p90` at the end of every cruise | Almost all served from the cache, age p50 below ~50 ms, few errors. Robot on its line as before (`robot at N cm from the line`). | `CRUISE_STATE_CACHE = False` |
-| **Ground height from the grid** | `[CRUISE] Cycle times …: … ground height from the grid N, from a robot state request M` | All from the grid if the frame is there; `scan` phase shorter by one robot state request (the time `grid_rate_check.py` prints). Points of the scans at the same height as before (viewer). | `GROUND_FROM_GRID = False` |
-| **Event-driven planning** | `[CRUISE] Cycle times …: Spot grid every X s, N read twice (K not processed)` | Grids closer than 0.4 s; "not processed" only if Spot renews more slowly than the cycle. CPU of the CORE: watch `top` (the planning thread now never sleeps). | `PLAN_EVENT_DRIVEN = False` |
+| **Plan read delay** (19-11) | `[CRUISE] Plan N: … read after X ms` | A few ms (default since 24-11); ~100-200 ms with `sleep_between_turns`. | — |
+| **Plans read** | `[CRUISE] End: … N plans (M cycles …)`; `cruise_timing.py` "plans read … of … published" | Before 24-11: 67-94%. With the wake-up (default) and the cache: close to 100%, Plan lines ~0.4 s apart (or faster with `event_driven_planning`). | — |
+| **Robot state cache** | `[CRUISE] robot state: N readings, M requests served (… from the cache …), age … p50/p90` at the end of every cruise | Almost all served from the cache, age p50 below ~50 ms, few errors. Robot on its line as before (`robot at N cm from the line`). | without the variant |
+| **Ground height from the grid** | `[CRUISE] Cycle times …: … ground height from the grid N, from a robot state request M` | All from the grid if the frame is there; `scan` phase shorter by one robot state request (the time `grid_rate_check.py` prints). Points of the scans at the same height as before (viewer). | without the variant |
+| **Event-driven planning** | `[CRUISE] Cycle times …: Spot grid every X s, N read twice (K not processed)` | Grids closer than 0.4 s; "not processed" only if Spot renews more slowly than the cycle. CPU of the CORE: watch `top` (the planning thread now never sleeps). | without the variant |
 
 Offline (`tests/test_state_cache.py`, `test_cruise` with fake network latencies, a timing model on the 09-11 cycles): plan in force ~0.1 s fresher with the wake-up, another ~0.1 s with the event-driven planning from the laptop, nothing more on the CORE (there the cycle is computation: `python3 tools/profile_cycle.py` says where).
 

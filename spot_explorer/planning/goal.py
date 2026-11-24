@@ -82,16 +82,6 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
         return None, None, [], []
 
     cell_center_x, cell_center_y = cell_center
-    # Exploration by frontier (mission/frontier.py): the goal of this cell is the frontier node,
-    # nothing else; once tried in the attempt or refused for the mission, no goal (the attempt
-    # fails and the frontier mode picks another node).
-    forced = getattr(env, '_forced_goal', None)
-    if forced is not None and (int(forced[0]), int(forced[1])) == (int(cell_row), int(cell_col)):
-        fp = (float(forced[2]), float(forced[3]))
-        seen_before = list(exclude or []) + list(_refused_goals(env, cell_row, cell_col))
-        if any(np.hypot(fp[0] - ex, fp[1] - ey) < P.RECOVERY_SAME_GOAL_M for ex, ey in seen_before):
-            return None, None, [], [fp]
-        return fp[0], fp[1], [fp], []
     sampled = list(sampler.get_point_in_cell(cell_row, cell_col))
 
     if global_map is None:

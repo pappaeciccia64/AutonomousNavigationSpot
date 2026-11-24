@@ -41,16 +41,6 @@ ANCHOR_IGNORE_NEAR_M = 0.30
 # disk (0.50 m) marked around the spot: without it, every outgoing edge would be discarded.
 # Applies only to the current node (set_robot_node).
 STOP_NODE_MAP_IGNORE_M = 0.70
-# Path kept on the route of the visit: every node entered by
-# the PATH search costs ROUTE_LINE_WEIGHT x its distance from the route line (the polyline
-# through the cell centres in visiting order, set by the mission: set_route_line), saturated at
-# ROUTE_LINE_SATURATION_M so that going round a big obstacle stays possible. With the
-# continuous motion the robot sees while it walks: on the line it sweeps the strip of the
-# visit in order. Only the path search and its stability check use it, not the cell rules nor
-# the reachability searches. Compared on fake missions by tools/compare_route_line.py.
-ROUTE_LINE_PENALTY = False
-ROUTE_LINE_WEIGHT = 1.0
-ROUTE_LINE_SATURATION_M = 1.0
 
 
 class PRM(EdgeEvaluation, EdgeStats):
@@ -118,8 +108,6 @@ class PRM(EdgeEvaluation, EdgeStats):
         self.edge_penalty_transient = {}
         self.node_penalty_persistent = {}   # idx -> additional weight (possibly inf)
         self.node_penalty_transient = {}
-        self.route_line = None               # (K, 2) polyline of the visit, see ROUTE_LINE_PENALTY
-        self._route_dist = {}                # idx -> distance from route_line (nodes never move)
 
         self._init_edge_evaluation()   # live data, global height map, caches (edge_evaluation.py)
         self._init_stats()             # veto statistics (edge_stats.py)
@@ -150,32 +138,16 @@ class PRM(EdgeEvaluation, EdgeStats):
                 + self.edge_penalty_transient.get(key, 0.0))
 
     def effective_weight(self, idx1: int, idx2: int, weight: float, route: bool = False) -> float:
-        """Geometric cost + edge penalty + arrival node penalty (+ the distance from the route
-        line of the arrival node, for the path search: ROUTE_LINE_PENALTY)."""
+        """Geometric cost + edge penalty + arrival node penalty (+ _route_cost of the arrival
+        node, for the path search: route=True)."""
         w = weight + self.edge_penalty(idx1, idx2) + self.node_penalty(idx2)
-        if route and ROUTE_LINE_PENALTY and self.route_line is not None:
-            w += ROUTE_LINE_WEIGHT * min(self.route_distance(idx2), ROUTE_LINE_SATURATION_M)
+        if route:
+            w += self._route_cost(idx2)
         return w
 
-    def set_route_line(self, points):
-        """The route of the visit (list of (x, y), e.g. the cell centres in visiting order),
-        for ROUTE_LINE_PENALTY."""
-        pts = np.asarray([p for p in points if p is not None], dtype=np.float64).reshape(-1, 2)
-        self.route_line = pts if len(pts) >= 2 else None
-        self._route_dist = {}
-
-    def route_distance(self, idx: int) -> float:
-        """Distance of node idx from the route line (inf without a line), cached."""
-        d = self._route_dist.get(idx)
-        if d is None:
-            if self.route_line is None or idx not in self.nodes:
-                return float('inf')
-            a, b = self.route_line[:-1], self.route_line[1:]
-            p = np.asarray(self.nodes[idx], dtype=np.float64)
-            ab = b - a
-            t = np.clip(np.einsum('ij,ij->i', p - a, ab) / np.maximum(np.einsum('ij,ij->i', ab, ab), 1e-12), 0.0, 1.0)
-            d = self._route_dist[idx] = float(np.min(np.hypot(*(a + t[:, None] * ab - p).T)))
-        return d
+    def _route_cost(self, idx: int) -> float:
+        """Extra cost of entering node idx in the path search (none)."""
+        return 0.0
 
     def add_node(self, point_idx: int, x: float, y: float, gradient: float = 0.0, roughness: float = 0.0):
         """Add a node with its mean slope and roughness (used only as a last resort)."""
@@ -367,7 +339,7 @@ class PRM(EdgeEvaluation, EdgeStats):
         Used by the path (find_path_dijkstra), by reachable_count and by the cell rules.
         heuristic(v): a lower bound of the cost from v to the target (A*); the queue is ordered
         by cost + heuristic, dist stays the real cost. route: add the distance
-        from the route line (ROUTE_LINE_PENALTY; the path search only).
+        added by _route_cost (the path search only).
         """
         dist, parents = {start_idx: 0.0}, {start_idx: None}
         h = heuristic if heuristic is not None else (lambda _v: 0.0)

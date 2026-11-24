@@ -12,7 +12,6 @@ from spot_explorer.perception import geometry
 from spot_explorer.perception import slopes
 from spot_explorer.perception import spot_grid
 
-from spot_explorer.planning import roadmap
 
 from spot_explorer import config as P
 from spot_explorer.records import MISSION_STATS, MISSION_CTX
@@ -36,14 +35,10 @@ def mission_switches():
         'config.MISSION_GRAPH_SAMPLING': P.MISSION_GRAPH_SAMPLING,
         'attempt_cruise.CONTINUOUS_MOTION': attempt_cruise.CONTINUOUS_MOTION,
         'planning_cycle.PLAN_PERIOD_S': planning_cycle.PLAN_PERIOD_S,
-        'roadmap.ROUTE_LINE_PENALTY': roadmap.ROUTE_LINE_PENALTY,
-        'roadmap.ROUTE_LINE_WEIGHT': roadmap.ROUTE_LINE_WEIGHT,
-        'roadmap.ROUTE_LINE_SATURATION_M': roadmap.ROUTE_LINE_SATURATION_M,
         'config.PLAN_ONLY_EXPLORED_CELLS': P.PLAN_ONLY_EXPLORED_CELLS,
         'attempt_common.CELL_SEEN_EXPLORED': attempt_common.CELL_SEEN_EXPLORED,
         'exploration.SEEN_BEFORE_MOVING': exploration.SEEN_BEFORE_MOVING,
         'exploration.Mission': exploration.Mission.__name__,   # SideRulesMission: the old rules
-        'exploration.GOAL_SOURCE': exploration.GOAL_SOURCE,
         'cell_rules.NEAR_PATH_M': cell_rules.NEAR_PATH_M,
         'cell_rules.EXPLORE_CELL_ON_THE_WAY': cell_rules.EXPLORE_CELL_ON_THE_WAY,
         'config.GRAPHNAV_SHORTCUTS': P.GRAPHNAV_SHORTCUTS,
@@ -85,7 +80,10 @@ def _emit_mission_summary_once():
         print(f"Cruises: {g('cruises', 0)}, {g('cruise_m', 0.0):.1f} m in {g('cruise_s', 0.0):.0f} s"
               + (f" ({g('cruise_m', 0.0) / g('cruise_s', 1.0):.2f} m/s)" if g('cruise_s') else "")
               + f", {g('cruise_plans', 0)} plans, {g('cruise_replans', 0)} path changes while walking, "
-              f"at most {g('cruise_max_dev_cm', 0.0):.0f} cm from the line"
+              f"at most {g('cruise_max_dev_cm', 0.0):.0f} cm from the line, "
+              f"path from the robot (edge walked closed) {g('cruise_from_robot', 0)}, "
+              f"edges closed by the frontier {g('cruise_edge_drops', 0)}, "
+              f"plans skipped (more than 20 cm from the robot) {g('cruise_stale_plans', 0)}"
               + (f", terrain not readable {g('terrain_errors')} times (careful gait)" if g('terrain_errors') else ""))
         print(f"Cells: chosen near {g('cell_choices_near', 0)} / far (GraphNav) {g('cell_choices_far', 0)}; "
               f"done while walking with the next one prepared in the planning thread {g('cruise_switches', 0)} "
