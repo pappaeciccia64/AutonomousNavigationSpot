@@ -95,6 +95,10 @@ class AnyGoalMission(exploration.Mission):
                 seen = bool(self.global_grid.global_occupancy_map is not None
                             and self.global_grid.global_occupancy_map.is_known(gx, gy))
                 env._forced_goal = (row, col, gx, gy)
+                # As the frontier variant before every goal: the marks a failed attempt leaves on
+                # the cell (left for later, chained choice) would end the next one at once.
+                env._chain_choice = None
+                env._attempt_left_unreachable = False
                 env._attempt_fail_why = None
                 print(f"[ANY-GOAL] Goal {k + 1}/{self.N_GOALS}: node {node} at ({gx:.2f}, {gy:.2f}) in cell "
                       f"({row},{col}); {'seen' if seen else 'never seen'}; truth: {'reachable' if truth else 'UNREACHABLE'}.")
