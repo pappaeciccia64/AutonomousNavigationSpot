@@ -24,6 +24,10 @@ from spot_explorer.mission import attempt_cruise
 from spot_explorer.mission.attempt_cruise import CruiseSteps
 from spot_explorer.mission.legacy.stop_and_go_start import StopAndGoStart
 
+# A cruise that ends for an exception (no new plan, a command that ends badly, a fall) is
+# followed by a new one from where the robot is; this many in a row end the attempt.
+MAX_CRUISE_RESTARTS = 3
+
 
 # =========================================================================
 # ENTERING A CELL: one attempt (CellAttempt)
@@ -113,6 +117,39 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
                         break
                     print(f"[ATTEMPT] No path from the planning thread within {attempt_cruise.START_PLAN_WAIT_S:.0f} s "
                           f"(try {k + 1} of {attempt_cruise.START_TRIES}).")
+                # A cruise that ended for an exception (not arrived, no hand-off, no block that
+                # leaves the cell): the attempt goes on with a new cruise from where the robot is,
+                # the start in the planning thread again. A fall (the robot gets up and backs
+                # away), low battery, or MAX_CRUISE_RESTARTS in a row: the attempt ends.
+                restarts = 0
+                while started is CONTINUE:
+                    why = getattr(self, 'cruise_end_reason', None) or "the cruise ended"
+                    if why.startswith('fall'):
+                        # As before the stop-and-go removal: the robot gets up, backs away along
+                        # the way it came, and the attempt ends (a failure of the cell).
+                        motion.check_and_recover_fall(self.robot_state_client, self.command_client,
+                                                      self.global_grid.global_occupancy_map, "during the cruise")
+                        recovery.retreat_along_traveled_path(self.env, self.robot_state_client, self.command_client,
+                                                             mobility_kwargs=self.mobility_kwargs)
+                        self.env._attempt_fail_why = f"fall during the cruise ({why})"
+                        return False
+                    if battery_return_due():
+                        print(f"[BATTERY] Interrupting the attempt on cell ({self.target_row},"
+                              f"{self.target_col}) for the low-battery return.")
+                        return False
+                    restarts += 1
+                    if restarts > MAX_CRUISE_RESTARTS:
+                        self.env._attempt_fail_why = (f"{MAX_CRUISE_RESTARTS} cruises in a row ended early "
+                                                      f"(the last: {why})")
+                        print(f"[ATTEMPT] Cell ({self.target_row},{self.target_col}): "
+                              f"{self.env._attempt_fail_why}: a failure of the cell, retried later.")
+                        return False
+                    MISSION_STATS['cruise_restarts'] = MISSION_STATS.get('cruise_restarts', 0) + 1
+                    print(f"[ATTEMPT] The cruise ended ({why}): a new cruise from here "
+                          f"({restarts} of {MAX_CRUISE_RESTARTS}).")
+                    self._prepare_for_thread()
+                    self.loop_iter = 1
+                    started = self._cruise_from_start()
                 if started is FAILED:
                     return False
                 if started is STOP:

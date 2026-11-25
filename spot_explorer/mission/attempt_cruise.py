@@ -607,8 +607,8 @@ class CruiseSteps:
                 if now - t0 > CRUISE_MAX_S:
                     reason = f"cruise longer than {CRUISE_MAX_S:.0f} s"
                     break
-                # Fall: the cruise ends and the next turn of the stop-and-go gets the robot up
-                # and backs away (_guards, motion.check_and_recover_fall).
+                # Fall: the cruise ends, the attempt gets the robot up and backs away before the
+                # next cruise (CellAttempt.run, _prepare_for_thread).
                 if now - last_fall_t >= CRUISE_FALL_CHECK_S:
                     last_fall_t = now
                     try:
@@ -777,6 +777,7 @@ class CruiseSteps:
                                        ids[0], self.goal_id])
             if not handoff:
                 _close_track(self.env)
+        self.cruise_end_reason = reason
         outcome = self._after_cruise(planner, track, t0, reason, n_plans, n_sends, pc, handoff)
         if arrived or handoff or pc.travelled >= CRUISE_STALL_M:
             self.cruise_stalls = 0

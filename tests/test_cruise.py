@@ -441,7 +441,7 @@ def main():
     walked_after = [np.hypot(x - fall['xy'][0], y - fall['xy'][1]) for x, y, _ in TRACK
                     if fall['xy'] is not None] if fall['done'] else [0.0]
     check(max(walked_after) < 3.0, "no wandering after the fall")
-    check("[FALL]" in r['log'] or "fall" in r['log'].lower(), "fall handled by the stop-and-go (log)")
+    check("[FALL]" in r['log'] or "fall" in r['log'].lower(), "fall handled by the attempt (log)")
 
     print(f"\n{'ALL OK' if not FAILS else f'{len(FAILS)} FAILED: ' + '; '.join(FAILS)} ({time.time() - t_all:.0f} s)")
     return 1 if FAILS else 0
