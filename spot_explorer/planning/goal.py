@@ -96,13 +96,10 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
     refused = _refused_goals(env, cell_row, cell_col)
     live_od = None
     if pts is not None and cells_obstacle_dist is not None:
-        try:
-            p2 = np.asarray(pts, dtype=np.float64).reshape(-1, np.shape(pts)[-1])[:, :2]
-            od = np.asarray(cells_obstacle_dist, dtype=np.float64).ravel()
-            if len(p2) == len(od) and len(p2):
-                live_od = (cKDTree(p2), od)
-        except Exception:
-            live_od = None
+        p2 = np.asarray(pts, dtype=np.float64)
+        od = np.asarray(cells_obstacle_dist, dtype=np.float64).ravel()
+        if p2.ndim == 2 and p2.shape[1] >= 2 and len(p2) == len(od) and len(od):
+            live_od = (cKDTree(p2[:, :2]), od)
 
     def _live_clearance(px, py):
         """Live obstacle_distance at the point, or None if outside the scan."""

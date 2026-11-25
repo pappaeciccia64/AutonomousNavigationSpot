@@ -18,6 +18,7 @@ from spot_explorer.perception import low_obstacles
 from spot_explorer.perception.geometry import OBSTACLE_THRESHOLD
 from spot_explorer.perception.slopes import SLOPE_BASELINE_M
 from spot_explorer.robot import connection
+from spot_explorer.robot.errors import ROBOT_ERRORS, describe, optional
 
 # Every request to Spot of a scan in the planning thread and in the frontier check (the layers,
 # the robot state): at most this, then the cycle ends without a scan ('no_scan', with the cause)
@@ -301,7 +302,7 @@ class LocalGrid:
                 return out
             except TimedOutError:
                 raise
-            except Exception as e:
+            except ROBOT_ERRORS as e:
                 # After 3 failures in a row it is no longer tried (a request that always fails
                 # would cost a network round trip at every scan); a single network error
                 # does not turn it off.
@@ -316,8 +317,8 @@ class LocalGrid:
                 p.extend(self.local_grid_client.get_local_grids([t], **kw))
             except TimedOutError:
                 raise
-            except Exception as e:
-                print(f"[WARNING] Failed to fetch layer '{t}': {e}")
+            except ROBOT_ERRORS as e:
+                print(f"[WARNING] Failed to fetch layer '{t}': {describe(e)}")
         return p
 
     @staticmethod
@@ -325,6 +326,8 @@ class LocalGrid:
         """(origin x, origin y, yaw in degrees, nx, ny, cell) of the layer in the VISION frame."""
         g = lg.local_grid
         tf = get_a_tform_b(g.transforms_snapshot, VISION_FRAME_NAME, g.frame_name_local_grid_data)
+        if tf is None:
+            raise ValueError(f"no transform from VISION to '{g.frame_name_local_grid_data}' in the message")
         q = tf.rotation
         yaw = np.degrees(connection.yaw_of(q))
         return (tf.position.x, tf.position.y, float(yaw), g.extent.num_cells_x, g.extent.num_cells_y,
@@ -405,17 +408,17 @@ class LocalGrid:
         Extra layers to SAVE only (e.g. 'intensity', 'no_step'), with a separate request:
         they do not enter the alignment checks of return_local_grid, so if they are
         missing or have another geometry the scan used for navigation is not affected.
-        Never raises. Returns {name: dict(values (ny, nx) float32, origin (x, y) in the
+        An optional part: never raises. Returns {name: dict(values (ny, nx) float32, origin (x, y) in the
         VISION frame, cell, origin_z: z of the layer frame in VISION, to add to the decoded
         heights of 'terrain')}; {} if the request fails.
         """
         try:
             protos = list(self.local_grid_client.get_local_grids(list(names)))
-        except Exception:
+        except ROBOT_ERRORS:
             return {}
         out = {}
         for lg in protos:
-            try:
+            with optional(f"[GRID] Extra layer {lg.local_grid_type_name}"):
                 ox, oy, _, nx, ny, cell = self._layer_geometry(lg)
                 vals = self.unpack_grid(lg)
                 if vals is None or np.size(vals) != nx * ny:
@@ -425,8 +428,6 @@ class LocalGrid:
                 out[lg.local_grid_type_name] = dict(
                     values=np.asarray(vals, dtype=np.float32).reshape((ny, nx)),
                     origin=np.array([ox, oy]), cell=float(cell), origin_z=float(oz))
-            except Exception:
-                continue
         return out
 
     def return_local_grid(self, types_of_grid, robot_state_client, max_attempts=3, timeout=None):
@@ -467,8 +468,8 @@ class LocalGrid:
                 continue
             try:
                 geoms = {lg.local_grid_type_name: self._layer_geometry(lg) for lg in p}
-            except Exception as e:
-                problem = f"layer geometry not readable ({e})"
+            except ROBOT_ERRORS + (ValueError,) as e:     # a message from the robot that cannot be read
+                problem = f"layer geometry not readable ({describe(e)})"
                 continue
             ref = geoms[types_of_grid[0]]
             bad = [n for n, gm in geoms.items()

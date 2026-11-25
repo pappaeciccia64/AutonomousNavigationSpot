@@ -7,6 +7,8 @@ from spot_explorer.graphnav.localization import graphnav_localization
 from spot_explorer.graphnav.map_recording import graphnav_is_recording
 from spot_explorer.graphnav.localization import wp_name_by_id
 import heapq
+from spot_explorer.graphnav.map_recording import LoopClosureUploadError
+from spot_explorer.robot.errors import ROBOT_ERRORS, describe
 
 
 def segment_seen_free(global_map, x1, y1, x2, y2, margin_m, step_m=0.05):
@@ -146,16 +148,16 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, loop_cl
                     try:
                         recordingInterface.create_edge_between_waypoint_objs(by_id[a], by_id[b])
                         added += 1
-                    except Exception as e:
+                    except ROBOT_ERRORS as e:
                         print(f"[GRAPHNAV] Shortcut {wp_name_by_id(recordingInterface, a)}-"
-                              f"{wp_name_by_id(recordingInterface, b)} rejected ({e}).")
+                              f"{wp_name_by_id(recordingInterface, b)} rejected ({describe(e)}).")
                 if before is not None and after is not None:
                     print(f"[GRAPHNAV] {label}: path to {wp_name_by_id(recordingInterface, target_wp_id)} "
                           f"{before:.1f} m -> {after:.1f} m with {len(used)} shortcuts "
                           f"(up to {P.GRAPHNAV_SHORTCUT_MAX_M:.1f} m, seen free with "
                           f"{P.GRAPHNAV_SHORTCUT_MARGIN_M:.2f} m of margin).")
-        except Exception as e:
-            print(f"[GRAPHNAV] Shortcuts from the map not added ({e}).")
+        except Exception as e:      # a refinement with a safe fallback: any error, logged
+            print(f"[GRAPHNAV] Shortcuts from the map not added ({describe(e)}).")
         finally:
             if added:
                 recordingInterface.invalidate_graph_cache()
@@ -174,7 +176,7 @@ def graphnav_add_shortcuts(recordingInterface, label="", map_edges=True, loop_cl
                 n_sdk, timed_out = recordingInterface.close_loops_checked(
                     max_edge_length_m=P.GRAPHNAV_SDK_LOOP_MAX_M, timeout_s=budget,
                     upload_result=not write_on_spot)
-            except Exception as e:
+            except ROBOT_ERRORS + (LoopClosureUploadError,) as e:
                 dt = time.perf_counter() - t0
                 MISSION_STATS['sdk_loop_failures'] += 1
                 retry = attempt == 1 and ('MapModified' in type(e).__name__ or 'modified' in str(e)

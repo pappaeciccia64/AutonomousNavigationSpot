@@ -856,18 +856,15 @@ def update_clearance_map(global_map, pts, snap, is_valid, unwritten, core, robot
     """
     if not hasattr(global_map, 'update_clearance') or snap is None:
         return
-    try:
-        od = np.asarray(snap.obstacle_dist, dtype=np.float64).ravel()
-        v = np.asarray(is_valid, dtype=bool).ravel()
-        if unwritten is not None and np.size(unwritten) == v.size:
-            v = v & ~np.asarray(unwritten, dtype=bool).ravel()
-        c = np.asarray(core, dtype=bool).ravel()
-        if od.size != v.size or c.size != v.size:
-            return
-        usable = v | c
-        od = np.where(c, np.maximum(od, ROBOT_HALF_WIDTH_M), od)
-        p = np.asarray(pts, dtype=np.float64).reshape(-1, 3)
-        near = np.hypot(p[:, 0] - robot_xy[0], p[:, 1] - robot_xy[1]) <= CLEARANCE_NEAR_M
-        global_map.update_clearance(p, od, usable, near=near)
-    except Exception as e:      # never fatal: it is a helper map
-        print(f"[SPACE] Free-space map not updated: {e}")
+    od = np.asarray(snap.obstacle_dist, dtype=np.float64).ravel()
+    v = np.asarray(is_valid, dtype=bool).ravel()
+    if unwritten is not None and np.size(unwritten) == v.size:
+        v = v & ~np.asarray(unwritten, dtype=bool).ravel()
+    c = np.asarray(core, dtype=bool).ravel()
+    if od.size != v.size or c.size != v.size:
+        return
+    usable = v | c
+    od = np.where(c, np.maximum(od, ROBOT_HALF_WIDTH_M), od)
+    p = np.asarray(pts, dtype=np.float64).reshape(-1, 3)
+    near = np.hypot(p[:, 0] - robot_xy[0], p[:, 1] - robot_xy[1]) <= CLEARANCE_NEAR_M
+    global_map.update_clearance(p, od, usable, near=near)

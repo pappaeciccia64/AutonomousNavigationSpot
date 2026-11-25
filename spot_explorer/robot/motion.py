@@ -33,6 +33,7 @@ from spot_explorer import config as P
 from spot_explorer.perception import gait
 from spot_explorer.records import MISSION_STATS
 from spot_explorer.robot import connection
+from spot_explorer.robot.errors import ROBOT_ERRORS, describe
 
 
 # =========================================================================
@@ -248,10 +249,8 @@ def recover_from_fall(robot_command_client, robot_state_client, status=None):
                       f"({st['x']:.2f}, {st['y']:.2f}).")
                 return True
             print(f"[FALL] After the stand command the robot is not standing ({st['reason'] or 'state'}).")
-        except RobotFallenError:
-            raise
-        except Exception as e:
-            print(f"[FALL] Attempt {attempt} failed: {e}")
+        except ROBOT_ERRORS as e:
+            print(f"[FALL] Attempt {attempt} failed: {describe(e)}")
             st = check_fall(robot_state_client)
     raise RobotFallenError(f"{SELF_RIGHT_MAX_ATTEMPTS} self-righting attempts failed. "
                            f"Operator intervention needed.")
@@ -273,8 +272,8 @@ def stop_robot(robot_command_client, reason=""):
         else:
             print("[STOP] Move interrupted.")
         return True
-    except Exception as e:
-        print(f"[STOP] Could not stop the robot: {e}")
+    except ROBOT_ERRORS as e:
+        print(f"[STOP] Could not stop the robot: {describe(e)}")
         return False
 
 
@@ -356,10 +355,10 @@ def relative_move(dx, dy, dyaw, frame_name, robot_command_client, robot_state_cl
             current_transforms = current_state.kinematic_state.transforms_snapshot
             current_tform_body = get_se2_a_tform_b(current_transforms, frame_name, BODY_FRAME_NAME)
             rpc_errors = 0
-        except Exception as e:
+        except ROBOT_ERRORS as e:
             rpc_errors += 1
             print(f"[MOVE] Communication error during the move ({rpc_errors}/"
-                  f"{MOVE_MAX_RPC_ERRORS}): {e}")
+                  f"{MOVE_MAX_RPC_ERRORS}): {describe(e)}")
             if rpc_errors >= MOVE_MAX_RPC_ERRORS:
                 stop_robot(robot_command_client, reason="repeated communication errors")
                 raise
@@ -370,12 +369,12 @@ def relative_move(dx, dy, dyaw, frame_name, robot_command_client, robot_state_cl
                                     (current_tform_body.y - initial_y) ** 2)
 
         # Stop requested by the caller (the safe frontier saw something on the leg).
-        # A callback that raises an exception is ignored: the move continues.
+        # A robot error inside the callback is ignored (the move continues); a bug is not.
         if should_abort is not None:
             try:
                 abort_now = bool(should_abort())
-            except Exception as e:
-                print(f"[STOP] Error in the stop condition, ignoring it: {e}")
+            except ROBOT_ERRORS as e:     # the condition may read the robot: a failed read does not stop
+                print(f"[STOP] Stop condition not readable, going on: {describe(e)}")
                 abort_now = False
             if abort_now:
                 stop_robot(robot_command_client,
@@ -729,10 +728,10 @@ class PathCommand:
             feedback = self.command_client.robot_command_feedback(self.cmd_id)
             x, y, yaw = self.pose()
             self._rpc_errors = 0
-        except Exception as e:
+        except ROBOT_ERRORS as e:
             self._rpc_errors += 1
             print(f"[PATH] Communication error while following the path ({self._rpc_errors}/"
-                  f"{MOVE_MAX_RPC_ERRORS}): {e}")
+                  f"{MOVE_MAX_RPC_ERRORS}): {describe(e)}")
             if self._rpc_errors >= MOVE_MAX_RPC_ERRORS:
                 self.stop("repeated communication errors")
                 raise
@@ -805,8 +804,8 @@ def check_and_recover_fall(robot_state_client, command_client, global_map, where
     """
     try:
         st = check_fall(robot_state_client)
-    except Exception as e:
-        print(f"[FALL] Could not read the robot state ({where}): {e}")
+    except ROBOT_ERRORS as e:
+        print(f"[FALL] Could not read the robot state ({where}): {describe(e)}")
         return None
     if not st['fallen']:
         return None
@@ -998,8 +997,8 @@ def navigate_to_path(target_x, target_y, robot_x, robot_y, robot_state_client, c
         if should_abort is not None:
             try:
                 abort_now = bool(should_abort())
-            except Exception as e:
-                print(f"[STOP] Error in the stop condition, ignoring it: {e}")
+            except ROBOT_ERRORS as e:     # the condition may read the robot: a failed read does not stop
+                print(f"[STOP] Stop condition not readable, going on: {describe(e)}")
                 abort_now = False
             if abort_now:
                 lx, ly = (pc._last[0], pc._last[1]) if pc._last is not None else (x0, y0)

@@ -10,6 +10,7 @@ from spot_explorer.robot import connection
 from spot_explorer.records import MISSION_STATS, TrajectoryLog, timing_add
 from spot_explorer.graphnav.localization import (_distance_from_waypoint, graphnav_is_lost, graphnav_log_drift, graphnav_log_localization, graphnav_relocalize)
 from spot_explorer.graphnav.map_shortcuts import graphnav_add_shortcuts
+from spot_explorer.robot.errors import ROBOT_ERRORS, describe
 
 
 # =========================================================================================
@@ -69,8 +70,8 @@ def graphnav_arrival_heading(recordingInterface, waypoint_id, face_xy, label):
         print(f"[GRAPHNAV] {label}: arrival facing ({face_xy[0]:.2f}, {face_xy[1]:.2f}), "
               f"yaw {np.degrees(want):.0f} deg ({np.degrees(rel):+.0f} relative to the waypoint).")
         return geometry_pb2.SE2Pose(position=geometry_pb2.Vec2(x=0.0, y=0.0), angle=rel)
-    except Exception as e:
-        print(f"[GRAPHNAV] {label}: arrival heading not computed ({e}): using the waypoint's.")
+    except Exception as e:      # a refinement with a safe fallback: any error, logged
+        print(f"[GRAPHNAV] {label}: arrival heading not computed ({describe(e)}): using the waypoint's.")
         return None
 
 
@@ -117,7 +118,7 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
             # do not have; this way it works wherever the field exists.
             enum = tp.DESCRIPTOR.fields_by_name['lost_detector_strictness'].enum_type
             tp.lost_detector_strictness = enum.values_by_name[P.GRAPHNAV_LOST_DETECTOR_STRICTNESS].number
-        except Exception:
+        except (KeyError, AttributeError):
             pass
     goal_pose = graphnav_arrival_heading(recordingInterface, waypoint_id, face_xy, label)
     if face_xy is not None and P.GRAPHNAV_ARRIVAL_HEADING == 'free' and hasattr(tp, 'ignore_final_yaw'):
@@ -138,7 +139,7 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
             cmd_id = client.navigate_to(waypoint_id, 1.0, command_id=cmd_id, travel_params=tp,
                                         destination_waypoint_tform_body_goal=goal_pose)
             nav_errors = 0
-        except Exception as e:
+        except ROBOT_ERRORS as e:
             if 'RobotLost' in type(e).__name__ and relocs < P.GRAPHNAV_MAX_RELOCALIZATIONS:
                 relocs += 1
                 print(f"[GRAPHNAV] {label}: GraphNav says the robot is lost: re-anchoring "
@@ -162,9 +163,9 @@ def _graphnav_navigate_to_inner(recordingInterface, waypoint_id, robot_state_cli
             fb = client.navigation_feedback(cmd_id)
             status = fb.status
             fb_errors = 0
-        except Exception as e:
+        except ROBOT_ERRORS as e:
             fb_errors += 1
-            print(f"[GRAPHNAV] {label}: feedback error ({fb_errors}/3): {e}")
+            print(f"[GRAPHNAV] {label}: feedback error ({fb_errors}/3): {describe(e)}")
             if fb_errors >= 3:
                 _stop_graphnav(command_client, reason="GraphNav: feedback not available")
                 MISSION_STATS['graphnav_fail'] += 1
@@ -231,8 +232,8 @@ def graphnav_return_to_start(recordingInterface, robot_state_client, command_cli
     try:
         graph = recordingInterface._get_graph(force_refresh=True)
         wp0 = next((w for w in graph.waypoints if w.annotations.name == "wp_0"), None)
-    except Exception as e:
-        print(f"[GRAPHNAV] Return to wp_0: graph not available ({e}).")
+    except ROBOT_ERRORS as e:
+        print(f"[GRAPHNAV] Return to wp_0: graph not available ({describe(e)}).")
         return 'not_arrived'
     if wp0 is None:
         print("[GRAPHNAV] Return to wp_0: waypoint wp_0 not found in the graph.")
@@ -278,7 +279,7 @@ def graphnav_step_back(env, recordingInterface, robot_state_client, command_clie
         return False, None
     try:
         rx, ry, _, _ = connection.getPosition(robot_state_client)
-    except Exception:
+    except ROBOT_ERRORS:
         rx, ry = trail[-1]['x'], trail[-1]['y']
     idx = None
     for k in range(len(trail) - 1, -1, -1):
@@ -304,8 +305,8 @@ def graphnav_step_back(env, recordingInterface, robot_state_client, command_clie
     try:
         recordingInterface.stop_recording()
         recording_stopped = True
-    except Exception as e:
-        print(f"[RETURN] Could not stop the recording ({e}): trying anyway.")
+    except ROBOT_ERRORS as e:
+        print(f"[RETURN] Could not stop the recording ({describe(e)}): trying anyway.")
     ok = graphnav_navigate_to(
         recordingInterface, crumb['wp_id'], robot_state_client, command_client,
         f"return to waypoint {crumb['wp_name']} at ({crumb['x']:.2f}, {crumb['y']:.2f})",
@@ -313,8 +314,8 @@ def graphnav_step_back(env, recordingInterface, robot_state_client, command_clie
     if recording_stopped:
         try:
             recordingInterface.start_recording()
-        except Exception as e:
-            print(f"[RETURN] Recording not resumed ({e}): the following breadcrumbs "
+        except ROBOT_ERRORS as e:
+            print(f"[RETURN] Recording not resumed ({describe(e)}): the following breadcrumbs "
                   "may not be created.")
     if ok:
         # The walked legs no longer describe the way the robot came:

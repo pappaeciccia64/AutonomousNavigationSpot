@@ -22,6 +22,8 @@ from bosdyn.client.frame_helpers import VISION_FRAME_NAME, get_a_tform_b
 from bosdyn.client.image import ImageClient, build_image_request
 from bosdyn.api import image_pb2
 
+from spot_explorer.robot.errors import ROBOT_ERRORS, describe, optional
+
 # The five body cameras (grey, ~640x480). Same names on every Spot.
 BODY_CAMERAS = ('frontleft_fisheye_image', 'frontright_fisheye_image',
                 'left_fisheye_image', 'right_fisheye_image', 'back_fisheye_image')
@@ -36,8 +38,8 @@ def init(robot, folder):
         _STATE['client'] = robot.ensure_client(ImageClient.default_service_name)
         _STATE['folder'] = folder
         return True
-    except Exception as e:
-        print(f"[PHOTO] Cameras not available, no photos: {e}")
+    except ROBOT_ERRORS as e:
+        print(f"[PHOTO] Cameras not available, no photos: {describe(e)}")
         _STATE['client'] = None
         return False
 
@@ -51,13 +53,10 @@ def _camera_meta(resp):
     meta = {'rows': resp.source.rows, 'cols': resp.source.cols,
             'acquisition_time': shot.acquisition_time.seconds + shot.acquisition_time.nanos * 1e-9,
             'frame': shot.frame_name_image_sensor}
-    try:
-        tf = get_a_tform_b(shot.transforms_snapshot, VISION_FRAME_NAME, shot.frame_name_image_sensor)
-        meta['vision_tform_camera'] = {
-            'position': [tf.position.x, tf.position.y, tf.position.z],
-            'rotation_wxyz': [tf.rotation.w, tf.rotation.x, tf.rotation.y, tf.rotation.z]}
-    except Exception:
-        meta['vision_tform_camera'] = None
+    tf = get_a_tform_b(shot.transforms_snapshot, VISION_FRAME_NAME, shot.frame_name_image_sensor)
+    meta['vision_tform_camera'] = None if tf is None else {
+        'position': [tf.position.x, tf.position.y, tf.position.z],
+        'rotation_wxyz': [tf.rotation.w, tf.rotation.x, tf.rotation.y, tf.rotation.z]}
     src = resp.source
     if src.HasField('pinhole'):
         i = src.pinhole.intrinsics
@@ -76,43 +75,39 @@ def capture(name, cameras=BODY_CAMERAS, folder=None, extra=None):
     """
     One JPEG per camera in <folder>/photos/ plus <name>.json with poses and intrinsics.
     folder: default the one given to init(). extra: dict added to the JSON (e.g. a label).
-    Returns the list of files written ([] if nothing). Never raises.
+    Returns the list of files written ([] if nothing). An optional part: never raises.
     """
     client = _STATE['client']
     folder = folder or _STATE['folder']
     if client is None or folder is None:
         return []
+    written = []
+    with optional(f"[PHOTO] {_safe(name)}"):
+        written = _capture(client, folder, _safe(name), cameras, extra)
+    return written
+
+
+def _capture(client, folder, name, cameras, extra):
     t0 = time.perf_counter()
-    name = _safe(name)
-    try:
-        out_dir = os.path.join(folder, 'photos')
-        os.makedirs(out_dir, exist_ok=True)
-        reqs = [build_image_request(c, quality_percent=JPEG_QUALITY,
-                                    image_format=image_pb2.Image.FORMAT_JPEG) for c in cameras]
-        responses = client.get_image(reqs, timeout=3.0)
-    except Exception as e:
-        print(f"[PHOTO] {name}: photos not taken ({e}).")
-        return []
+    out_dir = os.path.join(folder, 'photos')
+    os.makedirs(out_dir, exist_ok=True)
+    reqs = [build_image_request(c, quality_percent=JPEG_QUALITY,
+                                image_format=image_pb2.Image.FORMAT_JPEG) for c in cameras]
+    responses = client.get_image(reqs, timeout=3.0)
     written, meta = [], {'name': name, 'time': time.time(), 'cameras': {}}
     if extra:
         meta.update(extra)
     for resp in responses:
         cam = resp.source.name
-        try:
-            if resp.shot.image.format != image_pb2.Image.FORMAT_JPEG:
-                continue        # asked JPEG: anything else is skipped rather than decoded here
-            path = os.path.join(out_dir, f"{name}_{cam.replace('_image', '')}.jpg")
-            with open(path, 'wb') as f:
-                f.write(resp.shot.image.data)
-            written.append(path)
-            meta['cameras'][cam] = _camera_meta(resp)
-            meta['cameras'][cam]['file'] = os.path.basename(path)
-        except Exception as e:
-            print(f"[PHOTO] {name}: camera {cam} not saved ({e}).")
-    try:
-        with open(os.path.join(out_dir, f"{name}.json"), 'w') as f:
-            json.dump(meta, f, indent=1)
-    except Exception as e:
-        print(f"[PHOTO] {name}: poses not saved ({e}).")
+        if resp.shot.image.format != image_pb2.Image.FORMAT_JPEG:
+            continue        # asked JPEG: anything else is skipped rather than decoded here
+        path = os.path.join(out_dir, f"{name}_{cam.replace('_image', '')}.jpg")
+        with open(path, 'wb') as f:
+            f.write(resp.shot.image.data)
+        written.append(path)
+        meta['cameras'][cam] = _camera_meta(resp)
+        meta['cameras'][cam]['file'] = os.path.basename(path)
+    with open(os.path.join(out_dir, f"{name}.json"), 'w') as f:
+        json.dump(meta, f, indent=1)
     print(f"[PHOTO] {name}: {len(written)} photos in {time.perf_counter() - t0:.2f} s (photos/).")
     return written

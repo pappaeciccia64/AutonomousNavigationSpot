@@ -26,6 +26,7 @@ import numpy as np
 
 from spot_explorer import config as P
 from spot_explorer.robot import connection
+from spot_explorer.robot.errors import ROBOT_ERRORS, describe
 from spot_explorer.records import MISSION_STATS, append_csv
 
 _BATTERY_COLUMNS = ['t_s', 'wall_time', 'charge_pct', 'spot_runtime_min', 'voltage_v',
@@ -39,7 +40,7 @@ def read_battery(robot_state_client):
     None if the robot state does not report the charge. Never raises."""
     try:
         st = robot_state_client.get_robot_state()
-    except Exception:
+    except ROBOT_ERRORS:
         return None
     try:
         out = {}
@@ -65,7 +66,7 @@ def read_battery(robot_state_client):
                 rt = ps.locomotion_estimated_runtime
                 out['spot_runtime_min'] = (rt.seconds + rt.nanos * 1e-9) / 60.0
             return out
-    except Exception:
+    except (AttributeError, TypeError, ValueError):     # a state without the battery fields
         pass
     return None
 
@@ -129,7 +130,7 @@ class BatteryMonitor:
                 if self._xy_last is not None:
                     self._dist_m += float(np.hypot(x - self._xy_last[0], y - self._xy_last[1]))
                 self._xy_last = (x, y)
-            except Exception:
+            except ROBOT_ERRORS:
                 x, y = float('nan'), float('nan')
             b = read_battery(self.robot_state_client)
             if b is None:
@@ -141,8 +142,8 @@ class BatteryMonitor:
                 return self.return_due
             self._record(now, b, x, y, where or 'loop')
             return self.return_due
-        except Exception as e:
-            print(f"[BATTERY] Reading failed ({type(e).__name__}: {e}).")
+        except Exception as e:      # the monitor never stops the mission (module docstring)
+            print(f"[BATTERY] Reading failed ({describe(e)}).")
             return self.return_due
 
     def _record(self, now, b, x, y, where):

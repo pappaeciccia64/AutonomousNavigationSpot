@@ -7,6 +7,7 @@ from spot_explorer import config as P
 from spot_explorer.robot import connection
 from spot_explorer.records import MISSION_CTX, MISSION_STATS
 from spot_explorer.graphnav.navigation import graphnav_navigate_to
+from spot_explorer.robot.errors import ROBOT_ERRORS, describe
 from bosdyn.api import world_object_pb2
 from bosdyn.client.world_object import WorldObjectClient
 
@@ -20,8 +21,8 @@ def find_fiducials(robot, robot_state_client, wait_s=0.0, fiducial_id=None):
     """
     try:
         client = robot.ensure_client(WorldObjectClient.default_service_name)
-    except Exception as e:
-        print(f"[FIDUCIAL] World-object service not available: {e}")
+    except ROBOT_ERRORS as e:
+        print(f"[FIDUCIAL] World-object service not available: {describe(e)}")
         return []
     t_end = time.time() + max(0.0, wait_s)
     while True:
@@ -46,8 +47,8 @@ def find_fiducials(robot, robot_state_client, wait_s=0.0, fiducial_id=None):
                               'forward': float(dx * np.cos(yaw) + dy * np.sin(yaw)),
                               'left': float(-dx * np.sin(yaw) + dy * np.cos(yaw)),
                               'camera': tag.frame_name_camera})
-        except Exception as e:
-            print(f"[FIDUCIAL] Reading the fiducials failed: {e}")
+        except ROBOT_ERRORS as e:
+            print(f"[FIDUCIAL] Reading the fiducials failed: {describe(e)}")
             return []
         if found or time.time() >= t_end:
             return sorted(found, key=lambda f: f['dist'])
@@ -65,7 +66,7 @@ def _robot_in_tag_frame(snapshot, frame, vision_tform_tag, robot_state_client):
             vision_tform_body = SE3Pose(x, y, z, Quat(w=q.w, x=q.x, y=q.y, z=q.z))
             tag_tform_body = vision_tform_tag.inverse() * vision_tform_body
         return (float(tag_tform_body.x), float(tag_tform_body.y), float(tag_tform_body.z))
-    except Exception:
+    except ROBOT_ERRORS:
         return None
 
 
@@ -134,8 +135,8 @@ def graphnav_correct_wp0_with_fiducial(robot, recordingInterface, robot_state_cl
     try:
         wp0 = next(w for w in recordingInterface._get_graph(force_refresh=True).waypoints
                    if w.annotations.name == "wp_0")
-    except Exception as e:
-        print(f"[WP0] Correction not possible: wp_0 not found ({e}).")
+    except ROBOT_ERRORS + (StopIteration,) as e:
+        print(f"[WP0] Correction not possible: wp_0 not found ({describe(e)}).")
         MISSION_STATS['wp0_offset_final_m'] = round(offset, 2)
         return offset
     for k in range(1, P.WP0_FIDUCIAL_MAX_CORRECTIONS + 1):
@@ -144,8 +145,8 @@ def graphnav_correct_wp0_with_fiducial(robot, recordingInterface, robot_state_cl
               f"{P.WP0_FIDUCIAL_TOLERANCE_M:.2f} m). I relocalize GraphNav on the tag and go back to wp_0.")
         try:
             ok = recordingInterface.initialize_with_fiducial(robot_state_client, fiducial_id=start['id'])
-        except Exception as e:
-            print(f"[WP0] Relocalization on the tag failed ({e}).")
+        except ROBOT_ERRORS as e:
+            print(f"[WP0] Relocalization on the tag failed ({describe(e)}).")
             ok = False
         if not ok:
             print("[WP0] Without relocalization on the tag I do not correct: I stay where I am.")

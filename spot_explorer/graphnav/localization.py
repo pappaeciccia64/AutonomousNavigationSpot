@@ -7,6 +7,7 @@ from bosdyn.api.graph_nav import graph_nav_pb2 as _graph_nav_pb2
 from spot_explorer import config as P
 from spot_explorer.robot import connection
 from spot_explorer.records import MISSION_STATS, append_csv
+from spot_explorer.robot.errors import ROBOT_ERRORS, describe
 from bosdyn.api.graph_nav import nav_pb2 as _nav_pb2
 
 _DRIFT_COLUMNS = ['time', 'where', 'waypoint', 'age_s', 'dx', 'dy', 'd', 'gn_x', 'gn_y', 'vision_x',
@@ -17,13 +18,13 @@ def graphnav_localization(recordingInterface):
     """GraphNav localizer state as a dict, or None if unreadable. Does not download the graph."""
     try:
         st = recordingInterface._graph_nav_client.get_localization_state()
-    except Exception as e:
+    except ROBOT_ERRORS as e:
         return {'error': str(e)}
     loc = st.localization
     out = {'wp_id': loc.waypoint_id or None, 'is_lost': None}
     try:
         has_ld = st.HasField('lost_detector_state')
-    except Exception:
+    except ValueError:
         has_ld = False      # SDK without a loss detector
     if has_ld:
         ld = st.lost_detector_state
@@ -76,8 +77,8 @@ def graphnav_log_drift(recordingInterface, robot_state_client, where):
                     [[time.time(), where, name, round(age, 1), round(dx, 4), round(dy, 4), round(d, 4),
                       round(gx, 4), round(gy, 4), round(rx, 4), round(ry, 4)]])
         return d
-    except Exception as e:
-        print(f"[DRIFT] {where}: measurement failed ({type(e).__name__}: {e}).")
+    except ROBOT_ERRORS as e:
+        print(f"[DRIFT] {where}: measurement failed ({type(e).__name__}: {describe(e)}).")
         return None
 
 
@@ -111,7 +112,7 @@ def graphnav_log_localization(env, recordingInterface, robot_state_client, where
     try:
         q = connection.getPosition(robot_state_client)[3]
         pitch = float(np.degrees(np.arcsin(np.clip(2.0 * (q.w * q.y - q.z * q.x), -1.0, 1.0))))
-    except Exception:
+    except ROBOT_ERRORS:
         pass
     if loc.get('is_lost') is None:
         det = "loss detector not available"
@@ -170,9 +171,9 @@ def graphnav_relocalize(recordingInterface, robot_state_client, why=""):
         print(f"[LOCALIZATION] Re-anchoring {why}: succeeded on {name} ({d_wp:.2f} m away according to "
               f"our poses; guess from odometry, refined by ICP).")
         return True
-    except Exception as e:
+    except ROBOT_ERRORS as e:
         MISSION_STATS['graphnav_relocalization_fail'] = MISSION_STATS.get('graphnav_relocalization_fail', 0) + 1
-        print(f"[LOCALIZATION] Re-anchoring {why}: failed ({e}).")
+        print(f"[LOCALIZATION] Re-anchoring {why}: failed ({describe(e)}).")
         return False
 
 
@@ -196,14 +197,14 @@ def _distance_from_waypoint(recordingInterface, robot_state_client, waypoint_id,
             c, s = np.cos(a['yaw']), np.sin(a['yaw'])
             rx, ry = a['x'] + bx * c - by * s, a['y'] + bx * s + by * c
             return float(np.hypot(rx - b['x'], ry - b['y'])), 'from GraphNav (on a nearby waypoint)'
-    except Exception:
+    except ROBOT_ERRORS:
         pass
     try:
         wp = (getattr(recordingInterface, 'waypoint_poses', None) or {}).get(name)
         if wp is not None:
             rx, ry, _, _ = connection.getPosition(robot_state_client)
             return float(np.hypot(rx - wp['x'], ry - wp['y'])), 'from the VISION poses'
-    except Exception:
+    except ROBOT_ERRORS:
         pass
     return None, ''
 

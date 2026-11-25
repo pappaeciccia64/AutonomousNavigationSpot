@@ -16,6 +16,7 @@ from google.protobuf import wrappers_pb2 as wrappers
 from spot_explorer import config as P
 from spot_explorer.robot import connection
 from spot_explorer.graphnav.localization import graphnav_log_localization
+from spot_explorer.robot.errors import ROBOT_ERRORS, describe
 from bosdyn.api.graph_nav import map_processing_pb2
 from datetime import datetime
 
@@ -85,8 +86,8 @@ class RecordingInterface(object):
             self.invalidate_graph_cache()
             return True
 
-        except Exception as e:
-            print(f"[ANCHORING] ✗ Optimization failed: {e}")
+        except ROBOT_ERRORS as e:
+            print(f"[ANCHORING] ✗ Optimization failed: {describe(e)}")
             print(f"[{'=' * 40}]\n")
             return False
 
@@ -165,7 +166,7 @@ class RecordingInterface(object):
             try:
                 self._graph_nav_client.upload_graph(graph=response.new_subgraph,
                                                     generate_new_anchoring=False)
-            except Exception as e:
+            except ROBOT_ERRORS as e:
                 raise LoopClosureUploadError(n, e) from e
         self.invalidate_graph_cache()
         return n, bool(getattr(response, 'timed_out', False))
@@ -228,8 +229,8 @@ class RecordingInterface(object):
             robot_state = robot_state_client.get_robot_state()
             current_odom_tform_body = get_odom_tform_body(
                 robot_state.kinematic_state.transforms_snapshot).to_proto()
-        except Exception as e:
-            print(f"[FIDUCIAL INIT] ✗ Robot state not readable: {e}")
+        except ROBOT_ERRORS as e:
+            print(f"[FIDUCIAL INIT] ✗ Robot state not readable: {describe(e)}")
             return False
 
         if fiducial_id is not None:
@@ -259,8 +260,8 @@ class RecordingInterface(object):
             print(f"[{'=' * 40}]\n")
             return True
 
-        except Exception as e:
-            print(f"[FIDUCIAL INIT] ✗ FAILED: {e}")
+        except ROBOT_ERRORS as e:
+            print(f"[FIDUCIAL INIT] ✗ FAILED: {describe(e)}")
             print(f"[FIDUCIAL INIT] Possible causes:")
             print(f"  1. Fiducial {fiducial_id if fiducial_id else '(any)'} is not visible")
             print(f"  2. The robot is too far from the fiducial (better within 1-2 m)")
@@ -347,8 +348,8 @@ class RecordingInterface(object):
 
             return result
 
-        except Exception as e:
-            print(f"\n[LOCALIZATION STATE] ✗ Localization state not readable: {e}")
+        except ROBOT_ERRORS as e:
+            print(f"\n[LOCALIZATION STATE] ✗ Localization state not readable: {describe(e)}")
             return None
 
     def create_default_waypoint(self, cell_row=None, cell_col=None):
@@ -441,8 +442,8 @@ class RecordingInterface(object):
             status = self._recording_client.start_recording(recording_environment=self._recording_environment)
             self.invalidate_graph_cache()  # the recording will add waypoints
             print('[RECORDING] Map recording started.')
-        except Exception as err:
-            print(f'[RECORDING] Starting the recording failed: {err}')
+        except ROBOT_ERRORS as err:
+            print(f'[RECORDING] Starting the recording failed: {describe(err)}')
 
     def stop_recording(self, *args):
         first_iter = True
@@ -457,8 +458,8 @@ class RecordingInterface(object):
                 first_iter = False
                 time.sleep(0.5)
                 continue
-            except Exception as err:
-                print(f'[RECORDING] Stopping the recording failed: {err}')
+            except ROBOT_ERRORS as err:
+                print(f'[RECORDING] Stopping the recording failed: {describe(err)}')
                 break
 
 
@@ -505,7 +506,7 @@ class RecordingInterface(object):
                 continue
             try:
                 waypoint_snapshot = self._graph_nav_client.download_waypoint_snapshot(waypoint.snapshot_id)
-            except Exception:
+            except ROBOT_ERRORS:
                 print(f'[MAP DOWNLOAD] Waypoint snapshot not downloaded: {waypoint.snapshot_id}')
                 continue
             self._write_bytes(
@@ -525,7 +526,7 @@ class RecordingInterface(object):
             num_to_download += 1
             try:
                 edge_snapshot = self._graph_nav_client.download_edge_snapshot(edge.snapshot_id)
-            except Exception:
+            except ROBOT_ERRORS:
                 print(f'[MAP DOWNLOAD] Edge snapshot not downloaded: {edge.snapshot_id}')
                 continue
             self._write_bytes(
@@ -585,7 +586,7 @@ def graphnav_is_recording(recordingInterface):
     """True/False from the GraphNav recording, None if it cannot be known."""
     try:
         return bool(recordingInterface._recording_client.get_record_status().is_recording)
-    except Exception:
+    except ROBOT_ERRORS:
         return None
 
 
@@ -614,8 +615,8 @@ def graphnav_drop_breadcrumb(env, recordingInterface, robot_state_client, prm_no
         trail = env._graphnav_trail = []
     try:
         x, y, _, _ = connection.getPosition(robot_state_client)
-    except Exception as e:
-        print(f"[BREADCRUMB] Position not readable: {e}")
+    except ROBOT_ERRORS as e:
+        print(f"[BREADCRUMB] Position not readable: {describe(e)}")
         return None
     if not force and trail:
         last = trail[-1]
@@ -633,8 +634,8 @@ def graphnav_drop_breadcrumb(env, recordingInterface, robot_state_client, prm_no
             loc = recordingInterface.get_localization_state()
             wp_id = loc.get('waypoint_id') if isinstance(loc, dict) else None
             wp_name = loc.get('waypoint_name') if isinstance(loc, dict) else None
-    except Exception as e:
-        print(f"[BREADCRUMB] Waypoint not created: {e}")
+    except ROBOT_ERRORS as e:
+        print(f"[BREADCRUMB] Waypoint not created: {describe(e)}")
         return None
     if not wp_id:
         print("[BREADCRUMB] Waypoint created but not localized: I do not put it in the trail "
