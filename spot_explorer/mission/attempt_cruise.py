@@ -372,26 +372,64 @@ class CruiseSteps:
     def _first_plan(self, planner):
         """The planner starts and its first plan (with data) is the first turn
         of the attempt. The plan if the robot can start on it (confirmed stretch, rotation towards
-        the first node clear), None otherwise: then the planning is stopped and the stop-and-go
-        takes the turn. Leaves the robot pose, scan, snapshot, frontier and polyline of the plan."""
+        the first node clear). A plan that does not allow to start is a block at once
+        (_block_goal): the thread chooses another goal or cell and its plan is taken. None if no
+        usable plan comes in time, or no goal is left (the planning is stopped). Leaves the
+        robot pose, scan, snapshot, frontier and polyline of the plan."""
         tracker = self.verification_tracker
         tracker.start_planning(planner, planning_cycle.plan_period())
-        t0, plan = time.time(), None
+        t0, plan, last = time.time(), None, None
         wait_s = START_PLAN_WAIT_S if planner.switch_job == self._start_in_thread else FIRST_PLAN_WAIT_S
-        seen_bad, bad = None, []
+        bad, why, asked = [], None, None
         while time.time() - t0 < wait_s:
             time.sleep(CRUISE_POLL_S)
             p = tracker.get_plan()
-            if p is not None and p.get('status') not in ('no_scan', 'error'):
-                plan = p
-                break
-            if p is not None and p.get('version') != seen_bad:
+            if p is None or p.get('version') == last:
+                continue
+            last = p.get('version')
+            if p.get('status') in ('no_scan', 'error'):
                 # A plan without data or with an error is logged, so a failed start says why.
-                seen_bad = p.get('version')
                 bad.append((p.get('status'), p.get('error', '')))
-                print(f"[CRUISE] First plan {seen_bad}: {p.get('status')} {p.get('error', '')}")
+                print(f"[CRUISE] First plan {last}: {p.get('status')} {p.get('error', '')}")
+                continue
+            plan, why = p, None
+            self.robot_x, self.robot_y, self.robot_yaw = plan['robot']
+            if planner.last_scan is not None:
+                self.scan, self.snap = planner.last_scan, planner.last_snap
+            self.frontier, self.polyline = plan['frontier'], plan['polyline']
+            sw = plan.get('switch')
+            if sw is not None and sw.get('kind') in ('start', 'seen', 'nogoal'):
+                planner.switch_info = None
+                if sw['kind'] in ('seen', 'nogoal'):
+                    tracker.stop_planning()
+                    return sw['kind']
+                sw = None
+            if sw is not None and sw.get('kind') == 'end':
+                planner.switch_info = None
+                if sw.get('left') is not None:
+                    self.env._attempt_left_unreachable = True
+                why = sw.get('reason')
+                break
+            if sw is not None and sw.get('kind') in ('goal', 'cell'):
+                planner.switch_info = None
+                self._apply_switch(sw)
+                asked = None
+            if plan['status'] == 'no_path' and planner.no_path_job is not None:
+                continue                  # the thread is choosing another goal or cell
+            if plan['status'] != 'ok':
+                why = f"first plan '{plan['status']}'"
+                break
+            if plan['advance'] < CRUISE_MIN_AHEAD_M:
+                f = plan['frontier']
+                why = (f"first plan: {plan['advance']:.2f} m confirmed ("
+                       + (f"rotation not clear at node {plan['turn_stop']}" if plan['turn_stop'] else f['reason']) + ")")
+                if asked is None and self._block_goal(planner, why):
+                    asked, t0 = why, time.time()     # the new goal gets its own wait
+                if asked is not None:
+                    continue
+                break
+            break
         moving = getattr(self.env, '_moving_pc', None) is not None
-        why = None
         if plan is None:
             # Why: kept for the attempt (start_failure_reason), it ends up in the log and in the
             # mission summary: a start that fails is a failure of the cell, the cause tells
@@ -403,32 +441,13 @@ class CruiseSteps:
                       f"{len(noscan)} cycles without the scan of Spot ({noscan[-1] or 'no cause'})" if noscan else
                       "no cycle ended (thread busy or stuck)"))
             self.start_failure_reason = why
-        else:
-            self.robot_x, self.robot_y, self.robot_yaw = plan['robot']
-            if planner.last_scan is not None:
-                self.scan, self.snap = planner.last_scan, planner.last_snap
-            self.frontier, self.polyline = plan['frontier'], plan['polyline']
-            sw = plan.get('switch')
-            if sw is not None and sw.get('kind') in ('start', 'seen', 'nogoal'):
-                planner.switch_info = None
-                if sw['kind'] == 'seen':
-                    tracker.stop_planning()
-                    return 'seen'
-                if sw['kind'] == 'nogoal':
-                    tracker.stop_planning()
-                    return 'nogoal'
-                sw = None
-            if sw is not None and sw.get('kind') == 'end':
-                why = sw.get('reason')
-            elif sw is not None and sw.get('kind') in ('goal', 'cell'):
-                planner.switch_info = None
-                self._apply_switch(sw)
-            if why is None and plan['status'] != 'ok':
-                why = f"first plan '{plan['status']}'"
-            if why is None and plan['advance'] < CRUISE_MIN_AHEAD_M:
-                f = plan['frontier']
-                why = (f"first plan: {plan['advance']:.2f} m confirmed ("
-                       + (f"rotation not clear at node {plan['turn_stop']}" if plan['turn_stop'] else f['reason']) + ")")
+        elif why is None and (plan['status'] != 'ok' or plan['advance'] < CRUISE_MIN_AHEAD_M):
+            why = (f"first plan '{plan['status']}', {plan['advance']:.2f} m confirmed: no other goal "
+                   f"in {wait_s:.0f} s")
+        if why is not None and plan is not None:
+            self.start_failure_reason = why
+            if asked is not None:
+                self.env._attempt_left_unreachable = True     # blocked: the cell left for later
         if why is None and moving and len(plan['confirmed']) > 1:
             (ax, ay), (bx, by) = plan['confirmed'][:2]
             back = bool(plan['backward'] and plan['backward'][0])
@@ -442,7 +461,7 @@ class CruiseSteps:
             return plan
         tracker.stop_planning()
         MISSION_STATS['thread_first_turn_fallbacks'] = MISSION_STATS.get('thread_first_turn_fallbacks', 0) + 1
-        print(f"[CRUISE] The attempt does not start in cruise ({why}): the stop-and-go takes the turn.")
+        print(f"[CRUISE] The attempt does not start in cruise ({why}).")
         if moving:
             stop_if_moving(self.env, self.command_client, "first plan not usable while walking")
         self.need_refresh = True
@@ -534,6 +553,8 @@ class CruiseSteps:
         t0 = time.time()
         track = [(self.robot_x, self.robot_y)]
         reason, arrived, no_path_end = None, False, False
+        asked_block = None              # block_request asked, waiting for the new goal or cell
+        spot_blocked, blocked_send = 0, -1   # sends Spot reported blocked, the last one counted
         switch = CellSwitch(self, planner)
         n_plans = n_sends = bad = 0
         turn_t, poll_s, send_s = [], [], []      # main thread timing, see _main_timing
@@ -563,7 +584,21 @@ class CruiseSteps:
                 elif st == 'arrived' and to_goal:
                     reason, arrived = "arrived at the goal", True
                     break
-                if st not in ('moving', 'near_goal', 'arrived', 'comm_error'):
+                if st == 'moving' and n_sends > blocked_send:
+                    spot_blocked = 0
+                if st == 'blocked' and blocked_send != n_sends:
+                    # Spot reports the point blocked, the robot still: once, the next plan sends
+                    # again; again on a later send, a block (_block_goal).
+                    blocked_send, spot_blocked = n_sends, spot_blocked + 1
+                    if spot_blocked >= 2 and asked_block is None:
+                        why = "Spot reports the point blocked again"
+                        if self._block_goal(planner, why):
+                            asked_block = why
+                # Waiting for the next goal after a block, the robot stands at the end of its
+                # stretch: its command may end meanwhile.
+                waiting = ((st == 'blocked' and (spot_blocked < 2 or asked_block is not None))
+                           or (st == 'expired' and asked_block is not None))
+                if st not in ('moving', 'near_goal', 'arrived', 'comm_error') and not waiting:
                     reason = {'off_path': "too far from the path",
                               'blocked': "Spot reports the point blocked",
                               'expired': "command expired (no new send in time)",
@@ -633,7 +668,7 @@ class CruiseSteps:
                     if end is not None:
                         reason, handoff, no_path_end = end
                         break
-                    to_goal = False
+                    to_goal, asked_block = False, None
                 if plan['status'] == 'no_path':
                     if planner.no_path_job is not None:
                         continue      # the thread is choosing another goal or cell: the robot walks the stretch
@@ -700,9 +735,15 @@ class CruiseSteps:
                         reason, arrived = "arrived at the goal", True
                         self._cruise_finish_command(pc)
                         break
-                    reason = (f"the confirmed stretch ends {max(ahead, 0.0):.2f} m ahead ("
-                              + (f"rotation not clear at node {plan['turn_stop']}" if plan['turn_stop']
-                                 else f['reason']) + ")")
+                    why = (f"the confirmed stretch ends {max(ahead, 0.0):.2f} m ahead ("
+                           + (f"rotation not clear at node {plan['turn_stop']}" if plan['turn_stop']
+                              else f['reason']) + ")")
+                    # No way on from here: a block at once, the planning thread chooses the next
+                    # goal or cell and the same cruise goes on towards it.
+                    if asked_block is not None or self._block_goal(planner, why):
+                        asked_block = asked_block or why
+                        continue
+                    reason = why
                     break
                 to_goal = plan['to_goal']
                 t_send = time.time()
@@ -766,6 +807,18 @@ class CruiseSteps:
         """Between two turns of the cruise loop: until a new plan is published, at most
         CRUISE_POLL_S (the feedback is read at every turn, and the latest plan taken)."""
         tracker.wait_plan(last_version, CRUISE_POLL_S)
+
+    def _block_goal(self, planner, why):
+        """No way on towards the goal for the main thread: the planning thread treats the goal
+        as one without a path at its next cycle (CruisePlanner.block_request -> _on_no_path:
+        another goal in the cell, or the next cell). False if the thread cannot choose goals."""
+        if planner.no_path_job is None:
+            return False
+        planner.block_request = why
+        MISSION_STATS['cruise_blocks'] = MISSION_STATS.get('cruise_blocks', 0) + 1
+        print(f"[CRUISE] Block: {why}. The goal ({self.target_x:.2f}, {self.target_y:.2f}) is left, "
+              f"the planning thread chooses the next one.")
+        return True
 
     def _log_plan(self, plan, r, note=None):
         """The [CRUISE] Plan line of a plan: confirmed stretch ahead and why it ends, path,
@@ -876,10 +929,11 @@ class CruiseSteps:
                     n_nodes=len(ids), prep_s=time.perf_counter() - t0)
         return info
 
-    def _on_no_path(self, planner, scan, robot, prev_id, next_id):
+    def _on_no_path(self, planner, scan, robot, prev_id, next_id, why=None):
         """
         In the planning thread (CruisePlanner.no_path_job): no path from the node the robot
-        walks to towards the goal. If from there the graph goes on (the goal is the problem,
+        walks to towards the goal, or (why) no way on for the main thread (block_request). If
+        from there the graph goes on (the goal is the problem,
         not the robot): the goal is excluded for the mission and another one chosen in the cell
         (up to MAX_BLOCK_REPLANS per cell); with none, the cell is unreachable now and the
         next one is chosen (_prepare_next_cell; the cell is not marked done nor failed).
@@ -896,7 +950,7 @@ class CruiseSteps:
             return dict(kind='end', reason=(f"no path from node {next_id}, and from there the graph reaches only "
                                             f"{n_free} nodes: the robot is shut in, not the goal"))
         gx, gy = prm.get_node_position(planner.goal_id)
-        goal_choice._refuse_goal(env, row, col, gx, gy, "no path in the updated graph")
+        goal_choice._refuse_goal(env, row, col, gx, gy, why or "no path in the updated graph")
         planner.tried_goals.append((float(gx), float(gy)))
         MISSION_STATS['replan_fail_repicks'] = MISSION_STATS.get('replan_fail_repicks', 0) + 1
         if planner.repicks < P.MAX_BLOCK_REPLANS:

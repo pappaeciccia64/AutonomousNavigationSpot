@@ -130,7 +130,12 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
                           f"after {attempt_cruise.START_TRIES} tries ({why}): a failure of the cell, retried later.")
                     return False
                 if started is None:
-                    self.loop_iter = 0      # the first plan did not allow to start: stop-and-go
+                    # The first plan did not allow to start, and no other goal did in time
+                    # (attempt_cruise._first_plan: a block at once): the cell left for later.
+                    self.env._attempt_fail_why = (f"no start in cruise: "
+                                                  f"{getattr(self, 'start_failure_reason', None) or 'no plan'}")
+                    print(f"[ATTEMPT] Cell ({self.target_row},{self.target_col}): {self.env._attempt_fail_why}.")
+                    return False
             else:
                 # Stop-and-go mode (cruise off): its own start, legacy/stop_and_go_start.py.
                 if self._prepare() is FAILED:

@@ -283,6 +283,10 @@ class CruisePlanner:
         # -> dict; the thread itself chooses another goal or the next cell, the plan carries it
         # as 'switch' (as switch_job). None = the main thread handles the 'no_path'.
         self.no_path_job = None
+        # The main thread found no way on at the end of the confirmed stretch (or Spot reports
+        # the point blocked again): the reason, and the next cycle treats the goal as one without
+        # a path (no_path_job). None = nothing asked. Set by the main thread, read and cleared here.
+        self.block_request = None
         self.target_cell, self.tried_goals, self.repicks = None, [], 0
         # Times of the cycle, for the log: seconds per phase (PHASES) of every cycle, and the
         # interval between the acquisition times of two consecutive Spot grids (0 = the same
@@ -318,6 +322,16 @@ class CruisePlanner:
         set, chooses another goal. Returns (status, remainder, replanned, switched): switched
         = this call set switch_info."""
         tmp = edge_evaluation.TEMP_NODE
+        blocked = self.block_request if self.no_path_job is not None and status == 'ok' else None
+        if blocked is not None:
+            # The goal blocked for the main thread: as a goal without a path, at once.
+            self.block_request = None
+            self.prm.remove_point()             # the jobs choose goals among the real nodes
+            self.switch_info = dict(self.no_path_job(self, scan, robot, prev_id, next_id, why=blocked),
+                                    id=next(_SWITCH_IDS))
+            if self.switch_info.get('ids'):
+                return status, list(self.switch_info['ids']), True, True
+            return 'no_path', remainder, False, True
         if not from_robot and next_id == self.goal_id:
             return status, remainder, False, False
         if from_robot:

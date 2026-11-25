@@ -288,8 +288,9 @@ def main():
     #  - 0.8 m: appearing at the last moment (a person stepping in). The obstacle filter (median
     #    of 3 scans) counts it from its second scan, ~0.6 s: the robot stops late, with the nose
     #    into the box -- there the emergency brake is Spot's own body obstacle avoidance (on in
-    #    every command, not in this fake robot; user, 12-11). Checked here: the cruise stops for
-    #    it, the centre never inside the box, the cell entered anyway.
+    #    every command, not in this fake robot; user, 12-11). Checked here: no way on is a block
+    #    at once (the goal left, the next one chosen in the same cruise), the centre never inside
+    #    the box, the attempt ends cleanly.
     for face, realistic in ((1.8, True), (0.8, False)):
         state = {'done': False, 'prev': None}
 
@@ -310,15 +311,16 @@ def main():
             check(r['clear'] >= geometry.ROBOT_HALF_WIDTH_M, f"never closer to the box than half the body "
                                                              f"({r['clear']:.2f} m, limit {geometry.ROBOT_HALF_WIDTH_M})")
         else:
-            check(any('confirmed stretch ends' in e for e in r['ends']),
-                  f"the cruise stops for the box ({r['ends']})")
+            check('[CRUISE] Block:' in r['log'] or r['oks'] == [True],
+                  f"past the box: a block at once and the next goal chosen, or the cell entered ({r['ends']})")
             check(r['clear'] > 0.0, f"the centre never inside the box ({r['clear']:.2f} m; the body is "
                                     f"Spot's obstacle avoidance)")
-            # This fake robot has no body obstacle avoidance: it stops with the body against the
-            # box, every node around is out of the graph, and the attempt backs away and leaves
-            # the cell for later (on the robot Spot would have stopped before).
-            check(r['oks'] == [True] or ('[BLOCK]' in r['log'] and 'Traceback' not in r['log']),
-                  f"the attempt ends cleanly: cell entered, or backed away and left for later ({r['oks']})")
+            # This fake robot has no body obstacle avoidance: it can stop with the body against
+            # the box, unable to turn either way; then every goal of the cell is a block and the
+            # cell is left for later (on the robot Spot would have stopped before).
+            check(r['oks'] == [True] or ('no goal with a path in cell' in ' '.join(r['ends'])
+                                         and 'Traceback' not in r['log']),
+                  f"the attempt ends cleanly: cell entered, or left for later ({r['oks']}, {r['ends']})")
             continue
         check(r['oks'] == [True], "entered the cell anyway (around the box)")
 
