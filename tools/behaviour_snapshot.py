@@ -85,6 +85,8 @@ def work_perception(mission, data):
     import numpy as np
     from saved_scan import decode_and_process, load
     files = glob.glob(os.path.join(data, 'MissionMap', f'Mission_{mission}', 'scans', '*.npz'))
+    if not files:
+        return None                   # mission data not in this --data folder: skipped, not "0 scans"
     files.sort(key=lambda f: float(np.load(f)['time']))
     out = []
     for f in files:
@@ -372,14 +374,15 @@ def compare(a, b):
             x, y = a[part].get(key), b[part].get(key)
             if x is None or y is None:
                 if (x is None) != (y is None):
-                    out.append(f"{part} {key}: present in only one snapshot")
+                    out.append(f"{part} {key}: only in the {'old' if y is None else 'new'} snapshot "
+                               f"(mission data missing where the other one ran? see --data)")
                 continue
             if part == 'cruise':
                 out += compare_cruise(key, x, y)
                 continue
             if part == 'perception':
                 if len(x) != len(y):
-                    out.append(f"perception {key}: {len(x)} scans against {len(y)}")
+                    out.append(f"perception {key}: {len(x)} scans in the old snapshot, {len(y)} in the new")
                     continue
                 diffs = [f"{s['scan']}: {', '.join(k for k in s['layers'] if s['layers'][k] != t['layers'][k])} "
                          f"(obstacle cells {s['obstacle_cells']} -> {t['obstacle_cells']}, "
@@ -451,7 +454,9 @@ def main():
         old = json.load(open(a.files[0]))
         parts = [p for p in old['meta']['parts'] if a.parts is None or p in a.parts]
         missions = sorted({m for p in ('perception', 'replay') if p in old for m in old[p]}) or a.missions
-        tmp = os.path.join(tempfile.gettempdir(), 'behaviour_snapshot_now.json')
+        # A file of its own: several sessions may run a check at the same time.
+        fd, tmp = tempfile.mkstemp(prefix='behaviour_snapshot_now_', suffix='.json')
+        os.close(fd)
         worlds = sorted(old.get('missions', {}) or old.get('cruise', {})) or a.worlds
         new = record(tmp, parts, missions, worlds, data, a.jobs, a.repeat)
     print(f"\nBefore: {old['meta']['date']}, code {old['meta']['code']}")
