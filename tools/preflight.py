@@ -74,7 +74,6 @@ METHODS = [
     ("spot_explorer.planning.edge_evaluation", "EdgeEvaluation", "_traversed_edge_ok"),
     ("spot_explorer.planning.roadmap", "PRM", "anchor_node"),
     ("spot_explorer.planning.roadmap", "PRM", "set_allowed_nodes"),
-    ("spot_explorer.planning.roadmap", "PRM", "set_detour_limit"),
     ("spot_explorer.planning.roadmap", "PRM", "path_length"),
     ("spot_explorer.planning.edge_evaluation", "EdgeEvaluation", "update_local_grid_data"),
     ("spot_explorer.planning.roadmap", "PRM", "compute_path_cost"),

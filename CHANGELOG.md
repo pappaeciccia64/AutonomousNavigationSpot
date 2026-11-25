@@ -8,6 +8,20 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-25 (no detour cap: the navigation goes wherever a path exists)
+
+- `tests/test_any_goal.py` (new): goals drawn at random among all the mission graph nodes (seen
+  or not, near boxes, inside them, behind walls), each one attempt of the real cruise with the
+  goal forced on the node, judged against the fake world (a 0.30 m disk reaching the node).
+  30 goals in 5 worlds: 23 reachable and reached, 5 unreachable and noticed, 0 hangs, 0
+  reached where the body cannot go, closest approach 0.34-0.50 m. The 2 misses were reachable
+  goals refused by the detour cap (8.5 m around a wall for 2 m in a straight line).
+- Detour cap removed (user, 25-11): `PLAN_MAX_DETOUR_RATIO` / `PLAN_DETOUR_SLACK_M`,
+  `PRM.set_detour_limit`, `_within_caps` and the unused `max_edges` of `find_path_dijkstra`.
+  Whether a goal is worth a long way round is for the goal choice to say, not the navigation.
+  With the cells: a cell behind a wall is reached going round instead of left for later. The
+  old behaviour: the `detour_cap` variant of `varianti/`.
+
 ## 2026-11-24 evening (cleanup: the alternatives out of the main code, the last switches)
 
 Continues the cleanup of 20-11. The main code has no on/off switches for alternatives any more:

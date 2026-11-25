@@ -102,12 +102,8 @@ class PRM(EdgeEvaluation, EdgeStats):
         self.needs_refresh = False
 
         # Path search: nodes it may pass through (None = all; used to keep planning inside
-        # the cells already visited, see set_allowed_nodes) and detour cap (a path longer
-        # than max_detour_ratio * straight-line distance + detour_slack_m is "no path";
-        # None = no cap, see set_detour_limit).
+        # the cells already visited, see set_allowed_nodes).
         self.allowed_nodes = None
-        self.max_detour_ratio = None
-        self.detour_slack_m = 0.0
 
         # Cost layer: what is learned during the mission does not remove edges from the graph,
         # it adds a cost (possibly infinite) that Dijkstra adds to the edge weight. Today it is used
@@ -178,11 +174,6 @@ class PRM(EdgeEvaluation, EdgeStats):
         allowed. Used by mission_prm.restrict_planning_to_explored_cells.
         """
         self.allowed_nodes = None if node_ids is None else set(node_ids)
-
-    def set_detour_limit(self, max_ratio: Optional[float] = None, slack_m: float = 0.0):
-        """Cap on path length relative to the straight line (None = none)."""
-        self.max_detour_ratio = None if max_ratio is None else float(max_ratio)
-        self.detour_slack_m = float(slack_m)
 
     def path_length(self, path_ids) -> float:
         """Geometric length of a path, in metres."""
@@ -318,11 +309,11 @@ class PRM(EdgeEvaluation, EdgeStats):
     def find_path_dijkstra(self, start_idx: int, goal_idx: int,
                             current_path_ids: Optional[List[int]] = None,
                             margin: float = 0.0,
-                            max_edges: Optional[int] = None,
                             ignore_penalties: bool = False) -> Optional[List[int]]:
         """
-        Shortest path between two nodes (Dijkstra), inside allowed_nodes and with the detour
-        cap (set_detour_limit). None if there is none.
+        Shortest path between two nodes (Dijkstra), inside allowed_nodes. None if there is none:
+        however long the way round, a path that exists is returned (whether a goal is worth
+        it is for the goal choice to say).
 
         With current_path_ids (the plan being followed, starting from start_idx) and margin > 0,
         the new path is returned only if it costs at least `margin` less: avoids oscillating
@@ -333,8 +324,6 @@ class PRM(EdgeEvaluation, EdgeStats):
         if start_idx not in self.nodes or goal_idx not in self.nodes:
             return None
         new_path = self._dijkstra(start_idx, goal_idx, ignore_penalties)
-        if new_path is not None and not self._within_caps(new_path, max_edges):
-            new_path = None
         if current_path_ids is None or margin <= 0.0:
             return new_path
         return self._stable_plan(current_path_ids, new_path, margin)
@@ -388,14 +377,10 @@ class PRM(EdgeEvaluation, EdgeStats):
     def why_no_path(self, start_idx, goal_idx):
         """Why find_path_dijkstra(start_idx, goal_idx) is None, for the log: the path exists only
         through nodes outside allowed_nodes (cells not explored, mission_prm.planning_cells),
-        or is beyond the detour cap, or the graph is really split (every connecting edge out:
-        occupancy, slope, live scan, blocked)."""
+        or the graph is really split (every connecting edge out: occupancy, slope, live scan,
+        blocked)."""
         if start_idx not in self.nodes or goal_idx not in self.nodes:
             return "a node does not exist"
-        path = self._dijkstra(start_idx, goal_idx)
-        if path is not None:
-            return (f"the path exists ({len(path) - 1} edges, {self.path_length(path):.1f} m) but is beyond "
-                    f"the detour cap ({self.max_detour_ratio} x straight line + {self.detour_slack_m} m)")
         if self.allowed_nodes is not None:
             allowed, self.allowed_nodes = self.allowed_nodes, None
             try:
@@ -411,8 +396,8 @@ class PRM(EdgeEvaluation, EdgeStats):
     def reachable_from(self, start_idx, global_map=None, edge_safety_margin=0.0):
         """
         reachable(x, y) -> bool: has the node (x, y) is attached to (anchor_node) a path from
-        start_idx, as find_path_dijkstra(start_idx, node) would answer -- inside allowed_nodes,
-        within the detour cap -- with one search for all the points asked (the goal choice asks
+        start_idx, as find_path_dijkstra(start_idx, node) would answer -- inside allowed_nodes --
+        with one search for all the points asked (the goal choice asks
         dozens of points of a cell; with no reachable point, every one cost a whole Dijkstra).
         The path to a node from a search run to the end is the one a search stopped at that
         node finds. A node outside allowed_nodes (the goal is always allowed) gets its own search.
@@ -429,9 +414,7 @@ class PRM(EdgeEvaluation, EdgeStats):
                 return False
             if allowed is not None and nid not in allowed and nid != start_idx:
                 return self.find_path_dijkstra(start_idx, nid) is not None
-            if nid not in parents:
-                return False
-            return self._within_caps(self.path_to(parents, nid), None)
+            return nid in parents
         return reachable
 
     def _dijkstra(self, start_idx, goal_idx, ignore_penalties=False):
@@ -448,25 +431,6 @@ class PRM(EdgeEvaluation, EdgeStats):
         """Lower bound of the cost from a node to goal_idx for the path search; None = none
         (Dijkstra)."""
         return None
-
-    def _within_caps(self, path, max_edges):
-        """
-        Caps checked on the path FOUND: if the minimum-cost path has too many edges, or is a
-        loop too long compared with the straight line (set_detour_limit), the answer is "no
-        path": the cell is given up and retried later from another side.
-        """
-        if max_edges is not None and len(path) - 1 > max_edges:
-            return False
-        if self.max_detour_ratio is not None:
-            start_idx, goal_idx = path[0], path[-1]
-            (sx, sy), (gx, gy) = self.nodes[start_idx], self.nodes[goal_idx]
-            limit = self.max_detour_ratio * float(np.hypot(gx - sx, gy - sy)) + self.detour_slack_m
-            plen = self.path_length(path)
-            if plen > limit:
-                print(f"[DETOUR] Path {start_idx}->{goal_idx} {plen:.1f} m long, beyond "
-                      f"the cap of {limit:.1f} m: I consider it impracticable.")
-                return False
-        return True
 
     def _stable_plan(self, current_path_ids, new_path, margin):
         """Stability check: the new path only if it costs at least `margin` less than the plan

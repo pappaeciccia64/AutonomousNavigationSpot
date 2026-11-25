@@ -69,11 +69,6 @@ PRM_MIN_EDGE_M = 0.5
 PRM_MAX_EDGE_M = 1.25
 PRM_CONNECTION_RADIUS_M = 3.0
 
-# Detour cap: a path longer than RATIO * straight line + SLACK counts as "no path" (see
-# PRM.set_detour_limit). None = no cap.
-PLAN_MAX_DETOUR_RATIO = 2.0
-PLAN_DETOUR_SLACK_M = 1.0
-
 
 # ==================================================================
 # Navigation with the safe frontier: the loop of a cell attempt (cell_attempt.py,

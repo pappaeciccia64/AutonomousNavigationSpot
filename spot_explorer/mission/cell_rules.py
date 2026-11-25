@@ -131,9 +131,9 @@ class CellRules:
             return prm.anchor_node(px, py, global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M)
 
         def reachable(px, py):
-            # As the attempt (PRM.reachable_from): a path, within the detour cap.
+            # As the attempt (PRM.reachable_from): a path.
             nid = anchor(px, py)
-            return nid is not None and nid in pred and prm._within_caps(prm.path_to(pred, nid), None)
+            return nid is not None and nid in pred
         gx, gy, _v, _b = goal_choice.find_best_point_in_cell(
             from_xy[0], from_xy[1], env, row, col, None, None, sampler, global_map=global_map,
             reachable=reachable, quiet=True, require_reachable=True)

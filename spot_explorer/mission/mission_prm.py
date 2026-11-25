@@ -31,7 +31,6 @@ def build_mission_prm(env, verbose=True):
     prm = roadmap.PRM(min_edge_length=P.PRM_MIN_EDGE_M, max_edge_length=mg.reach_m,
                       connection_radius=P.PRM_CONNECTION_RADIUS_M)
     prm.mission_graph = mg          # rebuild_prm_edges reads it again
-    prm.set_detour_limit(P.PLAN_MAX_DETOUR_RATIO, P.PLAN_DETOUR_SLACK_M)
     mg.into_prm(prm)
     return prm, mg.as_sampler(), mg
 
