@@ -60,6 +60,7 @@ DEFAULT_PARTS = ('perception', 'replay', 'missions')
 REPEAT = 3
 CRUISE_MARGIN = dict(seen=3.0, walked_frac=0.15, clearance=0.03)
 MARK = '@@SNAPSHOT@@'
+WORKER_TIMEOUT_S = 900     # one scan set, replay or fake mission: a hung one must not block the queue
 
 
 def _h(*arrays, decimals=6):
@@ -227,6 +228,9 @@ def work_cruise(item, data):
 def compare_cruise(key, runs_a, runs_b):
     """Ranges of the reference runs against the new runs of one world; lines if outside."""
     out = []
+    if any(r is None for r in runs_b):
+        out.append(f"cruise {key}: {sum(r is None for r in runs_b)} of {len(runs_b)} runs did not end or failed "
+                   f"(see the [ERROR] lines of the recording)")
     a = [r for r in runs_a if r]
     b = [r for r in runs_b if r]
     if not a or not b:
@@ -276,8 +280,14 @@ def worker_main(part, item, data):
 # Record / compare
 # --------------------------------------------------------------------------------------
 def _run_worker(part, item, data):
-    p = subprocess.run([sys.executable, os.path.abspath(__file__), '_worker', part, item, '--data', data],
-                       capture_output=True, text=True, cwd=REPO)
+    try:
+        p = subprocess.run([sys.executable, os.path.abspath(__file__), '_worker', part, item, '--data', data],
+                           capture_output=True, text=True, cwd=REPO, timeout=WORKER_TIMEOUT_S)
+    except subprocess.TimeoutExpired as e:
+        tail = (e.stdout or b'')[-1500:]
+        tail = tail.decode(errors='replace') if isinstance(tail, bytes) else tail
+        return None, f"did not end within {WORKER_TIMEOUT_S} s (a mission that never ends?); last output:\n{tail}"
+
     for line in p.stdout.splitlines():
         if line.startswith(MARK):
             return json.loads(line[len(MARK):]), None
