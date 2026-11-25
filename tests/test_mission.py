@@ -53,6 +53,7 @@ import test_e2e_loop as T          # fake world, robot and local grid; applies i
 import bosdyn.client.lease
 from bosdyn.api import world_object_pb2
 from bosdyn.api.graph_nav import graph_nav_pb2, map_pb2, map_processing_pb2, recording_pb2
+from bosdyn.client.exceptions import RpcError
 from bosdyn.client.graph_nav import GraphNavServiceResponseError
 from bosdyn.client.math_helpers import Quat, SE3Pose
 from bosdyn.client.recording import NotRecordingError
@@ -311,7 +312,7 @@ class FakeRobot:
         self.time_sync = NS(wait_for_sync=lambda *a, **k: None)
         self._current_user = "prova"
         self.powered = False
-        self.state = NS(get_robot_state=lambda: (_ for _ in ()).throw(RuntimeError("fake state")))
+        self.state = NS(get_robot_state=lambda: (_ for _ in ()).throw(RpcError(None, "fake state")))
         self.commands = NS(robot_command=lambda *a, **k: 1)
 
     def ensure_client(self, name):
