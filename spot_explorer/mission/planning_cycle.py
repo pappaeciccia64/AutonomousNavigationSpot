@@ -153,6 +153,7 @@ def refresh_graph(prm, snap, global_map, robot_xyyaw, refresh, quiet=False):
 
     # Nodes inside obstacles: out of the graph (see prune_prm_nodes_in_obstacles).
     pruned_nodes = roadmap.prune_prm_nodes_in_obstacles(prm, snap)
+    roadmap.update_obstacle_costs(prm, snap, global_map)
     if quiet:
         prm.cycle_counts = getattr(prm, 'cycle_counts', (0, 0, 0, 0, 0))[:4] + (len(pruned_nodes),)
     elif pruned_nodes:

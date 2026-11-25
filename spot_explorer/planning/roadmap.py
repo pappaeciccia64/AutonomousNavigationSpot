@@ -15,7 +15,7 @@ import numpy as np
 from typing import List, Tuple, Optional
 import heapq
 from spot_explorer import config as P
-from spot_explorer.perception import slopes
+from spot_explorer.perception import geometry, slopes
 from spot_explorer.planning import safe_frontier
 from spot_explorer.planning.edge_evaluation import (OCCUPANCY_SAMPLES_MIN, OCCUPANCY_SAMPLES_PER_M,
                                                     EdgeEvaluation)
@@ -34,6 +34,14 @@ from spot_explorer.planning.edge_stats import EdgeStats
 ANCHOR_SEARCH_M = 1.0
 ANCHOR_ON_NODE_M = 0.15
 ANCHOR_IGNORE_NEAR_M = 0.30
+# Obstacle cost of a node (update_obstacle_costs), the costmap inflation idea: the edges check
+# only that the body walks STRAIGHT along them (corridor + margin); turning on the spot at a node
+# needs the body's circle (geometry.ROTATION_CLEARANCE_M, ~0.60 m). A node whose nearest obstacle
+# is closer than OBSTACLE_COST_D0_M costs Dijkstra OBSTACLE_COST_W_M * ((D0 - d) / D0)^2 more,
+# never infinite: where there is a roomier way the path takes it, where there is none (a
+# corridor) it still passes.
+OBSTACLE_COST_D0_M = 0.60
+OBSTACLE_COST_W_M = 4.0
 
 # Around the node the robot is in now, the global obstacle map is not used
 # for the first STOP_NODE_MAP_IGNORE_M of every edge: there the safe frontier judges on the live
@@ -108,6 +116,7 @@ class PRM(EdgeEvaluation, EdgeStats):
         self.edge_penalty_transient = {}
         self.node_penalty_persistent = {}   # idx -> additional weight (possibly inf)
         self.node_penalty_transient = {}
+        self.node_obstacle_cost = {}        # idx -> cost of the nearest obstacle (update_obstacle_costs)
 
         self._init_edge_evaluation()   # live data, global height map, caches (edge_evaluation.py)
         self._init_stats()             # veto statistics (edge_stats.py)
@@ -130,7 +139,8 @@ class PRM(EdgeEvaluation, EdgeStats):
     # ---- cost layer: reading ---------------------------------------------------------
     def node_penalty(self, idx: int) -> float:
         return (self.node_penalty_persistent.get(idx, 0.0)
-                + self.node_penalty_transient.get(idx, 0.0))
+                + self.node_penalty_transient.get(idx, 0.0)
+                + self.node_obstacle_cost.get(idx, 0.0))
 
     def edge_penalty(self, idx1: int, idx2: int) -> float:
         key = (min(idx1, idx2), max(idx1, idx2))
@@ -559,3 +569,34 @@ def prune_prm_nodes_in_obstacles(prm, snap, min_clearance_m=None):
             mark_edge_blocked_soft(prm, nid, nb)
         pruned.append(nid)
     return pruned
+
+
+def update_obstacle_costs(prm, snap, global_map=None):
+    """
+    The obstacle cost of every node with edges (prm.node_obstacle_cost, read by node_penalty):
+    d, the distance to the nearest obstacle, from the scan where it sees the node, otherwise
+    from the free space the global map remembers (GlobalGrid.clearance); a node never seen has
+    no cost (unknown is not an obstacle, as for the pruning). cost = OBSTACLE_COST_W_M *
+    ((OBSTACLE_COST_D0_M - d) / OBSTACLE_COST_D0_M)^2 for d < D0. Recomputed at every refresh of
+    the graph, like the pruning. Returns the number of nodes with a cost.
+    """
+    d0 = OBSTACLE_COST_D0_M
+    ids = [nid for nid in prm.nodes if nid >= 0 and prm.edges.get(nid)]
+    costs = {}
+    if ids:
+        xy = np.array([prm.nodes[nid] for nid in ids], dtype=np.float64)
+        rows, cols, inside = safe_frontier._cells(snap, xy[:, 0], xy[:, 1])
+        live = inside & snap.seen[rows, cols]
+        for k, nid in enumerate(ids):
+            if live[k]:
+                d = float(snap.obstacle_dist[rows[k], cols[k]])
+            elif global_map is not None:
+                d = global_map.clearance(xy[k, 0], xy[k, 1])
+                if d is None:
+                    continue
+            else:
+                continue
+            if d < d0:
+                costs[nid] = OBSTACLE_COST_W_M * ((d0 - max(d, 0.0)) / d0) ** 2
+    prm.node_obstacle_cost = costs
+    return len(costs)

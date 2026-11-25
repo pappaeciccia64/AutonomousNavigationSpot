@@ -317,8 +317,11 @@ def main():
                                     f"Spot's obstacle avoidance)")
             # This fake robot has no body obstacle avoidance: it can stop with the body against
             # the box, unable to turn either way; then every goal of the cell is a block and the
-            # cell is left for later (on the robot Spot would have stopped before).
-            check(r['oks'] == [True] or ('no goal with a path in cell' in ' '.join(r['ends'])
+            # cell is left for later, or after attempt_cruise.BLOCK_STILL_MAX blocks it is
+            # blocked on the spot, a failure of the cell (on the robot Spot would have stopped
+            # before).
+            ends = ' '.join(r['ends'])
+            check(r['oks'] == [True] or (('no goal with a path in cell' in ends or 'blocked on the spot' in ends)
                                          and 'Traceback' not in r['log']),
                   f"the attempt ends cleanly: cell entered, or left for later ({r['oks']}, {r['ends']})")
             continue
