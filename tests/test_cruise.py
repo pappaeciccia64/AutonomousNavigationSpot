@@ -100,6 +100,7 @@ def run(name, rects, start, cells_seq, on_step=None, env=None):
         except Exception:
             err = traceback.format_exc()
     tracker._running = False
+    planning_cycle.BUNDLE_SAVER.drain()                  # the bundles of the cruise
     records.VIS_EXECUTOR.submit(lambda: None).result()
     log = out.getvalue()
     with open(os.path.join(folder, 'log.txt'), 'w') as f:
@@ -152,6 +153,34 @@ def check_cell_switch():
           and not sw.pending, "cell done, the next one prepared: applied, the cruise goes on")
 
 
+def check_bundle_saver():
+    """planning_cycle.BundleSaver: the planner hands bundles over without waiting; the saver
+    asks the extra layers and writes; behind, the oldest is dropped; drain writes the rest."""
+    print("\n== Bundle saver: the planner never waits for Spot or the disk ==")
+    folder = tempfile.mkdtemp(prefix="saver_", dir=RUN_DIR)
+
+    class SlowGrid:
+        def extra_layers(self, names):
+            time.sleep(0.2)                       # a slow request to Spot
+            return {'intensity': dict(values=np.ones((2, 2), np.float32), origin=np.zeros(2), cell=0.03)}
+    saver = planning_cycle.BundleSaver()
+    drops0 = records.MISSION_STATS.get('bundle_drops', 0)
+    n = planning_cycle.BUNDLE_QUEUE_MAX + 4
+    t0 = time.time()
+    for k in range(n):
+        saver.put(os.path.join(folder, f"b{k:02d}.npz"), SlowGrid(), dict(time=float(k), x=np.arange(3)))
+    put_s = time.time() - t0
+    check(put_s < 0.1, f"{n} bundles handed over in {put_s * 1000:.0f} ms: the planner does not wait")
+    check(saver.drain(10.0), "drain: everything handed over is written")
+    files = sorted(os.listdir(folder))
+    drops = records.MISSION_STATS.get('bundle_drops', 0) - drops0
+    check(drops >= 1 and len(files) + drops == n and files[-1] == f"b{n - 1:02d}.npz",
+          f"behind: the oldest dropped ({drops}), the newest written ({len(files)} files)")
+    d = np.load(os.path.join(folder, files[-1]))
+    check('intensity' in d.files and 'intensity_origin' in d.files and float(d['extra_time']) >= float(d['time'])
+          and list(d['x']) == [0, 1, 2], "same arrays, the extra layers and their time added")
+
+
 def check_heading_rule():
     """CruisePlanner._turns_within: forward if the rotation is clear, otherwise backward."""
     print("\n== Heading rule: forward if the rotation is clear, otherwise backward ==")
@@ -201,6 +230,7 @@ def main():
     check_cell_switch()
     check_closed_edge()
     check_heading_rule()
+    check_bundle_saver()
 
     r = run("open field", [], (2.0, 2.0, 0.785), [(0, 1)])
     check(r['oks'] == [True], "entered the cell")

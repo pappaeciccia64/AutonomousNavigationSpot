@@ -9,8 +9,10 @@ While the thread plans, it is the only one touching graph and maps: the main thr
 the motion commands and reads the plans, and takes graph and maps back only after
 stop_planning() (which waits for the cycle running to end).
 """
+import collections
 import itertools
 import os
+import threading
 import time
 
 import numpy as np
@@ -25,7 +27,7 @@ from spot_explorer.perception import gait
 from spot_explorer.planning import edge_evaluation
 from spot_explorer.planning import roadmap
 from spot_explorer.planning import safe_frontier
-from spot_explorer.records import MISSION_STATS, mission_z0, save_npz_async
+from spot_explorer.records import MISSION_STATS, mission_z0
 from spot_explorer.robot import motion
 from spot_explorer.robot import connection
 
@@ -47,6 +49,74 @@ _SWITCH_IDS = itertools.count(1)
 PLAN_REPLAN_MARGIN = 0.10      # the new path must cost 10% less
 CRUISE_BUNDLE_STEP_M = 0.5     # a scan bundle every this many metres walked in cruise
 CRUISE_BUNDLE_REASON_S = 2.0   # and one when the frontier reason changes, at most this often
+BUNDLE_QUEUE_MAX = 8           # bundles waiting for the saver thread; beyond, the oldest is dropped
+
+
+class BundleSaver:
+    """
+    The scan bundles of the cruise are written by this thread, not by the planning thread:
+    the planner hands over the arrays it already has (put) and goes on without waiting; here
+    the extra layers are asked to Spot (SAVE_EXTRA_LAYERS: one request, mostly network waiting)
+    and the file is written. If the saver falls behind, the oldest bundle waiting is dropped,
+    never the planner held (MISSION_STATS['bundle_drops']). drain() at the end of the mission
+    (summary), before the final summary.
+    """
+
+    def __init__(self):
+        self._q = collections.deque()
+        self._cv = threading.Condition()
+        self._busy = False
+        self._thread = None
+
+    def put(self, path, local_grid, arrays):
+        with self._cv:
+            if len(self._q) >= BUNDLE_QUEUE_MAX:
+                self._q.popleft()
+                MISSION_STATS['bundle_drops'] = MISSION_STATS.get('bundle_drops', 0) + 1
+            self._q.append((path, local_grid, arrays))
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(target=self._run, name="bundle_saver", daemon=True)
+                self._thread.start()
+            self._cv.notify_all()
+
+    def _run(self):
+        while True:
+            with self._cv:
+                while not self._q:
+                    self._cv.wait()
+                path, local_grid, arrays = self._q.popleft()
+                self._busy = True
+            try:
+                extra = {}
+                if local_grid is not None and P.SAVE_EXTRA_LAYERS:
+                    for name, lay in local_grid.extra_layers(P.SAVE_EXTRA_LAYERS).items():
+                        extra.update({name: lay['values'], f'{name}_origin': lay['origin'],
+                                      f'{name}_cell': lay['cell']})
+                    if extra:
+                        # Asked here, after the scan of the bundle ('time'): when, to compare.
+                        extra['extra_time'] = time.time()
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                np.savez_compressed(path, **arrays, **extra)
+            except Exception as e:
+                print(f"[DATA SAVE] Could not save {os.path.basename(path)}: {e}")
+            finally:
+                with self._cv:
+                    self._busy = False
+                    self._cv.notify_all()
+
+    def drain(self, timeout=30.0):
+        """Wait until every bundle handed over is written (at most timeout s). True if so."""
+        t_end = time.time() + timeout
+        with self._cv:
+            while self._q or self._busy:
+                left = t_end - time.time()
+                if left <= 0:
+                    return False
+                self._cv.wait(left)
+        return True
+
+
+BUNDLE_SAVER = BundleSaver()
 
 
 # =========================================================================================
@@ -536,16 +606,13 @@ class CruisePlanner:
             b = self.bundle
             tf = get_a_tform_b(scan.proto.local_grid.transforms_snapshot, VISION_FRAME_NAME, BODY_FRAME_NAME)
             goal = self.prm.get_node_position(self.goal_id)
-            # The layers saved only (SAVE_EXTRA_LAYERS: intensity, no_step), one more request to
-            # Spot per bundle, as the bundles of the attempt start.
-            extra = {}
-            for name, lay in (self.local_grid.extra_layers(P.SAVE_EXTRA_LAYERS).items()
-                              if P.SAVE_EXTRA_LAYERS else ()):
-                extra.update({name: lay['values'], f'{name}_origin': lay['origin'], f'{name}_cell': lay['cell']})
-            save_npz_async(
+            # Written by the saver thread, with the layers saved only (SAVE_EXTRA_LAYERS:
+            # intensity, no_step) asked to Spot there: the planner does not wait for either.
+            BUNDLE_SAVER.put(
                 os.path.join(b['folder'], "scans",
                              f"scan_it{b['iteration']:03d}_cell{b['cell'][0]}_{b['cell'][1]}_"
                              f"{b['loop_iter']:03d}_cruise{self.bundle_seq + self.cycles:03d}.npz"),
+                self.local_grid, dict(
                 time=time.time(), iteration=b['iteration'], cell=np.array(b['cell']), loop_iter=b['loop_iter'],
                 **scan_bundle_arrays(scan, snap, self.local_grid, (robot[0], robot[1], tf.position.z), robot[2]),
                 polyline=np.array(polyline), path_node_ids=np.array(ids), robot_node_id=next_id,
@@ -556,7 +623,7 @@ class CruisePlanner:
                 frontier_od_robot=frontier['od_robot'], frontier_half_along=frontier['half_along'],
                 frontier_clearance=frontier['clearance_nominal'], frontier_path_len=frontier['path_len'],
                 allowed_advance=advance, keep_heading=False, no_progress=0,
-                decision_kind='cruise', decision_target=np.array(confirmed[-1], dtype=np.float64), **extra)
+                decision_kind='cruise', decision_target=np.array(confirmed[-1], dtype=np.float64)))
             self._bundle_xy = (robot[0], robot[1])
             self._bundle_why = (frontier['reason'], now)
             MISSION_STATS['scan_bundles'] += 1

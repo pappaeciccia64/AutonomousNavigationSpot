@@ -496,6 +496,7 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
         except Exception:
             err = traceback.format_exc()
     tracker._running = False
+    planning_cycle.BUNDLE_SAVER.drain()                  # the bundles of the cruise
     records.VIS_EXECUTOR.submit(lambda: None).result()      # wait for the saves
     # The real code returns env.is_point_in_cell(...), which with numpy coordinates is an
     # np.bool_: the caller does `if check:` and it works, but the checks here use `is True`.

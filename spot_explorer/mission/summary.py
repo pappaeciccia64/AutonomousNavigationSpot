@@ -58,6 +58,8 @@ def _emit_mission_summary_once():
     if MISSION_CTX.get('summary_done') or MISSION_CTX.get('prm') is None:
         return
     MISSION_CTX['summary_done'] = True
+    if not planning_cycle.BUNDLE_SAVER.drain():
+        print("[DATA SAVE] Scan bundles still being written after 30 s: the summary goes on.")
     try:
         prm = MISSION_CTX['prm']
         prm.print_mission_summary()
@@ -99,7 +101,9 @@ def _emit_mission_summary_once():
         print(f"Advances in the rotation cone: {MISSION_STATS['cone_moves']}, "
               f"back-offs avoided as useless: {MISSION_STATS['retreats_suppressed']}, "
               f"immediate replans: {MISSION_STATS['early_replans']}")
-        print(f"PRM nodes discarded as inside obstacles: {MISSION_STATS['nodes_pruned']}")
+        print(f"PRM nodes discarded as inside obstacles: {MISSION_STATS['nodes_pruned']}; scan bundles "
+              f"{MISSION_STATS.get('scan_bundles', 0)}, dropped because the saver was behind "
+              f"{MISSION_STATS.get('bundle_drops', 0)}")
         print(f"Goals excluded for the mission: {MISSION_STATS['goals_refused']}, choices without "
               f"reachable points: {MISSION_STATS['goals_unreachable']}, arrivals with the robot just "
               f"outside the cell: {MISSION_STATS['arrivals_near_goal']}, returns without "
