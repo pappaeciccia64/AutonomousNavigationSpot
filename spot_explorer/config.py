@@ -42,6 +42,13 @@ MISSION_START_POSITION = 'bottom-right'
 # From the command line: --order.
 MISSION_VISIT_ORDER = 'auto'
 
+# Where the goals come from (a mission option, to compare the two):
+#   'cells'    the next cell of the visit (serpentine or rings), its goal near the centre;
+#   'frontier' the cheapest frontier node from the robot, with the route of the visit as a cost
+#              (mission/frontier.py); the cells are only containers.
+# From the command line: --goals.
+MISSION_GOALS = 'cells'
+
 # How the graph nodes are generated (see mission_graph.py):
 #   'lattice' rectangular lattice; the centre of every cell is a node;
 #   'random'  scattered nodes with MISSION_RANDOM_DISTRIBUTION ('uniform', 'poisson',

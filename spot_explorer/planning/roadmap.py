@@ -51,6 +51,12 @@ OBSTACLE_COST_W_M = 4.0
 STOP_NODE_MAP_IGNORE_M = 0.70
 
 
+# Route of the visit in the path search (set_route_line, used by the frontier goals): every node
+# entered costs ROUTE_WEIGHT x its distance from the route, up to ROUTE_SATURATION_M.
+ROUTE_WEIGHT = 1.0
+ROUTE_SATURATION_M = 1.0
+
+
 class PRM(EdgeEvaluation, EdgeStats):
     """
     Mission graph: lattice nodes, valid edges with their cost, Dijkstra.
@@ -151,9 +157,37 @@ class PRM(EdgeEvaluation, EdgeStats):
             w += self._route_cost(idx2)
         return w
 
+    def set_route_line(self, points):
+        """The route of the visit (list of (x, y), e.g. the cell centres in visiting order) for
+        the path search: every node entered costs ROUTE_WEIGHT x its distance from the line,
+        saturated at ROUTE_SATURATION_M so that going round a big obstacle stays possible. Set
+        by the frontier goals (mission/frontier.py) to keep an orderly sweep; None = no line."""
+        pts = None if points is None else np.asarray([p for p in points if p is not None],
+                                                     dtype=np.float64).reshape(-1, 2)
+        self.route_line = pts if pts is not None and len(pts) >= 2 else None
+        self._route_dist = {}
+
+    def route_distance(self, idx: int) -> float:
+        """Distance of node idx from the route line (inf without a line), cached: nodes never move."""
+        cache = self.__dict__.setdefault('_route_dist', {})
+        d = cache.get(idx)
+        if d is None:
+            line = getattr(self, 'route_line', None)
+            if line is None or idx not in self.nodes:
+                return float('inf')
+            a, b = line[:-1], line[1:]
+            p = np.asarray(self.nodes[idx], dtype=np.float64)
+            ab = b - a
+            t = np.clip(np.einsum('ij,ij->i', p - a, ab) / np.maximum(np.einsum('ij,ij->i', ab, ab), 1e-12), 0.0, 1.0)
+            d = cache[idx] = float(np.min(np.hypot(*(a + t[:, None] * ab - p).T)))
+        return d
+
     def _route_cost(self, idx: int) -> float:
-        """Extra cost of entering node idx in the path search (none)."""
-        return 0.0
+        """Extra cost of entering node idx in the path search: its distance from the route line
+        (set_route_line), none without a line."""
+        if getattr(self, 'route_line', None) is None:
+            return 0.0
+        return ROUTE_WEIGHT * min(self.route_distance(idx), ROUTE_SATURATION_M)
 
     def add_node(self, point_idx: int, x: float, y: float, gradient: float = 0.0, roughness: float = 0.0):
         """Add a node with its mean slope and roughness (used only as a last resort)."""

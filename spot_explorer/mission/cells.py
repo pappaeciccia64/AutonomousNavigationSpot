@@ -417,7 +417,10 @@ def cell_border_distance(env, row, col, x, y):
 def cell_seen_fraction(env, global_map, row, col, step=0.05):
     """Share of cell (row, col) already observed in the global map (free or occupied,
     GlobalGrid.is_known), on a lattice of `step` in the rotated grid frame. None if the cell
-    does not exist."""
+    does not exist, or with the frontier goals (env.goal_mode, mission/frontier.py), where the
+    cells are only containers of the goals and "a cell done when seen" does not apply."""
+    if getattr(env, 'goal_mode', 'cells') == 'frontier':
+        return None
     center = env.get_world_position_from_cell(row, col)
     if center is None:
         return None

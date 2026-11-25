@@ -46,6 +46,8 @@ python3 run_mission.py --start 3,2                 # any cell (row,column)
 ```
 The visiting order (`--order`, `config.MISSION_VISIT_ORDER`) is `auto`: a serpentine from the robot's corner, or rings around the start if the robot is not in a corner; `serpentine` or `rings` can be forced. The `[CONFIG] Start` and `[CONFIG] Visiting order` lines of the log give the cell, how far the grid goes ahead, behind, left and right, and the first cells in order. An invalid start (cell outside the grid, unknown name): the mission does not start.
 
+Where the goals come from (`--goals`, `config.MISSION_GOALS`): `cells` (default) takes the next cell of the visit and a goal near its centre; `frontier` takes the frontier node (seen, free, next to the unseen) that is cheapest to reach from the robot, with the distance from the route of the visit as a cost so that the sweep stays orderly, and ends at 97% of the area seen (`spot_explorer/mission/frontier.py`). The navigation is the same in both; the option is there to compare them, in the simulator first.
+
 **Mission graph.** The nodes are generated in two ways (`--graph`, default in `config.MISSION_GRAPH_SAMPLING`):
 ```bash
 python3 run_mission.py --graph random --distribution poisson --density 9 --seed 7     # random nodes (default: poisson, 9 nodes/m², random seed)

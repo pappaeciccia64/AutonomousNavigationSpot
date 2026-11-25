@@ -36,6 +36,7 @@ from spot_explorer import REPO_ROOT
 from spot_explorer.records import (MISSION_STATS, MISSION_CTX, SegmentLog, install_stdout_tee, remove_stdout_tee, set_mission_z0)
 from spot_explorer.mission import attempt_common
 from spot_explorer.mission import exploration
+from spot_explorer.mission import frontier
 from spot_explorer.mission import summary
 import argparse
 import traceback
@@ -395,9 +396,11 @@ def easy_walk(options):
 
             recordingInterface.set_download_filepath(graph_folder)
 
-            mission = exploration.Mission(robot_state_client, command_client, recordingInterface, local_grid,
-                                global_grid, env, prm, gb_sampler, verification_tracker,
-                                mission_folder, mobility_kwargs)
+            mission_class = frontier.GOAL_MODES[P.MISSION_GOALS]
+            print(f"[CONFIG] Goals: {P.MISSION_GOALS} (--goals)")
+            mission = mission_class(robot_state_client, command_client, recordingInterface, local_grid,
+                                    global_grid, env, prm, gb_sampler, verification_tracker,
+                                    mission_folder, mobility_kwargs)
             mission.explore()
 
             env.print_map()
@@ -444,6 +447,9 @@ def _parse_args(argv=None):
                         f"or 'row,column' (default {P.MISSION_START_POSITION})")
     p.add_argument('--order', choices=cells.VISIT_ORDERS, default=None,
                    help=f"visiting order of the cells (default {P.MISSION_VISIT_ORDER})")
+    p.add_argument('--goals', choices=('cells', 'frontier'), default=None,
+                   help=f"where the goals come from: the next cell of the visit, or the cheapest "
+                        f"frontier node (default {P.MISSION_GOALS})")
     p.add_argument('--spacing', type=float, default=None,
                    help=f"spacing between lattice nodes in m, rounded to cell/n; the edges "
                         f"stay >= {P.PRM_MIN_EDGE_M:g} m (default {P.MISSION_LATTICE_SPACING_M}; "
@@ -516,6 +522,8 @@ def main():
     options.start_position = args.start
     if args.order is not None:
         P.MISSION_VISIT_ORDER = args.order
+    if args.goals is not None:
+        P.MISSION_GOALS = args.goals
     # Start and order are checked here, before connecting to the robot.
     _rows, _cols, _cell, _src = _grid_size(options, verbose=False)
     try:

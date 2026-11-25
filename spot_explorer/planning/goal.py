@@ -77,6 +77,16 @@ def find_best_point_in_cell(robot_x, robot_y, env, cell_row, cell_col, pts, cell
     """
     if safety_margin is None:
         safety_margin = geometry.PRM_EDGE_SAFETY_MARGIN_M
+    # A goal chosen elsewhere (the frontier goals, mission/frontier.py; the tests) is the goal of
+    # its cell: that point once; once tried in the attempt or refused, no goal (the attempt
+    # fails and the caller picks another one).
+    forced = getattr(env, '_forced_goal', None)
+    if forced is not None and (int(forced[0]), int(forced[1])) == (int(cell_row), int(cell_col)):
+        fp = (float(forced[2]), float(forced[3]))
+        tried = list(exclude or []) + list(_refused_goals(env, cell_row, cell_col))
+        if any(np.hypot(fp[0] - ex, fp[1] - ey) < P.RECOVERY_SAME_GOAL_M for ex, ey in tried):
+            return None, None, [], [fp]
+        return fp[0], fp[1], [fp], []
     cell_center = env.get_world_position_from_cell(cell_row, cell_col)
     if cell_center is None:
         return None, None, [], []

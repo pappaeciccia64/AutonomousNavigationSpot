@@ -3,7 +3,7 @@
 The whole mission (mission/run.py, unchanged) against a simulated robot (sim/, SIMULATOR.md).
 
     python3 tools/run_sim_mission.py --world hill
-    python3 tools/run_sim_mission.py --world walls --with frontier      # a variant of varianti/
+    python3 tools/run_sim_mission.py --world walls -- --goals frontier   # frontier goals
     python3 tools/run_sim_mission.py --world slope --out /tmp/sim_slope -- --rows 3 --cols 4
 
 The robot is sim/kinematic_world.KinematicWorld (no physics: it follows the commanded path

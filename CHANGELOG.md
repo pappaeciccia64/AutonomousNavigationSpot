@@ -8,6 +8,24 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-26 (goals from cells or from the frontier: the mission option --goals)
+
+- `run_mission.py --goals cells|frontier` (`config.MISSION_GOALS`, default `cells`), a mission
+  option to compare the two in the simulator (user, 26-11). The navigation is the same.
+- `spot_explorer/mission/frontier.py` (back from `varianti/`): the goal is the frontier node
+  (seen, free, next to the unseen) cheapest to reach from the robot with Dijkstra, with the
+  distance from the route of the visit as a node cost (`PRM.set_route_line`, `ROUTE_WEIGHT`
+  1.0, saturated at 1.0 m: only with the frontier goals, the cells' path search is unchanged);
+  the end at 97% of the area seen. The forced goal is now in `goal.find_best_point_in_cell`
+  (`env._forced_goal`); with the frontier goals `cells.cell_seen_fraction` and
+  `mission_prm.planning_cells` do not apply (`env.goal_mode`). No hooks replacing functions.
+- Why now: in the fake missions with the obstacle cost of the nodes (8a6115c), the frontier
+  goals never left the robot blocked on the spot and kept it >= 0.31 m from the boxes, where
+  the cells left it blocked 8-11 times and at 0.28 m in two worlds (a cell goal beside a box);
+  the frontier was slower in the worlds with walls (+30-55% time).
+- `tests/test_frontier.py` (back), `tools/behaviour_snapshot.py --goals`, `tools/run_sim_mission.py
+  -- --goals frontier`, README, SIMULATOR.md.
+
 ## 2026-11-25 (no detour cap: the navigation goes wherever a path exists)
 
 - `tests/test_any_goal.py` (new): goals drawn at random among all the mission graph nodes (seen

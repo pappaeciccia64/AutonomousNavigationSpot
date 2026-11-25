@@ -221,7 +221,9 @@ def work_cruise(item, data):
         vr = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(vr)
         vr.apply(variants)
-    r = M.run(walls=walls, name='snapshot_cruise', cruise=True)
+    goals = os.environ.get('SNAPSHOT_GOALS')
+    r = M.run(walls=walls, name='snapshot_cruise', cruise=True,
+              extra_args=['--goals', goals] if goals else ())
     log = r['log']
     track = np.array(T.ROBOT.track, dtype=float).reshape(-1, 2)
     seen = re.findall(r'\[COVERAGE\] End: area seen (\d+)%', log) or re.findall(r'area seen (\d+)%', log)
@@ -327,6 +329,7 @@ def record(path, parts, missions, worlds, data, jobs, repeat=REPEAT):
     jobs_list = [(p, m) for p in parts if p not in ('missions', 'cruise') for m in missions] + \
                 ([('missions', w) for w in worlds] if 'missions' in parts else [])
     snap = dict(meta=dict(date=datetime.datetime.now().isoformat(timespec='seconds'), code=_git_state(), variants=os.environ.get('SNAPSHOT_VARIANTS', ''),
+                          goals=os.environ.get('SNAPSHOT_GOALS', 'cells'),
                           repo=REPO, data=data, parts=list(parts)),
                 **{p: {} for p in parts})
     print(f"Recording {len(jobs_list)} jobs ({', '.join(parts)}) with {jobs} processes...")
@@ -434,12 +437,16 @@ def main():
     ap.add_argument('--with', dest='variants', default='',
                     help='cruise part: variants of the local varianti/ folder to turn on (e.g. frontier)')
     ap.add_argument('--variants-dir', default=None, help='the varianti/ folder (default: next to tools/)')
+    ap.add_argument('--goals', choices=('cells', 'frontier'), default=None,
+                    help='cruise part: the --goals option of the fake missions')
     ap.add_argument('--missions', nargs='+', default=MISSIONS, help='saved missions for perception and replay')
     ap.add_argument('--worlds', nargs='+', default=WORLDS, help='fake mission worlds: A, B, rand<seed>')
     ap.add_argument('--data', default=REPO, help='folder with MissionMap/, MissionLogs/, graph/')
     ap.add_argument('-j', '--jobs', type=int, default=max(1, (os.cpu_count() or 2) - 1))
     a = ap.parse_args()
     data = os.path.abspath(a.data)
+    if a.goals:
+        os.environ['SNAPSHOT_GOALS'] = a.goals
     if a.variants:
         os.environ['SNAPSHOT_VARIANTS'] = a.variants
         if a.variants_dir:

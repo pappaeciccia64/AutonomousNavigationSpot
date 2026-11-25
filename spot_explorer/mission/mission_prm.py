@@ -65,8 +65,11 @@ def planning_cells(env, target_row, target_col, from_xy):
     robot's, the goal's, and the cells next to both the robot's and the goal's
     (8-neighbourhood): the way around an obstacle on the border between the two cells. Cells
     never explored are not crossed: if the only way goes through one, the attempt fails and the
-    cell rules try the cell again later. None = every cell.
+    cell rules try the cell again later. None = every cell, always with the frontier goals
+    (env.goal_mode, mission/frontier.py), whose paths may cross any cell.
     """
+    if getattr(env, 'goal_mode', 'cells') == 'frontier':
+        return None
     target = (int(target_row), int(target_col))
     here = tuple(int(v) for v in env.get_cell_from_world(from_xy[0], from_xy[1]))
     cells = {(r, c) for r in range(env.rows) for c in range(env.cols) if env.is_cell_visited(r, c)}

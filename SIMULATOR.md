@@ -33,7 +33,7 @@ The bridge is written and runs against a reference backend without physics:
 | `tests/test_sim_bridge.py` | grids decoded by the real code, path command on the simulated robot, a whole mission |
 
     python3 tools/run_sim_mission.py --world hill
-    python3 tools/run_sim_mission.py --world walls --with frontier   # a variant of varianti/
+    python3 tools/run_sim_mission.py --world walls -- --goals frontier   # frontier goals
 
 ## Writing the backend of a real simulator
 
@@ -70,7 +70,7 @@ and stays the same.
 3. **Terrain**: slopes, steps, rough ground -- the gait choice and the slope costs get
    exercised, which the rectangle worlds of the tests cannot do.
 4. **Wider sensing** (a simulated lidar): the same three layers on a larger window; the
-   exploration by frontier (the `frontier` variant, `varianti/frontier.py`) is meant for it.
+   the frontier goals (`run_mission.py --goals frontier`) are meant for it.
 
 ## What to compare there
 
@@ -115,9 +115,8 @@ published, main thread turn. The network
 latency of a simulator is not the robot's: the order of the gains counts, not the absolute
 numbers.
 
-**4. Where the goal comes from**: cells against frontier (variant `frontier`: `--with frontier`
-of the runner, or `python3 varianti/run.py --with frontier -- <run_mission args>`; with
-`FRONTIER_BEYOND_M` of `varianti/frontier.py` at 0 and at 1.0, the goal beyond the edge), same scenes and
+**4. Where the goal comes from**: cells against frontier, the mission option
+`run_mission.py --goals cells|frontier` (with the runner: `-- --goals frontier`), same scenes and
 seeds. Expected with Spot's 3.84 m grid: as good as the cells in the open, slower among walls
 (goals ~1 m apart). If the simulator can give a wider grid (a simulated lidar: more cells, the
 code reads the size from the protos), run the frontier with it: there it should pull ahead.
