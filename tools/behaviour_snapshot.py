@@ -210,6 +210,15 @@ def work_cruise(item, data):
         walls = random_world(int(world[4:]), 4, 5, 2.0)
     else:
         walls = M.WORLDS[world]
+    variants = [v for v in os.environ.get('SNAPSHOT_VARIANTS', '').split(',') if v]
+    if variants:                      # alternatives of the local varianti/ folder (its run.apply)
+        import importlib.util
+        folder = os.environ.get('SNAPSHOT_VARIANTS_DIR') or os.path.join(REPO, 'varianti')
+        sys.path.insert(0, folder)
+        spec = importlib.util.spec_from_file_location('varianti_run', os.path.join(folder, 'run.py'))
+        vr = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(vr)
+        vr.apply(variants)
     r = M.run(walls=walls, name='snapshot_cruise', cruise=True)
     log = r['log']
     track = np.array(T.ROBOT.track, dtype=float).reshape(-1, 2)
@@ -222,6 +231,10 @@ def work_cruise(item, data):
                 clearance=_clearance(track, walls),
                 cruise_ends=len(re.findall(r'\[CRUISE\] End', log)),
                 stop_and_go=int(sg[-1]) if sg else None,
+                seconds=round(float(r.get('seconds', 0.0)), 1),
+                blocked_on_spot=log.count('blocked on the spot'),
+                start_failures=len(re.findall(r'Attempt start failed on cell', log)),
+                frontier_goals=len(re.findall(r'\[FRONTIER\] Goal:', log)),
                 traceback='Traceback' in log, ok=bool(r['ok'] in (None, True)))
 
 
@@ -260,9 +273,11 @@ def cruise_table(snap):
     for key, runs in sorted(snap.get('cruise', {}).items()):
         runs = [r for r in runs if r]
         if runs:
+            extra = (f"  time {[r.get('seconds') for r in runs]} s  on-the-spot {[r.get('blocked_on_spot') for r in runs]}  "
+                     f"start fails {[r.get('start_failures') for r in runs]}  frontier goals {[r.get('frontier_goals') for r in runs]}")
             lines.append(f"  {key:6s} cells {[len(r['visited']) for r in runs]}  seen {[r['seen'] for r in runs]}%  "
                          f"walked {[r['walked'] for r in runs]} m  closest {[r['clearance'] for r in runs]} m  "
-                         f"cruise ends {[r['cruise_ends'] for r in runs]}  stop-and-go {[r['stop_and_go'] for r in runs]}")
+                         f"cruise ends {[r['cruise_ends'] for r in runs]}  failed first turns {[r['stop_and_go'] for r in runs]}" + extra)
     return lines
 
 
@@ -307,7 +322,7 @@ def _git_state():
 def record(path, parts, missions, worlds, data, jobs, repeat=REPEAT):
     jobs_list = [(p, m) for p in parts if p not in ('missions', 'cruise') for m in missions] + \
                 ([('missions', w) for w in worlds] if 'missions' in parts else [])
-    snap = dict(meta=dict(date=datetime.datetime.now().isoformat(timespec='seconds'), code=_git_state(),
+    snap = dict(meta=dict(date=datetime.datetime.now().isoformat(timespec='seconds'), code=_git_state(), variants=os.environ.get('SNAPSHOT_VARIANTS', ''),
                           repo=REPO, data=data, parts=list(parts)),
                 **{p: {} for p in parts})
     print(f"Recording {len(jobs_list)} jobs ({', '.join(parts)}) with {jobs} processes...")
@@ -411,12 +426,19 @@ def main():
     ap.add_argument('--parts', nargs='+', choices=PARTS, default=None,
                     help='default: perception replay missions; cruise (slow, ~%d min per world) only if named' % (REPEAT * 2))
     ap.add_argument('--repeat', type=int, default=REPEAT, help='cruise runs per world')
+    ap.add_argument('--with', dest='variants', default='',
+                    help='cruise part: variants of the local varianti/ folder to turn on (e.g. frontier)')
+    ap.add_argument('--variants-dir', default=None, help='the varianti/ folder (default: next to tools/)')
     ap.add_argument('--missions', nargs='+', default=MISSIONS, help='saved missions for perception and replay')
     ap.add_argument('--worlds', nargs='+', default=WORLDS, help='fake mission worlds: A, B, rand<seed>')
     ap.add_argument('--data', default=REPO, help='folder with MissionMap/, MissionLogs/, graph/')
     ap.add_argument('-j', '--jobs', type=int, default=max(1, (os.cpu_count() or 2) - 1))
     a = ap.parse_args()
     data = os.path.abspath(a.data)
+    if a.variants:
+        os.environ['SNAPSHOT_VARIANTS'] = a.variants
+        if a.variants_dir:
+            os.environ['SNAPSHOT_VARIANTS_DIR'] = os.path.abspath(a.variants_dir)
     if a.cmd in ('record', 'check') and not os.path.isdir(os.path.join(data, 'MissionMap')) \
             and not set(a.parts or DEFAULT_PARTS) <= {'missions', 'cruise'}:
         sys.exit(f"No MissionMap/ in {data}: give the folder of the mission data with --data")
