@@ -150,7 +150,8 @@ def replay_end(job):
     where = 'ahead' if abs(brg) < 45 else 'behind' if abs(brg) > 135 else 'side'
     same = 'same' if rem[:1] == old_ids[:1] else 'old path' if rem[0] in old_ids else 'new'
     return (head + f" | first node {rem[0]} {math.hypot(nx - robot[0], ny - robot[1]):.2f} m {where} "
-            f"({brg:+.0f} deg, {same}) | confirmed {adv:.2f} m ({fr['reason']})"
+            f"({brg:+.0f} deg, {same}) | confirmed {adv:.2f} m ({fr['reason']} at {fr['dist']:.2f} of "
+            f"{fr['path_len']:.2f} m)"
             + (f", rotation stop at {turn_stop}" if turn_stop else "")
             + (" | backward" if any(back[:2]) else ""))
 
