@@ -1,25 +1,19 @@
-"""Scan -> maps -> graph -> path, the phases of CellAttempt (see cell_attempt.py) that look
-at the world: the first scan of the attempt, the fresh scan of every turn, the local data
-and the edge update in the PRM, the replan, the saved data."""
+"""The attempt start, the part of CellAttempt (see cell_attempt.py) that looks at the world:
+the scan into the PRM and the edge update, the robot node, the goal in the cell and the first
+path (run in the planning thread by attempt_cruise._start_in_thread)."""
 import os
 import time
 import numpy as np
-from bosdyn.client.frame_helpers import BODY_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b
+from bosdyn.client.frame_helpers import VISION_FRAME_NAME, get_a_tform_b
 from spot_explorer.graphnav import map_recording
-from spot_explorer.robot import photos
-from spot_explorer.robot import connection
 from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
 from spot_explorer.perception import spot_grid
-from spot_explorer.planning import safe_frontier
-from spot_explorer.planning import roadmap
 from spot_explorer.planning import edge_evaluation
 from spot_explorer.mission import mission_prm
-from spot_explorer import config as P
-from spot_explorer.records import (HANDOFF, MISSION_STATS, save_npz_async, timing_add, visualize_grid_with_candidates)
+from spot_explorer.records import HANDOFF, timing_add, visualize_grid_with_candidates
 from spot_explorer.planning import goal
-from spot_explorer.mission import planning_cycle
-from spot_explorer.mission.attempt_common import STOP, FAILED
+from spot_explorer.mission.attempt_common import FAILED
 
 class ScanSteps:
     """Mixin of CellAttempt: the state is CellAttempt's, see its docstring for the map of the phases."""
@@ -92,9 +86,9 @@ class ScanSteps:
             print(f"[EDGES] {self.prm_graph.live_veto_last} edges discarded at once by the live "
                   f"scan (they pass less than {edge_evaluation.LIVE_PREFILTER_OD_M:.2f} m from an "
                   f"obstacle just seen), before the slope.")
-        # A new attempt: the traps of the previous attempt no longer apply (see
-        # _trap_backtrack). The penalties are a layer separate from the edges, so
-        # they survive the rebuilds WITHIN the attempt.
+        # A new attempt: the edges taken out for the previous attempt (_ATTEMPT_MARK) no longer
+        # apply. The penalties are a layer separate from the edges, so they survive the
+        # rebuilds WITHIN the attempt.
         self.prm_graph.clear_penalties_for_attempt()
 
     def _goal_and_path(self, scan):
@@ -193,187 +187,3 @@ class ScanSteps:
         HANDOFF.mark("figure data")
         return None
 
-    def _scan_and_graph(self):
-        """Fresh scan, global maps, local data into the PRM and replanning if needed (EVENT
-        REFRESH); the loop is left if there is no path any more."""
-        outcome = self._fresh_scan()
-        if outcome is not None:
-            return outcome
-        touched_nodes = self._update_graph()
-        if touched_nodes:
-            self._replan(touched_nodes)
-        if not self.path_waypoints:
-            return STOP
-
-    def _fresh_scan(self):
-        """Scan, processing, global maps, local data into the PRM, snapshot for the frontier
-        and free-space map. FAILED if the scan does not arrive."""
-        # 1. Fresh scan, before anything else
-        scan = self.local_grid.fetch_scan(self.robot_state_client)
-        if scan is None:
-            print("[ERROR] Local acquisition failed during tracking. Precautionary stop.")
-            if self.verification_tracker is not None:
-                self.verification_tracker.clear_path()
-            return FAILED
-        self.t_scan = time.perf_counter()
-
-        # Robot pose at the same instant as the grid (same snapshot of transforms): the robot
-        # may still be walking from the previous cell (the hand-off of attempt_cruise).
-        tf = get_a_tform_b(scan.proto.local_grid.transforms_snapshot, VISION_FRAME_NAME, BODY_FRAME_NAME)
-        q = tf.rotation
-        self.robot_x, self.robot_y = tf.position.x, tf.position.y
-        self.robot_yaw = connection.yaw_of(q)
-        self.scan = scan
-        self.snap, self.t_proc, self.t_maps = planning_cycle.scan_into_maps(
-            self.local_grid, self.prm_graph, self.global_map, self.global_terrain_map, scan,
-            (self.robot_x, self.robot_y, self.robot_yaw), ground_label="scan-step")
-
-    def _update_graph(self):
-        """Edges re-evaluated on the new data (only after a move or an event), nodes in
-        obstacles out, rotation refusals still valid. The nodes touched by the refresh."""
-        # --- Event refresh -------------------------------------------------------------
-        # Edge weights and slopes change only when the data under them changes,
-        # i.e. when the window moves: with the robot still a refresh would recompute the
-        # same numbers, and about half the scans are rescans while still (block
-        # confirmations, turns without movement).
-        # It refreshes only when needed: at the end of a MOVE (completed,
-        # interrupted or failed, even if it crossed several PRM nodes and edges) and after
-        # the EVENTS that change the plan (confirmed block, edge discarded,
-        # replan, goal chosen again, return with GraphNav, fall).
-        # This does not affect safety: the protection net is not the graph vetoes but
-        # the safe FRONTIER, which is recomputed from scratch at every scan (0.5 ms) and at ~5 Hz
-        # during the move in the thread. Postponing the refresh only delays the moment
-        # the PLANNER learns of a new obstacle; if the robot is still there is
-        # nothing new to learn, and if something really enters the field the frontier gets
-        # shorter, the decision becomes 'wait' or 'blocked' -- which are events, so the
-        # refresh triggers anyway. The uncovered case closes by itself.
-        refresh = self.need_refresh or getattr(self.prm_graph, 'needs_refresh', False)
-        touched_nodes = planning_cycle.refresh_graph(
-            self.prm_graph, self.snap, self.global_map, (self.robot_x, self.robot_y, self.robot_yaw),
-            refresh)
-        if refresh:
-            self.need_refresh = False
-
-        # Edges already refused for rotation from this node: they stay out until the robot
-        # moves. The discard is soft, so refresh_local_edge_weights would put them back
-        # into play at every turn, and the robot could stay still alternating two refused
-        # edges without ever getting to the retreat. The robot can stay attached to the
-        # same node even after moving, so the discard holds only while the robot
-        # is where the rotation was refused.
-        for (from_id, to_id), n_fails in self.rotation_fails.items():
-            fx, fy = self.rotation_fail_xy.get((from_id, to_id), (self.robot_x, self.robot_y))
-            if (from_id == self.robot_node_id and n_fails > 0
-                    and float(np.hypot(self.robot_x - fx, self.robot_y - fy)) <= roadmap.ANCHOR_ON_NODE_M):
-                roadmap.mark_edge_blocked_soft(self.prm_graph, from_id, to_id)
-        return touched_nodes
-
-    def _replan(self, touched_nodes):
-        """Dijkstra from the robot node to the goal on the updated graph; the path changes
-        only if the new one costs at least 10% less. Without a path, new goal if the goal is
-        the one isolated."""
-        current_plan_ids = [self.robot_node_id] + [w[0] for w in self.path_waypoints]
-        chosen_path_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, self.goal_id,
-                                                       current_path_ids=current_plan_ids, margin=0.10)
-
-        if chosen_path_ids is None:
-            n_free = self.prm_graph.reachable_count(self.robot_node_id, P.REPLAN_FAIL_ROBOT_FREE_NODES)
-            if self.goal_repicks < P.MAX_BLOCK_REPLANS and n_free >= P.REPLAN_FAIL_ROBOT_FREE_NODES:
-                # From the robot the graph still goes somewhere: it is the goal that has been
-                # left isolated. Another one with a path is searched at once; if there is
-                # none, the previous plan stays as below.
-                MISSION_STATS['replan_fail_repicks'] = MISSION_STATS.get('replan_fail_repicks', 0) + 1
-                self._repick_goal(
-                    f"Replan failed: no path from {self.robot_node_id} to the goal "
-                    f"({self.target_x:.2f}, {self.target_y:.2f}) in the updated graph, while "
-                    f"from the robot the graph goes on: it is the goal that is isolated.",
-                    "no path in the updated graph")
-            else:
-                print(f"[REPLAN FAILED] No existing path from {self.robot_node_id} to "
-                      f"{self.goal_id} in the updated graph. I keep the previous path: the "
-                      f"safe frontier decides anyway how far it can advance.")
-        elif chosen_path_ids != current_plan_ids:
-            self._use_path(chosen_path_ids)
-            print(f"[REPLAN] Path updated ({len(touched_nodes)} local nodes re-evaluated): "
-                  f"{len(self.path_waypoints)} waypoints left.")
-
-            self.replan_counter += 1
-            MISSION_STATS['replan_count'] += 1
-            replan_save_path = os.path.join(
-                self.mission_folder, f"iteration_{self.iteration}_cell_{self.target_row}_{self.target_col}_replan_{self.replan_counter}.png"
-            ) if self.mission_folder else None
-
-            visualize_grid_with_candidates(
-                pts=self.scan.pts, terrain_real=self.scan.terrain, obstacle_mask=self.scan.obstacle_mask,
-                robot_x=self.robot_x, robot_y=self.robot_y,
-                candidates={'rejected': [], 'valid': []},
-                chosen_point=(self.target_x, self.target_y), iteration=self.iteration, env=self.env,
-                save_path=replan_save_path, prm_graph=self.prm_graph, chosen_path=self.full_path_coords,
-                cells_obstacle_dist=self.scan.od, valid_values=self.scan.valid,
-                grad_values=self.scan.grad, rough_values=self.scan.rough,
-                include_diagnostics=False  # light: main view and global map
-            )
-        else:
-            print(f"[REPLAN STABLE] Path unchanged from {self.robot_node_id} to {self.goal_id} "
-                  f"({len(touched_nodes)} local nodes re-evaluated): the alternative does not "
-                  f"pass the stability threshold. Carrying on with the current plan.")
-
-    def _save_scan_bundle(self):
-        """Everything needed to review this scan afterwards (scans/*.npz): grid layers,
-        filtered snapshot, path, frontier and decision. See SAVE_SCAN_BUNDLES."""
-        # A rotation refusal can be recomputed offline from obstacle_distance, robot_xyz,
-        # robot_yaw and decision_target.
-        if P.SAVE_SCAN_BUNDLES and self.mission_folder is not None:
-            extra = {}
-            if P.SAVE_EXTRA_LAYERS:
-                t_x = time.perf_counter()
-                for name, lay in self.local_grid.extra_layers(P.SAVE_EXTRA_LAYERS).items():
-                    extra[name] = lay['values']
-                    extra[f'{name}_origin'] = lay['origin']
-                    extra[f'{name}_cell'] = lay['cell']
-                timing_add('scan', time.perf_counter() - t_x)
-            save_npz_async(
-                os.path.join(self.mission_folder, "scans",
-                             f"scan_it{self.iteration:03d}_cell{self.target_row}_{self.target_col}_{self.loop_iter:03d}.npz"),
-                time=time.time(), iteration=self.iteration, cell=np.array([self.target_row, self.target_col]),
-                loop_iter=self.loop_iter,
-                **planning_cycle.scan_bundle_arrays(self.scan, self.snap, self.local_grid,
-                                                    (self.robot_x, self.robot_y, self.robot_z), self.robot_yaw),
-                polyline=np.array(self.polyline), path_node_ids=np.array([w[0] for w in self.path_waypoints]),
-                robot_node_id=self.robot_node_id, goal_xy=np.array([self.target_x, self.target_y]),
-                frontier_dist=self.frontier['dist'], frontier_reason=self.frontier['reason'],
-                frontier_stop_xy=np.array(self.frontier['stop_xy']),
-                frontier_value=np.nan if self.frontier['value'] is None else self.frontier['value'],
-                frontier_od_robot=self.frontier['od_robot'], frontier_half_along=self.frontier['half_along'],
-                frontier_clearance=self.frontier['clearance_nominal'], frontier_path_len=self.frontier['path_len'],
-                allowed_advance=safe_frontier.allowed_advance(self.frontier),
-                keep_heading=self.keep_heading, no_progress=self.no_progress,
-                **extra,
-                decision_kind=self.decision['kind'],
-                decision_target=np.array(self.decision.get('target', (np.nan, np.nan)), dtype=np.float64))
-            MISSION_STATS['scan_bundles'] += 1
-
-    def _save_block_data(self):
-        """Scan and path of the confirmed block, to look at it afterwards (BLOCKED_n.npz)."""
-        if self.mission_folder is not None:
-            try:
-                npz_blocked = os.path.join(
-                    self.mission_folder,
-                    f"iteration_{self.iteration}_cell_{self.target_row}_{self.target_col}_BLOCKED_{self.block_replans + 1}.npz")
-                np.savez_compressed(
-                    npz_blocked,
-                    obstacle_distance=self.snap.obstacle_dist, rough_veto=self.snap.rough_veto,
-                    seen=self.snap.seen, terrain=self.snap.terrain,
-                    terrain_raw=np.asarray(self.scan.terrain_raw).reshape(self.scan.shape),
-                    terrain_valid_raw=np.asarray(self.scan.valid).reshape(self.scan.shape),
-                    obstacle_mask=np.asarray(self.scan.obstacle_mask).reshape(self.scan.shape),
-                    roughness=self.scan.rough_2d,
-                    grid_origin_x=self.snap.origin_x, grid_origin_y=self.snap.origin_y, cell_size=self.snap.cell_size,
-                    robot_xy=np.array([self.robot_x, self.robot_y]), robot_yaw=self.robot_yaw,
-                    polyline=np.array(self.polyline), frontier_dist=self.frontier['dist'],
-                    frontier_reason=self.frontier['reason'], frontier_stop_xy=np.array(self.frontier['stop_xy']),
-                    ground_z=np.nan if self.local_grid.last_ground_filter.get('ground_z') is None
-                    else self.local_grid.last_ground_filter['ground_z'])
-                print(f"[DATA SAVE] Block data saved in {os.path.basename(npz_blocked)}")
-                photos.capture(os.path.splitext(os.path.basename(npz_blocked))[0])
-            except Exception as e:
-                print(f"[DATA SAVE] Could not save the block data: {e}")

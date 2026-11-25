@@ -1,7 +1,6 @@
-"""Getting out of a block: going back with GraphNav, walked retreat, blocked or deferred cells."""
+"""Getting away after a fall: the walked retreat along the way the robot came; reachable targets of a cell."""
 import numpy as np
 
-from spot_explorer.graphnav import navigation
 from spot_explorer.robot import motion
 from spot_explorer.perception import geometry
 from spot_explorer.robot import connection
@@ -9,7 +8,7 @@ from spot_explorer.planning import safe_frontier
 
 
 from spot_explorer import config as P
-from spot_explorer.records import MISSION_STATS, TrajectoryLog
+from spot_explorer.records import TrajectoryLog
 
 
 
@@ -19,168 +18,13 @@ from spot_explorer.records import MISSION_STATS, TrajectoryLog
 # =========================================================================
 
 
-def backtracking_cannot_help(env, prm_graph, goal_id, robot_state_client, max_hops,
-                             min_dist_m=0.40):
-    """
-    Can going back with GraphNav achieve anything?
-
-    escape_by_backtracking goes back to a breadcrumb and only then asks the graph for a path
-    from there. But every breadcrumb already has its PRM node: the same question can be asked
-    before moving. If the goal is in another component of the graph, no waypoint behind can
-    change the answer, and the returns would only be wasted travel.
-
-    Answers True only if every breadcrumb that would be visited has a PRM node connected in
-    the graph and there is no path from any of them. If even one cannot be judged (missing
-    or isolated node, e.g. discarded inside an obstacle) it answers False and the robot goes
-    back: when in doubt, the way out is not taken away.
-    """
-    trail = getattr(env, '_graphnav_trail', None) or []
-    if not trail or goal_id not in prm_graph.nodes:
-        return False
-    try:
-        rx, ry, _, _ = connection.getPosition(robot_state_client)
-    except Exception:
-        return False
-    candidates = [c for c in reversed(trail)
-                  if float(np.hypot(c['x'] - rx, c['y'] - ry)) >= min_dist_m][:int(max_hops)]
-    if not candidates:
-        return False
-    for crumb in candidates:
-        nid = crumb.get('prm_node')
-        if nid is None or nid not in prm_graph.nodes or not prm_graph.edges.get(nid):
-            return False
-        if prm_graph.find_path_dijkstra(nid, goal_id) is not None:
-            return False
-    return True
-
-
-def _trap_backtrack(trap_state, block_arc, env, prm_graph, goal_id, recordingInterface,
-                    robot_state_client, command_client, global_map, mobility_kwargs, pts,
-                    obstacle_mask, label="", **kwargs):
-    """
-    Going back (escape_by_backtracking) with MEMORY for the attempt.
-
-    trap_state: the attempt's dict ({'n': returns already made}), never reset within the
-    attempt. block_arc: (a, b), the edge the robot stopped on.
-
-    Before replanning, the edge becomes impassable for the rest of the attempt (attempt
-    penalty: it survives refreshes and rebuilds and is removed only at the start of the
-    next attempt, see roadmap.clear_penalties_for_attempt). From there the planner must
-    propose another way, or admit there is none. At the MAX_BACKTRACKS_PER_ATTEMPT-th
-    return the robot goes back anyway -- it cannot stay where it is -- but the attempt
-    ends: the cell is deferred and tried from another side. Without this memory the robot
-    would repeat the same loop forever.
-    """
-    trap_state['n'] = trap_state.get('n', 0) + 1
-    if block_arc is not None and block_arc[0] is not None and block_arc[1] is not None:
-        a, b = int(block_arc[0]), int(block_arc[1])
-        if a != b:
-            key = (min(a, b), max(a, b))
-            prm_graph.edge_penalty_persistent[key] = prm_graph._ATTEMPT_MARK
-            print(f"[RETURN] Edge {a}->{b} out of the plan for the rest of the attempt "
-                  f"(return {trap_state['n']}/{P.MAX_BACKTRACKS_PER_ATTEMPT}).")
-    esc = escape_by_backtracking(
-        env, prm_graph, goal_id, recordingInterface, robot_state_client, command_client,
-        global_map, mobility_kwargs, pts, obstacle_mask, label=label, **kwargs)
-    if trap_state['n'] >= P.MAX_BACKTRACKS_PER_ATTEMPT and esc.get('ok'):
-        MISSION_STATS['backtrack_giveups'] = MISSION_STATS.get('backtrack_giveups', 0) + 1
-        print(f"[RETURN] {trap_state['n']} returns in this attempt: I went "
-              f"back, but I do not retry. I defer the cell and try it from another side.")
-        esc = dict(esc, ok=False, how='gave up after repeated returns')
-    return esc
-
-
-def escape_by_backtracking(env, prm_graph, goal_id, recordingInterface, robot_state_client,
-                           command_client, global_map, mobility_kwargs, pts, obstacle_mask,
-                           max_hops=P.GRAPHNAV_MAX_BACKTRACK_HOPS, label="",
-                           skip_if_graph_cannot_help=False):
-    """
-    The way out when from here there is nowhere to go.
-
-    Go back one waypoint with GraphNav and try to replan towards the goal from there; if
-    that is not possible, go back another one, and so on up to max_hops. After max_hops the
-    cell is deferred and the next priority is taken.
-
-    If GraphNav cannot do it (empty track, not localized, STUCK, timeout) it falls back on
-    the walked retreat: it is worse, but it is the last safety net and we keep it. In a
-    trap where rotating is impossible GraphNav, which wants to turn the nose to follow an
-    edge, can return STUCK exactly where it is needed.
-
-    Returns a dict: ok (the mission can continue), ids (new path or None), robot_node (new
-    robot node or None), how (what happened, for the log).
-    """
-    # Only when the robot is not trapped (callers "no alternative in the graph"):
-    # in a trap or after a physical failure going back also serves to free it.
-    if skip_if_graph_cannot_help and backtracking_cannot_help(
-            env, prm_graph, goal_id, robot_state_client, max_hops):
-        print(f"[RETURN] {label}: from the nodes of the next {max_hops} breadcrumbs the graph does not "
-              f"reach the goal anyway (it does not depend on where I am). I do not go "
-              f"back: I defer the cell at once.")
-        MISSION_STATS['backtracks_skipped'] = MISSION_STATS.get('backtracks_skipped', 0) + 1
-        return {'ok': False, 'ids': None, 'robot_node': None, 'how': 'cell deferred'}
-
-    for hop in range(1, int(max_hops) + 1):
-        # Arrive facing the attempt's goal: from there replan towards it.
-        ok, crumb = navigation.graphnav_step_back(env, recordingInterface, robot_state_client, command_client,
-                                                     face_xy=prm_graph.get_node_position(goal_id))
-        if not ok:
-            if crumb is None:
-                print(f"[RETURN] {label}: no GraphNav breadcrumb available.")
-            else:
-                print(f"[RETURN] {label}: GraphNav could not go back to "
-                      f"{crumb['wp_name']}.")
-            MISSION_STATS['graphnav_backtrack_fail'] += 1
-            print("[RETURN] Falling back on the walked retreat along the travelled legs.")
-            retreat_along_traveled_path(env, robot_state_client, command_client,
-                                        mobility_kwargs=mobility_kwargs,
-                                        pts=pts, obstacle_mask=obstacle_mask)
-            return {'ok': False, 'ids': None, 'robot_node': None, 'how': 'walked retreat'}
-
-        if not crumb.get('in_place'):
-            MISSION_STATS['graphnav_backtracks'] += 1
-        prm_graph.needs_refresh = True       # the robot has moved: see event refresh
-        # The scan of the preliminary discard was taken from another point (and the
-        # body exclusion would be where the robot was): drop it, until the next scan.
-        prm_graph.set_live_obstacles(None, None, 0, 0, 1, 0, 0)
-        try:
-            ax, ay, _, _ = connection.getPosition(robot_state_client)
-        except Exception:
-            ax, ay = crumb['x'], crumb['y']
-        new_node = prm_graph.add_stop_node(
-            ax, ay, global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M,
-            label=f"stop (GraphNav return to {crumb['wp_name']})")
-        # No global-map exemption around this node: see the comment at the
-        # caller of set_robot_node in the main loop.
-        prm_graph.set_robot_node(new_node, 0.0)
-
-        ids = prm_graph.find_path_dijkstra(new_node, goal_id)
-        if ids is not None and len(ids) > 1:
-            print(f"[RETURN] {label}: back at {crumb['wp_name']} ({hop}/{max_hops}) and from here "
-                  f"there is a path with {len(ids) - 1} legs. Resuming.")
-            return {'ok': True, 'ids': ids, 'robot_node': new_node, 'how': 'replanned'}
-        print(f"[RETURN] {label}: back at {crumb['wp_name']} ({hop}/{max_hops}) but from here the "
-              f"graph offers no path to the goal.")
-        if crumb.get('in_place'):
-            break           # there are no farther breadcrumbs: more rounds would be the same
-
-    print(f"[RETURN] {label}: {hop} returns without finding a path. I defer the cell.")
-    return {'ok': False, 'ids': None, 'robot_node': None, 'how': 'cell deferred'}
-
-
-
-# =========================================================================
-# Walked retreat backwards: the last safety net
-# =========================================================================
-
-
 def retreat_along_traveled_path(env, robot_state_client, command_client,
                                 max_segments=P.RETREAT_MAX_SEGMENTS,
                                 mobility_kwargs=None,
                                 pts=None, obstacle_mask=None):
     """
-    Retreat: go back over its own steps walking BACKWARDS, without ever turning.
-    It is the last safety net, when the return with GraphNav fails (see
-    escape_by_backtracking).
+    Retreat: go back over its own steps walking BACKWARDS, without ever turning. After a
+    fall (cell_attempt).
 
     When the robot gets into a narrow space and there is no longer a path towards the goal
     from there, turning around is not a way out -- it needs space that is not there at that

@@ -3,7 +3,6 @@ import os
 import json
 
 from spot_explorer.robot import motion
-from spot_explorer.mission import attempt_cruise
 from spot_explorer.mission import planning_cycle
 from spot_explorer.mission import exploration
 from spot_explorer.mission import cell_rules
@@ -32,7 +31,6 @@ def mission_switches():
     """
     return {
         'config.MISSION_GRAPH_SAMPLING': P.MISSION_GRAPH_SAMPLING,
-        'attempt_cruise.CONTINUOUS_MOTION': attempt_cruise.CONTINUOUS_MOTION,
         'planning_cycle.PLAN_PERIOD_S': planning_cycle.PLAN_PERIOD_S,
         'exploration.Mission': exploration.Mission.__name__,   # a variant may replace it
         'cell_rules.NEAR_PATH_M': cell_rules.NEAR_PATH_M,
@@ -87,7 +85,7 @@ def _emit_mission_summary_once():
               f"closed because seen: in cruise {g('cruise_seen_handoffs', 0)}, at the attempt start "
               f"{g('cells_seen_only', 0)}, before moving {g('cells_seen_before_moving', 0)}"
               + (f"; on the way {g('cells_on_the_way')}" if g('cells_on_the_way') else ""))
-        print(f"Attempt starts from the planning thread: {g('thread_first_turns', 0)}, stop-and-go instead "
+        print(f"Attempt starts from the planning thread: {g('thread_first_turns', 0)}, no start in cruise "
               f"{g('thread_first_turn_fallbacks', 0)}, failed {len(g('start_failures', []))}; cell failures "
               f"{g('cell_failures', 0)}, cruises that did not walk {g('cruise_stalls', 0)}; goals chosen again "
               f"while walking {g('cruise_goal_repicks', 0)}")
@@ -98,18 +96,10 @@ def _emit_mission_summary_once():
             print(f"Attempt start failed on cell ({f['cell'][0]},{f['cell'][1]}): {f['reason']}")
         print(f"Segments recorded in the CSV: {MISSION_STATS['segments_logged']}")
         print(f".npz saves for edges near the threshold: {MISSION_STATS['near_threshold_saves']}")
-        print(f"Blocks confirmed by the frontier: {MISSION_STATS['frontier_blocks']}, "
-              f"stops halfway through a move: {MISSION_STATS['frontier_aborts']}, "
-              f"rotations refused: {MISSION_STATS['rotation_refusals']}, "
-              f"straight back-offs: {MISSION_STATS['straight_retreats']}, "
-              f"goals chosen again: {MISSION_STATS['goal_repicks']}, "
-              f"shortcuts: {MISSION_STATS['shortcuts']}")
         print(f"Advances in the rotation cone: {MISSION_STATS['cone_moves']}, "
               f"back-offs avoided as useless: {MISSION_STATS['retreats_suppressed']}, "
               f"immediate replans: {MISSION_STATS['early_replans']}")
-        print(f"Returns with GraphNav: {MISSION_STATS['graphnav_backtracks']} successful, "
-              f"{MISSION_STATS['graphnav_backtrack_fail']} failed (walked fallback); "
-              f"PRM nodes discarded as inside obstacles: {MISSION_STATS['nodes_pruned']}")
+        print(f"PRM nodes discarded as inside obstacles: {MISSION_STATS['nodes_pruned']}")
         print(f"Goals excluded for the mission: {MISSION_STATS['goals_refused']}, choices without "
               f"reachable points: {MISSION_STATS['goals_unreachable']}, arrivals with the robot just "
               f"outside the cell: {MISSION_STATS['arrivals_near_goal']}, returns without "
@@ -138,8 +128,7 @@ def _emit_mission_summary_once():
               f"{MISSION_STATS['sdk_loop_partial']} ended at the time limit, "
               f"{MISSION_STATS['sdk_loop_failures']} failed attempts")
         print(f"GraphNav re-anchorings (robot lost): {MISSION_STATS.get('graphnav_relocalizations', 0)} successful, "
-              f"{MISSION_STATS.get('graphnav_relocalization_fail', 0)} failed | cells deferred after "
-              f"{P.MAX_BACKTRACKS_PER_ATTEMPT} returns in the same attempt: {MISSION_STATS.get('backtrack_giveups', 0)} | "
+              f"{MISSION_STATS.get('graphnav_relocalization_fail', 0)} failed | "
               f"edges removed by the live scan in the refreshes: {MISSION_STATS.get('live_arc_vetoes', 0)}")
         lg_main = MISSION_CTX.get('local_grid')
         lg_trk = getattr(MISSION_CTX.get('tracker'), '_local_grid', None)

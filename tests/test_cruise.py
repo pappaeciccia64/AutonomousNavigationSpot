@@ -18,7 +18,6 @@ import os
 import shutil
 import sys
 import tempfile
-import threading
 import time
 import traceback
 from types import SimpleNamespace as NS
@@ -29,17 +28,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.dirname(HERE), HERE]
 
 import test_e2e_loop as e2e                                                    # noqa: E402
-from fake_spot import FakeSpot                                                 # noqa: E402
 from spot_explorer import config, records                                      # noqa: E402
 from spot_explorer.mission import attempt_common, attempt_cruise, cell_attempt, cells, planning_cycle  # noqa: E402
 from spot_explorer.perception import geometry                                  # noqa: E402
 from spot_explorer.planning import edge_evaluation, mission_graph, roadmap, safe_frontier   # noqa: E402
 from spot_explorer.perception import low_obstacles   # noqa: E402
 
-# test_e2e_loop pins the switches off for the stop-and-go: here the cruise is on, as in the field.
-attempt_cruise.CONTINUOUS_MOTION = True
-planning_cycle.get_a_tform_b = e2e.fake_get_a_tform_b
-attempt_cruise.BodyTiltRecorder = e2e._NoTilt
 
 FAILS = []
 TRACK = []          # (x, y, t) of the fake Spot while it commands the robot
@@ -58,73 +52,14 @@ def check(cond, msg):
         FAILS.append(msg)
 
 
-class PlanTracker(e2e.FakeTracker):
-    """The frontier thread of the test world, with the planning mode of the real tracker."""
-    AVT = safe_frontier.ArcVerificationTracker
-
-    def __init__(self):
-        super().__init__()
-        self._lock, self._cycle_lock = threading.Lock(), threading.Lock()
-        self._plan_cond = threading.Condition(self._lock)
-        self._job, self._plan, self._plan_version, self._job_period_s = None, None, 0, 0.4
-        self._running = True
-        threading.Thread(target=self._loop, daemon=True).start()
-
-    start_planning, stop_planning, get_plan, wait_plan, _planning_cycle = (
-        AVT.start_planning, AVT.stop_planning, AVT.get_plan, AVT.wait_plan, AVT._planning_cycle)
-
-    def _loop(self):
-        while self._running:
-            with self._lock:
-                job, period = self._job, self._job_period_s
-            if job is not None:
-                self._planning_cycle(job, period)
-            else:
-                time.sleep(0.05)
+PlanTracker = e2e.PlanTracker
 
 
-class RTSpot(FakeSpot):
-    """Real-time clock; pose shared with e2e.ROBOT (the stop-and-go legs move ROBOT through the
-    fake navigate_to). on_step(x, y) is called at every step (a box appearing)."""
+class RTSpot(e2e.RTSpot):
+    """The real-time fake Spot of test_e2e_loop, its walked track in TRACK."""
 
     def __init__(self, on_step=None):
-        super().__init__(e2e.ROBOT.x, e2e.ROBOT.y, e2e.ROBOT.yaw,
-                         blocked=lambda x, y: e2e.WORLD.od_at(x, y) < 0.10)
-        self._t, self._l, self.on_step = time.time(), threading.RLock(), on_step
-
-    def _walking(self):
-        c = self._cmds.get(self._active)
-        return c is not None and c['points'] is not None and c['status'] == 1
-
-    def _sync(self):
-        """While a trajectory runs the fake Spot moves the robot; otherwise the robot is where
-        the stop-and-go (fake navigate_to of test_e2e_loop) left it."""
-        with self._l:
-            now = time.time()
-            if self._walking():
-                self.advance(now - self._t)
-                e2e.ROBOT.x, e2e.ROBOT.y, e2e.ROBOT.yaw = self.x, self.y, self.yaw
-                e2e.ROBOT.track.append((self.x, self.y))
-                e2e.ROBOT.min_clear = min(e2e.ROBOT.min_clear, e2e.WORLD.od_at(self.x, self.y))
-                TRACK.append((self.x, self.y, now))
-                if self.on_step is not None:
-                    self.on_step(self.x, self.y)
-            else:
-                self.x, self.y, self.yaw = e2e.ROBOT.x, e2e.ROBOT.y, e2e.ROBOT.yaw
-            self._t = now
-
-    def robot_command(self, command=None, end_time_secs=None, lease=None, **kw):
-        with self._l:
-            self._sync()
-            return super().robot_command(command, end_time_secs, lease)
-
-    def robot_command_feedback(self, cid):
-        self._sync()
-        return super().robot_command_feedback(cid)
-
-    def get_robot_state(self):
-        self._sync()
-        return super().get_robot_state()
+        super().__init__(on_step, track=TRACK)
 
 
 def run(name, rects, start, cells_seq, on_step=None, env=None):

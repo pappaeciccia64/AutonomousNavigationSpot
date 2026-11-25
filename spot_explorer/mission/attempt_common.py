@@ -1,11 +1,10 @@
-"""Outcomes of the phases of a cell attempt and the battery checks they share (see cell_attempt.py)."""
+"""Outcomes of a cell attempt's cruise and the battery checks it shares (see cell_attempt.py)."""
 from spot_explorer.records import MISSION_CTX
 
 
-# Outcomes of a phase of the navigation loop (see CellAttempt._loop_once): None = go on
-# with the next phase.
-CONTINUE = "continue"   # turn finished: start again from the scan
-STOP = "stop"           # end of the loop: the final position decides (CellAttempt._finish)
+# Outcomes of a cruise (attempt_cruise._cruise, read by CellAttempt.run).
+CONTINUE = "continue"   # the cruise ended for an exception: a new cruise from here
+STOP = "stop"           # the attempt ends: the final position decides (CellAttempt._finish)
 FAILED = "failed"       # the attempt failed
 
 # A cell seen for at least this share in the global map (cells.cell_seen_fraction) counts as

@@ -129,24 +129,8 @@ def _print_configuration():
           f"swept sector in steps of {geometry.ROTATION_SWEEP_STEP_DEG:.0f} deg "
           f"(tolerance {geometry.ROTATION_NOISE_TOLERANCE_M:.2f} m on the noise); "
           f"SIDEWAYS WALKING DISABLED")
-    print(f"[CONFIG] IF IT CANNOT ROTATE: 1) fan in the cone +/-{P.CONE_SWEEP_MAX_DEG:.0f} deg "
-          f"in steps of {P.CONE_SWEEP_STEP_DEG:.0f}, it goes in the freest direction among those "
-          f"getting closer by at least {P.CONE_MIN_GAIN_M:.2f} m; 2) straight back-off up to "
-          f"{P.ROTATION_RETREAT_M:.2f} m ONLY if from there the rotation becomes possible, "
-          f"max {P.MAX_STRAIGHT_RETREATS_IN_A_ROW} in a row; 3) the leg is discarded")
-    print(f"[CONFIG] TRAP: 360 degree fan in steps of {P.ESCAPE_FAN_STEP_DEG:.0f} "
-          f"({int(360/P.ESCAPE_FAN_STEP_DEG)} directions); a direction counts if it allows "
-          f"{P.ESCAPE_FAN_MIN_ADVANCE_M:.2f} m AND the robot can turn to point at it. Zero "
-          f"directions -> it retraces the leg it came from AT ONCE, without "
-          f"discarding edges. Check on the arrival pose for steps below "
-          f"{P.ARRIVAL_EXIT_CHECK_MAX_STEP_M:.2f} m or with obstacle_distance below "
-          f"{P.ARRIVAL_EXIT_CHECK_OD_M:.2f} m, max {P.MAX_ARRIVAL_REFUSALS} refusals. "
-          f"Discard by [EARLY] and [ARRIVAL]: NOT permanent")
     print(f"[CONFIG] RETURNS: GraphNav breadcrumb every "
-          f"{P.GRAPHNAV_WAYPOINT_MIN_SPACING_M:.2f} m, return with GraphNav up to "
-          f"{P.GRAPHNAV_MAX_BACKTRACK_HOPS} waypoints back retrying the "
-          f"planning at every stop, then the cell is deferred; walked retreat "
-          f"only as the last net. PRM nodes discarded below "
+          f"{P.GRAPHNAV_WAYPOINT_MIN_SPACING_M:.2f} m; walked retreat after a fall. PRM nodes discarded below "
           f"{P.PRM_NODE_MIN_CLEARANCE_M:.2f} m of free space, only where seen. "
           f"Exemption of {roadmap.STOP_NODE_MAP_IGNORE_M:.2f} m from the global map "
           f"around the robot: now only after a fall")

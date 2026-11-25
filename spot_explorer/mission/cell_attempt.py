@@ -1,31 +1,19 @@
-"""One attempt to enter a cell: CellAttempt, the navigation loop with the safe frontier."""
-import time
-import numpy as np
-
+"""One attempt to enter a cell: CellAttempt, the cruise towards a goal in the cell."""
 from spot_explorer.robot import motion
 from spot_explorer.perception import geometry
 from spot_explorer.mission import cells
 from spot_explorer.robot import connection
-from spot_explorer.planning import decisions
-from spot_explorer.planning import safe_frontier
 
-from spot_explorer.planning import roadmap
-
-from spot_explorer import config as P
-from spot_explorer.records import HANDOFF, MISSION_STATS, timing_add
-from spot_explorer.planning import goal
+from spot_explorer.records import HANDOFF, MISSION_STATS
 from spot_explorer.mission import recovery
 from spot_explorer.mission import attempt_common
 from spot_explorer.mission.attempt_common import CONTINUE, STOP, FAILED, battery_return_due
 from spot_explorer.mission.attempt_scan import ScanSteps
-from spot_explorer.mission.attempt_obstacles import ObstacleSteps
-from spot_explorer.mission.attempt_legs import LegSteps
 from spot_explorer.mission import attempt_cruise
 from spot_explorer.mission.attempt_cruise import CruiseSteps
-from spot_explorer.mission.legacy.stop_and_go_start import StopAndGoStart
 
-# A cruise that ends for an exception (no new plan, a command that ends badly, a fall) is
-# followed by a new one from where the robot is; this many in a row end the attempt.
+# A cruise that ends for an exception (no new plan, a command that ends badly) is followed by a
+# new one from where the robot is; this many in a row end the attempt.
 MAX_CRUISE_RESTARTS = 3
 
 
@@ -35,48 +23,25 @@ MAX_CRUISE_RESTARTS = 3
 
 
 
-class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStart):
-    """Try to enter cell (target_row, target_col) from the robot's current position.
-
-    Scan, update of maps and graph, choice of the goal point, path, then the navigation
-    loop with the safe frontier. True if the robot ends up inside the cell.
+class CellAttempt(ScanSteps, CruiseSteps):
+    """Try to enter cell (target_row, target_col) from the robot's current position, in cruise.
+    True if the robot ends up inside the cell (or accepted just outside), or walking into it
+    after a hand-off.
 
     mobility_kwargs: optional dict forcing the gait (locomotion_hint, ground_mu_hint,
-        swing_height) for all legs, passed down to motion.relative_move through
-        navigate_to. Empty = gait chosen leg by leg (select_mobility_params).
+        swing_height) for the whole attempt (attempt_cruise._cruise_gait). Empty = gait chosen
+        by the plans from the terrain ahead.
 
-    How it is made. The start: the first cycle of the planning thread (attempt_cruise:
+    How it is made. The start is the first cycle of the planning thread (attempt_cruise:
     _start_in_thread -- seen check, _local_data_into_graph, _goal_and_path, _reset_counters),
-    then the cruise; in the stop-and-go mode (cruise off) _prepare (legacy/stop_and_go_start.py).
-    The stop-and-go loop: _loop_once until a phase decides the outcome:
+    then the cruise (attempt_cruise._cruise): the planning thread plans, the main thread sends
+    the confirmed stretch; goal and cell change while walking. A cruise that ends for an
+    exception is followed by a new one from where the robot is (MAX_CRUISE_RESTARTS); a fall,
+    blocked on the spot and low battery end the attempt.
 
-      _guards                 too many turns, low battery, fall, robot still for too long
-      _scan_and_graph         _fresh_scan, _update_graph, _replan
-      _frontier_and_decision  shortcut, safe frontier, decisions.decide_next_move:
-                              move / reached_node / arrived / wait / blocked
-      _moving_check           robot still walking from the previous cell (hand-off):
-                              on only into a cruise with a small turn, else stop first
-      _rotation               (move) cannot turn: _advance_in_cone, _back_up_to_turn,
-                              trap, leg discarded
-      _node_or_arrival        (reached_node, arrived)
-      _wait                   (wait) _repick_unreachable_goal, _replan_now,
-                              otherwise look again standing still
-      _block                  (blocked) goal to change, trap, leg out for the mission,
-                              new way or return with GraphNav
-      _execute_legs           (move) _check_arrival_pose, then for every leg
-                              _prepare_leg and _walk_leg (_leg_terrain,
-                              _move_and_record, outcome); with CONTINUOUS_MOTION
-                              _cruise instead of the legs (attempt_cruise.py)
-
-    Files: the loop, the guards, the decision and the shared actions are here; the scan
-    phases in attempt_scan.py (ScanSteps), rotation/wait/block in attempt_obstacles.py
-    (ObstacleSteps), the legs in attempt_legs.py (LegSteps), the cruise in
-    attempt_cruise.py (CruiseSteps). Outcomes and battery checks
-    in attempt_common.py.
-
-    Actions shared by the phases: _use_path, _drop_edge (for now / for the attempt / for
-    the mission), _walked_path and _stop_node_here, _escape_fan and _escape_trap,
-    _repick_goal, _go_back (GraphNav backwards, see _trap_backtrack).
+    Files: the start and the outcome here; the scan into the graph, the goal and the first path
+    in attempt_scan.py (ScanSteps); the cruise in attempt_cruise.py (CruiseSteps), its
+    planning cycle in planning_cycle.py. Outcomes and battery checks in attempt_common.py.
     """
 
     def __init__(self, local_grid, global_grid, robot_state_client, command_client,
@@ -105,95 +70,86 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
         HANDOFF.mark("choice of the next cell")
         HANDOFF.start("attempt start (robot standing) -> first command", restart=False)
         try:
-            if self._can_start_in_thread():
-                # The attempt start is the first cycle of the planning thread: the main thread
-                # only gets up if fallen and starts the planner (attempt_cruise._start_in_thread).
-                self._prepare_for_thread()
-                started = None
-                for k in range(attempt_cruise.START_TRIES):
-                    self.loop_iter = 1
-                    started = self._cruise_from_start()
-                    if started is not None or self.path_waypoints:
-                        break
-                    print(f"[ATTEMPT] No path from the planning thread within {attempt_cruise.START_PLAN_WAIT_S:.0f} s "
-                          f"(try {k + 1} of {attempt_cruise.START_TRIES}).")
-                # A cruise that ended for an exception (not arrived, no hand-off, no block that
-                # leaves the cell): the attempt goes on with a new cruise from where the robot is,
-                # the start in the planning thread again. A fall (the robot gets up and backs
-                # away), blocked on the spot, low battery, or MAX_CRUISE_RESTARTS in a row: the
-                # attempt ends.
-                restarts = 0
-                while started is CONTINUE:
-                    why = getattr(self, 'cruise_end_reason', None) or "the cruise ended"
-                    if why.startswith('fall'):
-                        # As before the stop-and-go removal: the robot gets up, backs away along
-                        # the way it came, and the attempt ends (a failure of the cell).
-                        motion.check_and_recover_fall(self.robot_state_client, self.command_client,
-                                                      self.global_grid.global_occupancy_map, "during the cruise")
-                        recovery.retreat_along_traveled_path(self.env, self.robot_state_client, self.command_client,
-                                                             mobility_kwargs=self.mobility_kwargs)
-                        self.env._attempt_fail_why = f"fall during the cruise ({why})"
-                        return False
-                    if why.startswith(attempt_cruise.BLOCKED_ON_SPOT):
-                        # Every goal needs a way the robot cannot take from where it stands: a new
-                        # cruise from here would find the same.
-                        self.env._attempt_fail_why = f"cruise ended {why}"
-                        print(f"[ATTEMPT] Cell ({self.target_row},{self.target_col}): "
-                              f"{self.env._attempt_fail_why}: a failure of the cell, retried later.")
-                        return False
-                    if battery_return_due():
-                        print(f"[BATTERY] Interrupting the attempt on cell ({self.target_row},"
-                              f"{self.target_col}) for the low-battery return.")
-                        return False
-                    restarts += 1
-                    if restarts > MAX_CRUISE_RESTARTS:
-                        self.env._attempt_fail_why = (f"{MAX_CRUISE_RESTARTS} cruises in a row ended early "
-                                                      f"(the last: {why})")
-                        print(f"[ATTEMPT] Cell ({self.target_row},{self.target_col}): "
-                              f"{self.env._attempt_fail_why}: a failure of the cell, retried later.")
-                        return False
-                    MISSION_STATS['cruise_restarts'] = MISSION_STATS.get('cruise_restarts', 0) + 1
-                    print(f"[ATTEMPT] The cruise ended ({why}): a new cruise from here "
-                          f"({restarts} of {MAX_CRUISE_RESTARTS}).")
-                    self._prepare_for_thread()
-                    self.loop_iter = 1
-                    started = self._cruise_from_start()
-                if started is FAILED:
-                    return False
-                if started is STOP:
-                    return True if self._seen_only else self._finish()
-                if started is None and not self.path_waypoints:
-                    # Not "unreachable now": that is a fact of the graph, this may be a slow or
-                    # stuck computer. A failure of the cell (retried later, set aside after
-                    # cell_rules.MAX_FAILURES), with its cause.
-                    self.loop_iter = 0
-                    why = getattr(self, 'start_failure_reason', None) or "the planning thread gave no path"
-                    self.env._attempt_fail_why = f"start in the planning thread failed: {why}"
-                    MISSION_STATS.setdefault('start_failures', []).append(
-                        dict(cell=[self.target_row, self.target_col], reason=why))
-                    print(f"[ATTEMPT] Cell ({self.target_row},{self.target_col}): no start from the planning thread "
-                          f"after {attempt_cruise.START_TRIES} tries ({why}): a failure of the cell, retried later.")
-                    return False
-                if started is None:
-                    # The first plan did not allow to start, and no other goal did in time
-                    # (attempt_cruise._first_plan: a block at once): the cell left for later.
-                    self.env._attempt_fail_why = (f"no start in cruise: "
-                                                  f"{getattr(self, 'start_failure_reason', None) or 'no plan'}")
-                    print(f"[ATTEMPT] Cell ({self.target_row},{self.target_col}): {self.env._attempt_fail_why}.")
-                    return False
-            else:
-                # Stop-and-go mode (cruise off): its own start, legacy/stop_and_go_start.py.
-                if self._prepare() is FAILED:
-                    return False
-                if self._seen_only:
-                    return True
-
-            while self.path_waypoints and len(self.path_waypoints) > 0:
-                outcome = self._loop_once()
-                if outcome is FAILED:
-                    return False
-                if outcome is STOP:
+            if not self._can_start_in_thread():
+                self.env._attempt_fail_why = ("no planning thread (the frontier tracker has no planning mode): "
+                                              "the cruise cannot run")
+                print(f"[ATTEMPT] Cell ({self.target_row},{self.target_col}): {self.env._attempt_fail_why}.")
+                return False
+            # The attempt start is the first cycle of the planning thread: the main thread
+            # only gets up if fallen and starts the planner (attempt_cruise._start_in_thread).
+            self._prepare_for_thread()
+            started = None
+            for k in range(attempt_cruise.START_TRIES):
+                self.loop_iter = 1
+                started = self._cruise_from_start()
+                if started is not None or self.path_waypoints:
                     break
+                print(f"[ATTEMPT] No path from the planning thread within {attempt_cruise.START_PLAN_WAIT_S:.0f} s "
+                      f"(try {k + 1} of {attempt_cruise.START_TRIES}).")
+            # A cruise that ended for an exception (not arrived, no hand-off, no block that
+            # leaves the cell): the attempt goes on with a new cruise from where the robot is,
+            # the start in the planning thread again. A fall (the robot gets up and backs
+            # away), blocked on the spot, low battery, or MAX_CRUISE_RESTARTS in a row: the
+            # attempt ends.
+            restarts = 0
+            while started is CONTINUE:
+                why = getattr(self, 'cruise_end_reason', None) or "the cruise ended"
+                if why.startswith('fall'):
+                    # The robot gets up, backs away along the way it came, and the attempt
+                    # ends (a failure of the cell).
+                    motion.check_and_recover_fall(self.robot_state_client, self.command_client,
+                                                  self.global_grid.global_occupancy_map, "during the cruise")
+                    recovery.retreat_along_traveled_path(self.env, self.robot_state_client, self.command_client,
+                                                         mobility_kwargs=self.mobility_kwargs)
+                    self.env._attempt_fail_why = f"fall during the cruise ({why})"
+                    return False
+                if why.startswith(attempt_cruise.BLOCKED_ON_SPOT):
+                    # Every goal needs a way the robot cannot take from where it stands: a new
+                    # cruise from here would find the same.
+                    self.env._attempt_fail_why = f"cruise ended {why}"
+                    print(f"[ATTEMPT] Cell ({self.target_row},{self.target_col}): "
+                          f"{self.env._attempt_fail_why}: a failure of the cell, retried later.")
+                    return False
+                if battery_return_due():
+                    print(f"[BATTERY] Interrupting the attempt on cell ({self.target_row},"
+                          f"{self.target_col}) for the low-battery return.")
+                    return False
+                restarts += 1
+                if restarts > MAX_CRUISE_RESTARTS:
+                    self.env._attempt_fail_why = (f"{MAX_CRUISE_RESTARTS} cruises in a row ended early "
+                                                  f"(the last: {why})")
+                    print(f"[ATTEMPT] Cell ({self.target_row},{self.target_col}): "
+                          f"{self.env._attempt_fail_why}: a failure of the cell, retried later.")
+                    return False
+                MISSION_STATS['cruise_restarts'] = MISSION_STATS.get('cruise_restarts', 0) + 1
+                print(f"[ATTEMPT] The cruise ended ({why}): a new cruise from here "
+                      f"({restarts} of {MAX_CRUISE_RESTARTS}).")
+                self._prepare_for_thread()
+                self.loop_iter = 1
+                started = self._cruise_from_start()
+            if started is FAILED:
+                return False
+            if started is STOP:
+                return True if self._seen_only else self._finish()
+            if started is None and not self.path_waypoints:
+                # Not "unreachable now": that is a fact of the graph, this may be a slow or
+                # stuck computer. A failure of the cell (retried later, set aside after
+                # cell_rules.MAX_FAILURES), with its cause.
+                self.loop_iter = 0
+                why = getattr(self, 'start_failure_reason', None) or "the planning thread gave no path"
+                self.env._attempt_fail_why = f"start in the planning thread failed: {why}"
+                MISSION_STATS.setdefault('start_failures', []).append(
+                    dict(cell=[self.target_row, self.target_col], reason=why))
+                print(f"[ATTEMPT] Cell ({self.target_row},{self.target_col}): no start from the planning thread "
+                      f"after {attempt_cruise.START_TRIES} tries ({why}): a failure of the cell, retried later.")
+                return False
+            if started is None:
+                # The first plan did not allow to start, and no other goal did in time
+                # (attempt_cruise._first_plan: a block at once): the cell left for later.
+                self.env._attempt_fail_why = (f"no start in cruise: "
+                                              f"{getattr(self, 'start_failure_reason', None) or 'no plan'}")
+                print(f"[ATTEMPT] Cell ({self.target_row},{self.target_col}): {self.env._attempt_fail_why}.")
+                return False
             return self._finish()
         finally:
             # A successful hand-off leaves the robot walking (see the hand-off in attempt_cruise), and
@@ -201,16 +157,6 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
             # there is no reason to stop the robot.
             if not self._handoff and getattr(self, 'loop_iter', 0) > 0:
                 attempt_cruise.stop_if_moving(self.env, self.command_client, "end of the attempt")
-
-    def _loop_once(self):
-        """One turn of the navigation loop: the phases in order, until one decides the outcome."""
-        for phase in (self._guards, self._scan_and_graph, self._frontier_and_decision,
-                     self._moving_check, self._rotation, self._timings, self._node_or_arrival, self._wait,
-                     self._block, self._execute_legs):
-            outcome = phase()
-            if outcome is not None:
-                return outcome
-        return CONTINUE
 
     def _prepare_for_thread(self):
         """Attempt start in the planning thread: what stays in the main thread before the planner starts -- get up if
@@ -247,41 +193,11 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
         return True
 
     def _reset_counters(self):
-        """Counters and memories of the attempt, before the first turn."""
-        # ===================================================================================
-        # Navigation loop with the safe FRONTIER
-        #
-        # At every turn: fresh scan, update of maps and PRM, replanning if needed,
-        # then the FRONTIER: how far the path is confirmed free now. The robot advances
-        # up to there (minus half a body and margin), along the path.
-        #   - the nose always points at the next point: no sideways walking; if the
-        #     rotation is not possible the cone is tried, then the straight back-off (see
-        #     plan_cone_move and plan_straight_retreat);
-        #   - the rotation is judged on the cells really swept (geometry.rotation_is_clear),
-        #     not on the circumscribed circle;
-        #   - if the goal turns out unreachable on the fresh data another one in the cell is
-        #     chosen, instead of waiting and declaring a block (goal_still_reachable).
-        # ===================================================================================
-        self.replan_counter = 0
-        self.need_refresh = True        # first turn of the attempt: see event refresh
-        self.no_progress = 0
-        self.block_replans = 0
+        """Counters and memories of the attempt, before the first command."""
         self.loop_iter = 0
-        self.rotation_fails = {}     # leg -> how many times the rotation towards it was refused
-        self.rotation_discards = 0   # discards for rotation refusal in this attempt
-        self.best_goal_dist = float('inf')   # to reset the refusals only on PROGRESS
-        self.idle_loops = 0          # consecutive turns without moving (see MAX_IDLE_LOOPS)
         self.cruise_stalls = 0       # consecutive cruises that did not walk (MAX_CRUISE_STALLS)
-        self.last_xy = None          # position at the previous turn, to count the idle turns
-        self.rotation_fail_xy = {}   # leg -> robot position at the last refusal
-        self.retreats_in_a_row = 0   # consecutive back-offs: reset by a real advance
-        self.early_replans = 0       # replans at the first blocking cell ('wait' branch)
-        self.arrival_refusals = 0    # steps refused because the arrival pose has no exits
-        self.early_replanned_edges = set()   # legs already discarded by [EARLY] in this attempt
         self.goal_repicks = 0        # how many times the goal point was chosen again
         self.tried_goals = []        # goal points already tried and found unreachable
-        self.arrived_near_goal = False   # arrival accepted with the robot just outside the cell
-        self.trap_state = {'n': 0}   # goings back in this attempt, never reset (see _trap_backtrack)
 
     def _reachable_from_robot(self):
         """reachable(x, y) for the goal choice: a path from the robot node (one search, see
@@ -296,285 +212,10 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
             out.append((nid, nx, ny))
         return out
 
-    # --- Actions shared by the decisions ---------------------------------------------------
     def _use_path(self, ids):
-        """The path becomes ids (from the robot node on); the confirmation of a block starts
-        again from zero."""
+        """The path becomes ids (from the robot node on)."""
         self.path_waypoints = self._waypoints_from_ids(ids)
         self.full_path_coords = [self.prm_graph.get_node_position(nid) for nid in ids]
-        self.no_progress = 0
-
-    def _drop_edge(self, a, b, duration):
-        """Remove leg a-b from the graph. duration:
-          'now'       -- until the next refresh, which puts it back if the data says it is free
-                         (see roadmap.mark_edge_blocked_soft);
-          'attempt' -- for the rest of the attempt (attempt penalty);
-          'mission'  -- forever: block confirmed while still or physical failure."""
-        if duration == 'mission':
-            self.prm_graph.mark_edge_invalid(a, b)
-            return
-        roadmap.mark_edge_blocked_soft(self.prm_graph, a, b)
-        if duration == 'attempt':
-            self.prm_graph.edge_penalty_persistent[(min(a, b), max(a, b))] = self.prm_graph._ATTEMPT_MARK
-
-    def _walked_path(self, x0, y0):
-        """The leg walked from (x0, y0) to the current position, for the retreat. Returns the
-        current position."""
-        ax, ay, _, _ = connection.getPosition(self.robot_state_client)
-        if not hasattr(self.env, '_traveled_arcs'):
-            self.env._traveled_arcs = []
-        self.env._traveled_arcs.append((x0, y0, ax, ay))
-        return ax, ay
-
-    def _stop_node_here(self, x, y, label):
-        """The position (x, y) becomes the robot node (see add_stop_node)."""
-        self.robot_node_id = self.prm_graph.add_stop_node(
-            x, y, self.global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M, label=label)
-        self.prm_graph.set_robot_node(self.robot_node_id, 0.0)
-
-    def _escape_fan(self):
-        """The 24 exit directions from here (see decisions.is_trapped): (trapped?,
-        usable directions, total, text for the log)."""
-        trapped, fan = decisions.is_trapped((self.robot_x, self.robot_y), self.robot_yaw, self.snap)
-        n_us, fan_txt = decisions.describe_escape_fan(fan)
-        return trapped, n_us, len(fan), fan_txt
-
-    def _escape_trap(self, edge_ab, message):
-        """No exit direction: discarding edges is useless, the problem is the place. Go back
-        with GraphNav (CONTINUE) or the attempt ends (FAILED)."""
-        MISSION_STATS['traps_detected'] += 1
-        print(message)
-        if self._go_back(edge_ab, f"from node {self.robot_node_id}"):
-            return CONTINUE
-        return FAILED
-
-    def _go_back(self, block_arc, label, skip_if_graph_cannot_help=False):
-        """Return with GraphNav (see _trap_backtrack) instead of walking backwards: go back one
-        waypoint, try to plan again from there, and so on up to
-        GRAPHNAV_MAX_BACKTRACK_HOPS; the walked retreat stays inside as the last net.
-        True if it starts again with a new path (turn counters reset), False if the
-        attempt must end."""
-        if self.verification_tracker is not None:
-            self.verification_tracker.clear_path()
-        esc = recovery._trap_backtrack(
-            self.trap_state, block_arc,
-            self.env, self.prm_graph, self.goal_id, self.recordingInterface, self.robot_state_client,
-            self.command_client, self.global_map, self.mobility_kwargs, self.scan.pts, self.scan.obstacle_mask,
-            label=label, skip_if_graph_cannot_help=skip_if_graph_cannot_help)
-        if not esc['ok']:
-            return False
-        self.robot_node_id = esc['robot_node']
-        self._use_path(esc['ids'])
-        self.early_replans = 0
-        self.retreats_in_a_row = 0
-        self.rotation_discards = 0
-        self.best_goal_dist = float('inf')
-        return True
-
-    def _frontier_stops_at_goal(self):
-        """The frontier stops for an obstacle (or roughness, slope) right next to the goal
-        (within REFUSED_GOAL_BLOCK_M) or beyond the end of the path, in the extension for the
-        nose: no path to this goal can pass, the problem is the point."""
-        if self.frontier['reason'] not in ('obstacle', 'roughness', 'slope'):
-            return False
-        sx, sy = self.frontier['stop_xy']
-        return (self.frontier['dist'] >= self.frontier['path_len']
-                or float(np.hypot(sx - self.target_x, sy - self.target_y)) <= P.REFUSED_GOAL_BLOCK_M)
-
-    def _repick_goal(self, why, exclusion_reason):
-        """
-        Exclude the current goal (for the mission, see _refuse_goal) and choose another one
-        in the cell, reachable from the robot. CONTINUE if there is a new goal with a path;
-        None if there is none (the goal stays excluded, the caller carries on).
-        At most MAX_BLOCK_REPLANS times per attempt.
-        """
-        self.goal_repicks += 1
-        self.need_refresh = True          # plan changed: see event refresh
-        MISSION_STATS['goal_repicks'] += 1
-        print(f"[TARGET] {why} I look for another one in the cell "
-              f"({self.goal_repicks}/{P.MAX_BLOCK_REPLANS}).")
-        self.tried_goals.append((float(self.target_x), float(self.target_y)))
-        goal._refuse_goal(self.env, self.target_row, self.target_col, self.target_x, self.target_y,
-                     exclusion_reason)
-        # Up to GOAL_REPICK_CANDIDATES candidates: the first one may not have a path in the graph.
-        # If none has one, goal and path go back to the previous ones (excluded for future
-        # choices, but consistent with the path): before, the new goal remained with the old
-        # path, towards the point just excluded.
-        old = (self.target_x, self.target_y, self.goal_id)
-        new_ids = None
-        reachable = self._reachable_from_robot()
-        for _k in range(P.GOAL_REPICK_CANDIDATES):
-            new_tx, new_ty, _vs, _rs = goal.find_best_point_in_cell(
-                self.robot_x, self.robot_y, self.env, self.target_row, self.target_col, self.scan.pts, self.scan.od,
-                self.sampler, global_map=self.global_map, exclude=self.tried_goals,
-                reachable=reachable)
-            if new_tx is None or new_ty is None:
-                print("[TARGET] No other valid point in this cell.")
-                break
-            goal_id = self.prm_graph.add_stop_node(
-                new_tx, new_ty, self.global_map, geometry.PRM_EDGE_SAFETY_MARGIN_M,
-                label=f"goal chosen again in cell ({self.target_row},{self.target_col})",
-                is_robot=False)
-            new_ids = self.prm_graph.find_path_dijkstra(self.robot_node_id, goal_id)
-            if new_ids is not None:
-                self.target_x, self.target_y, self.goal_id = new_tx, new_ty, goal_id
-                break
-            print(f"[TARGET] No path in the graph to ({new_tx:.2f}, {new_ty:.2f}): trying the "
-                  f"next point.")
-            self.tried_goals.append((float(new_tx), float(new_ty)))
-        if new_ids is None:
-            self.target_x, self.target_y, self.goal_id = old
-            print("[TARGET] No new goal with a path: I stay on the previous plan.")
-            return None
-        self.best_goal_dist = float('inf')    # new goal: progress from scratch
-        self._use_path(new_ids)
-        print(f"[REPLAN] To the new goal ({self.target_x:.2f}, "
-              f"{self.target_y:.2f}): {len(self.path_waypoints)} waypoint.")
-        return CONTINUE
-
-    def _guards(self):
-        """Loop limits: too many turns (MAX_LOOP_ITERATIONS), fall, too many still turns."""
-        self.loop_iter += 1
-        self.t_iter = time.perf_counter()
-        if self.loop_iter > P.MAX_LOOP_ITERATIONS:
-            print(f"[STALL] {P.MAX_LOOP_ITERATIONS} turns of the navigation loop without arriving: "
-                  f"interrupting the attempt on cell ({self.target_row},{self.target_col}).")
-            if self.verification_tracker is not None:
-                self.verification_tracker.clear_path()
-            return FAILED
-
-        # Battery below threshold: the attempt stops here, the mission closes and returns
-        # (see Mission.explore).
-        if battery_return_due():
-            print(f"[BATTERY] Interrupting the attempt on cell ({self.target_row},"
-                  f"{self.target_col}) for the low-battery return.")
-            if self.verification_tracker is not None:
-                self.verification_tracker.clear_path()
-            return FAILED
-
-        if motion.check_and_recover_fall(self.robot_state_client, self.command_client, self.global_map,
-                                   "during the navigation loop") is not None:
-            if self.verification_tracker is not None:
-                self.verification_tracker.clear_path()
-            recovery.retreat_along_traveled_path(self.env, self.robot_state_client, self.command_client,
-                                        mobility_kwargs=self.mobility_kwargs)
-            return FAILED
-
-        self.robot_x, self.robot_y, self.robot_z, robot_quat = connection.getPosition(self.robot_state_client)
-
-        self.robot_yaw = connection.yaw_of(robot_quat)
-
-        # --- Generic anti-stall guard: how many turns in a row without moving.
-        if self.last_xy is not None and float(np.hypot(self.robot_x - self.last_xy[0], self.robot_y - self.last_xy[1])) < P.IDLE_MOVE_M:
-            self.idle_loops += 1
-        else:
-            self.idle_loops = 0
-        # The rotation refusals are reset only when the robot really gets CLOSER
-        # to the goal (20 cm better than the best reached so far), not when it just
-        # moves: unable to turn, the planner can take the robot one node further
-        # on the wrong side and try again from there, and so on, moving away with the
-        # counter always at zero (test_e2e_loop.py, scenario S11). Moving is not making
-        # progress.
-        d_goal_now = float(np.hypot(self.robot_x - self.target_x, self.robot_y - self.target_y))
-        if d_goal_now < self.best_goal_dist - 0.20:
-            self.best_goal_dist = d_goal_now
-            self.rotation_discards = 0
-        self.last_xy = (self.robot_x, self.robot_y)
-        if self.idle_loops >= P.MAX_IDLE_LOOPS:
-            MISSION_STATS['idle_loops'] += self.idle_loops
-            print(f"[STALL] {self.idle_loops} consecutive loop turns without moving by "
-                  f"{P.IDLE_MOVE_M:.2f} m, with the robot at ({self.robot_x:.2f}, {self.robot_y:.2f}). "
-                  f"Whatever the reason, going on spinning here leads nowhere: "
-                  f"I give up entering ({self.target_row},{self.target_col}) from this side.")
-            if self.verification_tracker is not None:
-                self.verification_tracker.clear_path()
-            return FAILED
-
-    def _frontier_and_decision(self):
-        """Shortcut, safe frontier on the path and decision (decisions.decide_next_move):
-        move, node reached, arrived, wait or confirmed block."""
-        self.t_prm = time.perf_counter()
-
-        # 3. Safe frontier on the scan just made ---------------------------------------
-        # The shortcut respects the edges already discarded: see shortcut_index.
-        k_short = decisions.shortcut_index((self.robot_x, self.robot_y), self.path_waypoints, self.snap, self.global_map,
-                                 prm=self.prm_graph, robot_node_id=self.robot_node_id)
-        if k_short > 0:
-            skipped = [w[0] for w in self.path_waypoints[:k_short]]
-            self.path_waypoints = self.path_waypoints[k_short:]
-            print(f"[SHORTCUT] Direct stretch confirmed free to node {self.path_waypoints[0][0]}: "
-                  f"skipping {len(skipped)} intermediate nodes {skipped}.")
-            MISSION_STATS['shortcuts'] += 1
-        self.polyline = [(self.robot_x, self.robot_y)] + [(x, y) for _, x, y in self.path_waypoints]
-        self.frontier = safe_frontier.compute_safe_frontier(self.polyline, self.snap)
-        print(safe_frontier.describe_frontier(self.frontier))
-
-        self.path_version = None
-        if self.verification_tracker is not None:
-            self.path_version = self.verification_tracker.update_path(self.polyline[1:])
-
-        in_target_cell = (tuple(int(v) for v in self.env.get_cell_from_world(self.robot_x, self.robot_y))
-                          == (int(self.target_row), int(self.target_col)))
-        # Just outside the cell counts as inside, for the arrival by tolerance (see
-        # ARRIVAL_OUTSIDE_CELL_M).
-        robot_border = cells.cell_border_distance(self.env, self.target_row, self.target_col, self.robot_x, self.robot_y)
-        near_goal = (not in_target_cell and robot_border is not None
-                     and -robot_border <= P.ARRIVAL_OUTSIDE_CELL_M)
-        self.decision = decisions.decide_next_move((self.robot_x, self.robot_y), self.path_waypoints, self.frontier, self.no_progress,
-                                    in_target_cell=in_target_cell or near_goal)
-        if self.decision.get('final'):
-            MISSION_STATS['final_steps'] = MISSION_STATS.get('final_steps', 0) + 1
-            print(f"[FINAL STEP] The frontier allows only {self.decision['dist']:.2f} m, below the "
-                  f"minimum step of {P.MIN_PARTIAL_STEP_M:.2f} m, but it is enough: after the step "
-                  f"the goal is {self.frontier['path_len'] - self.decision['dist']:.2f} m away, within "
-                  f"the arrival tolerance of {P.GOAL_REACHED_TOLERANCE_M:.2f} m.")
-        if self.decision['kind'] == 'arrived' and near_goal:
-            self.arrived_near_goal = True
-            MISSION_STATS['arrivals_near_goal'] += 1
-            print(f"[GOAL] The robot is outside cell ({self.target_row},{self.target_col}) by "
-                  f"{-robot_border:.2f} m, {self.frontier['path_len']:.2f} m from the goal: it counts as "
-                  f"arrival (outside by at most {P.ARRIVAL_OUTSIDE_CELL_M:.2f} m, the nose is inside).")
-        if (self.decision['kind'] in ('wait', 'blocked') and not in_target_cell and not near_goal
-                and self.frontier['path_len'] <= P.GOAL_REACHED_TOLERANCE_M):
-            print(f"[GOAL] {self.frontier['path_len']:.2f} m to go, within the tolerance of "
-                  f"{P.GOAL_REACHED_TOLERANCE_M:.2f} m, but the robot is still outside cell "
-                  f"({self.target_row},{self.target_col}): it does not count as arrival, carrying on as for a "
-                  f"blocked frontier.")
-        self.next_node_id, next_x, next_y = self.path_waypoints[0]
-        self.keep_heading = False     # always False (no sideways): it stays in the saved data and in navigate_to
-
-        # The bundle is saved here, before the phases that can close the turn (rotation,
-        # wait, block): otherwise those scans would not end up on disk.
-        self._save_scan_bundle()
-
-    def _timings(self):
-        """Timings of the turn, for [TIMING] and the summary."""
-        t_front = time.perf_counter()
-
-        timing_add('scan', self.t_scan - self.t_iter)
-        timing_add('grid processing', self.t_proc - self.t_scan)
-        timing_add('global maps', self.t_maps - self.t_proc)
-        timing_add('PRM and replanning', self.t_prm - self.t_maps)
-        timing_add('frontier and decision', t_front - self.t_prm)
-        HANDOFF.mark("planning turn")
-        print(f"[TIMING] scan {self.t_scan - self.t_iter:.2f} s | processing {self.t_proc - self.t_scan:.2f} | "
-              f"maps {self.t_maps - self.t_proc:.2f} | PRM {self.t_prm - self.t_maps:.2f} | frontier {t_front - self.t_prm:.2f} "
-              f"| decision: {self.decision['kind']}")
-
-    def _node_or_arrival(self):
-        """Path node reached, or arrival accepted before the end."""
-        if self.decision['kind'] == 'reached_node':
-            self.robot_node_id = self.next_node_id
-            self.prm_graph.set_robot_node(self.robot_node_id, 0.0)
-            self.path_waypoints.pop(0)
-            self.no_progress = 0
-            return CONTINUE
-
-        if self.decision['kind'] == 'arrived':
-            print(f"[GOAL] The frontier does not allow the last {self.frontier['path_len']:.2f} m "
-                  f"({self.frontier['reason']}), within the tolerance of {P.GOAL_REACHED_TOLERANCE_M:.2f} m: "
-                  f"I consider the goal reached.")
-            return STOP
 
     def _finish(self):
         """After the loop: True if the robot is in the cell (or the arrival just outside was accepted)."""
@@ -583,7 +224,7 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
 
         # Final check of the position at the end of the path
         self.robot_x, self.robot_y, _, _ = connection.getPosition(self.robot_state_client)
-        if self.arrived_near_goal or self._handoff:
+        if self._handoff:
             return True
         return self.env.is_point_in_cell(self.robot_x, self.robot_y, self.target_row, self.target_col)
 

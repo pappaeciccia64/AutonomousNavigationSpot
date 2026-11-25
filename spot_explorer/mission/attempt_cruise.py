@@ -1,29 +1,31 @@
 """
-The cruise of CellAttempt (see cell_attempt.py), switch CONTINUOUS_MOTION: the robot walks
-along the path without stopping at the nodes, while the frontier thread runs the whole
-planning cycle (planning_cycle.CruisePlanner) and the main thread sends it the stretch
-confirmed free of every new plan (motion.PathCommand).
+The cruise of CellAttempt (see cell_attempt.py), the only way the robot moves in a cell attempt:
+the robot walks along the path without stopping at the nodes, while the frontier thread runs
+the whole planning cycle (planning_cycle.CruisePlanner) and the main thread sends it the
+stretch confirmed free of every new plan (motion.PathCommand).
 
-    stop-and-go decides 'move' --> _cruise():
-        send the stretch confirmed by the frontier of the stop-and-go
+    attempt start --> the first cycle of the planning thread (_start_in_thread: seen check,
+        local data into the graph, goal and path), its first plan the first command
+        (_first_plan); then _cruise():
         thread: scan, maps, edges, Dijkstra, frontier every PLAN_PERIOD_S (planning_cycle.plan_period)
         main:   at every new plan, send its confirmed stretch (it replaces the previous
                 one without stopping the robot); the robot never goes beyond the stretch
                 confirmed by the last plan
-    back to the stop-and-go (a turn with a fresh scan, as after a move) when:
-        arrived at the goal; the confirmed stretch ahead of the robot ends (obstacle, edge
-        of the data, corner where the rotation is not clear); no path, not even from where
-        the robot is; the command ends badly (stopped, off the path, Spot
-        reports it blocked); no new plan for CRUISE_PLAN_STALE_S; fall (checked every
-        CRUISE_FALL_CHECK_S); low battery; CRUISE_MAX_S.
+    the cruise ends when: arrived at the goal; the next cell cannot be prepared in cruise
+        (the hand-off); no goal with a path in the cell and no other cell; blocked on the spot
+        (BLOCK_STILL_MAX blocks without moving); the command ends badly (stopped, off the
+        path); no new plan for CRUISE_PLAN_STALE_S; fall (checked every CRUISE_FALL_CHECK_S);
+        low battery; CRUISE_MAX_S. After an exception the attempt starts a new cruise from
+        where the robot is (cell_attempt.MAX_CRUISE_RESTARTS).
 
 While the thread plans the main thread does not touch graph and maps: it sends commands,
 reads plans and the robot state. It takes them back after stop_planning().
 
 Without stopping, while the robot walks on the last stretch confirmed (the command lasts
 PATH_HOLD_S, so the main thread has that long):
-  - goal isolated (plan 'no_path'): the planning thread itself chooses another goal in the
-    cell, or the next cell (_on_no_path); with none the cruise ends;
+  - no way on (goal isolated, plan 'no_path'; or the confirmed stretch ends ahead of the
+    robot: a block at once, _block_goal): the planning thread itself chooses another goal in
+    the cell, or the next cell (_on_no_path); with none the cruise ends;
   - the cell done (seen CELL_SEEN_FRACTION, or the goal within CRUISE_HANDOFF_M): the planning
     thread prepares the next cell and the same cruise goes on (_prepare_next_cell);
   - the next cell not prepared in cruise (far: GraphNav; none): the hand-off. Inside the
@@ -31,15 +33,12 @@ PATH_HOLD_S, so the main thread has that long):
     GOAL_REACHED_TOLERANCE_M with the last stretch closed by an obstacle), the attempt
     ends successfully with the robot still walking towards the goal (env._moving_pc, last
     command over the whole confirmed stretch, not PATH_HOLD_S): the
-    mission marks the cell and the next attempt starts while the robot walks. A cruise start
-    goes on from its first plan (the rotation at the start, forward or backward, is in the
-    plan); a stop-and-go turn goes on if the rotation is clear: within
-    PATH_START_IN_PLACE_DEG of the nose it turns while walking, beyond it on the spot inside
-    the new command if the swept area is clear with CHAIN_TURN_EXTRA_AIR_M more air
-    (_moving_check); otherwise the robot is stopped first and the turn is made standing. An attempt
-    that fails before its loop (no valid goal, cell not reachable in the graph: only
-    computations) leaves the robot walking, and the mission goes on to the next cell.
-    stop_if_moving stops it before GraphNav and at the end of the exploration.
+    mission marks the cell and the next attempt starts while the robot walks; its first plan
+    carries the rotation at the start (forward or backward), made on the spot inside the new
+    command. An attempt that fails before its first command (no valid goal, cell not
+    reachable in the graph: only computations) leaves the robot walking, and the mission goes
+    on to the next cell. stop_if_moving stops it before GraphNav and at the end of the
+    exploration.
 """
 import functools
 import re
@@ -58,14 +57,12 @@ from spot_explorer.mission.attempt_common import CONTINUE, STOP, FAILED, battery
 from spot_explorer.perception import gait
 from spot_explorer.perception import global_maps
 from spot_explorer.perception import geometry
-from spot_explorer.planning import decisions
 from spot_explorer.planning import roadmap
 from spot_explorer.records import HANDOFF, MISSION_STATS, BodyTiltRecorder, append_trajectory, timing_add
 from spot_explorer.robot import connection
 from spot_explorer.robot import motion
 from spot_explorer.robot import photos
 
-CONTINUOUS_MOTION = True
 CRUISE_POLL_S = 0.2             # main thread: one feedback reading every 0.2 s
 CRUISE_PLAN_STALE_S = 1.2       # no new plan for this long: stop
 CRUISE_MIN_AHEAD_M = 0.10       # confirmed stretch ahead of the robot below this: stop
@@ -85,7 +82,7 @@ MAX_CRUISE_STALLS = 3
 CRUISE_TRACK_STEP_M = 0.30      # spacing of the walked track kept for the retreat
 CRUISE_BREADCRUMB_S = 1.0       # how often the GraphNav breadcrumb is tried
 CRUISE_BATTERY_S = 5.0          # how often the battery is read
-CRUISE_FALL_CHECK_S = 1.0       # how often the fall is checked (the stop-and-go does it at every turn)
+CRUISE_FALL_CHECK_S = 1.0       # how often the fall is checked
 CRUISE_ARRIVAL_WAIT_S = 2.0     # at the goal: wait at most this for the command to end
 CRUISE_SETTLE_S = 1.0           # after a stop: wait at most this for the robot to stand still
 # Distance from the goal at which the cell counts as done and the next one is chosen. The robot
@@ -105,7 +102,7 @@ CRUISE_SWITCH_WAIT_S = 3.0
 # The first command of a cruise comes from the first plan of the planning thread (the same
 # cycle as every other): it starts if the plan confirms at least CRUISE_MIN_AHEAD_M (the
 # rotation at the start, forward or backward, is in the plan: CruisePlanner._turns_within).
-# If the plan does not allow to start, the thread stops and the stop-and-go takes the turn.
+# If the plan does not allow to start, a block at once: another goal or cell (_first_plan).
 FIRST_PLAN_WAIT_S = 3.0
 # The attempt start (scan, seen check, local data into the graph, goal, path) is the first cycle
 # of the planning thread (_start_in_thread), so the first plan can take this long. Without a path
@@ -119,11 +116,6 @@ GAIT_DOWN_HOLD_S = 2.0
 # The locomotion_hint (AUTO <-> CRAWL) changes only after this long of plans asking for it, both
 # ways: Spot makes a side step of 10-15 cm at every hint change while walking.
 GAIT_HINT_HOLD_S = 3.0
-# A turn larger than PATH_START_IN_PLACE_DEG with the robot still walking (stop-and-go decision,
-# _moving_check) is made on the spot inside the new command, without stopping first, if the swept
-# area is clear with this much more air. The check uses the pose of the scan, and the robot walks
-# a few cm more before the command arrives.
-CHAIN_TURN_EXTRA_AIR_M = 0.15
 # A plan starts where the robot was when the plan was made, and the robot walks on until it is
 # read: it rejoins the new line with a short step if it is closer than this, otherwise the plan
 # is skipped (the robot keeps walking the stretch sent) and the next plan starts from where it is.
@@ -283,16 +275,6 @@ class CellSwitch:
 class CruiseSteps:
     """Mixin of CellAttempt: the state is CellAttempt's, see its docstring for the map of the phases."""
 
-    def _can_cruise(self):
-        """The decided move goes in cruise: switch on, frontier thread with the planning
-        mode, at least one whole leg (a partial step stays a partial step), and not in a
-        tight space (frontier with the exit rule active: the stop-and-go gets out of it)."""
-        tight = self.frontier.get('clearance', 0.0) < self.frontier.get('clearance_nominal', 0.0) - 1e-9
-        return (CONTINUOUS_MOTION and self.verification_tracker is not None and not tight
-                and hasattr(self.verification_tracker, 'start_planning')
-                and self.decision['kind'] == 'move' and self.decision['full']
-                and not self.keep_heading and len(self.path_waypoints) > 0)
-
     def _cruise_bundle_info(self):
         """Where and how the planner names its scan bundles (CruisePlanner.bundle)."""
         if self.mission_folder is None:
@@ -347,7 +329,7 @@ class CruiseSteps:
         In the planning thread (CruisePlanner.switch_job of the first cycle):
         the attempt start on the fresh scan of the cycle -- cell already seen? local data into
         the graph and the edges of the areas with new data, robot node, goal and path (the same
-        steps of the stop-and-go start, attempt_scan) -- then the cycle plans on that path. The
+        steps of attempt_scan) -- then the cycle plans on that path. The
         main thread waits for the first plan (_first_plan) and does not touch graph and maps.
         Returns the 'switch' of the plan: kind 'start' with the path, 'seen', or 'nogoal'.
         """
@@ -370,10 +352,8 @@ class CruiseSteps:
         return dict(kind='start', prep_s=time.perf_counter() - t0)
 
     def _can_start_in_thread(self):
-        """The whole attempt start can be the first cycle of the planner (cruise on, tracker with
-        the planning mode, gait not forced)."""
-        return (CONTINUOUS_MOTION and self.verification_tracker is not None
-                and hasattr(self.verification_tracker, 'start_planning') and not self.mobility_kwargs)
+        """The attempt can run: a frontier tracker with the planning mode."""
+        return self.verification_tracker is not None and hasattr(self.verification_tracker, 'start_planning')
 
     def _first_plan(self, planner):
         """The planner starts and its first plan (with data) is the first turn
@@ -473,7 +453,6 @@ class CruiseSteps:
         print(f"[CRUISE] The attempt does not start in cruise ({why}).")
         if moving:
             stop_if_moving(self.env, self.command_client, "first plan not usable while walking")
-        self.need_refresh = True
         return None
 
     def _new_planner(self, goal_id, path_ids, thread_goals=True):
@@ -492,47 +471,36 @@ class CruiseSteps:
     def _cruise_from_start(self):
         """The attempt start in the thread: the planner starts with a
         placeholder path at the robot node, its first cycle runs _start_in_thread. Returns as
-        _cruise, or stop (cell already seen), FAILED (no goal), None (stop-and-go)."""
+        _cruise: STOP (cell already seen, arrival, hand-off), FAILED (no goal), None (no first
+        plan to start with), CONTINUE (the cruise ended for an exception)."""
         start = self.prm_graph.robot_node if self.prm_graph.robot_node in self.prm_graph.nodes \
             else next(iter(self.prm_graph.nodes))
         planner = self._new_planner(start, [start], thread_goals=False)
         planner.switch_job = self._start_in_thread
-        return self._cruise(from_thread=True, planner=planner)
+        return self._cruise(planner)
 
-    def _cruise(self, from_thread=False, planner=None):
-        """The cruise (see the module docstring). Returns CONTINUE: the loop looks again
-        with a fresh scan, as after a move. from_thread: the first command
-        comes from the first plan of the planning thread; None if it does not allow to start
-        (the stop-and-go takes the turn)."""
+    def _cruise(self, planner):
+        """The cruise (see the module docstring), the first command from the first plan of the
+        planning thread (_first_plan). Returns STOP (cell seen, arrival, hand-off), FAILED (no
+        goal; no path to any goal of the cell; MAX_CRUISE_STALLS), None (the first plan does not
+        allow to start and no other goal did), CONTINUE (ended for an exception: see
+        cruise_end_reason)."""
         tracker = self.verification_tracker
-        if planner is None:
-            planner = self._new_planner(self.goal_id, [self.robot_node_id] + [w[0] for w in self.path_waypoints])
-        ids = list(planner.path_ids)
-        if from_thread:
-            plan0 = self._first_plan(planner)
-            # Seen or no goal: only computations, no command of this attempt -- the robot keeps
-            # walking if it was (hand-off), as an attempt that ends before its loop.
-            if plan0 == 'seen':
-                self._seen_only, self.loop_iter = True, 0
-                return STOP
-            if plan0 == 'nogoal':
-                self.loop_iter = 0
-                return FAILED
-            if plan0 is None:
-                return None
-            ids = [planner.path_ids[0]] + list(plan0['ids'])
-            adv, turn_stop = plan0['advance'], plan0['turn_stop']
-            confirmed, backward = plan0['confirmed'], plan0['backward']
-            kwargs = self._cruise_gait(plan0['terrain'])
-        else:
-            # First stretch: the one confirmed by the frontier of this turn, with the same corner
-            # check the planner will make.
-            adv, turn_stop, backward = planner._turns_within(
-                self.polyline, ids[1:], planning_cycle.walk_advance(self.polyline, self.frontier), self.snap,
-                self.robot_yaw)
-            confirmed = planning_cycle._cut_polyline(self.polyline, adv)
-            backward = backward[:max(len(confirmed) - 1, 0)]
-            kwargs = self._cruise_gait(planner._terrain(confirmed, ids[1:]))
+        plan0 = self._first_plan(planner)
+        # Seen or no goal: only computations, no command of this attempt -- the robot keeps
+        # walking if it was (hand-off), as an attempt that ends before its first command.
+        if plan0 == 'seen':
+            self._seen_only, self.loop_iter = True, 0
+            return STOP
+        if plan0 == 'nogoal':
+            self.loop_iter = 0
+            return FAILED
+        if plan0 is None:
+            return None
+        ids = [planner.path_ids[0]] + list(plan0['ids'])
+        adv, turn_stop = plan0['advance'], plan0['turn_stop']
+        confirmed, backward = plan0['confirmed'], plan0['backward']
+        kwargs = self._cruise_gait(plan0['terrain'])
         path_len = float(sum(np.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(self.polyline, self.polyline[1:])))
         to_goal = turn_stop is None and adv >= path_len - 0.01
         HANDOFF.mark("cruise setup")
@@ -540,10 +508,10 @@ class CruiseSteps:
               f"({self.target_x:.2f}, {self.target_y:.2f}): {len(ids) - 1} nodes, {path_len:.2f} m, "
               f"{adv:.2f} m confirmed" + (f" (rotation not clear at node {turn_stop})" if turn_stop else "") + ".")
 
-        self.need_refresh = True                  # after the cruise: see event refresh
         tracker.clear_path()
         # Robot still walking from the previous cell (hand-off): this command replaces that
-        # one, turning while walking (_moving_check has let only small turns through).
+        # one, turning while walking within PATH_START_IN_PLACE_DEG, beyond it on the spot
+        # inside the command.
         start_in_place = (motion.PATH_START_IN_PLACE_DEG if getattr(self.env, '_moving_pc', None) is not None
                           else motion.LEG_START_IN_PLACE_DEG)
         t_hand = getattr(self.env, '_handoff_t', None)
@@ -575,10 +543,7 @@ class CruiseSteps:
             HANDOFF.report("first send")
             n_sends += 1
             self._visit_after_send()
-            if from_thread:
-                last_version = plan0['version']       # the planner is running already
-            else:
-                tracker.start_planning(planner, planning_cycle.plan_period())
+            last_version = plan0['version']       # the planner is running already
             while reason is None:
                 self._wait_for_plan(tracker, last_version)
                 now = time.time()
@@ -699,7 +664,7 @@ class CruiseSteps:
                 # Hand-off to the next cell, robot inside the target cell: goal
                 # confirmed and within CRUISE_HANDOFF_M; or the frontier stops for an obstacle
                 # (roughness, slope) with the goal within GOAL_REACHED_TOLERANCE_M along the
-                # path, the arrival the stop-and-go would accept standing (decisions: 'arrived').
+                # path, the arrival accepted with the robot standing too.
                 to_go = (sum(float(np.hypot(b[0] - a[0], b[1] - a[1]))
                              for a, b in zip(plan['polyline'], plan['polyline'][1:]))
                          - _along(plan['polyline'], rx, ry))
@@ -807,6 +772,8 @@ class CruiseSteps:
         if handoff:
             self._handoff = True
             MISSION_STATS['cruise_handoffs'] = MISSION_STATS.get('cruise_handoffs', 0) + 1
+            return STOP
+        if arrived:
             return STOP
         return outcome
 
@@ -1006,7 +973,6 @@ class CruiseSteps:
         env._cells_left_unreachable). The attempt now on the new goal / cell, the log."""
         self.target_x, self.target_y = sw['goal']
         self.goal_id = sw['goal_id']
-        self.best_goal_dist = float('inf')
         self.env._last_attempt_goal = sw['goal']
         if sw['kind'] == 'goal':
             self.goal_repicks += 1
@@ -1050,36 +1016,6 @@ class CruiseSteps:
         """(env, row, col) of the target cell for the planner's 'cell_seen'."""
         return (self.env, self.target_row, self.target_col)
 
-    def _moving_check(self):
-        """
-        Turn of the loop with the robot still walking from the previous cell (hand-off): it
-        goes on only into a cruise with a small turn (within PATH_START_IN_PLACE_DEG, rotation
-        clear) or past a path node; for anything else (rotation on the spot, wait, block,
-        partial step) the robot is stopped first and the turn is made again standing.
-        """
-        if getattr(self.env, '_moving_pc', None) is None:
-            return None
-        kind = self.decision['kind']
-        if kind == 'reached_node':
-            return None
-        if kind == 'move' and self._can_cruise():
-            rot = decisions.rotation_plan(self.robot_yaw, (self.robot_x, self.robot_y), self.decision['target'],
-                                          self.frontier['od_robot'], snap=self.snap)
-            if rot['turn'] and abs(rot['dyaw_deg']) <= motion.PATH_START_IN_PLACE_DEG:
-                return None
-            if rot['turn'] and self._turn_clear_while_moving(rot['dyaw_deg']):
-                print(f"[CRUISE] {rot['dyaw_deg']:+.0f} deg to turn towards the next cell: on the spot "
-                      f"inside the new command, without stopping first (swept area clear with "
-                      f"{100 * CHAIN_TURN_EXTRA_AIR_M:.0f} cm more air).")
-                return None
-            why = (f"{rot['dyaw_deg']:+.0f} deg to turn towards the next cell, swept area not clear "
-                   f"with {100 * CHAIN_TURN_EXTRA_AIR_M:.0f} cm more air")
-        else:
-            why = f"decision '{kind}' with the robot still walking"
-        stop_if_moving(self.env, self.command_client, f"{why}: I stop and look again standing")
-        self.need_refresh = True
-        return CONTINUE
-
     @staticmethod
     def _cruise_finish_command(pc):
         """At the goal the last centimetres are still being walked: wait for the command to end
@@ -1095,8 +1031,7 @@ class CruiseSteps:
     def _cruise_settle(pc):
         """After a stop at 0.3 m/s the robot still slides a few centimetres: wait until it
         stands (less than 1 cm and 1 deg in 0.1 s), at most CRUISE_SETTLE_S: a move started from
-        a pose still moving begins off its line, and the stop-and-go scans with the robot
-        standing."""
+        a pose still moving begins off its line."""
         t_end = time.time() + CRUISE_SETTLE_S
         try:
             prev = pc.pose()
@@ -1109,17 +1044,6 @@ class CruiseSteps:
                 prev = now
         except Exception as e:
             print(f"[CRUISE] Pose not readable while waiting for the robot to stand: {e}")
-
-    def _turn_clear_while_moving(self, dyaw_deg):
-        """Rotation on the spot from the pose of the scan, with CHAIN_TURN_EXTRA_AIR_M more air."""
-        extra = CHAIN_TURN_EXTRA_AIR_M
-        if self.frontier['od_robot'] >= geometry.ROTATION_CLEARANCE_M + extra:
-            return True
-        clear, _margin = geometry.rotation_is_clear(
-            self.snap.obstacle_dist, self.snap.origin_x, self.snap.origin_y, self.snap.cell_size,
-            self.robot_x, self.robot_y, self.robot_yaw, float(np.radians(dyaw_deg)),
-            air=geometry.ROTATION_CLEARANCE_AIR_M + extra)
-        return bool(clear)
 
     def _stop_on_edge(self, planner, x, y):
         """The robot node after a cruise: an end of the edge it is on, not the nearest node. The
@@ -1161,8 +1085,6 @@ class CruiseSteps:
         if ids is None:
             ids = [self.robot_node_id] + [n for n in remainder if n != self.robot_node_id]
         self._use_path(ids)
-        self.no_progress = 0
-        self.retreats_in_a_row = 0
         if not handoff:   # with the hand-off the next attempt drops one at its start
             map_recording.graphnav_drop_breadcrumb(self.env, self.recordingInterface, self.robot_state_client,
                                                    self.robot_node_id, self.target_row, self.target_col)

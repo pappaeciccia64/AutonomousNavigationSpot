@@ -66,7 +66,7 @@ from spot_explorer.planning import goal as goal_choice   # noqa: E402
 from spot_explorer.mission import cell_attempt as _cell_attempt   # noqa: E402
 from spot_explorer.mission import attempt_common   # noqa: E402
 from spot_explorer.robot import battery
-from spot_explorer.mission import attempt_cruise, attempt_legs, cell_attempt, exploration
+from spot_explorer.mission import attempt_cruise, cell_attempt, exploration
 from spot_explorer.mission import run as mission_run
 from spot_explorer.planning import goal
 from spot_explorer.robot import motion
@@ -338,14 +338,6 @@ class _NoTilt(T._NoTilt):
     samples = []
 
 
-class _Tracker(T.FakeTracker):
-    def start(self):
-        pass
-
-    def stop(self):
-        pass
-
-
 @contextlib.contextmanager
 def _with_failures():
     """Forced failures, always the same: the 1st, 4th, 7th... attempt and the 2nd fail
@@ -411,7 +403,8 @@ def _with_battery(from_pct=36.0, points_per_read=1.0):
 
 
 def run(walls=None, name='MISSION', fiducial=None, stuck_wp0_m=None, wp0_offset_m=None, extra_args=(),
-        cruise=False):
+        cruise=True):
+    """A fake mission in world walls, in cruise (the only motion; cruise is kept for the callers)."""
     global FIDUCIAL_TAG
     FIDUCIAL_TAG = fiducial
     T.WORLD, T.ROBOT = T.World(WALLS if walls is None else walls, ghosts=True), T.Robot(*START)
@@ -421,30 +414,27 @@ def run(walls=None, name='MISSION', fiducial=None, stuck_wp0_m=None, wp0_offset_
     gn.stuck_wp0_m = stuck_wp0_m
     gn.wp0_offset_m = wp0_offset_m
     robot = FakeRobot(gn)
-    tracker_factory = lambda r: _Tracker()
-    if cruise:
-        # The continuous motion as in the field: the real-time fake Spot of test_cruise (it walks
-        # the trajectories of the cruise) as command and state client, and the frontier thread
-        # with the planning mode. Imported here: test_cruise switches the cruise on at import.
-        safe_frontier.ArcVerificationTracker = _REAL_AVT
-        import test_cruise as C
-        attempt_cruise.CONTINUOUS_MOTION = True
-        rt = C.RTSpot()
-        robot.state = robot.commands = rt
-        class _CruiseTracker(C.PlanTracker):
-            def start(self):
-                pass
+    # The cruise as in the field: the real-time fake Spot of test_e2e_loop (it walks the
+    # trajectories of the cruise) as command and state client, and the frontier thread with the
+    # planning mode.
+    safe_frontier.ArcVerificationTracker = _REAL_AVT
+    rt = T.RTSpot()
+    robot.state = robot.commands = rt
 
-            def stop(self):
-                self._running = False
-        tracker_factory = lambda r: _CruiseTracker()
+    class _CruiseTracker(T.PlanTracker):
+        def start(self):
+            pass
+
+        def stop(self):
+            self._running = False
+    tracker_factory = lambda r: _CruiseTracker()
     connection.setLogInfo = lambda o: (robot, NS(), robot.state, None)
     connection.SimpleEstop = lambda r, n: NS(stop=lambda: None, allow=lambda: None, release=lambda: None)
     bosdyn.client.lease.LeaseKeepAlive = lambda *a, **k: contextlib.nullcontext()
     mission_run.blocking_stand = lambda *a, **k: None
     spot_grid.LocalGrid = lambda r: T.FakeLocalGrid()
     safe_frontier.ArcVerificationTracker = tracker_factory
-    attempt_legs.BodyTiltRecorder = records.BodyTiltRecorder = _NoTilt
+    attempt_cruise.BodyTiltRecorder = records.BodyTiltRecorder = _NoTilt
     config.MISSION_GRAPH_SAMPLING = 'lattice'
 
     root = tempfile.mkdtemp(prefix="fake_mission_", dir=RUN_DIR)
@@ -459,8 +449,6 @@ def run(walls=None, name='MISSION', fiducial=None, stuck_wp0_m=None, wp0_offset_
             ok = mission_run.main()
     finally:
         sys.argv = argv
-        if cruise:
-            attempt_cruise.CONTINUOUS_MOTION = False
     logs = [os.path.join(dp, f) for dp, _, fs in os.walk(os.path.join(root, "MissionLogs")) for f in fs
             if f == "mission_log.txt"]
     log = open(logs[0]).read() if logs else out.getvalue()
@@ -534,7 +522,13 @@ def _check_world(name, r):
         check("[FIDUCIAL] No fiducial" in log and "[FIDUCIAL INIT]" not in log,
               "without a fiducial it starts without, and without trying the localization")
     if name == 'B':
-        check("[BLOCK] Confirmed" in log and "[RETURN]" in log, "block confirmed and return with GraphNav")
+        # The way closed in world B, handled while walking (before 25-11, in the stop-and-go: a
+        # block confirmed standing and a return with GraphNav): a block at once, or the goal
+        # without a path any more (another goal, or the cell left), depending on when the scan
+        # shows it.
+        check("[CRUISE] Block:" in log or "(the previous one has no path any more)" in log
+              or "left while walking" in log,
+              "the way closed handled while walking: another goal or cell chosen in the cruise")
 
 
 def _check_rules_failures(r):
@@ -561,14 +555,15 @@ def _check_rules_failures(r):
 def _check_emergency():
     """Mission interrupted halfway (exception or Ctrl+C): the robot sits, the motors power off
     and the GraphNav map is downloaded, then the error propagates as before."""
+    # At the second attempt: in cruise world A takes two (the cells are chained in one cruise).
     for how, err in (("exception", RuntimeError("fake failure")), ("Ctrl+C", KeyboardInterrupt())):
-        print(f"\nWhole mission in world F: interrupted by {how} at the third attempt.")
+        print(f"\nWhole mission in world F: interrupted by {how} at the second attempt.")
         real = cell_attempt.attempt_enter_cell_from_position
         n = {'k': 0}
 
         def attempt(*a, _err=err, **k):
             n['k'] += 1
-            if n['k'] == 3:
+            if n['k'] == 2:
                 raise _err
             return real(*a, **k)
         cell_attempt.attempt_enter_cell_from_position = attempt

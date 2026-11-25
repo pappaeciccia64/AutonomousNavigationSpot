@@ -1,13 +1,9 @@
 """
 The planning cycle: scan -> global maps -> edges of the graph -> path -> frontier.
 
-One piece of code for the two ways the robot moves:
-  - the navigation loop (CellAttempt, stop-and-go): it runs the steps itself, one
-    turn at a time, with the robot standing (attempt_scan.py: _fresh_scan, _update_graph,
-    _replan);
-  - the cruise (continuous motion): CruisePlanner runs the whole cycle in the frontier
-    thread (safe_frontier.ArcVerificationTracker.start_planning) at PLAN_PERIOD_S while the
-    robot walks, and publishes a plan that the main thread only reads.
+CruisePlanner runs the whole cycle in the frontier thread
+(safe_frontier.ArcVerificationTracker.start_planning) at PLAN_PERIOD_S while the robot walks
+(attempt_cruise.py), and publishes a plan that the main thread only reads.
 
 While the thread plans, it is the only one touching graph and maps: the main thread sends
 the motion commands and reads the plans, and takes graph and maps back only after
@@ -48,7 +44,7 @@ GAIT_LOOKAHEAD_M = 1.0
 # Ids of the switches (CruisePlanner.switch_info), unique for the whole mission: the cruise
 # applies a switch once by its id, so an id must never come back, whichever planner made it.
 _SWITCH_IDS = itertools.count(1)
-PLAN_REPLAN_MARGIN = 0.10      # as in the stop-and-go: the new path must cost 10% less
+PLAN_REPLAN_MARGIN = 0.10      # the new path must cost 10% less
 CRUISE_BUNDLE_STEP_M = 0.5     # a scan bundle every this many metres walked in cruise
 CRUISE_BUNDLE_REASON_S = 2.0   # and one when the frontier reason changes, at most this often
 
@@ -219,7 +215,7 @@ class CruisePlanner:
       4. edges refreshed at every cycle (the window moves with the robot), nodes in
          obstacles out (refresh_graph);
       5. Dijkstra from the next node to the goal, with the stability margin of the
-         stop-and-go: the path changes only if the new one costs 10% less. If the edge being
+         the path changes only if the new one costs 10% less (PLAN_REPLAN_MARGIN). If the edge being
          walked is closed (out of the graph, or closed by the frontier), from the robot
          instead: a temporary node linked to the nodes around it with the checks and the
          cost of every edge (edge_evaluation.connect_point);
@@ -235,8 +231,8 @@ class CruisePlanner:
       robot       (x, y, yaw) of the scan
       ids         path node ids from the next node to the goal
       polyline    [(x, y) robot] + positions of ids
-      frontier    compute_safe_frontier on polyline (decision threshold, as stop-and-go, but
-                  without the exit rule from a tight space: see allow_escape)
+      frontier    compute_safe_frontier on polyline (decision threshold, without the exit
+                  rule from a tight space: see allow_escape)
       advance     metres of polyline confirmed free for the robot centre (allowed_advance),
                   shortened to the first corner where the rotation on the spot is not clear
       confirmed   polyline cut at advance: the points to give to motion.PathCommand
@@ -522,7 +518,7 @@ class CruisePlanner:
         return txt
 
     def _save_bundle(self, scan, snap, robot, polyline, ids, next_id, frontier, advance, confirmed):
-        """A bundle like those of the stop-and-go (decision 'cruise', target = end of the
+        """A scan bundle (decision 'cruise', target = end of the
         confirmed stretch), every CRUISE_BUNDLE_STEP_M walked, and when the reason of the
         frontier changes (at most one every CRUISE_BUNDLE_REASON_S): turning on the spot or held
         by the frontier the robot does not walk, and those scans would be missing. Never
@@ -540,6 +536,12 @@ class CruisePlanner:
             b = self.bundle
             tf = get_a_tform_b(scan.proto.local_grid.transforms_snapshot, VISION_FRAME_NAME, BODY_FRAME_NAME)
             goal = self.prm.get_node_position(self.goal_id)
+            # The layers saved only (SAVE_EXTRA_LAYERS: intensity, no_step), one more request to
+            # Spot per bundle, as the bundles of the attempt start.
+            extra = {}
+            for name, lay in (self.local_grid.extra_layers(P.SAVE_EXTRA_LAYERS).items()
+                              if P.SAVE_EXTRA_LAYERS else ()):
+                extra.update({name: lay['values'], f'{name}_origin': lay['origin'], f'{name}_cell': lay['cell']})
             save_npz_async(
                 os.path.join(b['folder'], "scans",
                              f"scan_it{b['iteration']:03d}_cell{b['cell'][0]}_{b['cell'][1]}_"
@@ -554,7 +556,7 @@ class CruisePlanner:
                 frontier_od_robot=frontier['od_robot'], frontier_half_along=frontier['half_along'],
                 frontier_clearance=frontier['clearance_nominal'], frontier_path_len=frontier['path_len'],
                 allowed_advance=advance, keep_heading=False, no_progress=0,
-                decision_kind='cruise', decision_target=np.array(confirmed[-1], dtype=np.float64))
+                decision_kind='cruise', decision_target=np.array(confirmed[-1], dtype=np.float64), **extra)
             self._bundle_xy = (robot[0], robot[1])
             self._bundle_why = (frontier['reason'], now)
             MISSION_STATS['scan_bundles'] += 1

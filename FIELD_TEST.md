@@ -50,7 +50,7 @@ Offline (the `cruise_state_cache` variant's test, `test_cruise` with fake networ
 
 Validated indoors on 03-11 in five missions (room of about 10 x 3 m, always gait PLAIN). Never tried: grass, gait changes in the middle of a cruise (MODERATE / HARD, CRAWL), cruises longer than ~3 m.
 
-**Switch:** `CONTINUOUS_MOTION` in `spot_explorer/mission/attempt_cruise.py` (on); off = stop-and-go, the whole cruise off. The `[CONFIG] SWITCHES` line of the log says how it was.
+**Switch:** `CONTINUOUS_MOTION` in `spot_explorer/mission/attempt_cruise.py` (on); off = stop-and-go, the whole cruise off. The `[CONFIG] SWITCHES` line of the log says how it was. (Since 25-11 the switch and the stop-and-go are gone from the main code: the cruise is the only motion; the stop-and-go is in the local `varianti/` folder.)
 
 **Plan:** two missions on the same lawn, same grid and start: one with `CONTINUOUS_MOTION = False` as reference, one with it on. Tablet in hand; the first minutes in an open area.
 
