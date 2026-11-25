@@ -70,6 +70,12 @@ CRUISE_POLL_S = 0.2             # main thread: one feedback reading every 0.2 s
 CRUISE_PLAN_STALE_S = 1.2       # no new plan for this long: stop
 CRUISE_MIN_AHEAD_M = 0.10       # confirmed stretch ahead of the robot below this: stop
 CRUISE_BAD_PLANS = 3            # consecutive plans without scan or with an error: stop
+# Blocks with the robot still (moved less than BLOCK_STILL_M since the previous one): after
+# BLOCK_STILL_MAX of them the next goal is not asked for, the robot is blocked on the spot (every
+# goal needs a way it cannot take from here) and the attempt ends, a failure of the cell.
+BLOCK_STILL_M = 0.30
+BLOCK_STILL_MAX = 3
+BLOCKED_ON_SPOT = "blocked on the spot"
 CRUISE_MAX_S = 180.0
 # MAX_CRUISE_STALLS cruises in a row shorter than CRUISE_STALL_M (not arrived, no hand-off) end
 # the attempt: the robot is stuck in front of a stretch it cannot walk, and every short cruise
@@ -381,6 +387,7 @@ class CruiseSteps:
         t0, plan, last = time.time(), None, None
         wait_s = START_PLAN_WAIT_S if planner.switch_job == self._start_in_thread else FIRST_PLAN_WAIT_S
         bad, why, asked = [], None, None
+        self._block_chain = None
         while time.time() - t0 < wait_s:
             time.sleep(CRUISE_POLL_S)
             p = tracker.get_plan()
@@ -423,10 +430,12 @@ class CruiseSteps:
                 f = plan['frontier']
                 why = (f"first plan: {plan['advance']:.2f} m confirmed ("
                        + (f"rotation not clear at node {plan['turn_stop']}" if plan['turn_stop'] else f['reason']) + ")")
-                if asked is None and self._block_goal(planner, why):
+                if asked is None and self._block_goal(planner, why, plan['robot'][:2]):
                     asked, t0 = why, time.time()     # the new goal gets its own wait
                 if asked is not None:
                     continue
+                if self._block_chain and self._block_chain[2] > BLOCK_STILL_MAX:
+                    why = f"{BLOCKED_ON_SPOT}: {why}"
                 break
             break
         moving = getattr(self.env, '_moving_pc', None) is not None
@@ -592,7 +601,7 @@ class CruiseSteps:
                     blocked_send, spot_blocked = n_sends, spot_blocked + 1
                     if spot_blocked >= 2 and asked_block is None:
                         why = "Spot reports the point blocked again"
-                        if self._block_goal(planner, why):
+                        if self._block_goal(planner, why, (r['x'], r['y'])):
                             asked_block = why
                 # Waiting for the next goal after a block, the robot stands at the end of its
                 # stretch: its command may end meanwhile.
@@ -740,10 +749,11 @@ class CruiseSteps:
                               else f['reason']) + ")")
                     # No way on from here: a block at once, the planning thread chooses the next
                     # goal or cell and the same cruise goes on towards it.
-                    if asked_block is not None or self._block_goal(planner, why):
+                    if asked_block is not None or self._block_goal(planner, why, (rx, ry)):
                         asked_block = asked_block or why
                         continue
-                    reason = why
+                    still = getattr(self, '_block_chain', None)
+                    reason = f"{BLOCKED_ON_SPOT}: {why}" if still and still[2] > BLOCK_STILL_MAX else why
                     break
                 to_goal = plan['to_goal']
                 t_send = time.time()
@@ -809,11 +819,25 @@ class CruiseSteps:
         CRUISE_POLL_S (the feedback is read at every turn, and the latest plan taken)."""
         tracker.wait_plan(last_version, CRUISE_POLL_S)
 
-    def _block_goal(self, planner, why):
+    def _block_goal(self, planner, why, xy):
         """No way on towards the goal for the main thread: the planning thread treats the goal
         as one without a path at its next cycle (CruisePlanner.block_request -> _on_no_path:
-        another goal in the cell, or the next cell). False if the thread cannot choose goals."""
+        another goal in the cell, or the next cell). False if the thread cannot choose goals, or
+        after BLOCK_STILL_MAX blocks with the robot at xy still (blocked on the spot)."""
         if planner.no_path_job is None:
+            return False
+        chain = getattr(self, '_block_chain', None)
+        if xy[0] is None:
+            xy = (self.robot_x, self.robot_y)
+        if chain is not None and np.hypot(xy[0] - chain[0], xy[1] - chain[1]) < BLOCK_STILL_M:
+            chain = (chain[0], chain[1], chain[2] + 1)
+        else:
+            chain = (xy[0], xy[1], 1)
+        self._block_chain = chain
+        if chain[2] > BLOCK_STILL_MAX:
+            MISSION_STATS['cruise_blocked_on_spot'] = MISSION_STATS.get('cruise_blocked_on_spot', 0) + 1
+            print(f"[CRUISE] {BLOCKED_ON_SPOT.capitalize()}: {BLOCK_STILL_MAX} goals left without the robot "
+                  f"moving {BLOCK_STILL_M:.2f} m, no other goal asked for ({why}).")
             return False
         planner.block_request = why
         MISSION_STATS['cruise_blocks'] = MISSION_STATS.get('cruise_blocks', 0) + 1

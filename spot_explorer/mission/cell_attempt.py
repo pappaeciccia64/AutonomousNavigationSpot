@@ -120,7 +120,8 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
                 # A cruise that ended for an exception (not arrived, no hand-off, no block that
                 # leaves the cell): the attempt goes on with a new cruise from where the robot is,
                 # the start in the planning thread again. A fall (the robot gets up and backs
-                # away), low battery, or MAX_CRUISE_RESTARTS in a row: the attempt ends.
+                # away), blocked on the spot, low battery, or MAX_CRUISE_RESTARTS in a row: the
+                # attempt ends.
                 restarts = 0
                 while started is CONTINUE:
                     why = getattr(self, 'cruise_end_reason', None) or "the cruise ended"
@@ -132,6 +133,13 @@ class CellAttempt(ScanSteps, ObstacleSteps, LegSteps, CruiseSteps, StopAndGoStar
                         recovery.retreat_along_traveled_path(self.env, self.robot_state_client, self.command_client,
                                                              mobility_kwargs=self.mobility_kwargs)
                         self.env._attempt_fail_why = f"fall during the cruise ({why})"
+                        return False
+                    if why.startswith(attempt_cruise.BLOCKED_ON_SPOT):
+                        # Every goal needs a way the robot cannot take from where it stands: a new
+                        # cruise from here would find the same.
+                        self.env._attempt_fail_why = f"cruise ended {why}"
+                        print(f"[ATTEMPT] Cell ({self.target_row},{self.target_col}): "
+                              f"{self.env._attempt_fail_why}: a failure of the cell, retried later.")
                         return False
                     if battery_return_due():
                         print(f"[BATTERY] Interrupting the attempt on cell ({self.target_row},"
