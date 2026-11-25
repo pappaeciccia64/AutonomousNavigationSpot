@@ -53,7 +53,9 @@ import test_e2e_loop as T          # fake world, robot and local grid; applies i
 import bosdyn.client.lease
 from bosdyn.api import world_object_pb2
 from bosdyn.api.graph_nav import graph_nav_pb2, map_pb2, map_processing_pb2, recording_pb2
+from bosdyn.client.graph_nav import GraphNavServiceResponseError
 from bosdyn.client.math_helpers import Quat, SE3Pose
+from bosdyn.client.recording import NotRecordingError
 
 from spot_explorer.planning import safe_frontier
 from spot_explorer.perception import low_obstacles   # noqa: E402
@@ -173,7 +175,7 @@ class FakeGraphNav:
 
     def create_edge(self, edge=None, **kw):
         if not self.recording:
-            raise RuntimeError("NotRecordingError (fake)")
+            raise NotRecordingError(None, "NotRecordingError (fake)")
         self.graph.edges.add().CopyFrom(edge)
 
     # --- GraphNav ------------------------------------------------------------------
@@ -204,7 +206,7 @@ class FakeGraphNav:
             if self.wp0_returns > 0:
                 self.relocated = True             # from here GraphNav really knows where wp_0 is
             return graph_nav_pb2.SetLocalizationResponse(status=graph_nav_pb2.SetLocalizationResponse.STATUS_OK)
-        raise RuntimeError("STATUS_NO_MATCHING_FIDUCIAL (fake: no fiducial in the world)")
+        raise GraphNavServiceResponseError(None, "STATUS_NO_MATCHING_FIDUCIAL (fake: no fiducial in the world)")
 
     def navigate_to(self, waypoint_id, cmd_duration, command_id=None, travel_params=None,
                     destination_waypoint_tform_body_goal=None, **kw):

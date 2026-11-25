@@ -19,6 +19,7 @@ sys.path.insert(0, HERE)
 
 from bosdyn.api import trajectory_pb2                      # noqa: E402
 from bosdyn.api.spot import robot_command_pb2 as spot_cmd  # noqa: E402
+from bosdyn.client.exceptions import RpcError              # noqa: E402
 from bosdyn.util import duration_to_seconds                # noqa: E402
 
 from fake_spot import FakeSpot                             # noqa: E402
@@ -350,7 +351,7 @@ def test_network_errors():
         try:
             for _ in range(motion.MOVE_MAX_RPC_ERRORS):
                 pc.poll()
-        except RuntimeError:
+        except RpcError:
             raised = True
     stop_sent = not spot.commands[-1][1].synchronized_command.mobility_command.HasField('se2_trajectory_request')
     check(raised and stop_sent, f"after {motion.MOVE_MAX_RPC_ERRORS} in a row: stop sent and error raised")

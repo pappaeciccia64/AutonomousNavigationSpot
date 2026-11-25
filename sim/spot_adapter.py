@@ -23,7 +23,10 @@ from bosdyn.api.basic_command_pb2 import RobotCommandFeedbackStatus, SE2Trajecto
 from bosdyn.api.graph_nav import graph_nav_pb2, map_pb2, map_processing_pb2, recording_pb2
 from bosdyn.api import world_object_pb2
 from bosdyn.api.spot import robot_command_pb2 as spot_command_pb2
+from bosdyn.client.exceptions import RpcError
+from bosdyn.client.graph_nav import GraphNavServiceResponseError
 from bosdyn.client.math_helpers import Quat, SE3Pose
+from bosdyn.client.recording import NotRecordingError
 from bosdyn.util import duration_to_seconds, timestamp_to_sec
 from scipy.ndimage import distance_transform_edt
 
@@ -291,7 +294,7 @@ class MemoryGraphNav:
 
     def create_edge(self, edge=None, **kw):
         if not self.recording:
-            raise RuntimeError("NotRecordingError (sim)")
+            raise NotRecordingError(None, "NotRecordingError (sim)")
         self.graph.edges.add().CopyFrom(edge)
 
     def _nearest(self):
@@ -317,7 +320,7 @@ class MemoryGraphNav:
         return st
 
     def set_localization(self, **kw):
-        raise RuntimeError("STATUS_NO_MATCHING_FIDUCIAL (sim: no fiducial in the world)")
+        raise GraphNavServiceResponseError(None, "STATUS_NO_MATCHING_FIDUCIAL (sim: no fiducial in the world)")
 
     def navigate_to(self, waypoint_id, cmd_duration, command_id=None, travel_params=None,
                     destination_waypoint_tform_body_goal=None, **kw):
@@ -364,10 +367,10 @@ class _NoImages:
         return []
 
     def get_image_from_sources(self, *a, **kw):
-        raise RuntimeError("no cameras in the simulation")
+        raise RpcError(None, "no cameras in the simulation")
 
     def get_image(self, *a, **kw):
-        raise RuntimeError("no cameras in the simulation")
+        raise RpcError(None, "no cameras in the simulation")
 
 
 class SimRobot:

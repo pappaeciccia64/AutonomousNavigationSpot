@@ -20,6 +20,7 @@ import numpy as np
 from bosdyn.api import robot_command_pb2, robot_state_pb2
 from bosdyn.api.basic_command_pb2 import RobotCommandFeedbackStatus, SE2TrajectoryCommand
 from bosdyn.api.spot import robot_command_pb2 as spot_command_pb2
+from bosdyn.client.exceptions import RpcError
 from bosdyn.util import duration_to_seconds, timestamp_to_sec
 
 _FB = SE2TrajectoryCommand.Feedback
@@ -101,7 +102,7 @@ class FakeSpot:
     def _maybe_fail(self):
         if self.fail_next > 0:
             self.fail_next -= 1
-            raise RuntimeError("fake network error")
+            raise RpcError(None, "fake network error")
 
     # ---- simulation -----------------------------------------------------------------
     def advance(self, dt, step=0.02):
