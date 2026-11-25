@@ -225,7 +225,9 @@ def work_cruise(item, data):
     log = r['log']
     track = np.array(T.ROBOT.track, dtype=float).reshape(-1, 2)
     seen = re.findall(r'\[COVERAGE\] End: area seen (\d+)%', log) or re.findall(r'area seen (\d+)%', log)
-    sg = re.findall(r'stop-and-go instead (\d+)', log)
+    # The counter of starts that could not cruise: 'stop-and-go instead N' until the stop-and-go
+    # removal, 'no start in cruise N' after it.
+    sg = re.findall(r'(?:stop-and-go instead|no start in cruise) (\d+)', log)
     return dict(visited=sorted(set(re.findall(r'\[VISITED\] Cell \((\d+,\d+)\)', log))),
                 blocked=sorted(set(re.findall(r'\[BLOCKED\] Cell \((\d+,\d+)\)', log))),
                 seen=int(seen[-1]) if seen else None,
