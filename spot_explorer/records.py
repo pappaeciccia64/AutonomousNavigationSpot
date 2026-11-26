@@ -9,8 +9,8 @@ happened (mission_report.py, mission_viewer.py, test_replay.py).
                      as arguments (PRM, log folder, reference height)
   install_stdout_tee copy of all output into mission_log.txt
   BodyTiltRecorder   samples body position and tilt during a move
-  SegmentLog, append_csv, append_trajectory, TrajectoryLog
-                     the mission CSVs (segments.csv, trajectory.csv, drift.csv, ...)
+  append_csv, append_trajectory, TrajectoryLog
+                     the mission CSVs (trajectory.csv, drift.csv, battery.csv, ...)
   save_npz_async     saving of the .npz files on a helper thread, without stopping the loop
 """
 import csv
@@ -42,8 +42,7 @@ MISSION_STATS = {
     'gait_tier_counts': {'PLAIN': 0, 'MODERATE': 0, 'HARD': 0},
     'replan_count': 0,
     'near_threshold_saves': 0,
-    'segments_logged': 0,
-    'last_tier': None,   # tier of the last segment, read for the CSV row
+    'last_tier': None,   # gait level of the last command, for the [LOCALIZATION] line
     'time_s': {},        # seconds spent per phase, see timing_add / [TIMING]
     'scan_bundles': 0,
     'frontier_blocks': 0,
@@ -94,7 +93,6 @@ MISSION_STATS = {
 MISSION_CTX = {
     'prm': None,
     'log_folder': None,
-    'segment_log': None,
     'summary_done': False,
     # Ground height at mission start in the VISION frame. Spot measures heights
     # relative to where it was powered on: if it is taken to the mission area via
@@ -108,18 +106,6 @@ MISSION_CTX = {
     # see it again on return to wp_0 (graphnav_check_start_fiducial). None = none.
     'start_fiducial': None,
 }
-
-
-_SEGMENT_COLUMNS = [
-    'timestamp', 'iteration', 'cell_row', 'cell_col', 'node_from', 'node_to',
-    'x_from', 'y_from', 'x_to', 'y_to', 'dist_m',
-    'slope_source', 'long_slope', 'lat_slope',
-    'roughness',
-    'cost_dist', 'cost_long', 'cost_lat', 'cost_rough', 'cost_total',
-    'tier', 'gait_override', 'success', 'dist_traveled_m', 'dist_commanded_m', 'duration_s',
-    'roll_start_deg', 'pitch_start_deg', 'roll_end_deg', 'pitch_end_deg',
-    'roll_peak_abs_deg', 'pitch_peak_abs_deg', 'tilt_samples', 'tilt_errors',
-]
 
 
 _CSV_LOCK = threading.Lock()
@@ -466,31 +452,6 @@ class BodyTiltRecorder:
                 'samples': self._n,
                 'errors': self._errors,
             }
-
-
-class SegmentLog:
-    """CSV with one row for every segment (from one node to the next) actually travelled
-    or attempted. Opens in a spreadsheet. A row is written and flushed to disk at once, so
-    even an interrupted mission leaves the data up to the last segment."""
-    def __init__(self, path):
-        self._path = path
-        self._lock = threading.Lock()
-        with open(path, 'w', newline='', encoding='utf-8') as f:
-            csv.writer(f).writerow(_SEGMENT_COLUMNS)
-
-    def write_row(self, row_dict):
-        try:
-            def fmt(v):
-                if v is None:
-                    return ''
-                if isinstance(v, (float, np.floating)):
-                    return f"{float(v):.4f}"
-                return v
-            with self._lock:
-                with open(self._path, 'a', newline='', encoding='utf-8') as f:
-                    csv.writer(f).writerow([fmt(row_dict.get(c)) for c in _SEGMENT_COLUMNS])
-        except Exception as e:
-            print(f"[LOG] Could not write the segment row: {e}")
 
 
 def append_csv(name, header, rows):
