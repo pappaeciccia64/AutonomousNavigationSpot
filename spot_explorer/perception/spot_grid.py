@@ -511,7 +511,7 @@ class LocalGrid:
                 pts, vals, color = self.create_vtk_no_step_grid(p, robot_state_client, timeout)
                 grids_data[grid_type] = {'pts': pts, 'values': vals, 'color': color}
             elif grid_type in ['terrain', 'intensity', 'terrain_valid']:
-                pts, vals, color = self.create_vtk_terrain_grid(p, robot_state_client, layer_name=grid_type)
+                pts, vals, color = self.create_vtk_terrain_grid(p, layer_name=grid_type)
                 grids_data[grid_type] = {'pts': pts, 'values': vals, 'color': color}
                 if grid_type == 'terrain':
                     # Height quantization step of this scan: tolerance for
@@ -522,7 +522,7 @@ class LocalGrid:
 
         return grids_data, main_proto, p
 
-    def create_vtk_terrain_grid(self, proto, robot_state_client, layer_name='terrain'):
+    def create_vtk_terrain_grid(self, proto, layer_name='terrain'):
         """
         Terrain-type layer (terrain, terrain_valid, intensity): (points in the VISION frame,
         values, colours). For `terrain` the returned value is the height in VISION.

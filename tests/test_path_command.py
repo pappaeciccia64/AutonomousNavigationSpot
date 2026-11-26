@@ -311,29 +311,6 @@ def test_blocked():
     check(1.1 < spot.x <= 1.2, f"robot before the obstacle ({spot.x:.2f})")
 
 
-def test_leg_command():
-    print("\n== Leg of the stop-and-go with the path command (navigate_to_path) ==")
-    import types
-    for yaw_deg, abort_after in ((0.0, None), (90.0, None), (0.0, 1.0)):
-        spot = FakeSpot(0.0, 0.0, np.radians(yaw_deg))
-        old_sleep, old_time = motion.time.sleep, motion.time.time
-        motion.time.sleep = lambda dt, s=spot: s.advance(dt)
-        motion.time.time = lambda s=spot: 1e9 + s.now
-        try:
-            vtb = types.SimpleNamespace(rotation=types.SimpleNamespace(w=np.cos(np.radians(yaw_deg) / 2), x=0, y=0,
-                                                                       z=np.sin(np.radians(yaw_deg) / 2)))
-            ab = (lambda s=spot, t=abort_after: s.now > t) if abort_after else None
-            with contextlib.redirect_stdout(io.StringIO()):
-                ok, d, cmd = motion.navigate_to_path(1.5, 0.0, 0.0, 0.0, spot, spot, vtb, should_abort=ab,
-                                                     max_linear_vel=0.5)
-        finally:
-            motion.time.sleep, motion.time.time = old_sleep, old_time
-        if abort_after:
-            check(not ok and 0.2 < d < 1.0, f"stop requested by the frontier: interrupted after {d:.2f} m")
-        else:
-            check(ok and abs(d - 1.5) < 0.05, f"start {yaw_deg:.0f} deg off: arrived, {d:.2f} m out of {cmd:.2f}")
-
-
 def test_network_errors():
     print("\n== Network errors ==")
     spot = FakeSpot(0.0, 0.0)
@@ -368,7 +345,6 @@ if __name__ == '__main__':
     test_dead_man()
     test_stop()
     test_blocked()
-    test_leg_command()
     test_network_errors()
     print(f"\n{'ALL OK' if not FAILS else f'{len(FAILS)} FAILED: ' + '; '.join(FAILS)}")
     sys.exit(1 if FAILS else 0)

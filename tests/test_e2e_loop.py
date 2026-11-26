@@ -294,7 +294,6 @@ for _m in (attempt_scan, planning_cycle, spot_grid):
 connection.getPosition = lambda rsc: (ROBOT.x, ROBOT.y, -2.7, quat(ROBOT.yaw))
 # The moves outside the cruise (the retreat after a fall): straight legs on ROBOT.
 motion.navigate_to = fake_navigate_to
-motion.navigate_to_path = fake_navigate_to
 motion.move_to_world_point_without_turning = fake_move_no_turn
 motion.check_fall = fake_check_fall
 motion.recover_from_fall = fake_recover

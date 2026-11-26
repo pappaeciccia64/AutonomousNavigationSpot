@@ -71,18 +71,6 @@ ROTATION_NOISE_TOLERANCE_M = 0.15
 # tolerance at 0.15 a pole entering the body would be approved. For a wall the two metrics
 # coincide. The cells under the body now are excluded: the robot is standing on them.
 
-
-def body_extents(heading, motion_dir):
-    """
-    Body footprint relative to the direction of travel: (half along the travel,
-    half across). heading = body heading, motion_dir = direction of motion, in radians.
-    With heading == motion_dir: (0.55, 0.25); sideways: (0.25, 0.55).
-    """
-    a = motion_dir - heading
-    c, s = abs(np.cos(a)), abs(np.sin(a))
-    along = ROBOT_HALF_LENGTH_M * c + ROBOT_HALF_WIDTH_M * s
-    across = ROBOT_HALF_LENGTH_M * s + ROBOT_HALF_WIDTH_M * c
-    return float(along), float(across)
 FRONTIER_SAMPLE_STEP_M = 0.03        # one sample per cell
 FRONTIER_ROBOT_RADIUS_M = 0.60
 

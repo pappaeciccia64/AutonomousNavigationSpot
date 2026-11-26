@@ -9,7 +9,7 @@ happened (mission_report.py, mission_viewer.py, test_replay.py).
                      as arguments (PRM, log folder, reference height)
   install_stdout_tee copy of all output into mission_log.txt
   BodyTiltRecorder   samples body position and tilt during a move
-  SegmentLog, append_csv, append_trajectory, TrajectoryLog, log_segment
+  SegmentLog, append_csv, append_trajectory, TrajectoryLog
                      the mission CSVs (segments.csv, trajectory.csv, drift.csv, ...)
   save_npz_async     saving of the .npz files on a helper thread, without stopping the loop
 """
@@ -90,7 +90,7 @@ MISSION_STATS = {
 # Context of the current mission, for the diagnostic logs that have no way to receive
 # these objects as arguments (attempt_enter_cell_from_position is called from several
 # places and we do not want to change its signature). Filled in run.easy_walk(), read by
-# log_segment() and summary.emit_mission_summary_once(). Diagnostics only: no robot decision reads it.
+# summary.emit_mission_summary_once() and the CSV writers. Diagnostics only: no robot decision reads it.
 MISSION_CTX = {
     'prm': None,
     'log_folder': None,
@@ -551,19 +551,11 @@ class TrajectoryLog:
         return False
 
 
-def log_segment(row_dict):
-    seg_log = MISSION_CTX.get('segment_log')
-    if seg_log is not None:
-        seg_log.write_row(row_dict)
-        MISSION_STATS['segments_logged'] += 1
-
-
 def visualize_grid_with_candidates(pts, terrain_real, obstacle_mask, robot_x, robot_y,
                                    candidates, chosen_point, iteration, env, save_path,
                                    prm_graph=None, chosen_path=None,
-                                   cells_obstacle_dist=None, intensity_values=None,
-                                   valid_values=None, grad_values=None, rough_values=None,
-                                   include_diagnostics=True):
+                                   cells_obstacle_dist=None,
+                                   valid_values=None, grad_values=None, rough_values=None):
     """
     Data of a figure (scan, candidates, chosen point, PRM graph, path) saved in
     <name>_vis.npz. Nothing is drawn during the mission: mission_viewer.py makes the

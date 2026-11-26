@@ -325,8 +325,8 @@ def compute_safe_frontier(polyline, snap, extend_end_m=None, check_slope=True, b
             the terrain under the nose when the robot gets there. Default
             FRONTIER_BODY_HALF_LENGTH_M.
         check_slope: also check the slope of the free stretches.
-        body: (half footprint along the travel, half footprint across), see
-            geometry.body_extents. Default: robot facing where it goes (0.55, 0.25).
+        body: (half footprint along the travel, half footprint across). Default: robot facing
+            where it goes (0.55, 0.25).
         air_m: air between flank and obstacle. None = ROBOT_CLEARANCE_AIR_M (0.05), i.e. the
             minimum distance 0.30 with which it decides to start. The stop thread passes
             geometry.FRONTIER_ABORT_AIR_M (0.0): while moving it only stops for a real
@@ -480,33 +480,6 @@ def point_along(polyline, s):
             return (x1 + t * (x2 - x1), y1 + t * (y2 - y1)), k
         s_acc += L
     return polyline[-1], max(0, len(polyline) - 2)
-
-
-def describe_frontier(frontier):
-    """One readable line for the log."""
-    r = frontier['reason']
-    adv = allowed_advance(frontier)
-    sx, sy = frontier['stop_xy']
-    base = (f"{frontier['dist']:.2f} m confirmed out of {frontier['path_len']:.2f} m of path, "
-            f"allowed advance {adv:.2f} m")
-    if r == 'end_of_path':
-        return f"[FRONTIER] {base} -- path free up to the goal"
-    if r == 'end_of_data':
-        return f"[FRONTIER] {base} -- stops at the edge of the data at ({sx:.2f}, {sy:.2f}): I advance and look again"
-    if r == 'obstacle':
-        thr = frontier.get('stop_threshold', frontier.get('clearance_nominal',
-                                                          geometry.FRONTIER_CLEARANCE_M))
-        if frontier.get('stop_by_latch'):
-            why = (f"(minimum {thr:.2f} m; here the hysteresis decides, which keeps the cell blocking "
-                   f"up to {thr + OBSTACLE_HYSTERESIS_M:.2f} m)")
-        else:
-            why = f"(minimum {thr:.2f} m)"
-        return (f"[FRONTIER] {base} -- obstacle {frontier['value']:.2f} m from the centre line at "
-                f"({sx:.2f}, {sy:.2f}) {why}")
-    if r == 'roughness':
-        return f"[FRONTIER] {base} -- terrain too rough at ({sx:.2f}, {sy:.2f})"
-    return (f"[FRONTIER] {base} -- stretch too steep from ({sx:.2f}, {sy:.2f}) "
-            f"(slope {frontier['value']:.3f} > {slopes.SLOPE_THRESHOLD:.3f})")
 
 
 # =============================================================================
@@ -783,29 +756,4 @@ def verify_arc_safety(x1, y1, x2, y2, pts, obstacle_mask):
     """Point check of a segment on the fused mask. Used by the retreat."""
     return connection.check_line_of_sight(x1, y1, x2, y2, pts, obstacle_mask)
 
-
-# =========================================================================================
-# Decisions on the FRONTIER: what to do now given the safe frontier and the fresh scan.
-# Pure functions (no robot, no I/O), tested by the end-to-end test and the replay.
-# =========================================================================================
-def goal_still_reachable(snap, goal_x, goal_y):
-    """
-    Is the goal point still reachable on the FRESH data?
-
-    The safe frontier requires the centre line of the path to be at least
-    FRONTIER_CLEARANCE_M from an obstacle. A goal point with obstacle_distance below that
-    threshold can never be reached, however many scans are made: the robot would wait and
-    declare a block. It happens because the point is chosen from afar, when the area is
-    still unknown.
-
-    Returns:
-        True if the point is reachable or if it cannot be judged (outside the scanned
-        window: we do not know, and nothing is touched on the basis of nothing).
-    """
-    if snap is None:
-        return True
-    rows, cols, inside = _cells(snap, np.array([float(goal_x)]), np.array([float(goal_y)]))
-    if not bool(inside[0]):
-        return True
-    return float(snap.obstacle_dist[rows[0], cols[0]]) >= geometry.FRONTIER_CLEARANCE_M
 

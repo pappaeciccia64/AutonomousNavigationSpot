@@ -6,10 +6,8 @@ from bosdyn.api import geometry_pb2
 from spot_explorer.robot import motion
 from spot_explorer.robot import photos
 from spot_explorer import config as P
-from spot_explorer.robot import connection
 from spot_explorer.records import MISSION_STATS, TrajectoryLog, timing_add
 from spot_explorer.graphnav.localization import (_distance_from_waypoint, graphnav_is_lost, graphnav_log_drift, graphnav_log_localization, graphnav_relocalize)
-from spot_explorer.graphnav.map_shortcuts import graphnav_add_shortcuts
 from spot_explorer.robot.errors import ROBOT_ERRORS, describe
 
 
@@ -258,68 +256,3 @@ def graphnav_return_to_start(recordingInterface, robot_state_client, command_cli
     return 'not_arrived'
 
 
-def graphnav_step_back(env, recordingInterface, robot_state_client, command_client,
-                       min_dist_m=0.40, face_xy=None):
-    """
-    Go back with GraphNav to the most recent waypoint at least min_dist_m BEHIND.
-
-    The search goes backwards along the track because the last breadcrumb may have been
-    dropped here, where the robot is now: going back to it would move nothing. If no
-    breadcrumb is far enough, the oldest available one is used anyway.
-
-    Returns (ok, crumb). ok=True only if GraphNav declares it has ARRIVED: in
-    _graphnav_navigate_to_inner STATUS_LOST is a failure, localization is not forced on the
-    destination (see graphnav moves).
-
-    Recording must be STOPPED before navigating and resumed after: GraphNav does not
-    navigate while recording. It is the same sequence used for moves between cells.
-    """
-    trail = getattr(env, '_graphnav_trail', None) or []
-    if not trail:
-        return False, None
-    try:
-        rx, ry, _, _ = connection.getPosition(robot_state_client)
-    except ROBOT_ERRORS:
-        rx, ry = trail[-1]['x'], trail[-1]['y']
-    idx = None
-    for k in range(len(trail) - 1, -1, -1):
-        if float(np.hypot(trail[k]['x'] - rx, trail[k]['y'] - ry)) >= min_dist_m:
-            idx = k
-            break
-    if idx is None:
-        idx = 0
-    hop = len(trail) - 1 - idx
-    crumb = trail[idx]
-    d_crumb = float(np.hypot(crumb['x'] - rx, crumb['y'] - ry))
-    if d_crumb < min_dist_m:
-        # All breadcrumbs are around here (the robot may stand on one): GraphNav would not
-        # move the robot. Replan from where it is, without moving.
-        MISSION_STATS['backtracks_in_place'] += 1
-        print(f"[RETURN] The farthest breadcrumb behind, {crumb['wp_name']}, is {d_crumb:.2f} m away "
-              f"(less than {min_dist_m:.2f}): I do not move, I replan from here.")
-        return True, dict(crumb, in_place=True)
-    print(f"[RETURN] Going back to {crumb['wp_name']}, {d_crumb:.2f} m from the robot.")
-    recording_stopped = False
-    graphnav_add_shortcuts(recordingInterface, "before the return", map_edges=True,
-                           target_wp_id=crumb['wp_id'], robot_xy=(rx, ry))
-    try:
-        recordingInterface.stop_recording()
-        recording_stopped = True
-    except ROBOT_ERRORS as e:
-        print(f"[RETURN] Could not stop the recording ({describe(e)}): trying anyway.")
-    ok = graphnav_navigate_to(
-        recordingInterface, crumb['wp_id'], robot_state_client, command_client,
-        f"return to waypoint {crumb['wp_name']} at ({crumb['x']:.2f}, {crumb['y']:.2f})",
-        face_xy=face_xy)
-    if recording_stopped:
-        try:
-            recordingInterface.start_recording()
-        except ROBOT_ERRORS as e:
-            print(f"[RETURN] Recording not resumed ({describe(e)}): the following breadcrumbs "
-                  "may not be created.")
-    if ok:
-        # The walked legs no longer describe the way the robot came:
-        # GraphNav does not record them, and the fallback retreat must not use them.
-        env._traveled_arcs = []
-        del trail[len(trail) - hop:]        # breadcrumbs beyond this one are no longer needed
-    return ok, crumb

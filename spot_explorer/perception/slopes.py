@@ -203,7 +203,7 @@ def compute_arc_slope_profile(terrain_2d, grid_origin_x, grid_origin_y, cell_siz
 # =========================================================================
 # Slope of many edges together
 #
-# Same computation as compute_arc_slope_profile / _slope_profile_from_sampler / _body_slope,
+# Same computation as compute_arc_slope_profile / _body_slope,
 # done with matrices: one row per edge. Edges are grouped by number of samples (which
 # depends only on the length: on the lattice there are only a few dozen lengths), and for
 # each group positions, height readings, differences and 90th percentile are done in one
@@ -263,7 +263,7 @@ def arc_slope_profiles_batch(sample, x1, y1, x2, y2, cell_size, perp_sample_spac
     any shape (NaN / False where there is no data).
 
     sampler_mode=False: like compute_arc_slope_profile (live grid).
-    sampler_mode=True:  like _slope_profile_from_sampler (global map): same early exits --
+    sampler_mode=True:  on a sampler of the global map, with these early exits --
         the three points start/middle/end without data, centre-line coverage below
         min_sample_fraction -- which give "no data" with slopes 0.
 
@@ -442,103 +442,6 @@ def _body_slope(gather, base, x1, y1, x2, y2, dir_x, dir_y, perp_x, perp_y,
             or g_long.size == 0 or g_lat.size == 0):
         return base
     return max(lo, p90(g_long)), max(la, p90(g_lat)), True
-
-def _slope_profile_from_sampler(sample_height, x1, y1, x2, y2, cell_size,
-                                perp_sample_spacing_m=0.10,
-                                baseline_m=SLOPE_BASELINE_M,
-                                lateral_half_width_m=LATERAL_SLICE_HALF_WIDTH_M,
-                                min_sample_fraction=MIN_ARC_SAMPLE_FRACTION,
-                                sample_array=None, body_ext_m=0.0):
-    """
-    Slope of an edge on a SPARSE map (the global terrain map, see
-    GlobalTerrainGrid.compute_arc_slope_profile). sample_height(px, py) gives the height at
-    a point or None; sample_array does the same on an array (NaN where missing).
-
-    Same geometry and same base as compute_arc_slope_profile: the two sources must measure
-    the same quantity, otherwise an edge would change slope entering or leaving the scanned
-    window (test_replay.py checks it). has_data tells whether there are enough real samples.
-
-    Returns:
-        (longitudinal_slope, lateral_slope, has_data)
-    """
-    # x*x and not **2: it is the operation numpy does on arrays, so the length (and from
-    # there step and slope) is bit-for-bit identical to that of the batch computation
-    # (arc_slope_profiles_batch); **2 on a single number sometimes differs in the last digit.
-    dist = float(np.sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1)))
-    if dist < 1e-6:
-        return _no_slope_data(body_ext_m)
-
-    dir_x, dir_y = (x2 - x1) / dist, (y2 - y1) / dist
-    perp_x, perp_y = -dir_y, dir_x
-
-    # Early exit: if start, middle and end of the edge have no data, "without data"
-    # (most edges lie outside everything that has been seen). If at least
-    # one answers the full computation is done, and min_sample_fraction decides.
-    if sample_array is not None:
-        h3 = sample_array(np.array([x1, 0.5 * (x1 + x2), x2]), np.array([y1, 0.5 * (y1 + y2), y2]))
-        if not np.isfinite(h3).any():
-            return _no_slope_data(body_ext_m)
-    elif (sample_height(x1, y1) is None
-            and sample_height(0.5 * (x1 + x2), 0.5 * (y1 + y2)) is None
-            and sample_height(x2, y2) is None):
-        return _no_slope_data(body_ext_m)
-
-    def _sample_array(xs, ys):
-        """Sample an array of positions, NaN where the map has no data."""
-        if sample_array is not None:
-            return sample_array(xs, ys)
-        flat_x = np.ravel(xs)
-        flat_y = np.ravel(ys)
-        out = np.empty(flat_x.size, dtype=np.float64)
-        for i in range(flat_x.size):
-            h = sample_height(flat_x[i], flat_y[i])
-            out[i] = np.nan if h is None else float(h)
-        return out.reshape(np.shape(xs))
-
-    # --- LONGITUDINAL ---
-    num_along = max(2, int(dist / cell_size) + 1)
-    t = np.linspace(0.0, 1.0, num_along)
-    step_along = dist / (num_along - 1)
-    h_along = _sample_array(x1 + t * (x2 - x1), y1 + t * (y2 - y1))
-    cov_along = float(np.isfinite(h_along).mean())
-
-    # The lateral costs ~6 times the longitudinal (one slice every 10 cm, each
-    # as wide as the robot). If the longitudinal coverage is already insufficient,
-    # has_data would be False anyway: no point paying for it.
-    if cov_along < min_sample_fraction:
-        return _no_slope_data(body_ext_m)
-
-    grad_long = _baseline_gradient(h_along, step_along, baseline_m)
-    longitudinal_slope = p90(grad_long) if grad_long.size else 0.0
-
-    # --- LATERAL ---
-    num_slices = max(1, int(dist / perp_sample_spacing_m) + 1)
-    num_perp = max(2, int(2 * lateral_half_width_m / cell_size) + 1)
-    step_perp = 2 * lateral_half_width_m / (num_perp - 1)
-    u = np.linspace(-lateral_half_width_m, lateral_half_width_m, num_perp)
-    ts = np.linspace(0.0, 1.0, num_slices) if num_slices > 1 else np.array([0.5])
-    xs_perp = (x1 + ts * (x2 - x1))[:, None] + u[None, :] * perp_x
-    ys_perp = (y1 + ts * (y2 - y1))[:, None] + u[None, :] * perp_y
-    h_perp = _sample_array(xs_perp, ys_perp)
-    cov_lat = float(np.isfinite(h_perp).mean())
-    grad_lat = _baseline_gradient(h_perp, step_perp, baseline_m)
-    lateral_slope = p90(grad_lat) if grad_lat.size else 0.0
-
-    has_data = (cov_along >= min_sample_fraction and cov_lat >= min_sample_fraction
-                and grad_long.size > 0 and grad_lat.size > 0)
-
-    base = (longitudinal_slope, lateral_slope, has_data)
-    if body_ext_m <= 0:
-        return base
-
-    def gather(xs, ys):
-        h = _sample_array(xs, ys)
-        return h, np.isfinite(h)
-    return base + _body_slope(gather, base, x1, y1, x2, y2, dir_x, dir_y, perp_x, perp_y,
-                              h_along, np.isfinite(h_along), step_along, grad_lat,
-                              np.isfinite(h_perp), u, step_perp, num_slices, dist,
-                              perp_sample_spacing_m, baseline_m, min_sample_fraction, body_ext_m)
-
 
 # =========================================================================
 # Slope from a local plane

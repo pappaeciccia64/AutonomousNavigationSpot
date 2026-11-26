@@ -266,5 +266,3 @@ START_FIDUCIAL_WAIT_S = 3.0
 WP0_FIDUCIAL_CORRECTION = True
 WP0_FIDUCIAL_TOLERANCE_M = 0.30
 WP0_FIDUCIAL_MAX_CORRECTIONS = 2
-
-SHORTCUT_MAX_DIST_M = 2.5          # beyond it, the leg does not fit in the window anyway

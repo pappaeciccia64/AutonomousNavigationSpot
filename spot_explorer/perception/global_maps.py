@@ -534,8 +534,8 @@ class GlobalTerrainGrid:
         heights_flat = np.asarray(heights).ravel()
         valid_flat = np.asarray(is_valid).ravel()
 
-        # Key = floor(x / resolution) as in get_height (np.round on the cell centres
-        # would round to even and leave keys never written).
+        # Key = floor(x / resolution) (np.round on the cell centres would round to even and
+        # leave keys never written).
         gx_array = np.floor(x_array / self.resolution).astype(int)
         gy_array = np.floor(y_array / self.resolution).astype(int)
 
@@ -549,8 +549,8 @@ class GlobalTerrainGrid:
         r = self._h_r
         v = valid_flat.astype(bool)
         if v.any():
-            # The same sums in the same order (np.add.at goes point by point): the raster
-            # means are those of get_height to the bit.
+            # np.add.at goes point by point: the sums, and so the means, do not depend on how
+            # the points are grouped.
             gx, gy = gx_array[v], gy_array[v]
             r.ensure(int(gx.min()), int(gx.max()), int(gy.min()), int(gy.max()))
             ix, iy = gx - r.gx0, gy - r.gy0
@@ -558,15 +558,6 @@ class GlobalTerrainGrid:
             np.add.at(r.a['n'], (ix, iy), 1)
             r.a['mean'][ix, iy] = r.a['sum'][ix, iy] / r.a['n'][ix, iy]
             r.a['has'][ix, iy] = True
-
-    def get_height(self, x, y):
-        """Mean height observed at that position, or None if never seen."""
-        r = self._h_r
-        i = int(np.floor(x / self.resolution)) - r.gx0
-        j = int(np.floor(y / self.resolution)) - r.gy0
-        if not (0 <= i < r.a['n'].shape[0] and 0 <= j < r.a['n'].shape[1]) or r.a['n'][i, j] == 0:
-            return None
-        return float(r.a['sum'][i, j] / r.a['n'][i, j])
 
     height_sum = property(lambda self: _counted_view(self._h_r, 'sum', 'n'))
     height_count = property(lambda self: _counted_view(self._h_r, 'n', 'n'))
