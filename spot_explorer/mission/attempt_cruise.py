@@ -188,6 +188,19 @@ def _tier(grad, rough):
     return 'HARD'
 
 
+def _no_first_plan_why(bad, wait_s):
+    """Why no first plan came within wait_s (bad: the (status, error) of the plans without
+    data). Kept for the attempt (start_failure_reason), it ends up in the log and in the
+    mission summary: a start that fails is a failure of the cell, the cause tells whether the
+    graph or the computer was to blame."""
+    errors = [e for st, e in bad if st == 'error']
+    noscan = [e for st, e in bad if st == 'no_scan']
+    return (f"no plan from the planning thread within {wait_s:.0f} s: "
+            + (f"{len(errors)} cycles in error, the last: {errors[-1]}" if errors else
+               f"{len(noscan)} cycles without the scan of Spot ({noscan[-1] or 'no cause'})" if noscan else
+               "no cycle ended (thread busy or stuck)"))
+
+
 class CellSwitch:
     """
     The change of goal or cell while walking, seen from the main thread of a cruise (_cruise).
@@ -269,6 +282,27 @@ class CellSwitch:
         cruise._apply_switch(sw)
         self.report = True
         return None
+
+
+class _CruiseRun:
+    """The state of one cruise, passed between its steps (CruiseSteps._cruise_*)."""
+
+    def __init__(self, planner, tracker):
+        self.planner, self.tracker = planner, tracker
+        self.pc = self.state_client = self.recorder = None
+        self.ids, self.track, self.t0 = [], [], 0.0
+        self.start_in_place = self.gait0 = None     # the start of the first command
+        self.switch = None
+        self.reason = None               # set when the cruise ends: why
+        self.arrived = self.handoff = self.no_path_end = False
+        self.to_goal = False             # the stretch sent ends at the goal
+        self.asked_block = None          # block_request asked, waiting for the new goal or cell
+        self.spot_blocked, self.blocked_send = 0, -1   # sends Spot reported blocked, the last one counted
+        self.n_plans = self.n_sends = self.bad = 0
+        self.turn_t, self.poll_s, self.send_s = [], [], []     # main thread timing, see _main_timing
+        self.last_version = 0
+        self.last_plan_t = self.last_crumb_t = self.last_battery_t = self.last_fall_t = 0.0
+        self.crumb = None                # the thread creating a GraphNav breadcrumb
 
 
 class CruiseSteps:
@@ -420,16 +454,7 @@ class CruiseSteps:
             break
         moving = getattr(self.env, '_moving_pc', None) is not None
         if plan is None:
-            # Why: kept for the attempt (start_failure_reason), it ends up in the log and in the
-            # mission summary: a start that fails is a failure of the cell, the cause tells
-            # whether the graph or the computer was to blame.
-            errors = [e for st, e in bad if st == 'error']
-            noscan = [e for st, e in bad if st == 'no_scan']
-            why = (f"no plan from the planning thread within {wait_s:.0f} s: "
-                   + (f"{len(errors)} cycles in error, the last: {errors[-1]}" if errors else
-                      f"{len(noscan)} cycles without the scan of Spot ({noscan[-1] or 'no cause'})" if noscan else
-                      "no cycle ended (thread busy or stuck)"))
-            self.start_failure_reason = why
+            why = self.start_failure_reason = _no_first_plan_why(bad, wait_s)
         elif why is None and (plan['status'] != 'ok' or plan['advance'] < CRUISE_MIN_AHEAD_M):
             why = (f"first plan '{plan['status']}', {plan['advance']:.2f} m confirmed: no other goal "
                    f"in {wait_s:.0f} s")
@@ -438,13 +463,7 @@ class CruiseSteps:
             if asked is not None:
                 self.env._attempt_left_unreachable = True     # blocked: the cell left for later
         if why is None and moving and len(plan['confirmed']) > 1:
-            (ax, ay), (bx, by) = plan['confirmed'][:2]
-            back = bool(plan['backward'] and plan['backward'][0])
-            dyaw = np.degrees(motion._angle_diff(np.arctan2(by - ay, bx - ax) + (np.pi if back else 0.0),
-                                                 self.robot_yaw))
-            if abs(dyaw) > motion.PATH_START_IN_PLACE_DEG:
-                print(f"[CRUISE] {dyaw:+.0f} deg to turn towards the next cell: on the spot inside the new "
-                      f"command, without stopping first" + (" (then tail first)" if back else "") + ".")
+            self._say_turn_while_walking(plan)
         if why is None:
             MISSION_STATS['thread_first_turns'] = MISSION_STATS.get('thread_first_turns', 0) + 1
             return plan
@@ -454,6 +473,17 @@ class CruiseSteps:
         if moving:
             stop_if_moving(self.env, "first plan not usable while walking")
         return None
+
+    def _say_turn_while_walking(self, plan):
+        """Robot still walking (hand-off): a log line if the first command of the new cell turns
+        on the spot (beyond PATH_START_IN_PLACE_DEG), inside the command, without stopping."""
+        (ax, ay), (bx, by) = plan['confirmed'][:2]
+        back = bool(plan['backward'] and plan['backward'][0])
+        dyaw = np.degrees(motion._angle_diff(np.arctan2(by - ay, bx - ax) + (np.pi if back else 0.0),
+                                             self.robot_yaw))
+        if abs(dyaw) > motion.PATH_START_IN_PLACE_DEG:
+            print(f"[CRUISE] {dyaw:+.0f} deg to turn towards the next cell: on the spot inside the new "
+                  f"command, without stopping first" + (" (then tail first)" if back else "") + ".")
 
     def _new_planner(self, goal_id, path_ids, thread_goals=True):
         """The planning cycle of a cruise of this attempt: towards goal_id along path_ids, scan
@@ -484,8 +514,11 @@ class CruiseSteps:
         planning thread (_first_plan). Returns STOP (cell seen, arrival, hand-off), FAILED (no
         goal; no path to any goal of the cell; MAX_CRUISE_STALLS), None (the first plan does not
         allow to start and no other goal did), CONTINUE (ended for an exception: see
-        cruise_end_reason)."""
-        tracker = self.verification_tracker
+        cruise_end_reason).
+
+        One turn of the loop (_cruise_turn): read Spot's feedback, the periodic checks, take
+        the new plan of the planning thread, and send its confirmed stretch -- or end the
+        cruise (c.reason) for an arrival, a hand-off to the next cell or an exception."""
         plan0 = self._first_plan(planner)
         # Seen or no goal: only computations, no command of this attempt -- the robot keeps
         # walking if it was (hand-off), as an attempt that ends before its first command.
@@ -497,23 +530,36 @@ class CruiseSteps:
             return FAILED
         if plan0 is None:
             return None
-        ids = [planner.path_ids[0]] + list(plan0['ids'])
+        c = self._cruise_setup(planner, plan0)
+        try:
+            self._cruise_first_send(c, plan0)
+            while c.reason is None:
+                self._cruise_turn(c)
+        finally:
+            self._cruise_stop(c)
+        return self._cruise_outcome(c)
+
+    # --- the steps of the cruise, in the order they run --------------------------------------
+    def _cruise_setup(self, planner, plan0):
+        """The state of one cruise (_CruiseRun) from the first plan: path, command, recorder;
+        the previous command of a hand-off is replaced by this cruise's."""
+        c = _CruiseRun(planner, self.verification_tracker)
+        c.ids = [planner.path_ids[0]] + list(plan0['ids'])
         adv, turn_stop = plan0['advance'], plan0['turn_stop']
-        confirmed, backward = plan0['confirmed'], plan0['backward']
-        kwargs = self._cruise_gait(plan0['terrain'])
+        c.gait0 = self._cruise_gait(plan0['terrain'])
         path_len = float(sum(np.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(self.polyline, self.polyline[1:])))
-        to_goal = turn_stop is None and adv >= path_len - 0.01
+        c.to_goal = turn_stop is None and adv >= path_len - 0.01
         HANDOFF.mark("cruise setup")
         print(f"[CRUISE] Start from node {self.robot_node_id} towards the goal "
-              f"({self.target_x:.2f}, {self.target_y:.2f}): {len(ids) - 1} nodes, {path_len:.2f} m, "
+              f"({self.target_x:.2f}, {self.target_y:.2f}): {len(c.ids) - 1} nodes, {path_len:.2f} m, "
               f"{adv:.2f} m confirmed" + (f" (rotation not clear at node {turn_stop})" if turn_stop else "") + ".")
 
-        tracker.clear_path()
+        c.tracker.clear_path()
         # Robot still walking from the previous cell (hand-off): this command replaces that
         # one, turning while walking within PATH_START_IN_PLACE_DEG, beyond it on the spot
         # inside the command.
-        start_in_place = (motion.PATH_START_IN_PLACE_DEG if getattr(self.env, '_moving_pc', None) is not None
-                          else motion.LEG_START_IN_PLACE_DEG)
+        c.start_in_place = (motion.PATH_START_IN_PLACE_DEG if getattr(self.env, '_moving_pc', None) is not None
+                            else motion.LEG_START_IN_PLACE_DEG)
         t_hand = getattr(self.env, '_handoff_t', None)
         self.env._handoff_t = None
         if t_hand is not None and getattr(self.env, '_moving_pc', None) is not None:
@@ -521,241 +567,287 @@ class CruiseSteps:
                   f"one ended, with the robot still walking.")
         self.env._moving_pc = None
         _close_track(self.env)
-        handoff = False
-        state_client = self._cruise_state_client()
-        planner.robot_state_client = state_client
-        pc = motion.PathCommand(self.command_client, state_client)
-        recorder = BodyTiltRecorder(state_client)
-        recorder.start()
-        t0 = time.time()
-        track = [(self.robot_x, self.robot_y)]
-        reason, arrived, no_path_end = None, False, False
-        asked_block = None              # block_request asked, waiting for the new goal or cell
-        spot_blocked, blocked_send = 0, -1   # sends Spot reported blocked, the last one counted
-        switch = CellSwitch(self, planner)
-        n_plans = n_sends = bad = 0
-        turn_t, poll_s, send_s = [], [], []      # main thread timing, see _main_timing
-        last_version, last_plan_t = 0, t0
-        last_crumb_t, last_battery_t, last_fall_t = t0, t0, t0
-        crumb = None
-        try:
-            pc.send(confirmed[1:], start_in_place_deg=start_in_place, backward=backward, **kwargs)
-            HANDOFF.report("first send")
-            n_sends += 1
-            self._visit_after_send()
-            last_version = plan0['version']       # the planner is running already
-            while reason is None:
-                self._wait_for_plan(tracker, last_version)
-                now = time.time()
-                turn_t.append(now)
-                r = pc.poll()
-                poll_s.append(time.time() - now)
-                if r['x'] is not None and np.hypot(r['x'] - track[-1][0], r['y'] - track[-1][1]) >= CRUISE_TRACK_STEP_M:
-                    track.append((r['x'], r['y']))
-                st = r['status']
-                if st == 'arrived' and switch.pending:
-                    switch.at_goal(now)
-                elif st == 'arrived' and to_goal:
-                    reason, arrived = "arrived at the goal", True
-                    break
-                if st == 'moving' and n_sends > blocked_send:
-                    spot_blocked = 0
-                if st == 'blocked' and blocked_send != n_sends:
-                    # Spot reports the point blocked, the robot still: once, the next plan sends
-                    # again; again on a later send, a block (_block_goal).
-                    blocked_send, spot_blocked = n_sends, spot_blocked + 1
-                    if spot_blocked >= 2 and asked_block is None:
-                        why = "Spot reports the point blocked again"
-                        if self._block_goal(planner, why, (r['x'], r['y'])):
-                            asked_block = why
-                # Waiting for the next goal after a block, the robot stands at the end of its
-                # stretch: its command may end meanwhile.
-                waiting = ((st == 'blocked' and (spot_blocked < 2 or asked_block is not None))
-                           or (st == 'expired' and asked_block is not None))
-                if st not in ('moving', 'near_goal', 'arrived', 'comm_error') and not waiting:
-                    reason = {'off_path': "too far from the path",
-                              'blocked': "Spot reports the point blocked",
-                              'expired': "command expired (no new send in time)",
-                              'stopped': "command replaced or robot frozen"}.get(st, st)
-                    break
-                if now - t0 > CRUISE_MAX_S:
-                    reason = f"cruise longer than {CRUISE_MAX_S:.0f} s"
-                    break
-                # Fall: the cruise ends, the attempt gets the robot up and backs away before the
-                # next cruise (CellAttempt.run, _prepare_for_thread).
-                if now - last_fall_t >= CRUISE_FALL_CHECK_S:
-                    last_fall_t = now
-                    try:
-                        fall = motion.check_fall(state_client)
-                    except ROBOT_ERRORS:
-                        fall = None            # not readable now: checked again in CRUISE_FALL_CHECK_S
-                    if fall is not None and fall.get('fallen'):
-                        reason = f"fall ({fall.get('reason', '')})"
-                        break
-                if now - last_battery_t >= CRUISE_BATTERY_S:
-                    last_battery_t = now
-                    if battery_return_due():
-                        reason = "low battery"
-                        break
-                # The GraphNav waypoint is created in another thread: it can take more than a
-                # second, and meanwhile the main thread must keep reading plans and sending.
-                if now - last_crumb_t >= CRUISE_BREADCRUMB_S and (crumb is None or not crumb.is_alive()):
-                    last_crumb_t = now
-                    k = min(planner._seg, len(planner.path_ids) - 1)
-                    crumb = threading.Thread(
-                        target=map_recording.graphnav_drop_breadcrumb, daemon=True,
-                        args=(self.env, self.recordingInterface, self.robot_state_client,
-                              planner.path_ids[k], self.target_row, self.target_col))
-                    crumb.start()
-                now = time.time()
+        c.state_client = self._cruise_state_client()
+        planner.robot_state_client = c.state_client
+        c.pc = motion.PathCommand(self.command_client, c.state_client)
+        c.recorder = BodyTiltRecorder(c.state_client)
+        c.recorder.start()
+        c.t0 = time.time()
+        c.track = [(self.robot_x, self.robot_y)]
+        c.switch = CellSwitch(self, planner)
+        c.last_plan_t = c.last_crumb_t = c.last_battery_t = c.last_fall_t = c.t0
+        return c
 
-                tracker.raise_if_failed()        # a bug in the planning thread: the emergency procedure
-                plan = tracker.get_plan()
-                if plan is None or plan['version'] == last_version:
-                    if now - last_plan_t > CRUISE_PLAN_STALE_S:
-                        reason = f"no new plan for {now - last_plan_t:.1f} s"
-                    continue
-                last_version = plan['version']
-                n_plans += 1
-                if plan['status'] in ('no_scan', 'error'):
-                    bad += 1
-                    print(f"[CRUISE] Plan {last_version}: {plan['status']} {plan.get('error', '')}")
-                    if bad >= CRUISE_BAD_PLANS:
-                        reason = f"{bad} plans in a row without data ({plan['status']})"
-                    continue
-                bad, last_plan_t = 0, now
-                sw = switch.take(plan)
-                if switch.pending and sw is None:
-                    if plan['status'] == 'ok' and len(plan.get('confirmed', [])) > 1:
-                        # The stretch sent follows the confirmed one of every plan (it may get
-                        # shorter), whole (no dead man: the robot walks it while waiting).
-                        pc.send(plan['confirmed'][1:], hold_s=None, backward=plan['backward'],
-                                **self._cruise_gait(plan['terrain']))
-                        n_sends += 1
-                        self._log_plan(plan, r, "waiting for the next cell")
-                    reason = switch.late(now)
-                    if reason is not None:
-                        handoff = True
-                        break
-                    continue
-                if sw is not None:
-                    end = switch.apply(sw)
-                    if end is not None:
-                        reason, handoff, no_path_end = end
-                        break
-                    to_goal, asked_block = False, None
-                if plan['status'] == 'no_path':
-                    if planner.no_path_job is not None:
-                        continue      # the thread is choosing another goal or cell: the robot walks the stretch
-                    reason, no_path_end = "no path in the graph to the goal and no other goal in the cell", True
-                    break
-                rx, ry = (r['x'], r['y']) if r['x'] is not None else plan['robot'][:2]
-                ahead = plan['advance'] - _along(plan['polyline'], rx, ry)
-                f = plan['frontier']
-                self._log_plan(plan, r)
-                # The new stretch must start where the robot is. Every plan starts where the robot
-                # was when the plan was made (planning_cycle.CruisePlanner.pose_now): if it is
-                # still far from the new path, the plan is a moment old -- the robot keeps
-                # walking the stretch sent (safe up to its frontier) and the next plan starts
-                # from where it is.
-                off = motion.distance_from_polyline(rx, ry, plan['confirmed'])
-                if off > CRUISE_REJOIN_MAX_M:
-                    MISSION_STATS['cruise_stale_plans'] = MISSION_STATS.get('cruise_stale_plans', 0) + 1
-                    continue
-                # Hand-off to the next cell, robot inside the target cell: goal
-                # confirmed and within CRUISE_HANDOFF_M; or the frontier stops for an obstacle
-                # (roughness, slope) with the goal within GOAL_REACHED_TOLERANCE_M along the
-                # path, the arrival accepted with the robot standing too.
-                to_go = (sum(float(np.hypot(b[0] - a[0], b[1] - a[1]))
-                             for a, b in zip(plan['polyline'], plan['polyline'][1:]))
-                         - _along(plan['polyline'], rx, ry))
-                # Or the cell already seen enough (CELL_SEEN_FRACTION of it in the global map),
-                # wherever the robot is.
-                seen = plan.get('cell_seen')
-                why = None
-                if (seen is not None
-                        and seen >= attempt_common.CELL_SEEN_FRACTION):
-                    why = (f"cell seen {100 * seen:.0f}% (threshold {100 * attempt_common.CELL_SEEN_FRACTION:.0f}%), "
-                           f"{to_go:.2f} m from the goal")
-                    where = ""
-                    MISSION_STATS['cruise_seen_handoffs'] = MISSION_STATS.get('cruise_seen_handoffs', 0) + 1
-                else:
-                    # The arrival is the distance from the goal, inside the target cell or not: a
-                    # goal on the cell border with an obstacle just beyond it leaves the robot
-                    # outside the cell for good.
-                    where = "in the cell, " if self.env.is_point_in_cell(rx, ry, self.target_row, self.target_col) else ""
-                    if plan['to_goal'] and to_go <= CRUISE_HANDOFF_M:
-                        why = f"{to_go:.2f} m from the goal"
-                    elif (not plan['to_goal'] and to_go <= P.GOAL_REACHED_TOLERANCE_M
-                          and (f['reason'] in ('obstacle', 'roughness', 'slope') or ahead < CRUISE_MIN_AHEAD_M)):
-                        why = (f"{to_go:.2f} m from the goal, the last stretch closed by "
-                               + (f"rotation not clear at node {plan['turn_stop']}" if plan['turn_stop'] else f['reason'])
-                               + f": within the arrival tolerance of {P.GOAL_REACHED_TOLERANCE_M:.2f} m")
-                if why is not None:
-                    # The last send covers the whole confirmed stretch (dead man of the
-                    # trajectory time, as a leg): the robot walks it while the next cell is
-                    # prepared (in the planning thread, or by the next attempt).
-                    pc.send(plan['confirmed'][1:], hold_s=None, backward=plan['backward'],
-                            **self._cruise_gait(plan['terrain']))
-                    n_sends += 1
-                    self.env._handoff_t = time.time()
-                    if self._can_switch():
-                        switch.ask(why, where)
-                        continue
-                    reason, handoff = f"{where}{why}: next cell while walking", True
-                    HANDOFF.start("hand-off (end of the cruise -> first command of the next move)")
-                    break
-                if ahead < CRUISE_MIN_AHEAD_M:
-                    if plan['to_goal']:
-                        reason, arrived = "arrived at the goal", True
-                        self._cruise_finish_command(pc)
-                        break
-                    why = (f"the confirmed stretch ends {max(ahead, 0.0):.2f} m ahead ("
-                           + (f"rotation not clear at node {plan['turn_stop']}" if plan['turn_stop']
-                              else f['reason']) + ")")
-                    # No way on from here: a block at once, the planning thread chooses the next
-                    # goal or cell and the same cruise goes on towards it.
-                    if asked_block is not None or self._block_goal(planner, why, (rx, ry)):
-                        asked_block = asked_block or why
-                        continue
-                    still = getattr(self, '_block_chain', None)
-                    reason = f"{BLOCKED_ON_SPOT}: {why}" if still and still[2] > BLOCK_STILL_MAX else why
-                    break
-                to_goal = plan['to_goal']
-                t_send = time.time()
-                pc.send(plan['confirmed'][1:], backward=plan['backward'], **self._cruise_gait(plan['terrain']))
-                send_s.append(time.time() - t_send)
-                n_sends += 1
-                if switch.report:
-                    HANDOFF.report("first send towards the next cell")
-                    switch.report = False
-                self._visit_after_send()
-        finally:
-            self._visit_after_send()     # cruise ended before a send towards the next cell
-            if handoff:
-                self.env._moving_pc = pc          # still walking to the goal: the hand-off
-            elif not arrived:
-                pc.stop(f"end of the cruise: {reason}")
-                self._cruise_settle(pc)
-                # Photos of what the robot had in front when the cruise stopped on the terrain.
-                if reason and re.search(r'obstacle|slope|roughness', reason):
-                    photos.capture(f"cruise_it{self.iteration:03d}_cell{self.target_row}_{self.target_col}_"
-                                   f"{self.loop_iter:03d}_{time.strftime('%H-%M-%S')}",
-                                   extra={'reason': reason})
-            tracker.stop_planning()
-            print(_main_timing(turn_t, poll_s, send_s))
-            if hasattr(state_client, 'summary'):
-                print(f"[CRUISE] {state_client.summary()}")
-            if crumb is not None:
-                crumb.join(timeout=5.0)
-            self.env._moving_track = (recorder, (self.target_x, self.target_y),
-                                      [self.iteration, self.target_row, self.target_col, self.loop_iter,
-                                       ids[0], self.goal_id])
-            if not handoff:
-                _close_track(self.env)
-        self.cruise_end_reason = reason
-        outcome = self._after_cruise(planner, track, t0, reason, n_plans, n_sends, pc, handoff)
-        if arrived or handoff or pc.travelled >= CRUISE_STALL_M:
+    def _cruise_first_send(self, c, plan0):
+        """The confirmed stretch of the first plan, with its gait (_cruise_setup)."""
+        c.pc.send(plan0['confirmed'][1:], start_in_place_deg=c.start_in_place, backward=plan0['backward'],
+                  **c.gait0)
+        HANDOFF.report("first send")
+        c.n_sends += 1
+        self._visit_after_send()
+        c.last_version = plan0['version']       # the planner is running already
+
+    def _cruise_turn(self, c):
+        """One turn of the cruise: feedback, checks, the new plan and its send. Ends the cruise
+        by setting c.reason."""
+        self._wait_for_plan(c.tracker, c.last_version)
+        now = time.time()
+        r = self._cruise_feedback(c, now)
+        if c.reason is not None:
+            return
+        self._cruise_checks(c, now)
+        if c.reason is not None:
+            return
+        taken = self._cruise_take_plan(c)
+        if taken is None:
+            return
+        plan, now = taken
+        if self._cruise_follow_switch(c, plan, r, now):
+            return
+        if plan['status'] == 'no_path':
+            if c.planner.no_path_job is not None:
+                return      # the thread is choosing another goal or cell: the robot walks the stretch
+            c.reason, c.no_path_end = "no path in the graph to the goal and no other goal in the cell", True
+            return
+        self._cruise_on_plan(c, plan, r)
+
+    def _cruise_feedback(self, c, now):
+        """Spot's feedback on the command: the track, the arrival, Spot reporting the point
+        blocked, the command ending. Returns the feedback (motion.PathCommand.poll)."""
+        c.turn_t.append(now)
+        r = c.pc.poll()
+        c.poll_s.append(time.time() - now)
+        if r['x'] is not None and np.hypot(r['x'] - c.track[-1][0], r['y'] - c.track[-1][1]) >= CRUISE_TRACK_STEP_M:
+            c.track.append((r['x'], r['y']))
+        st = r['status']
+        if st == 'arrived' and c.switch.pending:
+            c.switch.at_goal(now)
+        elif st == 'arrived' and c.to_goal:
+            c.reason, c.arrived = "arrived at the goal", True
+            return r
+        if st == 'moving' and c.n_sends > c.blocked_send:
+            c.spot_blocked = 0
+        if st == 'blocked' and c.blocked_send != c.n_sends:
+            # Spot reports the point blocked, the robot still: once, the next plan sends
+            # again; again on a later send, a block (_block_goal).
+            c.blocked_send, c.spot_blocked = c.n_sends, c.spot_blocked + 1
+            if c.spot_blocked >= 2 and c.asked_block is None:
+                why = "Spot reports the point blocked again"
+                if self._block_goal(c.planner, why, (r['x'], r['y'])):
+                    c.asked_block = why
+        # Waiting for the next goal after a block, the robot stands at the end of its
+        # stretch: its command may end meanwhile.
+        waiting = ((st == 'blocked' and (c.spot_blocked < 2 or c.asked_block is not None))
+                   or (st == 'expired' and c.asked_block is not None))
+        if st not in ('moving', 'near_goal', 'arrived', 'comm_error') and not waiting:
+            c.reason = {'off_path': "too far from the path",
+                        'blocked': "Spot reports the point blocked",
+                        'expired': "command expired (no new send in time)",
+                        'stopped': "command replaced or robot frozen"}.get(st, st)
+        return r
+
+    def _cruise_checks(self, c, now):
+        """The checks made every few seconds: cruise too long, fall, battery; and the GraphNav
+        breadcrumb."""
+        if now - c.t0 > CRUISE_MAX_S:
+            c.reason = f"cruise longer than {CRUISE_MAX_S:.0f} s"
+            return
+        # Fall: the cruise ends, the attempt gets the robot up and backs away before the
+        # next cruise (CellAttempt.run, _prepare_for_thread).
+        if now - c.last_fall_t >= CRUISE_FALL_CHECK_S:
+            c.last_fall_t = now
+            try:
+                fall = motion.check_fall(c.state_client)
+            except ROBOT_ERRORS:
+                fall = None            # not readable now: checked again in CRUISE_FALL_CHECK_S
+            if fall is not None and fall.get('fallen'):
+                c.reason = f"fall ({fall.get('reason', '')})"
+                return
+        if now - c.last_battery_t >= CRUISE_BATTERY_S:
+            c.last_battery_t = now
+            if battery_return_due():
+                c.reason = "low battery"
+                return
+        # The GraphNav waypoint is created in another thread: it can take more than a
+        # second, and meanwhile the main thread must keep reading plans and sending.
+        if now - c.last_crumb_t >= CRUISE_BREADCRUMB_S and (c.crumb is None or not c.crumb.is_alive()):
+            c.last_crumb_t = now
+            k = min(c.planner._seg, len(c.planner.path_ids) - 1)
+            c.crumb = threading.Thread(
+                target=map_recording.graphnav_drop_breadcrumb, daemon=True,
+                args=(self.env, self.recordingInterface, self.robot_state_client,
+                      c.planner.path_ids[k], self.target_row, self.target_col))
+            c.crumb.start()
+
+    def _cruise_take_plan(self, c):
+        """(plan, now): the new plan of the planning thread, or None if there is none yet or it
+        has no data (too long without one ends the cruise). A bug in the planning thread is
+        raised here, towards the emergency procedure."""
+        now = time.time()
+        c.tracker.raise_if_failed()
+        plan = c.tracker.get_plan()
+        if plan is None or plan['version'] == c.last_version:
+            if now - c.last_plan_t > CRUISE_PLAN_STALE_S:
+                c.reason = f"no new plan for {now - c.last_plan_t:.1f} s"
+            return None
+        c.last_version = plan['version']
+        c.n_plans += 1
+        if plan['status'] in ('no_scan', 'error'):
+            c.bad += 1
+            print(f"[CRUISE] Plan {c.last_version}: {plan['status']} {plan.get('error', '')}")
+            if c.bad >= CRUISE_BAD_PLANS:
+                c.reason = f"{c.bad} plans in a row without data ({plan['status']})"
+            return None
+        c.bad, c.last_plan_t = 0, now
+        return plan, now
+
+    def _cruise_follow_switch(self, c, plan, r, now):
+        """The change of goal or cell while walking (CellSwitch): waiting for it, the robot
+        walks the stretch of every plan; when it comes, the cruise goes on towards it. True if
+        this turn ends here."""
+        sw = c.switch.take(plan)
+        if c.switch.pending and sw is None:
+            if plan['status'] == 'ok' and len(plan.get('confirmed', [])) > 1:
+                # The stretch sent follows the confirmed one of every plan (it may get
+                # shorter), whole (no dead man: the robot walks it while waiting).
+                c.pc.send(plan['confirmed'][1:], hold_s=None, backward=plan['backward'],
+                          **self._cruise_gait(plan['terrain']))
+                c.n_sends += 1
+                self._log_plan(plan, r, "waiting for the next cell")
+            reason = c.switch.late(now)
+            if reason is not None:
+                c.reason, c.handoff = reason, True
+            return True
+        if sw is not None:
+            end = c.switch.apply(sw)
+            if end is not None:
+                c.reason, c.handoff, c.no_path_end = end
+                return True
+            c.to_goal, c.asked_block = False, None
+        return False
+
+    def _cruise_on_plan(self, c, plan, r):
+        """A plan with a path: the hand-off to the next cell if the goal is reached or the cell
+        seen, the end of the confirmed stretch (arrival or block), or the send of the stretch."""
+        rx, ry = (r['x'], r['y']) if r['x'] is not None else plan['robot'][:2]
+        ahead = plan['advance'] - _along(plan['polyline'], rx, ry)
+        self._log_plan(plan, r)
+        # The new stretch must start where the robot is. Every plan starts where the robot
+        # was when the plan was made (planning_cycle.CruisePlanner.pose_now): if it is
+        # still far from the new path, the plan is a moment old -- the robot keeps
+        # walking the stretch sent (safe up to its frontier) and the next plan starts
+        # from where it is.
+        off = motion.distance_from_polyline(rx, ry, plan['confirmed'])
+        if off > CRUISE_REJOIN_MAX_M:
+            MISSION_STATS['cruise_stale_plans'] = MISSION_STATS.get('cruise_stale_plans', 0) + 1
+            return
+        why, where = self._handoff_why(plan, rx, ry, ahead)
+        if why is not None:
+            # The last send covers the whole confirmed stretch (dead man of the
+            # trajectory time, as a leg): the robot walks it while the next cell is
+            # prepared (in the planning thread, or by the next attempt).
+            c.pc.send(plan['confirmed'][1:], hold_s=None, backward=plan['backward'],
+                      **self._cruise_gait(plan['terrain']))
+            c.n_sends += 1
+            self.env._handoff_t = time.time()
+            if self._can_switch():
+                c.switch.ask(why, where)
+                return
+            c.reason, c.handoff = f"{where}{why}: next cell while walking", True
+            HANDOFF.start("hand-off (end of the cruise -> first command of the next move)")
+            return
+        if ahead < CRUISE_MIN_AHEAD_M:
+            self._cruise_stretch_ends(c, plan, rx, ry, ahead)
+            return
+        c.to_goal = plan['to_goal']
+        t_send = time.time()
+        c.pc.send(plan['confirmed'][1:], backward=plan['backward'], **self._cruise_gait(plan['terrain']))
+        c.send_s.append(time.time() - t_send)
+        c.n_sends += 1
+        if c.switch.report:
+            HANDOFF.report("first send towards the next cell")
+            c.switch.report = False
+        self._visit_after_send()
+
+    def _handoff_why(self, plan, rx, ry, ahead):
+        """(why, where): why the cell is done and the next one can be prepared while walking,
+        None if not yet; where = "in the cell, " if the robot is inside the target cell.
+        The cell seen enough (CELL_SEEN_FRACTION of it in the global map), wherever the robot
+        is; or the goal confirmed and within CRUISE_HANDOFF_M; or the frontier stopping for an
+        obstacle (roughness, slope) with the goal within GOAL_REACHED_TOLERANCE_M along the
+        path, the arrival accepted with the robot standing too."""
+        to_go = (sum(float(np.hypot(b[0] - a[0], b[1] - a[1]))
+                     for a, b in zip(plan['polyline'], plan['polyline'][1:]))
+                 - _along(plan['polyline'], rx, ry))
+        seen = plan.get('cell_seen')
+        if seen is not None and seen >= attempt_common.CELL_SEEN_FRACTION:
+            MISSION_STATS['cruise_seen_handoffs'] = MISSION_STATS.get('cruise_seen_handoffs', 0) + 1
+            return (f"cell seen {100 * seen:.0f}% (threshold {100 * attempt_common.CELL_SEEN_FRACTION:.0f}%), "
+                    f"{to_go:.2f} m from the goal"), ""
+        # The arrival is the distance from the goal, inside the target cell or not: a goal on
+        # the cell border with an obstacle just beyond it leaves the robot outside the cell for
+        # good.
+        where = "in the cell, " if self.env.is_point_in_cell(rx, ry, self.target_row, self.target_col) else ""
+        f = plan['frontier']
+        if plan['to_goal'] and to_go <= CRUISE_HANDOFF_M:
+            return f"{to_go:.2f} m from the goal", where
+        if (not plan['to_goal'] and to_go <= P.GOAL_REACHED_TOLERANCE_M
+                and (f['reason'] in ('obstacle', 'roughness', 'slope') or ahead < CRUISE_MIN_AHEAD_M)):
+            return (f"{to_go:.2f} m from the goal, the last stretch closed by "
+                    + (f"rotation not clear at node {plan['turn_stop']}" if plan['turn_stop'] else f['reason'])
+                    + f": within the arrival tolerance of {P.GOAL_REACHED_TOLERANCE_M:.2f} m"), where
+        return None, where
+
+    def _cruise_stretch_ends(self, c, plan, rx, ry, ahead):
+        """The confirmed stretch ends just ahead of the robot: arrived if it ends at the goal,
+        otherwise no way on from here -- a block at once (_block_goal), the planning thread
+        chooses the next goal or cell and the same cruise goes on towards it."""
+        if plan['to_goal']:
+            c.reason, c.arrived = "arrived at the goal", True
+            self._cruise_finish_command(c.pc)
+            return
+        f = plan['frontier']
+        why = (f"the confirmed stretch ends {max(ahead, 0.0):.2f} m ahead ("
+               + (f"rotation not clear at node {plan['turn_stop']}" if plan['turn_stop']
+                  else f['reason']) + ")")
+        if c.asked_block is not None or self._block_goal(c.planner, why, (rx, ry)):
+            c.asked_block = c.asked_block or why
+            return
+        still = getattr(self, '_block_chain', None)
+        c.reason = f"{BLOCKED_ON_SPOT}: {why}" if still and still[2] > BLOCK_STILL_MAX else why
+
+    def _cruise_stop(self, c):
+        """End of the cruise, whatever ended it (an exception too): the robot stopped unless it
+        walks on into the next cell (hand-off) or arrived; planning stopped; timing, track."""
+        self._visit_after_send()     # cruise ended before a send towards the next cell
+        if c.handoff:
+            self.env._moving_pc = c.pc          # still walking to the goal: the hand-off
+        elif not c.arrived:
+            c.pc.stop(f"end of the cruise: {c.reason}")
+            self._cruise_settle(c.pc)
+            # Photos of what the robot had in front when the cruise stopped on the terrain.
+            if c.reason and re.search(r'obstacle|slope|roughness', c.reason):
+                photos.capture(f"cruise_it{self.iteration:03d}_cell{self.target_row}_{self.target_col}_"
+                               f"{self.loop_iter:03d}_{time.strftime('%H-%M-%S')}",
+                               extra={'reason': c.reason})
+        c.tracker.stop_planning()
+        print(_main_timing(c.turn_t, c.poll_s, c.send_s))
+        if hasattr(c.state_client, 'summary'):
+            print(f"[CRUISE] {c.state_client.summary()}")
+        if c.crumb is not None:
+            c.crumb.join(timeout=5.0)
+        self.env._moving_track = (c.recorder, (self.target_x, self.target_y),
+                                  [self.iteration, self.target_row, self.target_col, self.loop_iter,
+                                   c.ids[0], self.goal_id])
+        if not c.handoff:
+            _close_track(self.env)
+
+    def _cruise_outcome(self, c):
+        """What the attempt does after the cruise: STOP, FAILED, or _after_cruise's outcome
+        (see _cruise); MAX_CRUISE_STALLS cruises in a row that hardly walked fail the cell."""
+        self.cruise_end_reason = c.reason
+        outcome = self._after_cruise(c.planner, c.track, c.t0, c.reason, c.n_plans, c.n_sends, c.pc, c.handoff)
+        if c.arrived or c.handoff or c.pc.travelled >= CRUISE_STALL_M:
             self.cruise_stalls = 0
         else:
             self.cruise_stalls += 1
@@ -766,15 +858,15 @@ class CruiseSteps:
                       f"the way confirmed at the start is not one the cruise can walk. I give up "
                       f"entering ({self.target_row},{self.target_col}) from here.")
                 return FAILED
-        if no_path_end:
+        if c.no_path_end:
             print(f"[CRUISE] Attempt on cell ({self.target_row},{self.target_col}) ended: no path in "
                   f"the graph to any goal of the cell from here.")
             return FAILED
-        if handoff:
+        if c.handoff:
             self._handoff = True
             MISSION_STATS['cruise_handoffs'] = MISSION_STATS.get('cruise_handoffs', 0) + 1
             return STOP
-        if arrived:
+        if c.arrived:
             return STOP
         return outcome
 
