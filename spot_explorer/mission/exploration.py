@@ -10,6 +10,7 @@ from spot_explorer.perception import global_maps
 from spot_explorer.mission import attempt_cruise
 from spot_explorer.mission import cells
 from spot_explorer.robot import connection
+from spot_explorer.robot.errors import optional
 
 
 from spot_explorer import config as P
@@ -98,14 +99,12 @@ class Mission:
         HANDOFF.mark("waypoint of the visited cell")
         self.env.mark_cell_visited(row, col)
         # Cells done while walking: the coverage line without waiting for the end of the
-        # attempt. The map may be in the middle of an update by the planning thread: a failed
-        # reading is skipped, it never touches the move.
+        # attempt (a log line only: the map may be in the middle of an update by the planning
+        # thread).
         t0 = getattr(self, '_t0', None)
         if t0 is not None:
-            try:
+            with optional("[COVERAGE] coverage line while walking"):
                 self._log_coverage(self._seen_area_pct(), (time.time() - t0) / 60.0)
-            except Exception:
-                pass
 
     def explore(self):
         """
@@ -326,10 +325,9 @@ class Mission:
         (report, mission_summary.json): no decision depends on it.
         """
         closed, visited, blocked, total = self._cell_counts()
-        try:
+        area = None
+        with optional("[PROGRESS] area seen"):
             area = self._seen_area_pct()
-        except Exception:
-            area = None
         minutes = (time.time() - self._t0) / 60.0 if self._t0 is not None else 0.0
         self._log_coverage(area, minutes, final=final)
         if not final and closed == self._closed_logged:

@@ -78,17 +78,13 @@ def retreat_along_traveled_path(env, robot_state_client, command_client,
             continue
 
         if pts is not None and obstacle_mask is not None:
-            try:
-                if safe_frontier.is_arc_in_fov(robot_x, robot_y, from_x, from_y, pts):
-                    status = safe_frontier.verify_arc_safety(robot_x, robot_y, from_x, from_y,
-                                                               pts, obstacle_mask)
-                    if status == 'blocked':
-                        print(f"[RETREAT] The way-back leg towards ({from_x:.2f}, {from_y:.2f}) "
-                              f"is obstructed in the current scan. I stop here.")
-                        break
-            except Exception as e:
-                print(f"[RETREAT] Check of the way-back leg failed ({e}); "
-                      f"carrying on anyway, it is the way I came from.")
+            if safe_frontier.is_arc_in_fov(robot_x, robot_y, from_x, from_y, pts):
+                status = safe_frontier.verify_arc_safety(robot_x, robot_y, from_x, from_y,
+                                                           pts, obstacle_mask)
+                if status == 'blocked':
+                    print(f"[RETREAT] The way-back leg towards ({from_x:.2f}, {from_y:.2f}) "
+                          f"is obstructed in the current scan. I stop here.")
+                    break
 
         print(f"[RETREAT] Leg {done + 1}/{max_segments}: going back towards "
               f"({from_x:.2f}, {from_y:.2f}), {seg_len:.2f} m backwards.")
@@ -137,11 +133,7 @@ def cell_has_reachable_target(env, sampler, global_map, row, col, safety_margin=
     center = env.get_world_position_from_cell(row, col)
     if center is None:
         return False, 0, 0, 0
-    points = [center]
-    try:
-        points += list(sampler.get_point_in_cell(row, col))
-    except Exception:
-        pass
+    points = [center] + list(sampler.get_point_in_cell(row, col))
     free = unknown = occupied = 0
     for (px, py) in points:
         if global_map.is_occupied(px, py, safety_margin=safety_margin):

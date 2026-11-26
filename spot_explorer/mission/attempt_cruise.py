@@ -62,6 +62,7 @@ from spot_explorer.records import HANDOFF, MISSION_STATS, BodyTiltRecorder, appe
 from spot_explorer.robot import connection
 from spot_explorer.robot import motion
 from spot_explorer.robot import photos
+from spot_explorer.robot.errors import ROBOT_ERRORS, describe, optional
 
 CRUISE_POLL_S = 0.2             # main thread: one feedback reading every 0.2 s
 CRUISE_PLAN_STALE_S = 1.2       # no new plan for this long: stop
@@ -155,10 +156,8 @@ def _close_track(env):
         return
     recorder, target, seg_id = rec
     recorder.stop()
-    try:
+    with optional("[LOG] trajectory of the cruise"):
         append_trajectory(getattr(recorder, 'samples', []), 'cruise', target, seg_id)
-    except Exception as e:
-        print(f"[LOG] Trajectory of the cruise not recorded: {e}")
 
 
 def _along(polyline, x, y):
@@ -588,8 +587,8 @@ class CruiseSteps:
                     last_fall_t = now
                     try:
                         fall = motion.check_fall(state_client)
-                    except Exception:
-                        fall = None
+                    except ROBOT_ERRORS:
+                        fall = None            # not readable now: checked again in CRUISE_FALL_CHECK_S
                     if fall is not None and fall.get('fallen'):
                         reason = f"fall ({fall.get('reason', '')})"
                         break
@@ -1046,8 +1045,8 @@ class CruiseSteps:
                         and abs(np.degrees(np.arctan2(np.sin(now[2] - prev[2]), np.cos(now[2] - prev[2])))) < 1.0):
                     return
                 prev = now
-        except Exception as e:
-            print(f"[CRUISE] Pose not readable while waiting for the robot to stand: {e}")
+        except ROBOT_ERRORS as e:
+            print(f"[CRUISE] Pose not readable while waiting for the robot to stand: {describe(e)}")
 
     def _stop_on_edge(self, planner, x, y):
         """The robot node after a cruise: an end of the edge it is on, not the nearest node. The

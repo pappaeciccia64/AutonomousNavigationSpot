@@ -13,6 +13,7 @@ from spot_explorer.perception import spot_grid
 
 from spot_explorer import config as P
 from spot_explorer.records import MISSION_STATS, MISSION_CTX
+from spot_explorer.robot.errors import optional
 
 
 
@@ -60,7 +61,7 @@ def _emit_mission_summary_once():
     MISSION_CTX['summary_done'] = True
     if not planning_cycle.BUNDLE_SAVER.drain():
         print("[DATA SAVE] Scan bundles still being written after 30 s: the summary goes on.")
-    try:
+    with optional("[LOG] mission summary"):
         prm = MISSION_CTX['prm']
         prm.print_mission_summary()
         total_gait = sum(MISSION_STATS['gait_tier_counts'].values())
@@ -78,8 +79,7 @@ def _emit_mission_summary_once():
               f"at most {g('cruise_max_dev_cm', 0.0):.0f} cm from the line, "
               f"path from the robot (edge walked closed) {g('cruise_from_robot', 0)}, "
               f"edges closed by the frontier {g('cruise_edge_drops', 0)}, "
-              f"plans skipped (more than 20 cm from the robot) {g('cruise_stale_plans', 0)}"
-              + (f", terrain not readable {g('terrain_errors')} times (careful gait)" if g('terrain_errors') else ""))
+              f"plans skipped (more than 20 cm from the robot) {g('cruise_stale_plans', 0)}")
         print(f"Cells: chosen near {g('cell_choices_near', 0)} / far (GraphNav) {g('cell_choices_far', 0)}; "
               f"done while walking with the next one prepared in the planning thread {g('cruise_switches', 0)} "
               f"(waits at the goal {g('cruise_switch_waits_at_goal', 0)}, next cell late beyond the wait "
@@ -170,5 +170,3 @@ def _emit_mission_summary_once():
                 summary['graph'] = mg.describe()
             with open(os.path.join(folder, 'mission_summary.json'), 'w', encoding='utf-8') as f:
                 json.dump(summary, f, indent=2, default=str)
-    except Exception as e:
-        print(f"[LOG] Could not produce the mission summary: {e}")

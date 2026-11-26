@@ -64,14 +64,10 @@ class ScanSteps:
         # confirmed anything about this place, and the edges crossing the obstacles just
         # seen would stay valid. Here obstacle_distance is the raw one: the filtered
         # snapshot is born in the navigation loop.
-        try:
-            self.prm_graph.set_live_obstacles(
-                np.asarray(cells_obstacle_dist, dtype=np.float64).reshape((num_y, num_x)),
-                np.asarray(valid_values, dtype=np.float64).reshape((num_y, num_x)) >= spot_grid.TERRAIN_VALID_MIN,
-                grid_origin_x, grid_origin_y, cell_size, self.robot_x, self.robot_y, self.robot_yaw)
-        except Exception as e:
-            self.prm_graph.set_live_obstacles(None, None, 0, 0, 1, 0, 0)
-            print(f"[EDGES] Scan not usable for the preliminary discard ({e}).")
+        self.prm_graph.set_live_obstacles(
+            np.asarray(cells_obstacle_dist, dtype=np.float64).reshape((num_y, num_x)),
+            np.asarray(valid_values, dtype=np.float64).reshape((num_y, num_x)) >= spot_grid.TERRAIN_VALID_MIN,
+            grid_origin_x, grid_origin_y, cell_size, self.robot_x, self.robot_y, self.robot_yaw)
 
         t_build = time.perf_counter()
         # The candidate pairs are those of the mission graph (see mission_prm.build_mission_prm);

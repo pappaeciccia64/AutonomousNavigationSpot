@@ -26,6 +26,7 @@ from spot_explorer.mission import cells
 from spot_explorer.planning import safe_frontier
 from spot_explorer.robot import battery
 from spot_explorer.robot import photos
+from spot_explorer.robot.errors import ROBOT_ERRORS, describe, optional
 
 from spot_explorer.planning import roadmap
 from spot_explorer.mission import mission_prm
@@ -54,6 +55,10 @@ def _emergency_shutdown(robot, command_client, recordingInterface, exc):
     Before, the program just exited: robot standing until the software E-Stop, no longer
     renewed, cut the power (~9 s), and map lost. If the robot has fallen it is not sat down
     (it is already on the ground). Each step is tried on its own: never raises from here.
+
+    The only place in the mission that catches every error, on purpose: whatever went wrong
+    (a bug included, or a second Ctrl+C), each step that makes the robot safe and keeps the
+    map must still be tried.
     """
     fallen = isinstance(exc, motion.RobotFallenError)
     print(f"\n[EMERGENCY] Mission interrupted ({type(exc).__name__}): "
@@ -63,8 +68,8 @@ def _emergency_shutdown(robot, command_client, recordingInterface, exc):
     if tracker is not None:
         try:
             tracker.clear_path()
-        except Exception:
-            pass
+        except BaseException as e:      # emergency: any error, the next steps still run
+            print(f"[EMERGENCY] Frontier thread not cleared ({e!r}).")
     if not fallen:
         try:
             motion.stop_robot(command_client, reason="mission interrupted")
@@ -73,21 +78,21 @@ def _emergency_shutdown(robot, command_client, recordingInterface, exc):
             sleep(3)
             robot.power_off(cut_immediately=False)
             print("[EMERGENCY] Robot sitting and motors off.")
-        except BaseException as e:
+        except BaseException as e:      # emergency: any error, the next steps still run
             print(f"[EMERGENCY] I could not sit the robot down ({e!r}): use the tablet.")
     try:
         recordingInterface.stop_recording()
-    except BaseException:
-        pass
+    except BaseException as e:          # emergency: any error (also: not recording)
+        print(f"[EMERGENCY] GraphNav recording not stopped ({e!r}).")
     try:
         global_maps.save_global_maps(MISSION_CTX.get('global_grid'), MISSION_CTX.get('mission_folder'),
                                       force=True)
-    except BaseException as e:
+    except BaseException as e:          # emergency: any error, the map download still runs
         print(f"[EMERGENCY] Global maps not saved ({e!r}).")
     try:
         recordingInterface.download_full_graph()
         print("[EMERGENCY] GraphNav map downloaded.")
-    except BaseException as e:
+    except BaseException as e:          # emergency: any error
         print(f"[EMERGENCY] GraphNav map not downloaded ({e!r}).")
 
 
@@ -169,7 +174,7 @@ def _grid_size(options, verbose=True):
             _r, _c, _cs = _env_grid.split(",")
             grid_rows, grid_cols, grid_cell = int(_r), int(_c), float(_cs)
             _grid_source = f"SPOT_MISSION_GRID='{_env_grid}'"
-        except Exception:
+        except ValueError:              # not three comma-separated numbers
             if verbose:
                 print(f"[CONFIG] SPOT_MISSION_GRID='{_env_grid}' not valid (expected 'rows,cols,side'): "
                       f"using {grid_rows},{grid_cols},{grid_cell:g}.")
@@ -234,7 +239,8 @@ def _close_mission(robot, robot_state_client, command_client, recordingInterface
         _wp0_id = next((w.id for w in recordingInterface._get_graph(force_refresh=True).waypoints
                         if w.annotations.name == "wp_0"), None)
         _xy_end = connection.getPosition(robot_state_client)[:2]
-    except Exception:
+    except ROBOT_ERRORS as e:
+        print(f"[CLOSURE] wp_0 or robot position not readable ({describe(e)}): shortcuts without them.")
         _wp0_id, _xy_end = None, None
     map_shortcuts.graphnav_add_shortcuts(recordingInterface, "before the return to wp_0",
                                          map_edges=True, target_wp_id=_wp0_id, robot_xy=_xy_end)
@@ -318,16 +324,14 @@ def easy_walk(options):
         graph_folder, mission_folder, mission_log_folder = _mission_folders()
         MISSION_CTX['mission_folder'] = mission_folder
         install_stdout_tee(os.path.join(mission_log_folder, "mission_log.txt"))
-        try:
-            MISSION_CTX['log_folder'] = mission_log_folder
+        MISSION_CTX['log_folder'] = mission_log_folder
+        MISSION_CTX['summary_done'] = False
+        with optional("[LOG] segment CSV, photos, configuration"):
             MISSION_CTX['segment_log'] = SegmentLog(os.path.join(mission_log_folder, "segments.csv"))
-            MISSION_CTX['summary_done'] = False
             print(f"[LOG] Log folder: {mission_log_folder}  |  data and images: {mission_folder}")
             if P.SAVE_BLOCK_PHOTOS:
                 photos.init(robot, mission_folder)
             _print_configuration()
-        except Exception as e:
-            print(f"[LOG] Could not initialize the segment CSV: {e}")
 
         command_client = robot.ensure_client(RobotCommandClient.default_service_name)
         robot.time_sync.wait_for_sync()
@@ -422,7 +426,7 @@ def easy_walk(options):
             _close_mission(robot, robot_state_client, command_client, recordingInterface)
             if estop is not None:
                 estop.release()
-        except BaseException as exc:
+        except BaseException as exc:    # everything, on purpose: the emergency procedure, then up
             _emergency_shutdown(robot, command_client, recordingInterface, exc)
             raise
 
@@ -560,14 +564,11 @@ def main():
         print("[FALL] Take control from the tablet, check the robot, then stand it up by hand.")
         print("=" * 70)
         return False
-    except Exception as exc:
+    except Exception as exc:            # the outermost level: the emergency already ran, report and exit
         logger = bosdyn.client.util.get_logger()
         logger.error('The mission was interrupted by an exception: %r', exc)
-        try:
-            print(f"[LOG] The mission ended with an exception: {exc!r}")
-            print(traceback.format_exc())
-        except Exception:
-            pass
+        print(f"[LOG] The mission ended with an exception: {exc!r}")
+        print(traceback.format_exc())
         return False
     finally:
         summary._emit_mission_summary_once()

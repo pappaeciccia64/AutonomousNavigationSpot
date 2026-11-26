@@ -23,13 +23,13 @@ from spot_explorer.mission import cells
 from spot_explorer.perception import geometry
 from spot_explorer.perception import global_maps
 from spot_explorer.perception import spot_grid
-from spot_explorer.perception import gait
 from spot_explorer.planning import edge_evaluation
 from spot_explorer.planning import roadmap
 from spot_explorer.planning import safe_frontier
 from spot_explorer.records import MISSION_STATS, mission_z0
 from spot_explorer.robot import motion
 from spot_explorer.robot import connection
+from spot_explorer.robot.errors import ROBOT_ERRORS, optional
 
 PLAN_PERIOD_S = 0.4            # one cycle every 0.4 s at most (2.5 Hz)
 
@@ -87,18 +87,17 @@ class BundleSaver:
                 path, local_grid, arrays = self._q.popleft()
                 self._busy = True
             try:
-                extra = {}
-                if local_grid is not None and P.SAVE_EXTRA_LAYERS:
-                    for name, lay in local_grid.extra_layers(P.SAVE_EXTRA_LAYERS).items():
-                        extra.update({name: lay['values'], f'{name}_origin': lay['origin'],
-                                      f'{name}_cell': lay['cell']})
-                    if extra:
-                        # Asked here, after the scan of the bundle ('time'): when, to compare.
-                        extra['extra_time'] = time.time()
-                os.makedirs(os.path.dirname(path), exist_ok=True)
-                np.savez_compressed(path, **arrays, **extra)
-            except Exception as e:
-                print(f"[DATA SAVE] Could not save {os.path.basename(path)}: {e}")
+                with optional(f"[DATA SAVE] {os.path.basename(path)}"):
+                    extra = {}
+                    if local_grid is not None and P.SAVE_EXTRA_LAYERS:
+                        for name, lay in local_grid.extra_layers(P.SAVE_EXTRA_LAYERS).items():
+                            extra.update({name: lay['values'], f'{name}_origin': lay['origin'],
+                                          f'{name}_cell': lay['cell']})
+                        if extra:
+                            # Asked here, after the scan of the bundle ('time'): when, to compare.
+                            extra['extra_time'] = time.time()
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    np.savez_compressed(path, **arrays, **extra)
             finally:
                 with self._cv:
                     self._busy = False
@@ -367,9 +366,9 @@ class CruisePlanner:
     def _grid_time(self, scan):
         try:
             t = scan.proto.local_grid.acquisition_time
-            t = t.seconds + t.nanos * 1e-9
-        except Exception:
+        except AttributeError:             # a grid without its acquisition time (the test fakes)
             return None
+        t = t.seconds + t.nanos * 1e-9
         dt = None if self._grid_t is None else t - self._grid_t
         self._grid_t = t
         if dt is not None:
@@ -444,7 +443,7 @@ class CruisePlanner:
             tf = get_se2_a_tform_b(self.robot_state_client.get_robot_state().kinematic_state.transforms_snapshot,
                                    VISION_FRAME_NAME, BODY_FRAME_NAME)
             return float(tf.x), float(tf.y), float(tf.angle)
-        except Exception:
+        except ROBOT_ERRORS:
             return fallback
 
     def robot_edge(self, robot):
@@ -602,7 +601,7 @@ class CruisePlanner:
                       and now - self._bundle_why[1] >= CRUISE_BUNDLE_REASON_S)
         if not (walked or new_reason):
             return
-        try:
+        with optional("[CRUISE] scan bundle"):
             b = self.bundle
             tf = get_a_tform_b(scan.proto.local_grid.transforms_snapshot, VISION_FRAME_NAME, BODY_FRAME_NAME)
             goal = self.prm.get_node_position(self.goal_id)
@@ -627,8 +626,6 @@ class CruisePlanner:
             self._bundle_xy = (robot[0], robot[1])
             self._bundle_why = (frontier['reason'], now)
             MISSION_STATS['scan_bundles'] += 1
-        except Exception as e:
-            print(f"[CRUISE] Scan bundle not saved: {e}")
 
     @staticmethod
     def _turns_within(polyline, ids, advance, snap, yaw):
@@ -689,17 +686,7 @@ class CruisePlanner:
             # A stretch cut short does not end on its node (the node pair would read the
             # global map cache of the whole edge).
             n2 = ids[k] if k < len(ids) and near[k + 1] == full[k + 1] else None
-            try:
-                lo, la, ro = self.prm.sample_terrain_between_points(x1, y1, x2, y2, node_idx1=n1, node_idx2=n2)
-            except Exception as e:
-                # A stretch whose terrain cannot be read is not flat ground: it gets the most
-                # careful gait. Logged once per planner, counted every time.
-                MISSION_STATS['terrain_errors'] = MISSION_STATS.get('terrain_errors', 0) + 1
-                if not getattr(self, '_terrain_error_said', False):
-                    self._terrain_error_said = True
-                    print(f"[CRUISE] Terrain of the stretch not readable ({e!r}): the most careful gait for it.")
-                grad = max(grad, gait.slope_thresholds()[1] + 1e-3)
-                continue
+            lo, la, ro = self.prm.sample_terrain_between_points(x1, y1, x2, y2, node_idx1=n1, node_idx2=n2)
             grad, rough = max(grad, lo, la), max(rough, ro)
         return grad, rough
 
