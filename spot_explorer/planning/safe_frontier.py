@@ -11,6 +11,7 @@ from spot_explorer.perception import geometry
 from spot_explorer.perception import slopes
 from spot_explorer.perception import spot_grid
 from spot_explorer.perception import low_obstacles
+from spot_explorer.robot.errors import ROBOT_ERRORS, describe
 
 
 LOGGER = logging.getLogger(__name__)
@@ -529,6 +530,12 @@ class ArcVerificationTracker:
     (get_plan, with 'version' and 'time'). While it plans, the thread is the only one
     touching graph and maps; stop_planning() returns when the cycle running has ended, so
     after it the main thread can take them back.
+
+    Errors in the thread (robot/errors.py): a robot error (an SDK request failing) is logged
+    and the next cycle tries again; anything else is a bug: it is kept in `error`, printed
+    once with its traceback, and the thread stops planning and checking. The main thread
+    calls raise_if_failed() and the bug goes up there, to the emergency procedure of
+    mission/run.py (user, 25-11: bugs in the decisions are not hidden).
     """
 
     def __init__(self, robot):
@@ -549,6 +556,7 @@ class ArcVerificationTracker:
         self._plan_version = 0
         self._plan_cond = threading.Condition(self._lock)   # notified at every plan published
         self._cycle_lock = threading.Lock()   # held for the whole planning cycle
+        self.error = None             # (exception, traceback text): a bug in the thread
 
     # --- interface for the main loop -----------------------------------------------------
     def update_path(self, waypoints_xy, extend_end_m=None, body=None):
@@ -587,6 +595,31 @@ class ArcVerificationTracker:
             self._job = None
         with self._cycle_lock:
             pass
+
+    def raise_if_failed(self):
+        """Re-raise in the caller's thread the bug that stopped this thread, if any (see the
+        class docstring), with the thread's traceback in the message."""
+        err = self.error
+        if err is not None:
+            exc, tb = err
+            try:
+                again = type(exc)(f"{exc} [raised in the planning thread]\n{tb}")
+            except Exception:                   # an exception type with its own constructor
+                again = RuntimeError(f"{describe(exc)} [raised in the planning thread]\n{tb}")
+            raise again from exc
+
+    def _fail(self, where, e):
+        """A bug in the thread: kept, printed once, and the thread stops planning and checking."""
+        tb = traceback.format_exc()
+        with self._lock:
+            if self.error is None:
+                self.error = (e, tb)
+            self._job = None
+            self._running = False
+            self._plan_cond.notify_all()
+        LOGGER.error(f"Bug in the {where}: {e}")
+        print(f"[PLANNING] Bug in the {where} ({describe(e)}): the thread stops, the main thread "
+              f"raises it.\n{tb}")
 
     def get_plan(self):
         """Last plan published (dict, with 'version' and 'time'), or None."""
@@ -644,10 +677,13 @@ class ArcVerificationTracker:
                 with self._lock:
                     if version == self._path_version:   # the path has not changed in the meantime
                         self._latest = frontier
-            except Exception as e:
+            except ROBOT_ERRORS as e:
                 # print too: the output goes into mission_log.txt, the logger only to the terminal.
-                LOGGER.error(f"Error computing the frontier: {e}")
-                print(f"[FRONTIER] Error computing the frontier (check while moving): {e!r}\n{traceback.format_exc()}")
+                LOGGER.error(f"Robot error computing the frontier: {e}")
+                print(f"[FRONTIER] Robot error computing the frontier (check while moving): {describe(e)}")
+            except Exception as e:              # a bug: kept for the main thread (raise_if_failed)
+                self._fail("frontier check", e)
+                return
             time.sleep(0.2)
 
     def _planning_cycle(self, job, period):
@@ -658,13 +694,15 @@ class ArcVerificationTracker:
                     return
             try:
                 plan = job()
-            except Exception as e:
+            except ROBOT_ERRORS as e:
                 # print, not only the logger: the output goes into mission_log.txt (stdout tee),
                 # the logger only to the terminal.
-                tb = traceback.format_exc()
-                LOGGER.error(f"Error in the planning cycle: {e}")
-                print(f"[PLANNING] Error in the planning cycle: {e!r}\n{tb}")
+                LOGGER.error(f"Robot error in the planning cycle: {e}")
+                print(f"[PLANNING] Robot error in the planning cycle: {describe(e)}")
                 plan = dict(status='error', error=repr(e))
+            except Exception as e:              # a bug: kept for the main thread (raise_if_failed)
+                self._fail("planning cycle", e)
+                return
             if plan is not None:              # None: the cycle had nothing new (same Spot grid)
                 with self._lock:
                     self._plan_version += 1

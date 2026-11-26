@@ -9,7 +9,9 @@ The two error rules of spot_explorer/robot/errors.py, without the robot.
   2. optional() prints one line with the error type and goes on;
   3. on a real caller: motion.PathCommand.poll counts a robot error as a communication
      error, while a bug inside the robot call is not hidden;
-  4. photos.capture is an optional part: a failing camera costs the photos, not the mission.
+  4. photos.capture is an optional part: a failing camera costs the photos, not the mission;
+  5. the planning thread: a robot error is retried, a bug is kept and raised again in the main
+     thread (ArcVerificationTracker.raise_if_failed).
 """
 import contextlib
 import io
@@ -81,6 +83,42 @@ def main():
         hidden = False
     spot.robot_command_feedback = real
     check(not hidden, "a bug in the robot call is not hidden")
+
+    print("== planning thread: a robot error is retried, a bug goes up to the main thread ==")
+    import threading
+    from spot_explorer.planning import safe_frontier
+    tr = safe_frontier.ArcVerificationTracker.__new__(safe_frontier.ArcVerificationTracker)
+    tr._lock = threading.Lock()
+    tr._plan_cond = threading.Condition(tr._lock)
+    tr._cycle_lock = threading.Lock()
+    tr._plan, tr._plan_version, tr.error, tr._running = None, 0, None, True
+    calls = {'n': 0}
+
+    def robot_fails():
+        calls['n'] += 1
+        raise RpcError(None, "network")
+    tr._job = robot_fails
+    with contextlib.redirect_stdout(io.StringIO()):
+        tr._planning_cycle(robot_fails, 0.0)
+    check(tr.error is None and tr._job is robot_fails and tr.get_plan()['status'] == 'error',
+          "a robot error: logged, a plan with status 'error', planning goes on")
+    tr.raise_if_failed()
+
+    def bug():
+        return {}['missing']
+    tr._job = bug
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        tr._planning_cycle(bug, 0.0)
+    check(tr.error is not None and tr._job is None and not tr._running,
+          "a bug: kept, the thread stops planning")
+    try:
+        tr.raise_if_failed()
+        raised = None
+    except KeyError as e:
+        raised = e
+    check(raised is not None and 'planning thread' in str(raised) and 'missing' in str(raised),
+          "raise_if_failed re-raises it in the caller's thread, with the thread's traceback")
 
     print("== photos.capture ==")
     class BrokenCameras:
