@@ -226,38 +226,86 @@ def set_mission_z0(robot_state_client, z_body):
     return z0
 
 
+# Log categories turned off: the lines whose tag ([TIMING], [GAIT], ...) is here are written
+# neither on screen nor in mission_log.txt (the colleague's idea, missionLog.LOG_ENABLED of
+# andrea-branch). A line without a tag of its own (a table row, a blank line) follows the tag
+# of the line before it. Empty = everything written. Turned on and off in one place, without
+# touching the code that prints; the tools read some tags (live_viewer, mission_report,
+# test_replay): keep those on.
+LOG_OFF = set()
+
+
+def _line_tag(line):
+    """The [TAG] a line starts with (after spaces), None if it has none."""
+    t = line.lstrip()
+    if t.startswith('['):
+        end = t.find(']')
+        if 0 < end < 40:
+            return t[1:end]
+    return None
+
+
 class _TeeStream:
     """
     Copy everything printed to a file, keeping the normal printing on screen too. In the
     file every line is preceded by a time (HH:MM:SS.mmm), useful to align the logs with a
-    video or with notes taken by hand during the test.
+    video or with notes taken by hand during the test. Lines of the categories in LOG_OFF are
+    dropped from both; the output goes out line by line (a line waits for its end).
     """
     def __init__(self, original, file_path):
         self._orig = original
         self._file = open(file_path, 'a', buffering=1, encoding='utf-8')
         self._lock = threading.Lock()
-        self._at_line_start = True
+        self._pending = ''          # the start of a line not ended yet
+        self._last_tag = None       # tag of the last line, for the lines without one
+        self._mid_line = False      # a flush wrote the start of the current line already
+        self._dropping = False      # ... and that start was dropped (its category is off)
+
+    def _keep(self, line):
+        if not LOG_OFF:
+            return True
+        tag = _line_tag(line)
+        if tag is not None:
+            self._last_tag = tag
+        elif not line.strip():
+            return self._last_tag not in LOG_OFF
+        return (tag or self._last_tag) not in LOG_OFF
 
     def write(self, s):
-        try:
-            self._orig.write(s)
-        except Exception:
-            pass
+        # The log never stops the mission: a failed write is dropped (an optional part, on
+        # purpose any error).
         try:
             with self._lock:
-                out = []
-                for chunk in s.splitlines(keepends=True):
-                    if self._at_line_start:
-                        out.append(datetime.now().strftime('%H:%M:%S.%f')[:-3] + ' ')
-                    out.append(chunk)
-                    self._at_line_start = chunk.endswith('\n')
-                if out:
-                    self._file.write(''.join(out))
+                text = self._pending + s
+                lines = text.splitlines(keepends=True)
+                self._pending = lines.pop() if lines and not lines[-1].endswith('\n') else ''
+                for line in lines:
+                    self._emit(line)
         except Exception:
             pass
         return len(s)
 
+    def _emit(self, piece, ended=True):
+        """Write a piece of text (a whole line, or with ended=False the start of one written by
+        a flush): on screen as it is, in the file with the time at the start of each line."""
+        if self._mid_line:                      # the rest of a line whose start went out already
+            keep, stamp = not self._dropping, ''
+        else:
+            keep = self._keep(piece)
+            stamp = datetime.now().strftime('%H:%M:%S.%f')[:-3] + ' '
+        if keep:
+            self._orig.write(piece)
+            self._file.write(stamp + piece)
+        self._mid_line, self._dropping = (not ended), (not keep and not ended)
+
     def flush(self):
+        try:
+            with self._lock:
+                if self._pending:               # a line without its end yet (print(..., end=''))
+                    self._emit(self._pending, ended=False)
+                    self._pending = ''
+        except Exception:
+            pass
         try:
             self._orig.flush()
         except Exception:
