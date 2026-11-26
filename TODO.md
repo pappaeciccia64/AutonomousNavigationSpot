@@ -6,15 +6,9 @@ with the reason: progress is read there, here only what is missing.
 
 ---
 
-## State at the move to `main` (30-10-2026)
+## In the field
 
-**Field tests of 29-10.**
-- *10:57, validation* (8 x 5 cells of 2 m, lawn sloping ~8 degrees uphill, bushes and a hedge along the left side): 40/40 cells at the first attempt, no block, stall or error; the new goal after a failed replan triggered once and worked. The return to wp_0 stopped ~1.2 m from the start (see below).
-- *Afternoon* (15:13, 15:27, 16:32; same 8 x 5 grid, in a strip ~3.5 m wide between a wall or hedge ~3 m to the left of the start and another edge on the right): 8–10 cells each, the rest correctly left out (the wall cuts the grid; the cells behind it were never seen, `[FINE] ... Le altre non sono mai state raggiungibili`). Returns to wp_0 0.04–0.08 m from the start according to the tag: the correction with the fiducial did not need to trigger, so it has **never triggered on the robot** yet. 15:31: Ctrl+C halfway through the mission, the robot sat down, motors off, GraphNav map downloaded: the **emergency shutdown works**. 15:27: `KeepaliveMotorsOffError` at power-on (known: restart by hand).
-
-**Return to wp_0 off by ~1.2 m (29-10 10:57)**: correction with the fiducial done on 29-10 afternoon (see CHANGELOG), still to be seen triggering in the field. Analysis: GraphNav said "arrived", but the starting tag seen on arrival (1.59 m, +1.03 m to the left, against 1.08 m and -0.13 m at the start) said the robot was ~1.2 m to the right of the start; confirmed by eye. Odometry drift 2.82 m in 15 min (uphill, grass); GraphNav corrected 1.86 m of it, the residue (~1.3 m) is all along the hedge, the only long straight reference: ICP knows the distance from the hedge but not the position along it. The graph (odometry edges, including our 9 shortcuts) carries all the drift from wp_153 to wp_0. The tag was in the snapshot of wp_0 and visible on arrival, but GraphNav did not use it to correct. Anomaly to understand: right after the initialization on the fiducial GraphNav's loss detector said LOST until the re-anchoring at 11:06 (no effect on the exploration).
-
-**In the field** (until the grass is handled)
+Until the grass is handled:
 
 - Start on low or bare ground, never inside tall grass: 28-10 13:50 (return blocked), 14:17 (no cell reachable, 21 s), 14:19 (3 cells). The log now says so: `[END] No cell reachable from the start`.
 - Full battery: on 28-10 14:23 it started at 66% and ended at 37%, a few minutes from the automatic return at 30% (consumption 1.15–1.19 %/min, 0.18–0.19 %/m).
@@ -26,21 +20,14 @@ with the reason: progress is read there, here only what is missing.
 
 | Question | Data of 28-10 | Decision |
 |---|---|---|
-| **Final loop closure** (full only, at the end of the mission, limit 45 s) | 16 edges in 55.5 s (13:50), 20 in 65.6 s (14:23); uploaded with `upload_graph` without errors or a second attempt | Stays like this. Spot overruns the limit by 10–20 s, growing with the graph: to keep an eye on, possibly a lower limit. |
-| **Returns without the quick closure** | All GraphNav trips successful (3 and 8), shortcuts 116 -> 27 m and 132 -> 70 m | Removed from the code on 29-10. |
 | **Odometry drift** | 14:23: **1.09 m in 26 min on the tag**, 0.92 m on GraphNav; 13:50: 0.19 m after 4 min | Far above the 0.3 m threshold: the correction of the global maps must be done (main work, point 3). |
 | **Low-battery return threshold** (30%) | 1.15–1.19 %/min, 0.18–0.19 %/m; return to wp_0 of 14–21 m cost 1 point | The return costs little: 30% has a wide margin, it could go down to 20–25%. To be decided with bigger missions. |
-| **`CLEARANCE_MAP_DECIDES`** | Median disagreement 7–9% of the edges; no gap proposed more than once | Removed from the code on 29-10: the binary map decides; the free-space map stays for the goal choice. |
-| **Gaits** | HARD on calm legs (below 8°): 6 (13:50), 9 (14:23) | Little time lost; to be reviewed together with the smooth motion. |
-| **GraphNav breadcrumbs every 0.75 m** | Map download 76–94 s at the end of the mission | To try 1.0–1.5 m when working on the motion. |
+| **Gaits** | HARD on calm legs (below 8°): 6 (13:50), 9 (14:23) | Little time lost; to be reviewed with the cruise data. |
+| **GraphNav breadcrumbs every 0.75 m** | Map download 76–94 s at the end of the mission | To try 1.0–1.5 m. |
 
 ---
 
-## Loop decisions: what really triggers (count of 29-10)
-
-Over the 15 missions since 22-10 (~420 attempts): walked retreat 0 times since 12-10 (it stays as the last net and after falls); falls and stall 0; trap 2; multi-node leg interrupted 3; cone 8, straight back-off 18, leg discarded for rotation 19; `[EARLY]` ~100, confirmed blocks 36, returns with GraphNav ~30; mission recovery 10 (2 successful). Possible simplifications that CHANGE the behaviour, to try with the robot after `main`: cone, back-off and trap as a single fan of exit directions (the cone is the directions close to the wanted one, the back-off the one at 180 degrees); a single escalation ladder with one counter (discard the leg, look again standing still, exit direction, return with GraphNav, give up the side) instead of a dozen separate counters; a single "is the goal still fine?" check at the start of the turn.
-
-## Main work, after the version on `main`
+## Main work
 
 1. **Grass and obstacles that "move"** from scan to scan. The main problem of 28-10: vegetation is seen as a wall, in our map and in GraphNav's obstacle avoidance.
    - *Labelled data of 28-10* (the robot knew where the tall grass was):
@@ -53,14 +40,9 @@ Over the 15 missions since 22-10 (~420 attempts): walked retreat 0 times since 1
      - **`obstacle_avoidance_padding`** (body): never set by us, so 0 is sent. The docs give no default; the SDK example `fiducial_follow` sends 0.001 to have almost none, which suggests 0 = robot default. The "~7.5 cm" quoted before is not confirmed. Only a field test gives the value.
      - **Hazard Avoidance Service** (`TYPE_PREFER_STEP_ON`): it clears hazards of the same service, not the stereo classification behind `obstacle_distance`; "prefer" types only in autonomous navigation. Not a way for grass.
      - **`MobilityParams.hazard_detection_mode`** (semantic hazards, needs a CORE I/O; `COST` = areas to avoid instead of blocking obstacles): never set by us. To check if it is on by default on our robot, if it has a CORE I/O.
-   - *Goal*: low vegetation (a few cm, low intensity) crossable or with a reduced margin; bushes above ~0.5 m stay obstacles. A rule behind a switch, tested on the replay of these missions. Also on 26-10: 24% of the low obstacles had the intensity of the ground, against 5% of the tall ones.
-2. **Smoother motion and non-blocking loop.**
-   - *Data of 28-10* (13:50, 14:23, from `trajectory.csv`): during the legs the robot advances 74–75% of the time, rotates in place 8%, and is **still 17–18% (~165 s per mission)**, in short pieces: ~0.6 s per leg halfway through the advance, in all gaits, and ~0.45 s per leg at the end, waiting for `BODY_STATUS_SETTLED` (the settling steps: the "walking in place"). The legs are ~0.9 m: the mean speed per leg is 0.17 m/s in PLAIN with a 0.5 limit, 0.11 m/s in MODERATE and HARD. The robot never reaches cruising speed: it turns, accelerates, slows down, settles, stops.
-   - *First stage*: continuous paths instead of points with a stop (multi-point trajectories, turning while walking), no settling on intermediate legs.
-   - *Second stage*: motion, more frequent scans, update of weights and graph running while the robot walks, instead of today's sequential loop (the only thing in parallel is the safe frontier). It changes the structure of the loop: after the first stage, with the end-to-end test compared line by line. Both behind a switch, then a few cells in the field before leaving them on.
-   - On the same occasion: the planner ignores rotations (U-turns impossible in narrow corridors, 28-10 11:36 and the "funnel" scenario of the end-to-end test).
-3. **Drift correction in the global maps**, with `drift.csv` and the starting fiducial (1.09 m in 26 minutes on 28-10, 2.8 m in 15 minutes on 29-10): realign the global map with GraphNav's localizations, or forget old observations faster when the robot passes there again.
-4. **Are the cells still needed?** See idea 5 below. On 28-10 they weighed: the "just outside" arrival makes it ambiguous where the robot is (cells (7,0)-(7,1) never attempted at 13:50, fixed); the sides make attempts skip; a corner of grass stays "to do" only because the grid splits it into two cells.
+   - *Goal*: low vegetation (a few cm, low intensity) crossable or with a reduced margin; bushes above ~0.5 m stay obstacles. A rule tried first as a variant (`varianti/`), on the replay of these missions. Also on 26-10: 24% of the low obstacles had the intensity of the ground, against 5% of the tall ones.
+2. **Drift correction in the global maps**, with `drift.csv` and the starting fiducial (1.09 m in 26 minutes on 28-10, 2.8 m in 15 minutes on 29-10): realign the global map with GraphNav's localizations, or forget old observations faster when the robot passes there again.
+3. **Are the cells still needed?** See idea 5 below. On 28-10 they weighed: the "just outside" arrival makes it ambiguous where the robot is (cells (7,0)-(7,1) never attempted at 13:50, fixed); a corner of grass stays "to do" only because the grid splits it into two cells.
 
 ---
 
@@ -74,11 +56,11 @@ Not decided yet: first it must be said what exactly they do and how to prove the
 
 4. **A* for the path search (later, not now; 19-11).** Ready as the local variant `a_star` (`varianti/a_star.py`): heuristic alpha x straight-line distance, admissible (no edge of the saved missions costs less than its length). Its test: same path cost in 191/191 random searches, 63% less search time; the search is ~15% of the planning cycle. Why it waits: on the replay of all missions (`test_replay --all`) the cost is always the same but in 4 attempts the path chosen among EQUAL-cost ones has one edge more -- A* explores in another order and breaks the ties differently, against the preference for long edges. Before using it: decide the tie rule (fewer edges at equal cost, or the same order as Dijkstra) and check it on the replay. For now Dijkstra stays (decision of 19-11).
 5. **Without cells: a route instead of a grid (discussion of 19-11).** Ideas weighed and where they ended:
-   - *Goal on the frontier* (a seen node with an edge to an unseen one, the one closest to the serpentine, chosen with one Dijkstra from the robot): the frontier moves with the robot (~2 m ahead), so the goal runs away at every scan, the path is 1-3 edges and the choice is myopic (a U of bushes). Kept only as the fallback for the zones left behind, at the end.
+   - *Goal on the frontier* (a seen node with an edge to an unseen one, the one closest to the serpentine, chosen with one Dijkstra from the robot): the frontier moves with the robot (~2 m ahead), so the goal runs away at every scan, the path is 1-3 edges and the choice is myopic (a U of bushes). Weighed on 19-11 as the fallback for the zones left behind; since 26-11 it is the option `--goals frontier` (below), to compare in the simulator.
    - *Coverage (new area seen from a node) as a weight in the goal choice*: easy to count, hard to use well (mixed units to tune, overestimated behind obstacles, changes at every scan). Kept as the MEASURE of progress and the end condition: the "area seen" of `[PROGRESS]` does not need cells.
    - *Goal sliding along the serpentine, also through unseen space*: with fixed waypoints every ~2-3 m it is the cell centres in visiting order -- the goal is the same as today. What is really new is only the path: the distance from the route as a cost in Dijkstra, so that with the continuous motion the robot sweeps the strip of the visit while it walks.
-   - So the experiment is that alone, with the cells kept: the local variant `route_line`, compared on fake missions by `varianti/tools/compare_route_line.py`. If it helps, removing the cells becomes a simplification of the code (cell choice, cell rules), not a change of behaviour. First result: little difference (CHANGELOG 19-11 evening).
-   - Built anyway, as an alternative goal source for a wider sensing (lidar): the local variant `frontier` (`varianti/frontier.py`): Dijkstra from the robot with the route penalty, stop at the first frontier node; goals prepared while walking. With Spot's grid: short goals, slower. To try in the simulator (SIMULATOR.md) and with a lidar window.
+   - So the experiment is that alone, with the cells kept: the variant `route_line` (the route cost with `--goals cells`; the frontier goals use it already), compared on fake missions by `varianti/tools/compare_route_line.py`. If it helps, removing the cells becomes a simplification of the code (cell choice, cell rules), not a change of behaviour. First result: little difference (CHANGELOG 19-11 evening).
+   - Built anyway, as an alternative goal source for a wider sensing (lidar): since 26-11 the mission option `--goals frontier` (`mission/frontier.py`): Dijkstra from the robot with the route penalty, stop at the first frontier node; goals prepared while walking. With Spot's grid: short goals, slower. To try in the simulator (SIMULATOR.md) and with a lidar window.
 ---
 
 ## Code structure

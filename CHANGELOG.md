@@ -8,6 +8,34 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-26 evening (cleanup: catch-alls, log categories, the cruise loop in steps, unused code, docs)
+
+Toward the code tried in Isaac Sim: no behaviour change, checked with the tests and
+`tools/behaviour_snapshot.py` at every step.
+
+- **Errors**: in `mission/` nothing catches everything any more outside the emergency procedure
+  and the outermost `main()` (`robot/errors.py` rules: robot calls catch `ROBOT_ERRORS`,
+  optional parts use `optional()`, decision code catches nothing; the `terrain_errors` count
+  goes). The steps that were silent now print what failed.
+- **Log categories** (`records.LOG_OFF`, the colleague's idea without one function per message):
+  a line whose `[TAG]` is listed is written neither on screen nor in `mission_log.txt`, with the
+  untagged lines after it. Empty: nothing changes until categories are chosen. `tests/test_log.py`.
+- **The cruise loop in named steps** (`attempt_cruise._cruise`, 299 lines): setup, first send,
+  one turn (feedback, checks, take the plan, switch while walking, on the plan), stop, outcome.
+  Same statements in the same order.
+- **The side mask of the cells** (`explored_sides`, `get_cell_sides_status`) moves into
+  `varianti/side_rules.py`, the only rules that use it; `get_cell_status` returns the value alone.
+- **Unused code out**: `mission_prm.robot_on_node`, `graphnav_step_back`, `geometry.body_extents`,
+  `GlobalTerrainGrid.get_height`, `slopes._slope_profile_from_sampler`,
+  `safe_frontier.describe_frontier` and `goal_still_reachable`, `config.SHORTCUT_MAX_DIST_M`,
+  `motion.navigate_to_path` (with its test), the segment log (`SegmentLog`, `log_segment`,
+  `segments.csv` is no longer written: its readers stay for the old missions), unused
+  parameters (`stop_if_moving`, `_planner_to`, `create_vtk_terrain_grid`,
+  `visualize_grid_with_candidates`).
+- **Docs**: README (cell choice by the cell rules, the cruise, modules, tools and tests of
+  today), FIELD_TEST (rows of features that left with the stop-and-go out), TODO (done items
+  out), SIMULATOR.
+
 ## 2026-11-26 (the colleague's simulation on this code: run_mission.py --sim)
 
 - The simulation of GennaiG00/AutonomousNavigationSim (andrea-branch, 20-25/11) brought onto
@@ -37,6 +65,25 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 - The stop-and-go mission can still be run: `varianti/tools/run_stop_and_go_mission.sh`, the code
   of 6dc6cbe in a temporary worktree.
 
+## 2026-11-26 (a bug in the planning thread stops the mission; cruise bundles from a saver thread)
+
+- **Bugs are not hidden** (user, 25-11): in the planning thread a robot error (`ROBOT_ERRORS`)
+  is logged and the next cycle tries again; any other exception is a bug, kept with its
+  traceback, the thread stops planning and `tracker.raise_if_failed()` raises it again in the
+  main thread (cruise start, every turn, after `wait_plan`). The cruise stops the robot and the
+  emergency procedure of `run.py` sits it down and saves the maps. Tests: `test_e2e_loop` S19
+  (a TypeError in the planning cycle after 1 m), `test_mission` world G, `tests/test_errors.py`.
+- **Cruise bundles from a saver thread** (`planning_cycle.BundleSaver`, user 26-11): the extra
+  layers (intensity, no_step) are asked to Spot by the saver, not by the planning thread, which
+  never waits for Spot or the disk. More than `BUNDLE_QUEUE_MAX` (8) bundles behind: the oldest
+  waiting is dropped (`bundle_drops` in the summary). Same content; `extra_time` says when the
+  extra layers were taken.
+- **`test_e2e_loop` S3** (a person stepping in front): the 0.20 m minimum distance is no longer
+  checked for this scenario, as for the 0.8 m box. On the robot the brake for an obstacle
+  appearing 0.3 m from the nose is Spot's own body obstacle avoidance, which the fake robot does
+  not model; no stop rule of ours for it (user, 26-11). Measured 0.12 m, attempt ended
+  "blocked on the spot".
+
 ## 2026-11-26 (goals from cells or from the frontier: the mission option --goals)
 
 - `run_mission.py --goals cells|frontier` (`config.MISSION_GOALS`, default `cells`), a mission
@@ -55,6 +102,28 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 - `tests/test_frontier.py` (back), `tools/behaviour_snapshot.py --goals`, `tools/run_sim_mission.py
   -- --goals frontier`, README, SIMULATOR.md.
 
+## 2026-11-25 (stop-and-go removed: the cruise is the only motion)
+
+The user's rule (25-11): the robot never stands "thinking". In three steps:
+- **No way on is a block at once**: at the end of the confirmed stretch with no way on, the
+  planning thread treats the goal as one without a path and takes another goal in the cell
+  (`MAX_BLOCK_REPLANS`), else the next cell, else the cruise ends with the cell left for later.
+  A first plan that does not allow to start is the same block.
+- **A cruise ended for an exception is followed by a new cruise** from where the robot is
+  (`MAX_CRUISE_RESTARTS`, 3, in a row: failure of the cell). A fall: the robot gets up, backs
+  away along the way it came and the attempt ends. Low battery: the attempt ends.
+- **Blocked on the spot**: `BLOCK_STILL_MAX` (3) blocks with the robot moved less than
+  `BLOCK_STILL_M` (0.30 m): no other goal is asked, the attempt ends as a failure of the cell.
+  Before, a robot that could take no goal from where it stood asked for one after another until
+  the 180 s cap (in the cruise reference a run hung 2.5 h).
+- **Removed**: `mission/attempt_legs.py`, `attempt_obstacles.py`, `legacy/stop_and_go_start.py`,
+  the stop-and-go loop and phases of `cell_attempt`, `CONTINUOUS_MOTION` and the start outside
+  the planning thread; `recovery` keeps the retreat after a fall. The cruise bundles save the
+  extra layers again. The old code: 6dc6cbe, runnable with `varianti/tools/run_stop_and_go_mission.sh`.
+- Tests: the scenarios of `test_e2e_loop` and the fake missions of `test_mission` run in
+  cruise; expectations of the stop-and-go out (S9, S12, S17 removed; the others in the commit
+  messages of 03c6fa5, f521845, c03f397).
+
 ## 2026-11-25 (no detour cap: the navigation goes wherever a path exists)
 
 - `tests/test_any_goal.py` (new): goals drawn at random among all the mission graph nodes (seen
@@ -68,6 +137,27 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
   Whether a goal is worth a long way round is for the goal choice to say, not the navigation.
   With the cells: a cell behind a wall is reached going round instead of left for later. The
   old behaviour: the `detour_cap` variant of `varianti/`.
+
+## 2026-11-25 (obstacle cost on the nodes)
+
+- The edges check only that the body walks straight along them; turning on the spot at a node
+  needs the body's circle (~0.60 m), and nothing told Dijkstra. Every node now has a cost from
+  its distance d to the nearest obstacle: `OBSTACLE_COST_W_M * ((D0 - d) / D0)^2` for d < D0 =
+  0.60 m, W = 4.0 m, never infinite (a corridor with no alternative is still taken); d from the
+  live scan, otherwise the global map; a never-seen node has no cost
+  (`roadmap.update_obstacle_costs`, recomputed in `refresh_graph`).
+- Fake missions: closest approach 0.28-0.63 m; the blocks on the spot that remain happen at the
+  goal of the cell just done with the next cell behind, which a node cost cannot move.
+
+## 2026-11-25 (errors: robot calls catch only the SDK's errors)
+
+- `robot/errors.py`: `ROBOT_ERRORS` (the SDK's `bosdyn.client.exceptions.Error` and the frame
+  tree's) and `optional(what)`. In `perception/`, `planning/`, `graphnav/` and `robot/` the
+  `except Exception` around robot calls catch `ROBOT_ERRORS`: a bug is no longer taken for a
+  robot failure (user, 25-11: optional parts log and go on, bugs in the decisions are not
+  hidden). Photos and extra grid layers are optional; shortcuts and arrival heading keep a
+  logged fallback; the battery monitor never stops the mission. The fakes of the tests raise
+  SDK errors instead of RuntimeError. `tests/test_errors.py`.
 
 ## 2026-11-24 evening (cleanup: the alternatives out of the main code, the last switches)
 

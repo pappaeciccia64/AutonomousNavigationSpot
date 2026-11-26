@@ -23,7 +23,7 @@ Tests: `tests/test_sim_core.py` (no SDK, no simulator), `tools/sim_selftest.py [
 
 ## Test plan for the first days in the simulator
 
-Each run: note scene, seed, variant and switches (the `[CONFIG] SWITCHES` line has them),
+Each run: note scene, seed, goals and variants (the `[CONFIG] SWITCHES` line has them),
 keep the mission folder. Tools: `tools/mission_report.py` (outcome, `Coverage:`),
 `varianti/tools/cruise_timing.py` (timing of the cruise), `tools/mission_viewer.py` (maps,
 scans, path), `coverage.csv` (area seen over time). The alternatives live in the `varianti/` folder (GitHub branch `varianti`): a mission with
@@ -45,8 +45,8 @@ and stops (`[CRUISE] End`), plans read (`cruise_timing.py`). Expected from the f
 all reachable cells, 98-100% seen, cruise 0.3-0.35 m/s.
 
 **3. Timing variants** (FIELD_TEST.md, "Timing of the cruise"), one at a time on the open
-scene: `cruise_state_cache`, `event_driven_planning`, `ground_from_grid` (only if the bridge
-puts `gpe` in the grid snapshot; the colleague's does not), and `sleep_between_turns` (the old fixed sleep: the waking
+scene: `cruise_state_cache`, `event_driven_planning`, `ground_from_grid` (only if the simulator
+puts `gpe` in the grid snapshot; `spot_explorer/sim/` does not today), and `sleep_between_turns` (the old fixed sleep: the waking
 on a new plan is in the main code since 24-11). Look at: plan read delay, plans read of those
 published, main thread turn. The network
 latency of a simulator is not the robot's: the order of the gains counts, not the absolute
