@@ -34,7 +34,7 @@ from spot_explorer.planning import graph_nodes
 
 from spot_explorer import config as P
 from spot_explorer import REPO_ROOT
-from spot_explorer.records import (MISSION_STATS, MISSION_CTX, SegmentLog, install_stdout_tee, remove_stdout_tee, set_mission_z0)
+from spot_explorer.records import (MISSION_STATS, MISSION_CTX, install_stdout_tee, remove_stdout_tee, set_mission_z0)
 from spot_explorer.mission import attempt_common
 from spot_explorer.mission import exploration
 from spot_explorer.mission import frontier
@@ -326,8 +326,7 @@ def easy_walk(options):
         install_stdout_tee(os.path.join(mission_log_folder, "mission_log.txt"))
         MISSION_CTX['log_folder'] = mission_log_folder
         MISSION_CTX['summary_done'] = False
-        with optional("[LOG] segment CSV, photos, configuration"):
-            MISSION_CTX['segment_log'] = SegmentLog(os.path.join(mission_log_folder, "segments.csv"))
+        with optional("[LOG] photos, configuration"):
             print(f"[LOG] Log folder: {mission_log_folder}  |  data and images: {mission_folder}")
             if P.SAVE_BLOCK_PHOTOS:
                 photos.init(robot, mission_folder)

@@ -147,7 +147,7 @@ class Mission:
             if choice.near:
                 ok = self._attempt(choice.row, choice.col)
             else:
-                attempt_cruise.stop_if_moving(self.env, self.command_client, "next cell far: GraphNav")
+                attempt_cruise.stop_if_moving(self.env, "next cell far: GraphNav")
                 ok = self._travel_to_choice(choice)
             # The cruise may have gone on into other cells (see attempt_cruise): the outcome
             # is that of the last one.
@@ -171,7 +171,7 @@ class Mission:
                 default = "attempt failed" if (choice.near or ok is not None) else "GraphNav did not get there"
                 rules.record_failure(choice, getattr(self.env, '_attempt_fail_why', None) or default)
             rules.skip_once |= set(map(tuple, getattr(self.env, '_cells_left_unreachable', [])))
-        attempt_cruise.stop_if_moving(self.env, self.command_client, "end of the exploration")
+        attempt_cruise.stop_if_moving(self.env, "end of the exploration")
         rules.explain_end(self._attempt_count)
         self._log_progress(final=True)
 

@@ -490,7 +490,7 @@ def run(name, rects, start, target_cell, ghosts=True, dynamic=None, fall=None, s
                 ROBOT.track.append((ROBOT.x, ROBOT.y))
                 track2_from = len(ROBOT.track) - 1
                 ok2 = attempt(1)
-            attempt_cruise.stop_if_moving(env, spot, "end of the scenario")
+            attempt_cruise.stop_if_moving(env, "end of the scenario")
         except motion.RobotFallenError as e:
             ok = f"RobotFallenError: {e}"
         except Exception:

@@ -123,7 +123,7 @@ GAIT_HINT_HOLD_S = 3.0
 CRUISE_REJOIN_MAX_M = 0.20
 
 
-def stop_if_moving(env, command_client, reason):
+def stop_if_moving(env, reason):
     """If an attempt ended with the robot still walking (hand-off), stop it and wait until it
     stands. Before GraphNav, at the end of the exploration, after a failed attempt."""
     pc = getattr(env, '_moving_pc', None)
@@ -452,7 +452,7 @@ class CruiseSteps:
         MISSION_STATS['thread_first_turn_fallbacks'] = MISSION_STATS.get('thread_first_turn_fallbacks', 0) + 1
         print(f"[CRUISE] The attempt does not start in cruise ({why}).")
         if moving:
-            stop_if_moving(self.env, self.command_client, "first plan not usable while walking")
+            stop_if_moving(self.env, "first plan not usable while walking")
         return None
 
     def _new_planner(self, goal_id, path_ids, thread_goals=True):
@@ -879,7 +879,7 @@ class CruiseSteps:
         return None, None, None, None
 
     @staticmethod
-    def _planner_to(planner, prm, prev_id, next_id, ids, gid, cell):
+    def _planner_to(planner, prev_id, next_id, ids, gid, cell):
         """The planner goes on along ids towards goal gid of cell, keeping the edge being walked."""
         planner.set_path(([prev_id] if prev_id != next_id else []) + list(ids), gid)
         if planner.seen_cell is not None:
@@ -919,7 +919,7 @@ class CruiseSteps:
         if ids is None:
             info['reason'] = f"no goal with a path in the next cell ({choice.row},{choice.col})"
             return info
-        self._planner_to(planner, prm, prev_id, next_id, ids, gid, (choice.row, choice.col))
+        self._planner_to(planner, prev_id, next_id, ids, gid, (choice.row, choice.col))
         info.update(next=(choice.row, choice.col), goal=(tx, ty), goal_id=gid, ids=list(ids),
                     n_nodes=len(ids), prep_s=time.perf_counter() - t0)
         return info
@@ -952,7 +952,7 @@ class CruiseSteps:
             planner.repicks += 1
             ids, gid, tx, ty = self._goal_with_path(row, col, scan, robot, next_id, planner.tried_goals)
             if ids is not None:
-                self._planner_to(planner, prm, prev_id, next_id, ids, gid, (row, col))
+                self._planner_to(planner, prev_id, next_id, ids, gid, (row, col))
                 return dict(kind='goal', cell=(row, col), goal=(tx, ty), goal_id=gid, ids=list(ids),
                             n_nodes=len(ids), prep_s=time.perf_counter() - t0)
         if self._can_switch():

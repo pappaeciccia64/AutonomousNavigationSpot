@@ -156,7 +156,7 @@ class CellAttempt(ScanSteps, CruiseSteps):
             # so does an attempt that failed before its loop: only computations, no command, so
             # there is no reason to stop the robot.
             if not self._handoff and getattr(self, 'loop_iter', 0) > 0:
-                attempt_cruise.stop_if_moving(self.env, self.command_client, "end of the attempt")
+                attempt_cruise.stop_if_moving(self.env, "end of the attempt")
 
     def _prepare_for_thread(self):
         """Attempt start in the planning thread: what stays in the main thread before the planner starts -- get up if

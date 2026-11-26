@@ -96,7 +96,7 @@ def run(name, rects, start, cells_seq, on_step=None, env=None):
                 oks.append(bool(ok))
                 if ok:
                     env.mark_cell_visited(*cell)
-            attempt_cruise.stop_if_moving(env, spot, "end of the scenario")
+            attempt_cruise.stop_if_moving(env, "end of the scenario")
         except Exception:
             err = traceback.format_exc()
     tracker._running = False

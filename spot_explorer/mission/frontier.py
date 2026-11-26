@@ -177,7 +177,7 @@ class FrontierMission(exploration.Mission):
                 if failures >= FRONTIER_MAX_FAILURES:
                     why_end = f"{failures} goals failed in a row"
                     break
-        attempt_cruise.stop_if_moving(self.env, self.command_client, "end of the exploration")
+        attempt_cruise.stop_if_moving(self.env, "end of the exploration")
         MISSION_STATS['frontier_end'] = why_end
         print(f"[FRONTIER] End of the exploration: {why_end}, after "
               f"{MISSION_STATS.get('frontier_goals', 0)} goals ({MISSION_STATS.get('frontier_goals_failed', 0)} failed).")

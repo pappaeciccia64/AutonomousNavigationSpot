@@ -96,7 +96,6 @@ def _emit_mission_summary_once():
             print("Ends of the cruises: " + ", ".join(f"{k} {v}" for k, v in sorted(exits.items(), key=lambda kv: -kv[1])))
         for f in g('start_failures', []):
             print(f"Attempt start failed on cell ({f['cell'][0]},{f['cell'][1]}): {f['reason']}")
-        print(f"Segments recorded in the CSV: {MISSION_STATS['segments_logged']}")
         print(f".npz saves for edges near the threshold: {MISSION_STATS['near_threshold_saves']}")
         print(f"Advances in the rotation cone: {MISSION_STATS['cone_moves']}, "
               f"back-offs avoided as useless: {MISSION_STATS['retreats_suppressed']}, "

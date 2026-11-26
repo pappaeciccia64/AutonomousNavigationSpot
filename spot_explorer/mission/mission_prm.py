@@ -1,6 +1,5 @@
 """The mission graph during the mission: PRM construction, edge update, cells allowed for
 planning, reachability of a cell (see planning/mission_graph.py for the graph itself)."""
-import numpy as np
 
 from spot_explorer import config as P
 from spot_explorer.perception import geometry
@@ -97,12 +96,6 @@ def restrict_planning_to_explored_cells(prm, env, target_row, target_col, robot_
     print(f"[PLAN] Paths allowed only in cells {sorted(cells)}: {len(allowed)} nodes out of "
           f"{len(prm.nodes)}. If a non-visited cell must be crossed, I give up this "
           f"side and move to another cell.")
-
-
-def robot_on_node(prm, node_id, x, y):
-    """True if the robot is practically on the node (see roadmap.ANCHOR_ON_NODE_M)."""
-    pos = prm.get_node_position(node_id)
-    return pos is not None and float(np.hypot(pos[0] - x, pos[1] - y)) <= roadmap.ANCHOR_ON_NODE_M
 
 
 def rebuild_prm_edges(prm, global_map, incremental=True):
