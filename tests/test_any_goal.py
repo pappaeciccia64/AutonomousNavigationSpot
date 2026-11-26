@@ -41,7 +41,7 @@ import test_e2e_loop as T                                            # noqa: E40
 import test_mission as M                                             # noqa: E402
 from behaviour_snapshot import random_world                          # noqa: E402
 from spot_explorer import config as P                                # noqa: E402
-from spot_explorer.mission import exploration, mission_prm           # noqa: E402
+from spot_explorer.mission import exploration, frontier, mission_prm  # noqa: E402
 from spot_explorer.planning import goal                              # noqa: E402
 from spot_explorer.robot import connection                           # noqa: E402
 
@@ -152,13 +152,14 @@ def one_world(name, n_goals, seed):
     T.START_XY = M.START[:2]
     AnyGoalMission.N_GOALS, AnyGoalMission.SEED, AnyGoalMission.results = n_goals, seed, []
     choose, best = forced_goal_choice()
-    real_mission = exploration.Mission
-    exploration.Mission, goal.find_best_point_in_cell = AnyGoalMission, choose
+    # run.py takes the mission class from frontier.GOAL_MODES (--goals): replaced there.
+    real_mission = frontier.GOAL_MODES['cells']
+    frontier.GOAL_MODES['cells'], goal.find_best_point_in_cell = AnyGoalMission, choose
     try:
         with contextlib.redirect_stdout(io.StringIO()):
             r = M.run(walls=walls, name=f'any_goal_{name}', cruise=True)
     finally:
-        exploration.Mission, goal.find_best_point_in_cell = real_mission, best
+        frontier.GOAL_MODES['cells'], goal.find_best_point_in_cell = real_mission, best
     # Closest approach measured on the track, on the world's own distance map (the robot's
     # min_clear is updated only by some of the fake movers).
     track = np.array(T.ROBOT.track, dtype=float).reshape(-1, 2)
@@ -177,6 +178,7 @@ def main():
         print(f"== world {w}: {a.goals} random goals ==")
         r, res, clear = one_world(w, a.goals, a.seed)
         check('Traceback' not in r['log'], f"no traceback in the mission")
+        check(len(res) == a.goals, f"{len(res)} of {a.goals} goals tried (the goal mission was run)")
         for g in res:
             tag = f"node {g['node']} ({g['xy'][0]:.1f}, {g['xy'][1]:.1f}), {'seen' if g['seen'] else 'never seen'}"
             if g['seconds'] > GOAL_TIME_LIMIT_S:
