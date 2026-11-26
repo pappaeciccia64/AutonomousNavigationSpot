@@ -78,110 +78,21 @@ PRM_CONNECTION_RADIUS_M = 3.0
 
 
 # ==================================================================
-# Navigation with the safe frontier: the loop of a cell attempt (cell_attempt.py,
-# decisions.decide_next_move). The frontier distances are in perception.geometry (FRONTIER_*).
-#   MIN_PARTIAL_STEP_M           -- shortest step worth a move (a scan costs more than a few cm).
-#   FRONTIER_BLOCK_CONFIRM_SCANS -- consecutive scans, with the robot standing, without being
-#                                   able to advance the minimum step before a block is declared:
-#                                   an edge is condemned only after a look from close by.
-#   FRONTIER_RESCAN_WAIT_S       -- pause between two confirmation scans.
-#   MAX_BLOCK_REPLANS            -- replans after a block allowed in one attempt; then the
-#                                   attempt gives up. Also limits the re-choices of the goal.
-#   FRONTIER_ABORT_CONFIRM       -- while moving, how many consecutive frontiers (~0.2 s each)
-#                                   must say the robot will not get there before it is stopped.
-#                                   2 ignores a single noisy frame; at 0.5 m/s that is ~20 cm.
-#   GOAL_REACHED_TOLERANCE_M     -- if the frontier forbids the last centimetres to the goal
-#                                   (e.g. a wall just beyond), the robot settles for this.
-#   MAX_LOOP_ITERATIONS          -- limit on the turns of the loop.
+# Goal of a cell attempt (the cruise, mission/attempt_cruise.py).
+#   MAX_BLOCK_REPLANS        -- goals of the same cell tried again after a block in one attempt;
+#                               then the cell is left for later.
+#   GOAL_REACHED_TOLERANCE_M -- the robot has arrived within this distance of the goal: the
+#                               frontier stops the robot's centre FRONTIER_BODY_HALF_LENGTH_M +
+#                               FRONTIER_MARGIN_M (0.65 m) before the first point that is not
+#                               free, and the arrival tolerance is the same distance.
 # ==================================================================
-MIN_PARTIAL_STEP_M = 0.40
-# Final step: a step shorter than MIN_PARTIAL_STEP_M (but at least FINAL_STEP_MIN_M) is taken
-# anyway if it brings the robot, inside the cell, within GOAL_REACHED_TOLERANCE_M of the goal:
-# after it the arrival counts.
-FINAL_STEP_MIN_M = 0.10
-FRONTIER_BLOCK_CONFIRM_SCANS = 3
-FRONTIER_RESCAN_WAIT_S = 0.3
 MAX_BLOCK_REPLANS = 3
-FRONTIER_ABORT_CONFIRM = 2
-FRONTIER_ABORT_TOLERANCE_M = 0.05
-
-# The frontier stops the robot's centre FRONTIER_BODY_HALF_LENGTH_M + FRONTIER_MARGIN_M (0.65 m)
-# before the first point that is not free (allowed_advance). The arrival tolerance must be the
-# same distance: with a smaller one the robot could neither advance nor arrive, and would end
-# up declaring a block.
 GOAL_REACHED_TOLERANCE_M = geometry.FRONTIER_BODY_HALF_LENGTH_M + geometry.FRONTIER_MARGIN_M
-MAX_LOOP_ITERATIONS = 150
 
-# --- Stall checks ---------------------------------------------------------------------------
-# The loop can turn with the robot standing still: the rotation towards the next node is
-# refused, the cone finds no direction that gets closer, but some directions are usable (so it
-# is not a trap); the leg is discarded, the path changes and the new first node is refused again.
-#   MAX_ROTATION_DISCARDS -- legs discarded for a refused rotation in one attempt. Counted per
-#       attempt, not per pair of nodes: the pair changes at every replan.
-#   MAX_IDLE_LOOPS -- consecutive turns without the robot moving IDLE_MOVE_M: then the attempt
-#       gives up. It must be above the longest legitimate sequence with the robot standing,
-#       otherwise it cuts off the later fallbacks (return with GraphNav):
-#         early replans          MAX_EARLY_REPLANS              4
-#         goal chosen again      MAX_BLOCK_REPLANS              3
-#         block confirmations    FRONTIER_BLOCK_CONFIRM_SCANS x (MAX_BLOCK_REPLANS+1) = 3 x 4 = 12
-#         rotation refusals      MAX_ROTATION_DISCARDS          4
-#         arrival refusals       MAX_ARRIVAL_REFUSALS           3
-#                                                        total 26  -> 30
-#       At ~0.7 s per turn that is ~20 s.
-MAX_ROTATION_DISCARDS = 4
-MAX_IDLE_LOOPS = 30
-IDLE_MOVE_M = 0.05
-
-# ==================================================================
-# Rotation and back-off.
-#
-# The robot always points its nose towards the point it walks to: no sideways walking. Spot is
-# 1.10 m long and 0.50 m wide, so sideways the frontier would need 0.59 m of obstacle_distance
-# instead of 0.30, exactly where space is tight.
-#
-# When it cannot rotate, the robot backs up in a straight line along its body axis (footprint
-# and threshold unchanged) and tries again at the next turn. The second time on the same leg,
-# the leg is discarded and the path recomputed.
-#   ROTATION_RETREAT_M           -- how far it tries to back up (the frontier may allow less)
-#   ROTATION_RETREAT_MIN_M       -- shortest back-off worth a move
-#   MAX_ROTATION_FAILS_SAME_EDGE -- back-offs on the same leg before discarding it
-# ==================================================================
-ROTATION_RETREAT_M = 0.60
-ROTATION_RETREAT_MIN_M = 0.20
-MAX_ROTATION_FAILS_SAME_EDGE = 2
-
-# --- Fan inside the rotation cone (see plan_cone_move).
-CONE_SWEEP_MAX_DEG = 90.0      # how far it looks, to the right and left of the nose
-CONE_SWEEP_STEP_DEG = 10.0     # step of the angular sweep (9 directions per side)
-CONE_MIN_GAIN_M = 0.20         # a direction counts only if it gets closer to the goal by this much
-# The cone aims at the point of the path this far from the robot, not at the goal in a straight
-# line: around a block, getting closer in a straight line can lead into a dead end on the other
-# side. If that point is behind, no direction gets closer and the robot backs up instead.
-CONE_PATH_LOOKAHEAD_M = 1.5
-# During a rotation in place the seen area shifts, and an "end of data" frontier can get a few
-# cm shorter without any obstacle: it does not interrupt the move until the robot has moved this
-# much. A frontier shortened by an obstacle always interrupts.
-ABORT_IGNORE_DATA_EDGE_UNTIL_M = 0.15
-
-# Consecutive back-offs allowed, counted per sequence: MAX_ROTATION_FAILS_SAME_EDGE is per
-# (robot_node, next_node), and after a back-off the robot may be attached to another node.
-MAX_STRAIGHT_RETREATS_IN_A_ROW = 2
-
-# --- 360 degree fan: recognizing a trap (see scan_escape_directions).
-ESCAPE_FAN_STEP_DEG = 15.0        # 24 directions
-ESCAPE_FAN_MIN_ADVANCE_M = 0.30   # below this space a direction is not a way out
-# Check that the arrival pose has a way out (see arrival_has_exit), made only on short steps and
-# towards tight spaces, where the robot can walk into a corner.
-ARRIVAL_EXIT_CHECK_MAX_STEP_M = 0.40
-ARRIVAL_EXIT_CHECK_OD_M = 0.50
-MAX_ARRIVAL_REFUSALS = 3          # per cell attempt
-
-# --- Going back with GraphNav ----------------------------------------------------------------
-# Walking backwards over the recorded legs is blind and without relocalization. GraphNav walks
-# forwards, with Boston Dynamics' localization and obstacle avoidance, along a trail of
-# waypoints left on the way (see graphnav_drop_breadcrumb).
+# --- GraphNav trail -------------------------------------------------------------------------
+# GraphNav walks forwards, with Boston Dynamics' localization and obstacle avoidance, along a
+# trail of waypoints left on the way (see graphnav_drop_breadcrumb).
 GRAPHNAV_WAYPOINT_MIN_SPACING_M = 0.75   # minimum distance between two breadcrumbs
-GRAPHNAV_MAX_BACKTRACK_HOPS = 3          # then the attempt gives up the cell
 
 # --- Shortcuts in the GraphNav graph --------------------------------------------------------
 # Every waypoint is linked only to the previous one, so the GraphNav graph is a chain along the
@@ -208,13 +119,6 @@ GRAPHNAV_SHORTCUT_MARGIN_M = 0.30
 GRAPHNAV_SDK_LOOP_MAX_M = 2.0
 # A PRM node with less free space than this cannot be reached by the frontier: discarded.
 PRM_NODE_MIN_CLEARANCE_M = geometry.FRONTIER_CLEARANCE_M   # 0.30
-# Early replans (at the first blocking cell, without waiting for the confirmation scans) allowed
-# per cell attempt. See the 'wait' branch.
-MAX_EARLY_REPLANS = 4
-# Every going back is remembered for the attempt (see _trap_backtrack): the edge the robot
-# stopped on stays impassable until the end of the attempt, so the planner does not find the
-# same path into the same trap. At the MAX_BACKTRACKS_PER_ATTEMPT-th return the attempt gives up.
-MAX_BACKTRACKS_PER_ATTEMPT = 2
 # Within this distance a recovery goal is "the same" as the one that just failed.
 RECOVERY_SAME_GOAL_M = 0.30
 

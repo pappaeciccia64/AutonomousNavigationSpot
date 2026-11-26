@@ -296,7 +296,6 @@ connection.getPosition = lambda rsc: (ROBOT.x, ROBOT.y, -2.7, quat(ROBOT.yaw))
 motion.navigate_to = fake_navigate_to
 motion.navigate_to_path = fake_navigate_to
 motion.move_to_world_point_without_turning = fake_move_no_turn
-config.FRONTIER_RESCAN_WAIT_S = 0.0
 motion.check_fall = fake_check_fall
 motion.recover_from_fall = fake_recover
 

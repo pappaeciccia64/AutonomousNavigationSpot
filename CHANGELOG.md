@@ -8,6 +8,17 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-26 (what only the stop-and-go used, out)
+
+- `planning/decisions.py` removed (decide_next_move, rotation_plan, shortcut_index, the cone and
+  escape fans, arrival_has_exit: the loop of the stop-and-go) and 27 parameters of `config.py`
+  used only by it or by nothing (MIN_PARTIAL_STEP_M, FRONTIER_BLOCK_CONFIRM_SCANS, the stall
+  checks, rotation back-offs, cone and escape fans, arrival exit check, GraphNav backtracking,
+  MAX_EARLY_REPLANS, ...). Kept: MAX_BLOCK_REPLANS, GOAL_REACHED_TOLERANCE_M,
+  GRAPHNAV_WAYPOINT_MIN_SPACING_M, RECOVERY_SAME_GOAL_M, the retreat after a fall.
+- The stop-and-go mission can still be run: `varianti/tools/run_stop_and_go_mission.sh`, the code
+  of 6dc6cbe in a temporary worktree.
+
 ## 2026-11-26 (goals from cells or from the frontier: the mission option --goals)
 
 - `run_mission.py --goals cells|frontier` (`config.MISSION_GOALS`, default `cells`), a mission

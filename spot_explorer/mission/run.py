@@ -144,8 +144,7 @@ def _print_configuration():
           f"{P.BATTERY_SAMPLE_S:.0f} s, data in battery.csv")
     print(f"[CONFIG] GOAL: arrival tolerance {P.GOAL_REACHED_TOLERANCE_M:.2f} m "
           f"(= half body + frontier margin), point chosen again up to "
-          f"{P.MAX_BLOCK_REPLANS} times if it turns out unreachable; replan at the "
-          f"FIRST blocking cell, up to {P.MAX_EARLY_REPLANS} times per attempt")
+          f"{P.MAX_BLOCK_REPLANS} times if it turns out unreachable")
     print(f"[CONFIG] GOAL CHOICE: only points reachable from the robot in the graph (if there "
           f"are any), preferred free space {P.TARGET_CLEARANCE_M:.2f} m (minimum "
           f"{geometry.PLAN_CLEARANCE_M:.2f}), at least {P.TARGET_CELL_BORDER_M:.2f} m from the border "

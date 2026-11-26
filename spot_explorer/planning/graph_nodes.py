@@ -43,8 +43,8 @@ RINGS -- how many connections
                (diagonal): 16 directions instead of 8, 16 neighbours per node;
     rings=3 -> additionally 0.75, 0.79, 0.90, 1.00, 1.03, 1.06 m: longer stretches, ~2.5
                times the edges.
-  Long straight stretches are produced anyway by decisions.shortcut_index, which skips the
-  intermediate nodes when the safe frontier confirms the stretch on the live data.
+  Long straight stretches come anyway from the cruise, which sends the whole confirmed
+  stretch of the path as one command.
   rings=None goes up to min(connection_radius, max_edge_length).
 
 ANCHORING
