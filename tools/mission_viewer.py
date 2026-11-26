@@ -1208,15 +1208,21 @@ def overlay_prm_local(ax, ctx, i):
 def _overlay_prm_local(ax, ctx, i):
     d = ctx.scans[i]
     vis = ctx.vis_before(float(d['time']) if 'time' in d else None)
-    if not vis:
+    # Scans saved since 26-11 carry the graph as it was at that scan (prm_live_*: the edges
+    # left after the vetoes of the live scan). Older scans: the last PRM view before them
+    # (*_vis.npz, saved at the attempt start), which still has the edges discarded since.
+    live = 'prm_live_edges' in d and len(np.asarray(d['prm_live_node_ids']).ravel()) > 0  # ADD 26-11: graph of this scan, if saved
+    if not vis and not live:
         return
-    vd = vis[1]
+    vd = vis[1] if vis else {}
     x0, x1, y0, y1 = _extent(d)
     # Only the edges touching the window are kept, with array operations: the PRM
     # edges are tens of thousands and are rechecked at every redraw.
-    ids = np.asarray(_arr(vd, 'prm_node_ids', ()), dtype=np.int64).ravel()
-    nxy = np.asarray(_arr(vd, 'prm_node_xy', (2,)), dtype=np.float64).reshape(-1, 2)
-    edges = np.asarray(_arr(vd, 'prm_edges', (2,)), dtype=np.int64).reshape(-1, 2)
+    src = d if live else vd  # FIX 26-11: was always the view of the attempt start
+    pre = 'prm_live_' if live else 'prm_'
+    ids = np.asarray(_arr(src, pre + 'node_ids', ()), dtype=np.int64).ravel()
+    nxy = np.asarray(_arr(src, pre + 'node_xy', (2,)), dtype=np.float64).reshape(-1, 2)
+    edges = np.asarray(_arr(src, 'prm_live_edges' if live else 'prm_edges', (2,)), dtype=np.int64).reshape(-1, 2)
     if len(ids) == 0 or len(nxy) != len(ids):
         ax.set_xlim(x0, x1); ax.set_ylim(y0, y1)
         return
@@ -1237,7 +1243,8 @@ def _overlay_prm_local(ax, ctx, i):
             segs = np.stack([pos[e[:, 0]], pos[e[:, 1]]], axis=1)
             cols = _edge_colors(vd, e, (0.2, 0.2, 0.2, 0.35), alpha=0.35)
             return _edges_image(segs, cols, x0, x1, y0, y1, max_px=480)
-        img = _cached_edges_image(('loc', vis[0], round(x0, 3), round(y0, 3), round(x1, 3), round(y1, 3)), build)
+        key = ('loc-live', i) if live else ('loc', vis[0])  # FIX 26-11: one cached image per scan when live
+        img = _cached_edges_image(key + (round(x0, 3), round(y0, 3), round(x1, 3), round(y1, 3)), build)
         ax.imshow(img, origin='lower', extent=[x0, x0 + img.shape[1] * ((x1 - x0) / img.shape[1]),
                                               y0, y0 + img.shape[0] * ((y1 - y0) / img.shape[0])],
                   interpolation='nearest', zorder=3)

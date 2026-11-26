@@ -38,6 +38,14 @@ FRONTIER_END_SEEN = 0.97          # mission area seen: the exploration ends
 FRONTIER_MIN_DIST_M = 0.75        # a frontier node nearer than this to the robot is not a goal
 FRONTIER_REFUSED_RADIUS_M = 0.6   # around a goal that failed, no goal for the rest of the mission
 FRONTIER_MAX_FAILURES = 6         # failed goals in a row: the exploration ends
+# ADD 26-11: goal beyond the edge (--frontier-beyond B). 0 = off: the goal is the frontier node
+# (seen, free, next to the unseen). B > 0: the goal is the node up to B m beyond it, into the
+# unseen, furthest along the direction robot -> frontier node, reached through valid edges and
+# not near a refused goal. Longer goals, fewer changes of goal: each change can turn the robot
+# round (the path starts from the end of the edge being walked). Tried on 20-11 with fake missions
+# (tools/compare_route_line.py, then in varianti/): 1.0 m = 40% fewer goals, none failed, same
+# area and time; 1.5 m = goals inside obstacles not seen yet, refused.
+FRONTIER_BEYOND_M = 0.0
 
 
 def _inside(env, x, y):
@@ -101,15 +109,53 @@ class FrontierRules:
         dist, _parents, end = prm.costs_from(start, stop=lambda u: u in front, route=True)
         if end is None:
             return None
+        frontier_node = end
+        beyond = self._beyond(end, x, y, global_map) if FRONTIER_BEYOND_M > 0 else None  # ADD 26-11
+        if beyond is not None:
+            end = beyond
         gx, gy = (float(v) for v in prm.nodes[end])
         row, col = (int(v) for v in env.get_cell_from_world(gx, gy))
         env._forced_goal = (row, col, gx, gy)
-        self.last = (end, gx, gy, float(dist[end]), len(front))
+        self.last = (end, gx, gy, float(dist[frontier_node]), len(front))
         MISSION_STATS['frontier_goals'] = MISSION_STATS.get('frontier_goals', 0) + 1
+        fx, fy = (float(v) for v in prm.nodes[frontier_node])
         print(f"[FRONTIER] Goal: node {end} at ({gx:.2f}, {gy:.2f}) in cell ({row},{col}), cost "
-              f"{dist[end]:.2f} from the robot, {prm.route_distance(end):.2f} m from the route; "
-              f"{len(front)} frontier nodes.")
-        return cell_rules.Choice(row, col, 0, dist[end], None, None, end, (gx, gy))
+              f"{dist[frontier_node]:.2f} from the robot, {prm.route_distance(frontier_node):.2f} m from the route; "
+              f"{len(front)} frontier nodes"
+              + (f"; {float(np.hypot(gx - fx, gy - fy)):.2f} m beyond the frontier node {frontier_node} "
+                 f"({fx:.2f}, {fy:.2f}), not seen yet" if beyond is not None else "") + ".")
+        return cell_rules.Choice(row, col, 0, dist[frontier_node], None, None, end, (gx, gy))
+
+    def _beyond(self, start, rx, ry, global_map):  # ADD 26-11: goal beyond the edge (FRONTIER_BEYOND_M)
+        """The node up to FRONTIER_BEYOND_M beyond the frontier node start, into the unseen: reached
+        from start through valid edges (finite weight) over nodes never seen, inside the mission
+        grid, not near a refused goal; the one furthest along the direction robot -> start.
+        None if there is none (the frontier node stays the goal)."""
+        prm, env = self.prm, self.env
+        sx, sy = (float(v) for v in prm.nodes[start])
+        dx, dy = sx - rx, sy - ry
+        n = float(np.hypot(dx, dy))
+        if n < 1e-6 or global_map is None:
+            return None
+        ux, uy = dx / n, dy / n
+        best, best_along = None, 0.0
+        todo, seen = [start], {start}
+        while todo:
+            u = todo.pop()
+            for v, w in prm.edges.get(u, ()):
+                if v in seen or not np.isfinite(w):
+                    continue
+                vx, vy = (float(c) for c in prm.nodes[v])
+                if (float(np.hypot(vx - sx, vy - sy)) > FRONTIER_BEYOND_M or not _inside(env, vx, vy)
+                        or global_map.is_known(vx, vy)
+                        or any(float(np.hypot(vx - qx, vy - qy)) <= FRONTIER_REFUSED_RADIUS_M for qx, qy in self.refused)):
+                    continue
+                seen.add(v)
+                todo.append(v)
+                along = (vx - sx) * ux + (vy - sy) * uy
+                if along > best_along:
+                    best, best_along = v, along
+        return best
 
     def explain_end(self, attempts):
         pass

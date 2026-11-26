@@ -199,6 +199,16 @@ class LiveState:
         s = self.log_state
         shown = text
         text = modern_log_line(text)          # old missions: Italian tags and phrases
+        # ADD 26-11: cells and goal from the log as they change. The *_vis.npz views come only
+        # at the attempt start: in cruise one attempt closes several cells while walking, so the
+        # cells stayed "to explore" and the goal stayed on the first cell of the attempt.
+        m = re.match(r'\[(VISITED|BLOCKED)\] Cell \((\d+),(\d+)\) marked as', text)
+        if m:
+            rc = (int(m.group(2)), int(m.group(3)))
+            s.setdefault('cell_status', {})[rc] = '1' if m.group(1) == 'VISITED' else '-1'
+        m = re.match(r'\[TARGET\] Cell \((\d+),(\d+)\)', text)
+        if m:
+            s['target_cell'] = (int(m.group(1)), int(m.group(2)))
         if text.startswith('[PROGRESS]'):
             s['progress'] = text[len('[PROGRESS] '):]
         elif text.startswith('[COVERAGE]'):
@@ -279,16 +289,18 @@ def _mosaic_image(mosaic):
     return img, ext
 
 
-def _draw_cells(ax, vis, target_cell):
+def _draw_cells(ax, vis, target_cell, status_from_log=None):
+    """status_from_log: {(r, c): '1' visited / '-1' blocked} from the log, newer than the view."""
     if vis is None or 'env_cells' not in vis or not len(vis['env_cells']):
         return
+    status_from_log = status_from_log or {}  # ADD 26-11: cell status from the log
     size = float(vis.get('env_cell_size', 5.0))
     yaw = float(vis.get('env_origin_yaw', 0.0))
     h = size / 2.0
     R = np.array([[np.cos(yaw), -np.sin(yaw)], [np.sin(yaw), np.cos(yaw)]])
     base = np.array([[-h, -h], [h, -h], [h, h], [-h, h]]) @ R.T
     for (r, c, x, y), st in zip(vis['env_cells'], vis['env_cell_status']):
-        st = str(st)
+        st = status_from_log.get((int(r), int(c)), str(st))  # FIX 26-11: was only the view of the attempt start
         if st == '1':
             kw = dict(edgecolor='darkgreen', facecolor='lightgreen', alpha=0.25, lw=1.0)
         elif st == '-1':
@@ -302,12 +314,31 @@ def _draw_cells(ax, vis, target_cell):
                 clip_on=True)
 
 
-def _draw_graph(ax, vis):
+def _draw_graph(ax, vis, scan=None):
+    """The PRM graph. Around the latest scan, the graph as it was at that scan (prm_live_* of
+    the bundles since 26-11: the edges left after the vetoes of the live scan); elsewhere the
+    last view (*_vis.npz, from the attempt start), which still has the edges discarded since."""
+    from matplotlib.collections import LineCollection
+    box = None
+    # ADD 26-11: the graph of the latest scan, inside its window (+1 m, as graph_window_arrays)
+    if scan is not None and 'prm_live_edges' in scan and len(np.asarray(scan['prm_live_node_ids']).ravel()):
+        ny, nx = scan['obstacle_mask'].shape
+        ox, oy = (float(v) for v in scan['grid_origin'])
+        cs = float(scan['cell_size'])
+        box = (ox - 1.0, ox + nx * cs + 1.0, oy - 1.0, oy + ny * cs + 1.0)
+        lpos = {int(n): xy for n, xy in zip(scan['prm_live_node_ids'], scan['prm_live_node_xy'])}
+        lsegs = [(lpos[int(a)], lpos[int(b)]) for a, b in scan['prm_live_edges']
+                 if int(a) in lpos and int(b) in lpos]
+        ax.add_collection(LineCollection(lsegs, colors=(0.35, 0.35, 0.35, 0.35), linewidths=0.5, zorder=2))
     if vis is None or 'prm_edges' not in vis or not len(vis['prm_edges']):
         return
     pos = {int(n): xy for n, xy in zip(vis['prm_node_ids'], vis['prm_node_xy'])}
-    segs = [(pos[int(a)], pos[int(b)]) for a, b in vis['prm_edges'] if int(a) in pos and int(b) in pos]
-    from matplotlib.collections import LineCollection
+
+    def in_box(p):
+        return box is not None and box[0] <= p[0] <= box[1] and box[2] <= p[1] <= box[3]
+    # FIX 26-11: the old view is drawn only outside the live window (it has edges discarded since)
+    segs = [(pos[int(a)], pos[int(b)]) for a, b in vis['prm_edges'] if int(a) in pos and int(b) in pos
+            and not (in_box(pos[int(a)]) and in_box(pos[int(b)]))]
     ax.add_collection(LineCollection(segs, colors=(0.5, 0.5, 0.5, 0.18), linewidths=0.4, zorder=2))
 
 
@@ -335,8 +366,9 @@ def draw(fig, ax_map, ax_txt, st, follow, until=None):
         ax_map.imshow(loc, origin='lower', extent=ext_l, interpolation='nearest', zorder=3)
         ax_map.add_patch(patches.Rectangle((ext_l[0], ext_l[2]), nx * cs, ny * cs, fill=False,
                                            edgecolor='deepskyblue', lw=1.2, zorder=4))
-    _draw_cells(ax_map, st.vis, cell)
-    _draw_graph(ax_map, st.vis)
+    cell = st.log_state.get('target_cell', cell)  # FIX 26-11: goal cell from the log, it changes while walking
+    _draw_cells(ax_map, st.vis, cell, st.log_state.get('cell_status'))  # FIX 26-11: cell status from the log
+    _draw_graph(ax_map, st.vis, d)  # FIX 26-11: graph of the latest scan (prm_live_*)
 
     tr = st.trajectory(until)
     if len(tr):

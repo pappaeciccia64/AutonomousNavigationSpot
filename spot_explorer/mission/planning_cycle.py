@@ -229,6 +229,31 @@ def refresh_graph(prm, snap, global_map, robot_xyyaw, refresh, quiet=False):
     return touched_nodes
 
 
+def graph_window_arrays(prm, scan, margin_m=1.0):  # ADD 26-11: graph of the moment in the scan bundles
+    """The PRM graph as it is at this scan, around its window (window + margin_m): nodes and
+    edges still in the graph, i.e. after the vetoes of the live scan (they remove the edges
+    from prm.edges). Saved in the scan bundles (prm_live_*): the *_vis.npz views are saved
+    only at the attempt start, so the viewers drew over every scan the graph of the start,
+    with the edges discarded since. Called in the planning thread, which owns the graph (the
+    saver thread only writes the arrays). Empty arrays if not available."""
+    try:
+        n_y, n_x = scan.shape
+        x0, y0 = scan.grid_origin_x - margin_m, scan.grid_origin_y - margin_m
+        x1 = scan.grid_origin_x + n_x * scan.cell_size + margin_m
+        y1 = scan.grid_origin_y + n_y * scan.cell_size + margin_m
+        inside = {int(i): (float(p[0]), float(p[1])) for i, p in list(prm.nodes.items())
+                  if x0 <= p[0] <= x1 and y0 <= p[1] <= y1}
+        edges = [(a, int(b)) for a in inside for b, _w in list(prm.edges.get(a, ()))
+                 if a < int(b) and int(b) in inside]
+        ids = np.array(sorted(inside), dtype=np.int64)
+        return dict(prm_live_node_ids=ids,
+                    prm_live_node_xy=np.array([inside[i] for i in ids.tolist()], dtype=np.float64).reshape(-1, 2),
+                    prm_live_edges=np.array(edges, dtype=np.int64).reshape(-1, 2))
+    except Exception:
+        return dict(prm_live_node_ids=np.empty(0, np.int64), prm_live_node_xy=np.empty((0, 2)),
+                    prm_live_edges=np.empty((0, 2), np.int64))
+
+
 def scan_bundle_arrays(scan, snap, local_grid, robot_xyz, robot_yaw):
     """The layers of a processed scan for its bundle (scans/*.npz, see SAVE_SCAN_BUNDLES):
     grid, filtered snapshot, masks, geometry and robot pose. The caller adds the path, the
@@ -556,6 +581,7 @@ class CruisePlanner:
         backward = backward[:max(len(confirmed) - 1, 0)]
         t1 = time.perf_counter(); ph['frontier'] = t1 - t; t = t1
         path_len = float(sum(np.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(polyline, polyline[1:])))
+        self._diag_heading(robot, confirmed, backward, remainder, prev_id, next_id, from_robot)  # ADD 26-11: diagnostic
         self._save_bundle(scan, snap, robot, polyline, remainder, next_id, frontier, advance, confirmed)
         terrain = self._terrain(confirmed, remainder)
         cell_seen = (cells.cell_seen_fraction(self.seen_cell[0], self.global_map, *self.seen_cell[1:])
@@ -586,6 +612,40 @@ class CruisePlanner:
             txt += f" | ground height from the grid {g['grid']}, from a robot state request {g['robot_state']}"
         return txt
 
+    # ADD 26-11: diagnostic of the robot spinning on the spot with the frontier goals (26-11 17:14,
+    # slope: ~160 s turning between -30 and -168 deg near (1.0, 0.05) while every plan said
+    # "1.8 m confirmed ahead, 3 nodes", with the goal 0.85 m ahead). A [CRUISE-DIAG] line, and a
+    # scan bundle, when the heading the path asks at its start differs from the robot's by more
+    # than DIAG_HEADING_DEG, or flips by more than 90 deg from the previous plan. Log only.
+    DIAG_HEADING_DEG = 45.0
+    DIAG_EVERY_S = 1.0           # at most one line per second, a flip always
+
+    def _diag_heading(self, robot, confirmed, backward, ids, prev_id, next_id, from_robot):  # ADD 26-11
+        try:
+            seg = next(((a, b) for a, b in zip(confirmed, confirmed[1:])
+                        if np.hypot(b[0] - a[0], b[1] - a[1]) > 0.05), None)
+            if seg is None:
+                return
+            (ax, ay), (bx, by) = seg
+            d = float(np.arctan2(by - ay, bx - ax)) + (np.pi if backward and backward[0] else 0.0)
+            wrap = lambda a: float(np.arctan2(np.sin(a), np.cos(a)))
+            gap = np.degrees(wrap(d - robot[2]))
+            last = getattr(self, '_diag_last', None)
+            flip = last is not None and abs(wrap(d - last)) > np.pi / 2
+            now = time.time()
+            if (abs(gap) > self.DIAG_HEADING_DEG and now - getattr(self, '_diag_t', 0.0) >= self.DIAG_EVERY_S) or flip:
+                print(f"[CRUISE-DIAG] cycle {self.cycles}: path asks heading {np.degrees(wrap(d)):.0f} deg, robot "
+                      f"{np.degrees(robot[2]):.0f} deg (gap {gap:+.0f})"
+                      + (f", FLIPPED from {np.degrees(last):.0f} deg of the previous plan" if flip else "")
+                      + f" | robot ({robot[0]:.2f}, {robot[1]:.2f}) on edge {prev_id}->{next_id}, path "
+                      f"{'from the robot' if from_robot else 'from the edge'}, nodes {list(ids)[:5]}, first points "
+                      f"{[(round(float(p[0]), 2), round(float(p[1]), 2)) for p in confirmed[:3]]}, backward {list(backward)[:3]}")
+                self._diag_t = now
+                self._diag_force_bundle = True     # the next _save_bundle writes this scan
+            self._diag_last = d
+        except Exception:
+            pass
+
     def _save_bundle(self, scan, snap, robot, polyline, ids, next_id, frontier, advance, confirmed):
         """A scan bundle (decision 'cruise', target = end of the
         confirmed stretch), every CRUISE_BUNDLE_STEP_M walked, and when the reason of the
@@ -599,7 +659,9 @@ class CruisePlanner:
                                                       robot[1] - self._bundle_xy[1]) >= CRUISE_BUNDLE_STEP_M)
         new_reason = (self._bundle_why is not None and frontier['reason'] != self._bundle_why[0]
                       and now - self._bundle_why[1] >= CRUISE_BUNDLE_REASON_S)
-        if not (walked or new_reason):
+        diag = getattr(self, '_diag_force_bundle', False)   # ADD 26-11: a [CRUISE-DIAG] line asked for this scan
+        self._diag_force_bundle = False
+        if not (walked or new_reason or diag):
             return
         with optional("[CRUISE] scan bundle"):
             b = self.bundle
@@ -614,6 +676,7 @@ class CruisePlanner:
                 self.local_grid, dict(
                 time=time.time(), iteration=b['iteration'], cell=np.array(b['cell']), loop_iter=b['loop_iter'],
                 **scan_bundle_arrays(scan, snap, self.local_grid, (robot[0], robot[1], tf.position.z), robot[2]),
+                **graph_window_arrays(self.prm, scan),  # ADD 26-11: graph of this scan, for the viewers
                 polyline=np.array(polyline), path_node_ids=np.array(ids), robot_node_id=next_id,
                 goal_xy=np.array(goal if goal is not None else (np.nan, np.nan)),
                 frontier_dist=frontier['dist'], frontier_reason=frontier['reason'],

@@ -331,6 +331,9 @@ def easy_walk(options):
             if P.SAVE_BLOCK_PHOTOS:
                 photos.init(robot, mission_folder)
             _print_configuration()
+            if getattr(robot, 'is_sim', False):  # ADD 26-11: which simulated world, in the mission log
+                print("[SIM] " + robot.describe() + ".")   # was printed only before the log file opened
+                print("[SIM] " + robot.world_summary() + ".")
 
         command_client = robot.ensure_client(RobotCommandClient.default_service_name)
         robot.time_sync.wait_for_sync()
@@ -403,7 +406,9 @@ def easy_walk(options):
             recordingInterface.set_download_filepath(graph_folder)
 
             mission_class = frontier.GOAL_MODES[P.MISSION_GOALS]
-            print(f"[CONFIG] Goals: {P.MISSION_GOALS} (--goals)")
+            print(f"[CONFIG] Goals: {P.MISSION_GOALS} (--goals)"
+                  + (f", {frontier.FRONTIER_BEYOND_M:g} m beyond the frontier (--frontier-beyond)"  # ADD 26-11
+                     if P.MISSION_GOALS == 'frontier' and frontier.FRONTIER_BEYOND_M > 0 else ""))
             mission = mission_class(robot_state_client, command_client, recordingInterface, local_grid,
                                     global_grid, env, prm, gb_sampler, verification_tracker,
                                     mission_folder, mobility_kwargs)
@@ -456,6 +461,9 @@ def _parse_args(argv=None):
     p.add_argument('--goals', choices=('cells', 'frontier'), default=None,
                    help=f"where the goals come from: the next cell of the visit, or the cheapest "
                         f"frontier node (default {P.MISSION_GOALS})")
+    p.add_argument('--frontier-beyond', type=float, default=None, metavar='M',  # ADD 26-11
+                   help="with --goals frontier: the goal up to M m beyond the frontier node, into the "
+                        f"unseen (default {frontier.FRONTIER_BEYOND_M:g} = the frontier node itself; tried: 1.0)")
     p.add_argument('--spacing', type=float, default=None,
                    help=f"spacing between lattice nodes in m, rounded to cell/n; the edges "
                         f"stay >= {P.PRM_MIN_EDGE_M:g} m (default {P.MISSION_LATTICE_SPACING_M}; "
@@ -534,6 +542,10 @@ def main():
         P.MISSION_VISIT_ORDER = args.order
     if args.goals is not None:
         P.MISSION_GOALS = args.goals
+    if args.frontier_beyond is not None:  # ADD 26-11
+        if args.frontier_beyond < 0:
+            sys.exit("--frontier-beyond must be 0 or more")
+        frontier.FRONTIER_BEYOND_M = args.frontier_beyond
     # Start and order are checked here, before connecting to the robot.
     _rows, _cols, _cell, _src = _grid_size(options, verbose=False)
     try:

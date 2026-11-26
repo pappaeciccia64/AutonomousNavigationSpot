@@ -12,6 +12,7 @@ rotation in place, the straight leg and the walk without turning.
 Standard library and numpy only.
 """
 import math
+import os
 import threading
 import time
 
@@ -44,6 +45,13 @@ PATH_SEARCH_SEGMENTS = 3   # the projection is searched only a few segments ahea
 # centimetres "ahead" of the new schedule. Stopping for that made the cruise crawl in Isaac Sim
 # (25-11: 0.06-0.08 m/s instead of 0.4). Up to this much ahead it walks at the planned speed.
 PATH_AHEAD_TOL_M = 0.25  # FIX 25-11: was wait when ahead: cruise crawled at 0.07 m/s
+# FIX 26-11: a turn on the spot at a node (a sharp corner, a U-turn) starts only once the robot
+# is at the node, as on Spot, which reaches the node in time before turning. The target used to
+# run up to PATH_LOOKAHEAD_M ahead with the heading of the trajectory "for now": with a U-turn
+# 20-30 cm ahead the robot started turning towards the way back before getting there, the next
+# plan (every 0.4 s) asked forward again, and it spun on the spot for minutes (26-11 17:46,
+# frontier goals on the slope: path [19, 361, 1] with the U-turn at node 19).
+PATH_NODE_TOL_M = 0.06   # the robot is "at the node" within this along the path
 
 GOING, AT_GOAL, TIMED_OUT, OVERRIDDEN, STOPPED = 'going', 'at_goal', 'timed_out', 'overridden', 'stopped'
 
@@ -222,12 +230,32 @@ class BaseController:
                 goal.status = status
         self._active = None
 
+    # ADD 26-11: the side of a turn of nearly 180 deg is kept, as on Spot, which goes on turning
+    # the way it started. Chosen from scratch at every sample, with the goal behind the robot the
+    # shortest side flipped at every new command (the path is resent every 0.4 s and its heading
+    # moves by a few degrees): +0.6 / -0.6 rad/s in turn and the robot turned back and forth for
+    # minutes (26-11 17:58, frontier goals on the slope, SPOT_SIM_TRACE).
+    TURN_KEEP_SIDE_RAD = math.radians(150.0)   # beyond this error the side of the last turn is kept
+    TURN_SIDE_MEMORY_S = 1.0                   # ... if that turn was this recent
+
+    def _turn_error(self, target, yaw):  # ADD 26-11
+        """Heading error target - yaw in (-pi, pi], on the side of the last turn when nearly 180 deg."""
+        e = wrap(target - yaw)
+        last = getattr(self, '_turn_side', None)
+        now = time.time()
+        if (abs(e) > self.TURN_KEEP_SIDE_RAD and last is not None and now - last[1] <= self.TURN_SIDE_MEMORY_S
+                and math.copysign(1.0, e) != last[0]):
+            e += last[0] * 2.0 * math.pi                       # same angle, taken the other way round
+        if abs(e) > math.radians(2.0):
+            self._turn_side = (math.copysign(1.0, e), now)
+        return e
+
     # --- loop ----------------------------------------------------------------------------
     def _velocity(self, goal, st, now):
         """Body velocity towards the goal, and whether the robot is inside the tolerance."""
         ex, ey = goal.x - st['x'], goal.y - st['y']
         dist = math.hypot(ex, ey)
-        eyaw = 0.0 if goal.yaw is None else wrap(goal.yaw - st['yaw'])
+        eyaw = 0.0 if goal.yaw is None else self._turn_error(goal.yaw, st['yaw'])  # FIX 26-11: was wrap(): side flipped near 180 deg
         # Hysteresis: once inside, the robot may wobble a little without "leaving".
         k = 1.5 if goal.inside_since is not None else 1.0
         pos_ok = dist <= goal.pos_tol * k
@@ -256,7 +284,19 @@ class BaseController:
         if now >= goal.pts[-1][3] or min(max(s_time, s_proj), s_proj + PATH_LOOKAHEAD_M) >= s_end - 1e-6:
             return self._velocity(goal, st, now)
         s_target = min(max(s_time, s_proj), s_proj + PATH_LOOKAHEAD_M)
-        tx, ty, th = goal.pose_at_s(s_target, k)
+        # FIX 26-11: the next turn on the spot (a zero-length step of the trajectory) after the
+        # stretch the robot is on: the target stops there and keeps the heading of the approach
+        # until the robot has reached it; then the heading follows the trajectory in time.
+        S, j = goal.s, goal.seg + 1
+        while j < len(S) - 1 and S[j + 1] - S[j] > 1e-6:
+            j += 1
+        if j < len(S) - 1 and s_proj < S[j] - PATH_NODE_TOL_M:
+            s_target = min(s_target, S[j])
+            tx, ty, th = goal.pose_at_s(s_target, goal.seg)      # was pose_at_s(s_target, k): turned early
+        else:
+            tx, ty, th = goal.pose_at_s(s_target, k)
+            if goal.s[k + 1] - goal.s[k] <= 1e-6:   # FIX 26-11: in time for the turn on the spot: its heading, at its node
+                tx, ty, th = goal.pts[k + 1][0], goal.pts[k + 1][1], goal.pts[k + 1][2]
         # speed of the trajectory on the stretch being walked (0 on a turn on the spot)
         a, b = goal.pts[k], goal.pts[k + 1]
         seg_v = (goal.s[k + 1] - goal.s[k]) / max(b[3] - a[3], 1e-3)
@@ -267,6 +307,7 @@ class BaseController:
             v_ff = goal.v_max
         else:
             v_ff = min(goal.v_max, seg_v)
+        goal.dbg = (s_proj, s_time, s_target, th)   # ADD 26-11: for SPOT_SIM_TRACE
         nx, ny, _ = goal.pose_at_s(min(s_end, s_target + 0.05), k)
         dx, dy = nx - tx, ny - ty
         dn = math.hypot(dx, dy)
@@ -278,7 +319,7 @@ class BaseController:
             wx, wy = wx * goal.v_max / sp, wy * goal.v_max / sp
         c, s = math.cos(st['yaw']), math.sin(st['yaw'])
         vx, vy = c * wx + s * wy, -s * wx + c * wy
-        wz = max(-goal.w_max, min(goal.w_max, KP_ANGULAR * wrap(th - st['yaw'])))
+        wz = max(-goal.w_max, min(goal.w_max, KP_ANGULAR * self._turn_error(th, st['yaw'])))  # FIX 26-11: was wrap(): side flipped near 180 deg
         return (vx, vy, wz), False
 
     def _hold_velocity(self, st):
@@ -292,6 +333,29 @@ class BaseController:
             vx, vy = vx * HOLD_MAX_LINEAR_MPS / speed, vy * HOLD_MAX_LINEAR_MPS / speed
         wz = 0.0 if yaw is None else KP_ANGULAR * wrap(yaw - st['yaw'])
         return (vx, vy, max(-HOLD_MAX_ANGULAR_RPS, min(HOLD_MAX_ANGULAR_RPS, wz)))
+
+    # ADD 26-11: trace of what the simulated robot is told, 25 times per second, to a CSV file when
+    # the environment variable SPOT_SIM_TRACE names one (SPOT_SIM_TRACE=/tmp/trace.csv python3
+    # run_mission.py --sim ...). For the spinning on the spot of 26-11 17:46. Off otherwise.
+    def _trace(self, st, goal, cmd):
+        path = os.environ.get('SPOT_SIM_TRACE')
+        if not path:
+            return
+        try:
+            f = getattr(self, '_trace_file', None)
+            if f is None:
+                f = self._trace_file = open(path, 'a', buffering=1)
+                f.write("wall,sim_t,x,y,yaw_deg,goal,kind,s_proj,s_time,s_target,target_heading_deg,"
+                        "goal_x,goal_y,cmd_vx,cmd_vy,cmd_wz,hold\n")
+            kind = 'none' if goal is None else ('path' if isinstance(goal, PathGoal) else 'point')
+            dbg = getattr(goal, 'dbg', None) if isinstance(goal, PathGoal) else None
+            s_proj, s_time, s_target, th = dbg if dbg else (float('nan'),) * 4
+            f.write(f"{time.time():.3f},{st.get('t', 0.0):.3f},{st['x']:.3f},{st['y']:.3f},{math.degrees(st['yaw']):.1f},"
+                    f"{self._active},{kind},{s_proj:.3f},{s_time:.3f},{s_target:.3f},{math.degrees(th):.1f},"
+                    f"{goal.x if goal else float('nan'):.3f},{goal.y if goal else float('nan'):.3f},"
+                    f"{cmd[0]:.3f},{cmd[1]:.3f},{cmd[2]:.3f},{int(self._hold is not None)}\n")
+        except Exception:
+            pass
 
     def _loop(self):
         cmd = (0.0, 0.0, 0.0)
@@ -330,6 +394,7 @@ class BaseController:
                                 self._hold = (goal.x, goal.y, goal.yaw)
                     elif self._hold is not None:
                         cmd = self._hold_velocity(st)
+                    self._trace(st, goal, cmd)   # ADD 26-11: SPOT_SIM_TRACE (off unless asked)
             if st is not None:
                 for fn in list(self._listeners):
                     try:

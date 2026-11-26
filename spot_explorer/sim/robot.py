@@ -732,6 +732,26 @@ class SimRobot:
                    len(w.shapes), st['x'], st['y'], np.degrees(st['yaw']), st['z'] - w.height_at(st['x'], st['y'])))
 
 
+    def world_summary(self):  # ADD 26-11: the simulated world, for the [SIM] line of the mission log
+        """Name of the world and its ground: ramp (grade and direction), hills, bumps, shapes.
+        The name alone is not enough: a world file copied from another keeps its name."""
+        w = self._core.world
+        t = w.terrain or {}
+        parts = [f"world '{w.name or 'empty'}'"]
+        ramp = t.get('ramp') or {}
+        if ramp.get('grade_pct'):
+            parts.append(f"ramp {float(ramp['grade_pct']):g}% ({np.degrees(np.arctan(float(ramp['grade_pct']) / 100.0)):.1f} deg) "
+                         f"uphill towards {float(ramp.get('dir_deg', 0.0)):g} deg (0 = ahead at the start, 90 = left)")
+        if t.get('max_slope_deg'):
+            parts.append(f"hills up to {float(t['max_slope_deg']):g} deg (wavelength {float(t.get('wavelength_m', 0)):g} m)")
+        if t.get('bumps'):
+            parts.append(f"{len(t['bumps'])} bumps")
+        if not (ramp.get('grade_pct') or t.get('max_slope_deg') or t.get('bumps')):
+            parts.append("flat ground")
+        parts.append(f"{len(w.shapes)} obstacles")
+        return ", ".join(parts)
+
+
 def connect(address=''):
     """SimRobot connected to the simulator at 'host:port' (default 127.0.0.1:8765)."""
     host, port = parse_address(address)
