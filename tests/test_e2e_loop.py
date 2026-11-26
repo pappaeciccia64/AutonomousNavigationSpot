@@ -277,7 +277,7 @@ class FakeEnv:
         return abs(x - cx) <= 2.5 and abs(y - cy) <= 2.5
 
     def get_cell_status(self, r, c):
-        return (0, 0)
+        return 0
 
 
 class FakeSampler:

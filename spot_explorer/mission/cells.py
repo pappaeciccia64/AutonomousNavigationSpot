@@ -2,9 +2,7 @@
 cells.py -- the mission cell map.
 
 A rows x cols grid of square cells of side cell_size. For each cell: 0 = not visited,
-1 = visited, -1 = blocked (tried from all sides, without success), plus a 4-bit mask of
-the sides it has already been tried from (North 0b1000, East 0b0100, South 0b0010,
-West 0b0001).
+1 = visited, -1 = blocked (tried, not reachable).
 
 The grid frame is fixed at power-on (set_origin): the centre of the starting cell is at
 the origin, the grid x axis is the robot's forward direction at that moment (columns),
@@ -112,7 +110,6 @@ class EnvironmentMap(object):
         self.origin_yaw = 0.0  # robot heading at power-on, rad
         self.start_cell = (0, 0)  # starting cell (row, column)
         self.current_cell = (0, 0)
-        self.explored_sides = {}
 
     def mark_cell_visited(self, row, col):
         """Mark the cell as visited (1). False if it is outside the grid."""
@@ -162,11 +159,6 @@ class EnvironmentMap(object):
             print(f"[BLOCKED] Cell ({row},{col}) marked as blocked (value -1)")
         else:
             print(f"[ERROR] Cannot mark cell ({row},{col}) as blocked: outside the grid")
-
-    def get_cell_sides_status(self, row, col):
-        """4-bit mask of the sides already tried (from 0b0000 to 0b1111)."""
-        cell_key = (row, col)
-        return self.explored_sides.get(cell_key, 0b0000)
 
     def set_origin(self, x, y, yaw=0.0, start_row=0, start_col=0):
         """
@@ -252,14 +244,11 @@ class EnvironmentMap(object):
 
     def get_cell_status(self, row, col):
         """
-        (value, sides_tried): value 0 not visited, 1 visited, -1 blocked; sides_tried is
-        the 4-bit mask. (None, None) outside the grid.
+        0 not visited, 1 visited, -1 blocked; None outside the grid.
         """
         if 0 <= row < self.rows and 0 <= col < self.cols:
-            cell_value = self.map[row][col]
-            explored_sides = self.get_cell_sides_status(row, col)
-            return cell_value, explored_sides
-        return None, None
+            return self.map[row][col]
+        return None
 
     def generate_serpentine_path(self, start_cell=None):
         """

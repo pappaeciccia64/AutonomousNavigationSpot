@@ -610,7 +610,6 @@ def save_visualization_bundle(save_path, pts, terrain_real, obstacle_mask, robot
                     if wp is None:
                         continue
                     st = env.get_cell_status(row, col)
-                    st = st[0] if isinstance(st, (tuple, list)) else st
                     cells.append((row, col, wp[0], wp[1], str(st)))
 
         def _pts(lst):
