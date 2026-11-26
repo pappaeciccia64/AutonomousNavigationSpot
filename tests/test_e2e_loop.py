@@ -321,11 +321,12 @@ class PlanTracker(FakeTracker):
         self._lock, self._cycle_lock = threading.Lock(), threading.Lock()
         self._plan_cond = threading.Condition(self._lock)
         self._job, self._plan, self._plan_version, self._job_period_s = None, None, 0, 0.4
-        self._running = True
+        self._running, self.error = True, None
         threading.Thread(target=self._loop, daemon=True).start()
 
-    start_planning, stop_planning, get_plan, wait_plan, _planning_cycle = (
-        AVT.start_planning, AVT.stop_planning, AVT.get_plan, AVT.wait_plan, AVT._planning_cycle)
+    start_planning, stop_planning, get_plan, wait_plan, _planning_cycle, raise_if_failed, _fail = (
+        AVT.start_planning, AVT.stop_planning, AVT.get_plan, AVT.wait_plan, AVT._planning_cycle,
+        AVT.raise_if_failed, AVT._fail)
 
     def _loop(self):
         while self._running:
@@ -677,6 +678,33 @@ if __name__ == '__main__':
     check(r['err'] is None and r['ok'] is True, "cell reached through the corridor")
     check(r['min_clear'] >= geometry.FRONTIER_CLEARANCE_M - 0.10,
           f"does not graze the corridor walls (minimum distance {r['min_clear']:.2f} m)")
+
+    # S19: a bug in the planning cycle while the robot walks (user, 25-11: bugs in the decisions
+    # are not hidden). The planning thread keeps it and stops planning (safe_frontier
+    # raise_if_failed); the cruise raises it within one turn, stops the robot, and the bug goes
+    # up to the caller (mission/run.py: the emergency procedure, test_mission world G).
+    from spot_explorer.mission import planning_cycle
+    real_call = planning_cycle.CruisePlanner.__call__
+
+    def buggy_call(self):
+        if np.hypot(ROBOT.x - 2.0, ROBOT.y - 2.0) > 1.0:
+            raise TypeError("injected bug in the planning cycle")
+        return real_call(self)
+    planning_cycle.CruisePlanner.__call__ = buggy_call
+    try:
+        t_s19 = time.time()
+        r = run("S19. bug in the planning cycle while walking", [], (2.0, 2.0, 0.785), (0, 1))
+        t_s19 = time.time() - t_s19
+    finally:
+        planning_cycle.CruisePlanner.__call__ = real_call
+    check(r['err'] is not None and "TypeError: injected bug in the planning cycle [raised in the "
+          "planning thread]" in r['err'], "the bug comes out of the attempt, with its type and origin")
+    check("buggy_call" in (r['err'] or ""), "the planning thread's traceback is in the message")
+    check(r['log'].count("[PLANNING] Bug in the planning cycle") == 1, "the bug is printed once")
+    check("[STOP] Move interrupted: end of the cruise" in r['log'], "the robot is stopped")
+    check(np.hypot(r['final'][0] - 2.0, r['final'][1] - 2.0) < 2.0,
+          f"stopped soon after the bug ({np.hypot(r['final'][0] - 2.0, r['final'][1] - 2.0):.2f} m from the start)")
+    check(t_s19 < 60.0, f"no hang ({t_s19:.0f} s)")
 
     # S18: Spot does not answer the scan request (16-11, spot_grid.SCAN_TIMEOUT_S): the download
     # ends at once with the cause, no fall back to one request per layer, the single request is

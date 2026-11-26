@@ -585,6 +585,33 @@ def _check_emergency():
         check("[EMERGENCY] Robot sitting and motors off." in log, f"{how}: robot sitting and motors off")
         check("[EMERGENCY] GraphNav map downloaded." in log, f"{how}: GraphNav map downloaded")
 
+    # World G: a bug in the planning thread while the robot walks (user, 25-11: bugs in the
+    # decisions are not hidden). The thread keeps it, the cruise raises it, and it reaches the
+    # same emergency procedure as a bug in the main thread.
+    print("\nWhole mission in world G: a bug in the planning cycle during the cruise.")
+    from spot_explorer.mission import planning_cycle
+    real_call = planning_cycle.CruisePlanner.__call__
+    n = {'k': 0}
+
+    def buggy_call(self):
+        n['k'] += 1
+        if n['k'] == 40:
+            raise TypeError("injected bug in the planning cycle")
+        return real_call(self)
+    planning_cycle.CruisePlanner.__call__ = buggy_call
+    try:
+        r = run(WORLDS['A'], "MISSION_G_planning_bug")
+    finally:
+        planning_cycle.CruisePlanner.__call__ = real_call
+    log = r['log']
+    check(n['k'] >= 40, f"the bug fired in the planning thread ({n['k']} cycles)")
+    check(r['ok'] is False, "planning bug: the mission ends with the error")
+    check("injected bug in the planning cycle [raised in the planning thread]" in log + r['out'],
+          "planning bug: raised by the main thread, with its origin")
+    check("[EMERGENCY] Robot sitting and motors off." in log, "planning bug: robot sitting and motors off")
+    check("[EMERGENCY] GraphNav map downloaded." in log, "planning bug: GraphNav map downloaded")
+    check(r['seconds'] < 300, f"planning bug: no hang ({r['seconds']:.0f} s)")
+
 
 def _check_start():
     """Starting cell chosen by name (corners, centre, mid-sides, 'row,column') and visiting

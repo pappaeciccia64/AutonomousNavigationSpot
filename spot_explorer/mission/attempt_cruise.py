@@ -370,6 +370,7 @@ class CruiseSteps:
         self._block_chain = None
         while time.time() - t0 < wait_s:
             time.sleep(CRUISE_POLL_S)
+            tracker.raise_if_failed()            # a bug in the planning thread goes up from here
             p = tracker.get_plan()
             if p is None or p.get('version') == last:
                 continue
@@ -609,6 +610,7 @@ class CruiseSteps:
                     crumb.start()
                 now = time.time()
 
+                tracker.raise_if_failed()        # a bug in the planning thread: the emergency procedure
                 plan = tracker.get_plan()
                 if plan is None or plan['version'] == last_version:
                     if now - last_plan_t > CRUISE_PLAN_STALE_S:
@@ -783,8 +785,10 @@ class CruiseSteps:
 
     def _wait_for_plan(self, tracker, last_version):
         """Between two turns of the cruise loop: until a new plan is published, at most
-        CRUISE_POLL_S (the feedback is read at every turn, and the latest plan taken)."""
+        CRUISE_POLL_S (the feedback is read at every turn, and the latest plan taken).
+        A bug in the planning thread wakes the wait and is raised here (raise_if_failed)."""
         tracker.wait_plan(last_version, CRUISE_POLL_S)
+        tracker.raise_if_failed()
 
     def _block_goal(self, planner, why, xy):
         """No way on towards the goal for the main thread: the planning thread treats the goal
