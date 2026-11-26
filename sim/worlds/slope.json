@@ -1,0 +1,12 @@
+{
+  "name": "slope",
+  "ground_z": 0.0,
+  "terrain": {
+    "ramp": {"dir_deg": 0, "grade_pct": 12},
+    "extent_m": [-15, 45, -30, 30]
+  },
+  "shapes": [
+    {"type": "cylinder", "x": 3.0, "y": 1.5, "r": 0.18, "h": 4.0},
+    {"type": "cylinder", "x": 5.5, "y": 3.5, "r": 0.18, "h": 4.0}
+  ]
+}

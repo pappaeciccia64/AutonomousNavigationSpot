@@ -39,6 +39,7 @@ from spot_explorer.mission import exploration
 from spot_explorer.mission import frontier
 from spot_explorer.mission import summary
 import argparse
+import contextlib
 import traceback
 
 # Where MissionMap/, MissionLogs/ and graph/ are created (the tests move it to a temporary folder).
@@ -308,7 +309,10 @@ def easy_walk(options):
     recordingInterface.stop_recording()
     recordingInterface.clear_map()
 
-    with bosdyn.client.lease.LeaseKeepAlive(lease_client, must_acquire=True, return_at_exit=True):
+    # The simulated robot (--sim) has no lease; on the robot nothing changes.
+    lease_keepalive = (contextlib.nullcontext() if getattr(robot, 'is_sim', False) else
+                       bosdyn.client.lease.LeaseKeepAlive(lease_client, must_acquire=True, return_at_exit=True))
+    with lease_keepalive:
         # Folders and log created at once, so the copy of the output to file (mission_log.txt)
         # also captures the whole start-up and graph construction.
         graph_folder, mission_folder, mission_log_folder = _mission_folders()
@@ -468,6 +472,10 @@ def _parse_args(argv=None):
                    help=f"minimum edge length in m (default {P.PRM_MIN_EDGE_M:g})")
     p.add_argument('--max-edge', type=float, default=None,
                    help=f"maximum edge length in m (default {P.PRM_MAX_EDGE_M:g})")
+    p.add_argument('--sim', nargs='?', const='', default=os.environ.get('SPOT_SIM'), metavar='HOST:PORT',
+                   help="run against a simulator (sim/isaac_spot_server.py or sim/kinematic_server.py) "
+                        "instead of the robot; default address 127.0.0.1:8765, or the SPOT_SIM "
+                        "variable. See sim/README_SIM.md")
     p.add_argument('--hostname', default=os.environ.get('SPOT_HOSTNAME', '192.168.80.3'),
                    help="robot address (default: SPOT_HOSTNAME, else 192.168.80.3, the robot's WiFi; "
                         "from the CORE I/O on board: 192.168.50.3)")
@@ -535,6 +543,7 @@ def main():
         sys.exit(2)
     options.name = "easyWalk"
     options.hostname = args.hostname
+    options.sim = args.sim          # None = the real robot at hostname
     options.no_estop = args.no_estop
     options.verbose = False
     options.recording_user_name = ""

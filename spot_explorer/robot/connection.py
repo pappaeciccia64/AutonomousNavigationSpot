@@ -57,6 +57,17 @@ from bosdyn.client.estop import EstopClient, EstopEndpoint, EstopKeepAlive
 
 def setLogInfo(options):
     bosdyn.client.util.setup_logging(options.verbose)
+    # Simulation (run_mission.py --sim, spot_explorer/sim/robot.py): the simulated robot, the
+    # same four values as below; no login, no time sync, no lease to hold.
+    if getattr(options, 'sim', None) is not None:
+        from spot_explorer.sim import robot as sim_robot
+        robot = sim_robot.connect(options.sim)
+        lease_client = robot.ensure_client(bosdyn.client.lease.LeaseClient.default_service_name)
+        robot_state_client = robot.ensure_client(RobotStateClient.default_service_name)
+        client_metadata = GraphNavRecordingServiceClient.make_client_metadata(
+            session_name='simulation', client_username=robot._current_user,
+            client_id='RecordingClient', client_type='Python SDK')
+        return robot, lease_client, robot_state_client, client_metadata
     sdk = bosdyn.client.create_standard_sdk(options.name)
     robot = sdk.create_robot(options.hostname)
     bosdyn.client.util.authenticate(robot)
@@ -86,6 +97,11 @@ class SimpleEstop:
     """
 
     def __init__(self, robot, name='simple_estop'):
+        # The simulated robot has no E-Stop service: stop() and allow() only print.
+        self.keepalive = None
+        if getattr(robot, 'is_sim', False):
+            print(f"[OK] E-Stop '{name}' not needed: simulated robot")
+            return
         self.estop_client = robot.ensure_client(EstopClient.default_service_name)
         self.endpoint = EstopEndpoint(self.estop_client, name, estop_timeout=9.0)
         self.endpoint.force_simple_setup()
@@ -95,18 +111,22 @@ class SimpleEstop:
 
     def stop(self):
         """Engage the E-Stop: the robot stops at once."""
-        self.keepalive.stop()
+        if self.keepalive is not None:
+            self.keepalive.stop()
         print("[ESTOP] Robot stopped")
 
     def allow(self):
         """Release the E-Stop: the robot may move."""
-        self.keepalive.allow()
+        if self.keepalive is not None:
+            self.keepalive.allow()
         print("[ESTOP] Robot free to move")
 
     def release(self):
         """End of the mission, robot already sitting with the motors off: our endpoint leaves
         the robot's E-Stop configuration, so the robot is again as we found it. Otherwise it
         stays E-Stopped by an endpoint nobody answers for, and the tablet cannot power it on."""
+        if self.keepalive is None:      # simulated robot: nothing to remove
+            return
         self.keepalive.shutdown()
         clear_estop_config(self.estop_client)
         print("[ESTOP] Our E-Stop removed from the robot (configuration back to empty)")

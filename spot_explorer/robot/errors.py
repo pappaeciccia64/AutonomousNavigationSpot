@@ -5,8 +5,8 @@ The two rules for errors, used everywhere in the package.
    ROBOT_ERRORS, the errors of the Boston Dynamics SDK. Every SDK error derives from
    bosdyn.client.exceptions.Error (RpcError, ResponseError, the GraphNav and recording
    errors, TimedOutError), plus the frame-tree errors of bosdyn.client.frame_helpers
-   (a transform snapshot from the robot that cannot be read). Anything else is a bug in
-   our code and is not hidden.
+   (a transform snapshot from the robot that cannot be read), and the link to the simulator
+   (spot_explorer/sim/link.py). Anything else is a bug in our code and is not hidden.
 
        try:
            state = robot_state_client.get_robot_state()
@@ -28,8 +28,11 @@ import contextlib
 from bosdyn.client.exceptions import Error as _SdkError
 from bosdyn.client.frame_helpers import Error as _FrameError
 
-# The SDK's own errors, and a frame tree from the robot that cannot be read.
-ROBOT_ERRORS = (_SdkError, _FrameError)
+from spot_explorer.sim.link import SimLinkError as _SimLinkError
+
+# The SDK's own errors, a frame tree from the robot that cannot be read, and the link to the
+# simulator lost (run_mission.py --sim: the simulated robot not answering).
+ROBOT_ERRORS = (_SdkError, _FrameError, _SimLinkError)
 
 
 def describe(e):

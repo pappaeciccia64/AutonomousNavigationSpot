@@ -1,0 +1,29 @@
+{
+  "name": "forest_hills",
+  "ground_z": 0.0,
+  "terrain": {
+    "max_slope_deg": 7,
+    "wavelength_m": 9,
+    "seed": 4,
+    "ramp": {"dir_deg": 0, "grade_pct": 5},
+    "bumps": [{"x": 6.5, "y": 4.5, "h": 0.40, "r": 3.5},
+              {"x": 10.0, "y": 1.0, "h": -0.30, "r": 3.0}],
+    "extent_m": [-15, 45, -30, 30]
+  },
+  "shapes": [
+    {"type": "cylinder", "x": 2.4, "y": 1.1, "r": 0.15, "h": 4.0},
+    {"type": "cylinder", "x": 3.6, "y": 3.2, "r": 0.20, "h": 4.0},
+    {"type": "cylinder", "x": 1.4, "y": 4.3, "r": 0.12, "h": 4.0},
+    {"type": "cylinder", "x": 5.1, "y": 0.4, "r": 0.18, "h": 4.0},
+    {"type": "cylinder", "x": 5.8, "y": 5.6, "r": 0.25, "h": 4.0},
+    {"type": "cylinder", "x": 7.6, "y": 2.9, "r": 0.16, "h": 4.0},
+    {"type": "cylinder", "x": 8.3, "y": 6.4, "r": 0.22, "h": 4.0},
+    {"type": "cylinder", "x": 3.0, "y": 6.6, "r": 0.14, "h": 4.0},
+    {"type": "cylinder", "x": 10.4, "y": 4.1, "r": 0.20, "h": 4.0},
+    {"type": "cylinder", "x": 0.6, "y": 7.5, "r": 0.17, "h": 4.0},
+    {"type": "cylinder", "x": -1.5, "y": 2.5, "r": 0.20, "h": 4.0},
+    {"type": "cylinder", "x": 4.2, "y": -1.8, "r": 0.18, "h": 4.0},
+    {"type": "box", "x": 6.4, "y": 7.6, "sx": 2.2, "sy": 0.35, "yaw_deg": -20, "h": 0.4},
+    {"type": "box", "x": 9.2, "y": -0.6, "sx": 0.9, "sy": 0.7, "yaw_deg": 35, "h": 0.6}
+  ]
+}

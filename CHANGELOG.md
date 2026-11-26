@@ -8,6 +8,24 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-26 (the colleague's simulation on this code: run_mission.py --sim)
+
+- The simulation of GennaiG00/AutonomousNavigationSim (andrea-branch, 20-25/11) brought onto
+  this code: `spot_explorer/sim/` (the simulated Spot over a socket), `sim/` (Isaac Sim and the
+  kinematic simulator, worlds, scripts), `tools/sim_viewer.py`, `sim_sensor_viewer.py`,
+  `sim_selftest.py`, `sim_turn_check.py`, `tests/test_sim_core.py`; `run_mission.py --sim`, no
+  lease / E-Stop with the simulated robot (`robot/connection.py`, `mission/run.py`). See
+  `sim/README_SIM.md` and `SIMULATOR.md`. The bridge written here on 20-11 (`sim/backend.py`,
+  `kinematic_world.py`, `spot_adapter.py`, `tools/run_sim_mission.py`) is removed.
+- The trajectory of a command is followed point by point and in time (andrea-branch 033020c,
+  done on the office PC on 25-11): the cruise sends multi-point paths.
+- The failures of the simulated services are the SDK's errors (`SimNotRecordingError`,
+  `SimGraphNavError`) and a lost link to the simulator is a robot error (`robot/errors.py`):
+  the mission catches only those since 25-11.
+- Checked with the kinematic simulator (3 x 4 cells, worlds boxes, forest_hills, woods): cells
+  12/12 in one cruise each (18.7-19.6 m, 0.32-0.33 m/s), frontier 24-28 goals with none failed,
+  100% of the area seen everywhere; `tools/sim_selftest.py --sim` all OK.
+
 ## 2026-11-26 (what only the stop-and-go used, out)
 
 - `planning/decisions.py` removed (decide_next_move, rotation_plan, shortcut_index, the cone and

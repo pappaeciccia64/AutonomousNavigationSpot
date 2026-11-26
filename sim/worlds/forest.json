@@ -1,0 +1,13 @@
+{
+  "name": "forest",
+  "ground_z": 0.0,
+  "shapes": [
+    {"type": "cylinder", "x": 2.2, "y": 0.8, "r": 0.15, "h": 3.0},
+    {"type": "cylinder", "x": 3.4, "y": 2.3, "r": 0.20, "h": 3.0},
+    {"type": "cylinder", "x": 1.3, "y": 3.1, "r": 0.12, "h": 3.0},
+    {"type": "cylinder", "x": 4.6, "y": 0.6, "r": 0.18, "h": 3.0},
+    {"type": "cylinder", "x": 5.2, "y": 3.4, "r": 0.25, "h": 3.0},
+    {"type": "cylinder", "x": 2.9, "y": 4.4, "r": 0.15, "h": 3.0},
+    {"type": "box", "x": 4.0, "y": 4.9, "sx": 1.6, "sy": 0.3, "yaw_deg": -15, "h": 0.4}
+  ]
+}
