@@ -41,19 +41,11 @@ VIS_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vis_worker"
 MISSION_STATS = {
     'gait_tier_counts': {'PLAIN': 0, 'MODERATE': 0, 'HARD': 0},
     'replan_count': 0,
-    'near_threshold_saves': 0,
     'last_tier': None,   # gait level of the last command, for the [LOCALIZATION] line
     'time_s': {},        # seconds spent per phase, see timing_add / [TIMING]
     'scan_bundles': 0,
-    'frontier_blocks': 0,
-    'frontier_aborts': 0,
-    'rotation_refusals': 0,   # rotations refused by the sector check
-    'straight_retreats': 0,   # straight back-offs after a rotation refusal
-    'goal_repicks': 0,        # goal points chosen again inside the loop
     'goals_refused': 0,       # goals excluded for the rest of the mission (_refuse_goal)
     'goals_unreachable': 0,   # goal choices without any reachable point in the graph
-    'arrivals_near_goal': 0,  # arrivals accepted with the robot just outside the cell
-    'backtracks_in_place': 0, # returns without movement: no breadcrumb far enough
     'sdk_loop_calls': 0,      # successful Spot loop closures (with an answer)
     'sdk_loop_s': 0.0,        # seconds spent in those calls
     'sdk_loop_edges': 0,      # edges created by Spot
@@ -62,23 +54,9 @@ MISSION_STATS = {
     'drift_samples': 0,       # odometry drift measurements (graphnav_log_drift)
     'drift_max_m': 0.0,       # maximum drift measured
     'drift_last_m': 0.0,      # last measurement (usually on arrival at wp_0)
-    'graphnav_trips_avoided': 0,  # GraphNav moves avoided: from the waypoint the graph does not reach the cell
-    'cone_moves': 0,          # advances inside the possible rotation cone
-    'retreats_suppressed': 0,  # back-offs avoided because useless
-    'early_replans': 0,       # replans at the first blocking cell
-    'traps_detected': 0,      # traps recognized by the 360 degree fan
-    'arrival_refusals': 0,    # steps refused because the arrival pose has no exits
-    'graphnav_backtracks': 0,     # one-waypoint returns that succeeded with GraphNav
-    'graphnav_backtrack_fail': 0, # failed GraphNav returns (walked fallback)
     'nodes_pruned': 0,            # PRM nodes discarded because inside an obstacle
-    'idle_loops': 0,              # idle loop turns (anti-stall guard)
-    'multinode_cut': 0,           # multi-node sequences stopped at an intermediate node
-    'multinode_moves': 0,         # moves that crossed more than one node
-    'multinode_nodes': 0,         # nodes crossed by those moves
     'prm_refresh': 0,             # edge refreshes performed
     'prm_refresh_skipped': 0,     # refreshes skipped (no event, robot still)
-    'rotation_maneuvers': 0,
-    'shortcuts': 0,
     'falls': 0,
     'self_rights': 0,
     'graphnav_ok': 0,

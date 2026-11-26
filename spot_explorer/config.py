@@ -216,10 +216,6 @@ GRAPHNAV_TIMEOUT_S = 240.0
 # fiducial and the drift are measured anyway (see graphnav_return_to_start).
 GRAPHNAV_RETURN_NEAR_M = 1.0
 
-# A loop leg whose command ends badly (timeout, Spot not settling) without a frontier stop, with
-# the robot within this distance of the arrival point, counts as done instead of as a physical
-# failure (edge discarded for good). 0 = off.
-MOVE_NEAR_GOAL_M = 0.10
 GRAPHNAV_MAX_LINEAR_VEL_MPS = 0.5
 GRAPHNAV_MAX_ANGULAR_VEL_RPS = 0.6
 

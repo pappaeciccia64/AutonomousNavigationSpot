@@ -38,7 +38,6 @@ def mission_switches():
         'config.GRAPHNAV_SHORTCUTS': P.GRAPHNAV_SHORTCUTS,
         'config.GRAPHNAV_ARRIVAL_HEADING': P.GRAPHNAV_ARRIVAL_HEADING,
         'config.WP0_FIDUCIAL_CORRECTION': P.WP0_FIDUCIAL_CORRECTION,
-        'config.MOVE_NEAR_GOAL_M': P.MOVE_NEAR_GOAL_M,
         'config.GRAPHNAV_SDK_LOOP_CLOSURE': P.GRAPHNAV_SDK_LOOP_CLOSURE,
         'config.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S': P.GRAPHNAV_SDK_LOOP_BUDGET_FINAL_S,
         'config.SAVE_SCAN_BUNDLES': P.SAVE_SCAN_BUNDLES,
@@ -96,32 +95,17 @@ def _emit_mission_summary_once():
             print("Ends of the cruises: " + ", ".join(f"{k} {v}" for k, v in sorted(exits.items(), key=lambda kv: -kv[1])))
         for f in g('start_failures', []):
             print(f"Attempt start failed on cell ({f['cell'][0]},{f['cell'][1]}): {f['reason']}")
-        print(f".npz saves for edges near the threshold: {MISSION_STATS['near_threshold_saves']}")
-        print(f"Advances in the rotation cone: {MISSION_STATS['cone_moves']}, "
-              f"back-offs avoided as useless: {MISSION_STATS['retreats_suppressed']}, "
-              f"immediate replans: {MISSION_STATS['early_replans']}")
         print(f"PRM nodes discarded as inside obstacles: {MISSION_STATS['nodes_pruned']}; scan bundles "
               f"{MISSION_STATS.get('scan_bundles', 0)}, dropped because the saver was behind "
               f"{MISSION_STATS.get('bundle_drops', 0)}")
         print(f"Goals excluded for the mission: {MISSION_STATS['goals_refused']}, choices without "
-              f"reachable points: {MISSION_STATS['goals_unreachable']}, arrivals with the robot just "
-              f"outside the cell: {MISSION_STATS['arrivals_near_goal']}, returns without "
-              f"movement: {MISSION_STATS['backtracks_in_place']}")
-        print(f"Traps recognized by the fan: {MISSION_STATS['traps_detected']}, "
-              f"steps refused for lack of exits on arrival: {MISSION_STATS['arrival_refusals']}")
+              f"reachable points: {MISSION_STATS['goals_unreachable']}")
         tot_r = MISSION_STATS['prm_refresh'] + MISSION_STATS['prm_refresh_skipped']
-        mn = MISSION_STATS['multinode_moves']
-        print(f"Multi-node moves: {mn}"
-              + (f", {MISSION_STATS['multinode_nodes']} nodes crossed "
-                 f"({MISSION_STATS['multinode_nodes'] / mn:.1f} per move)" if mn else "")
-              + f"; stopped at an intermediate node (rotation or arrival): {MISSION_STATS['multinode_cut']}")
         print(f"PRM edge refreshes: {MISSION_STATS['prm_refresh']} done, "
               f"{MISSION_STATS['prm_refresh_skipped']} skipped because without events"
               + (f" ({100.0 * MISSION_STATS['prm_refresh_skipped'] / tot_r:.0f}% of turns saved)"
                  if tot_r else ""))
         print(f"Falls: {MISSION_STATS['falls']}, got up by itself: {MISSION_STATS['self_rights']}")
-        print(f"Legs not completed but arrived within {P.MOVE_NEAR_GOAL_M:.2f} m of the point (valid): "
-              f"{MISSION_STATS.get('moves_near_goal', 0)}")
         print(f"GraphNav moves successful: {MISSION_STATS['graphnav_ok']}, failed: {MISSION_STATS['graphnav_fail']}")
         print(f"Odometry drift: {MISSION_STATS['drift_samples']} measurements at GraphNav arrivals, "
               f"maximum {MISSION_STATS['drift_max_m']:.2f} m, last {MISSION_STATS['drift_last_m']:.2f} m "
