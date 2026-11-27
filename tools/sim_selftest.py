@@ -107,8 +107,8 @@ def main():
             check(ground is not None and 0.3 < z - ground.position.z < 0.8,
                   f"frames: body {z - ground.position.z:.2f} m above the ground plane")
             ctx['start'] = (x, y, math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y ** 2 + q.z ** 2)))
-            b = battery.read_battery(rsc)          # dict with 'charge_pct' (robot/battery.py)
-            b = None if b is None else b.get('charge_pct')
+            b = battery.read_battery(rsc)
+            b = None if b is None else b.get('charge_pct')  # FIX 26-11: read_battery returns a dict (robot/battery.py)
             check(b is not None and 0 <= b <= 100, f"battery: {b if b is not None else float('nan'):.0f}%")
             check(apriltags.find_fiducials(robot, rsc) == [], "fiducials: none in the simulation, no error")
         step("Robot state", state)

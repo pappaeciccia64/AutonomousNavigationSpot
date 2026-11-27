@@ -65,8 +65,9 @@ LIDAR_SERVICE_NAME = 'velodyne-point-cloud'      # the lidar payload of the real
 DEPTH_SCALE = 1000.0                             # depth images: millimetres
 
 
-# The failures of a robot service are raised as the SDK's own errors: the mission catches only
-# those around its robot calls (spot_explorer/robot/errors.py), anything else is taken for a bug.
+# FIX 26-11: the failures of a robot service are raised as the SDK's own errors (were RuntimeError /
+# KeyError): the mission catches only those around its robot calls (spot_explorer/robot/errors.py),
+# anything else is taken for a bug and goes to the emergency procedure.
 class SimNotRecordingError(NotRecordingError):
     """The SDK's NotRecordingError: waypoints and edges only while recording."""
 
@@ -74,7 +75,7 @@ class SimNotRecordingError(NotRecordingError):
         super().__init__(None, message)
 
 
-class SimGraphNavError(GraphNavServiceResponseError):
+class SimGraphNavError(GraphNavServiceResponseError):  # ADD 26-11: see the FIX above
     """A GraphNav request the simulation cannot satisfy (no snapshots, no fiducials, an edge
     between unknown waypoints), as the SDK's GraphNav response error."""
 
@@ -426,14 +427,14 @@ class SimGraphNavClient:
         for e in (graph.edges if graph is not None else ()):
             try:
                 self._core.graph.add_edge(e.id.from_waypoint, e.id.to_waypoint)
-            except KeyError as err:
+            except KeyError as err:                  # FIX 26-11: an SDK error, see SimGraphNavError
                 raise SimGraphNavError(str(err)) from err
 
     def download_waypoint_snapshot(self, waypoint_snapshot_id, **kwargs):
-        raise SimGraphNavError("simulated GraphNav: waypoints have no snapshots")
+        raise SimGraphNavError("simulated GraphNav: waypoints have no snapshots")  # FIX 26-11: was KeyError
 
     def download_edge_snapshot(self, edge_snapshot_id, **kwargs):
-        raise SimGraphNavError("simulated GraphNav: edges have no snapshots")
+        raise SimGraphNavError("simulated GraphNav: edges have no snapshots")  # FIX 26-11: was KeyError
 
     def get_localization_state(self, **kwargs):
         wid, rel = self._core.graph.localization()
@@ -447,10 +448,10 @@ class SimGraphNavClient:
                          max_distance=None, max_yaw=None, fiducial_init=None, **kwargs):
         SL = graph_nav_pb2.SetLocalizationRequest
         if fiducial_init in (SL.FIDUCIAL_INIT_NEAREST, SL.FIDUCIAL_INIT_SPECIFIC):
-            raise SimGraphNavError("simulated GraphNav: there are no fiducials in the simulation")
+            raise SimGraphNavError("simulated GraphNav: there are no fiducials in the simulation")  # FIX 26-11: was RuntimeError
         try:
             self._core.graph.set_localized()
-        except RuntimeError as err:          # an empty map: nothing to localize on
+        except RuntimeError as err:          # FIX 26-11: an empty map, nothing to localize on: an SDK error
             raise SimGraphNavError(str(err)) from err
 
     def navigate_to(self, destination_waypoint_id, cmd_duration, route_params=None,
@@ -505,7 +506,7 @@ class SimRecordingClient:
             raise SimNotRecordingError("simulated GraphNav: not recording, edge not created")
         try:
             self._core.graph.add_edge(edge.id.from_waypoint, edge.id.to_waypoint)
-        except KeyError as err:
+        except KeyError as err:                      # FIX 26-11: an SDK error, see SimGraphNavError
             raise SimGraphNavError(str(err)) from err
         return recording_pb2.CreateEdgeResponse.STATUS_OK
 
@@ -756,5 +757,5 @@ def connect(address=''):
     """SimRobot connected to the simulator at 'host:port' (default 127.0.0.1:8765)."""
     host, port = parse_address(address)
     robot = SimRobot(host, port)
-    print("[SIM] SIMULATED ROBOT: " + robot.describe() + ".")
+    print("[SIM] SIMULATED ROBOT: " + robot.describe() + ".")  # FIX 26-11: was missionLog (not in continuous-motion)
     return robot
