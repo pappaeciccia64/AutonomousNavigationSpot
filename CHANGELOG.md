@@ -8,6 +8,20 @@ Until 29-10-2026 the code was a flat set of Italian-named modules (`easy_walk.py
 
 ---
 
+## 2026-11-26 evening (office PC: simulation and frontier, diagnostics)
+
+- `--frontier-beyond M` (`frontier.FRONTIER_BEYOND_M`, default 0 = off): with `--goals frontier`
+  the goal is the node up to M m beyond the frontier node, into the unseen (tried on 20-11
+  with 1.0 m in the fake missions). Not yet tried in Isaac Sim.
+- `[CRUISE-DIAG]` line, with a scan bundle, when the heading the path asks differs from the
+  robot's by more than 45 deg or flips (log only); the scan bundles save the graph of the
+  moment (`prm_live_*`), which `live_viewer.py` and `mission_viewer.py` draw.
+- Simulated robot (`spot_explorer/sim/controller.py`): a turn on the spot at a node starts only
+  once the robot is there, and the side of a turn of nearly 180 deg is kept (the robot spun on
+  the spot with frontier goals, 26-11 17:14-17:58; not yet tried in Isaac Sim);
+  `SPOT_SIM_TRACE=<file.csv>`. `[SIM]` lines in the mission log: world and start pose.
+- Worlds `sim/worlds/campo_prova.json` (woods with a 20% ramp) and `thicket.json` (denser, 25%).
+
 ## 2026-11-26 evening (cleanup: catch-alls, log categories, the cruise loop in steps, unused code, docs)
 
 Toward the code tried in Isaac Sim: no behaviour change, checked with the tests and

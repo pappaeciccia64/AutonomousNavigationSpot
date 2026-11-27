@@ -98,6 +98,8 @@ the two always agree.
 | `empty.json`, `boxes.json`, `forest.json` | flat ground; nothing, three boxes, trunks |
 | `slope.json` | a constant 12% grade uphill ahead (6.8 deg), two trunks: up, down and across a slope |
 | `forest_hills.json` | hills up to ~12 deg, a mound, a hollow, a 5% grade, trunks and a log |
+| `campo_prova.json` | the wood of `woods` (seed 7) with a 20% ramp rising to the left |
+| `thicket.json` | a denser wood (seed 3) with a 25% ramp |
 | `woods.json` | a wood with real trees, shrubs, boulders, fallen logs, grass and leaves (Isaac Sim draws them from the downloaded assets; every other simulator sees the same obstacles as plain solids) |
 
 ### The forest (`woods`)
@@ -112,6 +114,9 @@ python3 sim/make_forest_world.py                                   # sim/worlds/
 python3 sim/make_forest_world.py --seed 3 --trees 60 --tree-gap 1.2 --name thicket \
     --out sim/worlds/thicket.json                                  # denser, another layout
 ```
+
+`SPOT_SIM_TRACE=<file.csv>` (kinematic simulator) writes what the simulated robot is told, 25
+times a second.
 
 Every tree, shrub and boulder is also a shape of the world file, a cylinder as wide as what
 the asset has below the robot's height (for a tree, the trunk; only trees whose crown starts

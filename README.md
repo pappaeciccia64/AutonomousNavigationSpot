@@ -48,7 +48,7 @@ The visiting order (`--order`, `config.MISSION_VISIT_ORDER`) is `auto`: a serpen
 
 In a simulator (Isaac Sim, or a kinematic one without physics): `run_mission.py --sim`, see `sim/README_SIM.md` and `SIMULATOR.md`.
 
-Where the goals come from (`--goals`, `config.MISSION_GOALS`): `cells` (default) takes the next cell of the visit and a goal near its centre; `frontier` takes the frontier node (seen, free, next to the unseen) that is cheapest to reach from the robot, with the distance from the route of the visit as a cost so that the sweep stays orderly, and ends at 97% of the area seen (`spot_explorer/mission/frontier.py`). The navigation is the same in both; the option is there to compare them, in the simulator first.
+Where the goals come from (`--goals`, `config.MISSION_GOALS`): `cells` (default) takes the next cell of the visit and a goal near its centre; `frontier` takes the frontier node (seen, free, next to the unseen) that is cheapest to reach from the robot, with the distance from the route of the visit as a cost so that the sweep stays orderly, and ends at 97% of the area seen (`spot_explorer/mission/frontier.py`); `--frontier-beyond M` puts the goal on the node up to M m beyond the frontier node, into the unseen (default 0 = on the frontier node). The navigation is the same in both; the option is there to compare them, in the simulator first.
 
 **Mission graph.** The nodes are generated in two ways (`--graph`, default in `config.MISSION_GRAPH_SAMPLING`):
 ```bash
