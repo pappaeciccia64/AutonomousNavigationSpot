@@ -25,6 +25,7 @@ import numpy as np
 from bosdyn.client.frame_helpers import BODY_FRAME_NAME, GROUND_PLANE_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b
 
 from spot_explorer.robot import connection
+from spot_explorer.robot.errors import ROBOT_ERRORS, describe, optional
 
 # A helper thread to save data to disk without stopping the navigation loop.
 VIS_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vis_worker")
@@ -151,11 +152,9 @@ HANDOFF = StepTimer()
 def save_npz_async(path, **arrays):
     """Compressed save on the service thread: the main loop does not wait for the disk."""
     def _job():
-        try:
+        with optional(f"[DATA SAVE] {os.path.basename(path)}"):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             np.savez_compressed(path, **arrays)
-        except Exception as e:
-            print(f"[DATA SAVE] Could not save {os.path.basename(path)}: {e}")
     VIS_EXECUTOR.submit(_job)
 
 
@@ -175,8 +174,10 @@ def set_mission_z0(robot_state_client, z_body):
     try:
         snap = robot_state_client.get_robot_state().kinematic_state.transforms_snapshot
         z0 = float(get_a_tform_b(snap, VISION_FRAME_NAME, GROUND_PLANE_FRAME_NAME).position.z)
-    except Exception as e:
-        print(f"[HEIGHTS] Ground plane not available ({e}): using the body height.")
+    except ROBOT_ERRORS as e:
+        print(f"[HEIGHTS] Ground plane not available ({describe(e)}): using the body height.")
+    except AttributeError:      # get_a_tform_b gives None: no 'gpe' frame in the snapshot
+        print("[HEIGHTS] Ground plane not available (no 'gpe' frame): using the body height.")
     if z0 is None or not np.isfinite(z0):
         z0, source = float(z_body) - 0.5, "body height - 0.5 m"
     MISSION_CTX['mission_z0'] = z0
@@ -211,6 +212,10 @@ def _line_tag(line):
 
 class _TeeStream:
     """
+    The only place that still catches any error silently, on purpose: the tee is under every
+    print, so it can neither print a failure nor stop the mission for one (disk full, file
+    closed); the screen output goes on regardless.
+
     Copy everything printed to a file, keeping the normal printing on screen too. In the
     file every line is preceded by a time (HH:MM:SS.mmm), useful to align the logs with a
     video or with notes taken by hand during the test. Lines of the categories in LOG_OFF are
@@ -294,22 +299,17 @@ class _TeeStream:
 
 def install_stdout_tee(file_path):
     """From here on every print also goes to file_path. Idempotent."""
-    try:
+    with optional("[LOG] copy of the output to file"):
         if not isinstance(sys.stdout, _TeeStream):
             sys.stdout = _TeeStream(sys.stdout, file_path)
             print(f"[LOG] Full copy of the output to file: {file_path}")
-    except Exception as e:
-        print(f"[LOG] Could not enable the copy of the output to file: {e}")
 
 
 def remove_stdout_tee():
-    try:
-        if isinstance(sys.stdout, _TeeStream):
-            tee = sys.stdout
-            sys.stdout = tee._orig
-            tee.close_file()
-    except Exception:
-        pass
+    if isinstance(sys.stdout, _TeeStream):
+        tee = sys.stdout
+        sys.stdout = tee._orig
+        tee.close_file()
 
 
 def _quat_to_roll_pitch_deg(q):
@@ -329,9 +329,12 @@ def _ground_plane_slopes_deg(snap, yaw):
     partly levels. NaN if the frame is not there.
     """
     try:
-        r = get_a_tform_b(snap, VISION_FRAME_NAME, GROUND_PLANE_FRAME_NAME).rotation
-    except Exception:
+        tf = get_a_tform_b(snap, VISION_FRAME_NAME, GROUND_PLANE_FRAME_NAME)
+    except ROBOT_ERRORS:
+        tf = None
+    if tf is None:
         return float('nan'), float('nan')
+    r = tf.rotation
     # z axis of the gpe frame in VISION = normal of the ground plane.
     nx = 2.0 * (r.x * r.z + r.w * r.y)
     ny = 2.0 * (r.y * r.z - r.w * r.x)
@@ -385,7 +388,7 @@ class BodyTiltRecorder:
             roll, pitch = _quat_to_roll_pitch_deg(q)
             yaw = float(np.degrees(connection.yaw_of(q)))
             gpe_long, gpe_lat = _ground_plane_slopes_deg(snap, np.radians(yaw))
-        except Exception:
+        except ROBOT_ERRORS:
             with self._lock:
                 self._errors += 1
             return None
@@ -404,21 +407,15 @@ class BodyTiltRecorder:
             self._sample()
 
     def start(self):
-        try:
-            self._sample()
-            self._thread = threading.Thread(target=self._run, name="body_tilt_recorder", daemon=True)
-            self._thread.start()
-        except Exception:
-            pass
+        self._sample()
+        self._thread = threading.Thread(target=self._run, name="body_tilt_recorder", daemon=True)
+        self._thread.start()
 
     def stop(self):
-        try:
-            self._stop.set()
-            if self._thread is not None:
-                self._thread.join(timeout=1.0)
-            self._sample()
-        except Exception:
-            pass
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+        self._sample()
         with self._lock:
             return {
                 'roll_start': self._start[0] if self._start else None,
@@ -437,7 +434,7 @@ def append_csv(name, header, rows):
     folder = MISSION_CTX.get('log_folder')
     if not folder or not rows:
         return
-    try:
+    with optional(f"[LOG] {name}"):
         path = os.path.join(folder, name)
         with _CSV_LOCK:
             new = not os.path.exists(path)
@@ -447,8 +444,6 @@ def append_csv(name, header, rows):
                     w.writerow(header)
                 for r in rows:
                     w.writerow([f"{v:.4f}" if isinstance(v, (float, np.floating)) else v for v in r])
-    except Exception as e:
-        print(f"[LOG] Could not write {name}: {e}")
 
 
 def append_trajectory(samples, move, target_xy=(np.nan, np.nan), seg_id=None):
@@ -472,21 +467,14 @@ class TrajectoryLog:
         self._rec = None
 
     def __enter__(self):
-        try:
-            self._rec = BodyTiltRecorder(self._client)
-            self._rec.start()
-        except Exception:
-            self._rec = None
+        self._rec = BodyTiltRecorder(self._client)
+        self._rec.start()
         return self
 
     def __exit__(self, *exc):
-        if self._rec is None:
-            return False
-        try:
+        with optional(f"[LOG] trajectory of the move '{self._move}'"):
             self._rec.stop()
             append_trajectory(list(self._rec.samples), self._move, self._target)
-        except Exception as e:
-            print(f"[LOG] Trajectory of the move '{self._move}' not recorded: {e}")
         return False
 
 
@@ -516,7 +504,7 @@ def save_visualization_bundle(save_path, pts, terrain_real, obstacle_mask, robot
     graph is saved here and not at every scan.
     """
     t0 = time.perf_counter()
-    try:
+    with optional("[DATA SAVE] figure data"):
         def _arr(a, dtype=np.float64):
             return np.empty(0, dtype=dtype) if a is None else np.asarray(a, dtype=dtype)
 
@@ -547,7 +535,7 @@ def save_visualization_bundle(save_path, pts, terrain_real, obstacle_mask, robot
             try:
                 a = np.asarray([(float(p[0]), float(p[1])) for p in (lst or [])], dtype=np.float64)
                 return a.reshape(-1, 2)
-            except Exception:
+            except (TypeError, ValueError, IndexError):     # not a list of points
                 return np.empty((0, 2))
 
         out = os.path.splitext(save_path)[0] + "_vis.npz"
@@ -578,6 +566,4 @@ def save_visualization_bundle(save_path, pts, terrain_real, obstacle_mask, robot
             env_start_cell=np.array((-1, -1) if env is None else tuple(env.start_cell), dtype=np.int64),
             traveled_arcs=np.array(getattr(env, '_traveled_arcs', []), dtype=np.float64).reshape(-1, 4),
         )
-    except Exception as e:
-        print(f"[DATA SAVE] Could not prepare the figure data: {e}")
     timing_add('figure data', time.perf_counter() - t0)
